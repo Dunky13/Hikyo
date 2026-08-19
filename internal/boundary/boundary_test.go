@@ -97,7 +97,7 @@ var forbidden = []struct{ importer, imports, why string }{
 	{module + "/internal/crypto", module + "/internal/", "crypto is a leaf package: persistence arrives through its KeyStore interface"},
 }
 
-// Crypto chokepoint (encryption ADR CI invariant 12, placed by the
+// Crypto chokepoint (encryption-model ADR CI invariant 12, placed by the
 // system-architecture ADR § Encryption boundary): no import of a
 // cryptographic primitive package outside the envelope package, and age
 // nowhere outside the backup package. crypto/sha256 and crypto/subtle stay

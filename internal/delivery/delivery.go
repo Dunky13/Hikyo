@@ -5,7 +5,7 @@
 // It holds encoding and nothing else. The keying lives in internal/crypto
 // (where `crypto/hmac` and `crypto/hkdf` are confined), the authorization lives
 // at the chokepoint, and the projection this encodes is computed by the service.
-// Splitting it out is what makes the seam the revision ADR needs testable: when
+// Splitting it out is what makes the seam the revision-model ADR needs testable: when
 // real values and revisions land (#50/#51), Manifest's INPUT changes and
 // nothing else does.
 package delivery
@@ -26,7 +26,7 @@ const ManifestVersion = "v1"
 // Presence is what the fetch surface reports about a key in one environment.
 //
 // It is NOT part of the manifest: the change token covers DELIVERED CONTENT
-// only (revision ADR), so tightening `required_in` -- which changes what a
+// only (revision-model ADR), so tightening `required_in` -- which changes what a
 // future publish may commit, not what this snapshot delivers -- must not move
 // the token and fire a rollout wave. `set` joined the enumeration with #51:
 // a key the snapshot delivers is `set`, and one it does not carries whichever
@@ -45,7 +45,7 @@ const (
 )
 
 // Row is one delivery-manifest entry: an ordered `(key, classification,
-// value-or-presence)` triple, per the schema ADR's amendment to the revision
+// value-or-presence)` triple, per the schema-model ADR's amendment to the revision
 // ADR.
 //
 // Classification is IN the manifest and that is the amendment's whole point: an

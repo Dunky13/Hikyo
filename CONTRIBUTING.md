@@ -26,6 +26,16 @@ compensating check, not independent human review.
 Do not report vulnerabilities in public issues. Use the private channels in
 [SECURITY.md](./SECURITY.md).
 
+## Design decisions
+
+The locked architecture decision records live in [`docs/adr/`](./docs/adr/README.md)
+and the build-ready specification set in [`docs/spec/`](./docs/spec/README.md).
+Code comments cite them by file stem ("the encryption-model ADR" is
+`docs/adr/encryption-model.md`); `docs/adr/README.md` maps every short name to
+its file. A change that contradicts a locked ADR reopens the ADR (amendment
+banner) rather than silently diverging — see
+[`oss-mechanics.md`](./docs/adr/oss-mechanics.md) § Governance.
+
 ## Local verification
 
 Run the checks relevant to the changed package and the full test suite before

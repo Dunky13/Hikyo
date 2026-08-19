@@ -323,7 +323,7 @@ func (s *Grants) grantOne(
 	// A widening on a machine principal is a SECOND fact, not a nuance of the
 	// first: grant.created says a row appeared, identity.grant_widened says
 	// plaintext became newly reachable to credentials that are already out
-	// there. The audit ADR's propagation asks for the second by name.
+	// there. The audit-model ADR's propagation asks for the second by name.
 	if widening != nil {
 		widening.object = audit.Object{Type: "grant", ID: out.GrantID}
 		events = append(events, *widening)

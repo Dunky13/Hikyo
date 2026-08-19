@@ -275,7 +275,7 @@ func scenarioValueDelivery(t *testing.T, db *store.DB) {
 	if _, err := values.Set(t.Context(), actor, dev, "NEVER_DECLARED", "x"); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("an undeclared key accepted a value: %v", err)
 	}
-	// VALIDATION MOVED TO PUBLISH (schema ADR § Validation timing: advisory on
+	// VALIDATION MOVED TO PUBLISH (schema-model ADR § Validation timing: advisory on
 	// save, authoritative at publish). The over-budget value SAVES — a draft is
 	// the user's scratchpad, and blocking the save pushes work in progress into
 	// external notepads, which for secrets is exactly where it must not go —
@@ -714,7 +714,7 @@ func scenarioValueDiff(t *testing.T, db *store.DB) {
 	}
 }
 
-// scenarioValueCiphertext proves the storage properties the encryption ADR
+// scenarioValueCiphertext proves the storage properties the encryption-model ADR
 // fixes: nothing at rest is plaintext, and a ciphertext is decryptable at
 // exactly one row — transplanting it to another row, key or environment fails.
 func scenarioValueCiphertext(t *testing.T, db *store.DB) {
@@ -739,7 +739,7 @@ func scenarioValueCiphertext(t *testing.T, db *store.DB) {
 	}
 
 	// Transplant resistance, cross-ENVIRONMENT (the flat-model amendment to the
-	// encryption ADR): moving the ciphertext onto the same key's row in another
+	// encryption-model ADR): moving the ciphertext onto the same key's row in another
 	// environment makes it undecryptable, so the disclosure path fails loudly
 	// rather than handing over prod's material.
 	kr := sharedKeyring(t, db)
@@ -760,7 +760,7 @@ func scenarioValueCiphertext(t *testing.T, db *store.DB) {
 }
 
 // disclosureEvents counts the per-key disclosure rows one environment
-// collected — the audit ADR forbids "revealed N secrets" as a single row, so
+// collected — the audit-model ADR forbids "revealed N secrets" as a single row, so
 // the count being per key is the point.
 func disclosureEvents(t *testing.T, db *store.DB, envID string) int64 {
 	t.Helper()

@@ -26,7 +26,7 @@ import (
 // guard whose off-switch sits in the hand it restrains is not a guard.
 
 // ProtectedWindowCap is the protected-environment window cap: 0, meaning
-// every disclosure reauthenticates. The permission ADR recommends it and the
+// every disclosure reauthenticates. The permission-model ADR recommends it and the
 // operations spec may narrow it, never widen it.
 const ProtectedWindowCap = 0 * time.Second
 

@@ -181,7 +181,7 @@ func TestEveryOperationCarriesItsContractExtensions(t *testing.T) {
 		"none": true, "human-session": true, "machine-credential": true,
 		"instance-credential": true, "local": true,
 		// `scim-credential` is the SCIM provisioning connection's own artifact
-		// class (#73 §7): the machine-identity ADR's closed token-type list
+		// class (#73 §7): the machine-identities ADR's closed token-type list
 		// gains `scim` by the scim-provisioning amendment, and this is that
 		// type's eligibility name.
 		//

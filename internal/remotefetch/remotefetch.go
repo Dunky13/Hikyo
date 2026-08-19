@@ -10,7 +10,7 @@
 // The property that makes the air-gap statement survive this feature: an
 // instance with zero configured remotes performs ZERO outbound connections.
 // Nothing here runs on a timer — there is deliberately no background poller
-// (the architecture ADR fixed no generic job framework, and a standing
+// (the system-architecture ADR fixed no generic job framework, and a standing
 // authenticated heartbeat toward every remote for a health dot nobody is
 // looking at is exactly what that rules out). A fetch happens because a holder
 // of `instance-directory` is looking at the directory, and at no other moment.

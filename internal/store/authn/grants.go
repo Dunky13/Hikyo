@@ -84,7 +84,7 @@ func (r *Resolver) AddGrantOrigin(ctx context.Context, id, grantID string, p dom
 	// human grant surface's RELEASE gate — a revoke releases every origin kind
 	// it admits — so widening it to cover the SCIM kinds would make an
 	// administrator's revoke tear out `scim` origins, which is exactly the
-	// hand-mutation the scim ADR §4 refuses by name. The write gate is
+	// hand-mutation the scim-provisioning ADR §4 refuses by name. The write gate is
 	// therefore "any kind SOME writer owns"; which writer may release which
 	// kind stays each surface's own question.
 	if !domain.IsMintableOrigin(o.Kind) && !domain.IsSystemOrigin(o.Kind) {

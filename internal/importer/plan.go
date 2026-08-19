@@ -738,7 +738,7 @@ func emptySlices(t *Template) {
 }
 
 // PlaintextWarning is the phrase every phase-1 run ends with. The source-of-
-// truth ADR requires the source-still-on-disk warning; the import ADR extends
+// truth ADR requires the source-still-on-disk warning; the import-paths ADR extends
 // it to the emitted values files, which sit there until `values import`
 // completes and the human deletes them.
 func PlaintextWarning(sourcePath string, valuesFiles []string) string {

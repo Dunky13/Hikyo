@@ -473,7 +473,7 @@ func scenarioConcurrent(t *testing.T, db *store.DB) {
 // tenantFixture seeds an org, a project and the grants a hierarchy scenario
 // needs, and returns the addressed scopes. Grants are org-scoped so downward
 // inheritance carries them to every project and environment beneath, which is
-// the lattice the permission ADR fixes.
+// the lattice the permission-model ADR fixes.
 func tenantFixture(t *testing.T, db *store.DB, label string) (domain.PrincipalID, domain.Scope) {
 	t.Helper()
 	orgs := &service.Orgs{DB: db}

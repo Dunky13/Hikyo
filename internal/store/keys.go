@@ -37,7 +37,7 @@ type KeyReader interface {
 // KeyRepo is the transactional keyring repository. InsertTier3 and
 // InsertMaster are always preceded by AcquireHierarchyGeneration in the same
 // transaction — the fence that will serialize key creation against master
-// rotation (encryption ADR § Rotation; the rotation operations land later).
+// rotation (encryption-model ADR § Rotation; the rotation operations land later).
 type KeyRepo interface {
 	KeyReader
 	AcquireHierarchyGeneration(ctx context.Context, pf authz.Proof) error

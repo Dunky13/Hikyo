@@ -1,12 +1,12 @@
 -- +goose Up
--- Keyring persistence (#43, encryption ADR): wrapped key blobs only — the
+-- Keyring persistence (#43, encryption-model ADR): wrapped key blobs only — the
 -- datastore never holds unwrapped key material, and the root key is never
 -- stored at all. State columns and generation counters are the rotation
 -- state-machine scaffolding; the five rotation operations land later.
 -- Roll-forward only: no Down section by policy.
 -- A row is one WRAPPER of one master version under one root epoch — not
 -- the master itself. The dual-wrapped transition state of rotate-root-key
--- (encryption ADR § Rotation) is two active rows sharing a version with
+-- (encryption-model ADR § Rotation) is two active rows sharing a version with
 -- different epochs; startup accepts any wrapper the presented root opens.
 -- Scope-class declarations (tenant-isolation ADR; the derived registry must
 -- be total, so #44's analyzer fails the build on an undeclared table).
@@ -47,7 +47,7 @@ CREATE TABLE tier3_keys (
 );
 CREATE UNIQUE INDEX tier3_keys_one_active ON tier3_keys (purpose, org_id, project_id) WHERE state = 'active';
 
--- Fencing scaffolding (encryption ADR § Rotation): the 'hierarchy' row
+-- Fencing scaffolding (encryption-model ADR § Rotation): the 'hierarchy' row
 -- serializes tier-3 key creation against future master/root rotation; per-
 -- scope rows arrive with each tier-3 key.
 CREATE TABLE key_generations (

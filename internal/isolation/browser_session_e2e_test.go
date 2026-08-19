@@ -323,7 +323,7 @@ func runListMineProjection(t *testing.T, db *store.DB) {
 		t.Fatalf("bob sees %v, want exactly [org-b] — a cross-org leak", got)
 	}
 	// A grant BELOW org depth still names its org. Without this the rail is
-	// empty for the persona the permission ADR says drives the product: the
+	// empty for the persona the permission-model ADR says drives the product: the
 	// developer scoped to one project or one environment.
 	if got := names(mchA1); !slices.Equal(got, []string{"org-a"}) {
 		t.Fatalf("a project-scoped principal sees %v, want [org-a]", got)

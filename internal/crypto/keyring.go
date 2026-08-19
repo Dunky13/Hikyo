@@ -56,7 +56,7 @@ var ErrStaleMaster = errors.New("crypto: wrapping master key version is no longe
 // KeyStore is the persistence seam. internal/store/keyring implements it;
 // every method that creates keys must run in one transaction, acquire the
 // hierarchy generation (the fence that serializes tier-3 key creation
-// against master rotation — encryption ADR § Rotation), and for tier-3
+// against master rotation — encryption-model ADR § Rotation), and for tier-3
 // creation verify the key's MasterKeyVersion is still the active master
 // inside that fence (ErrStaleMaster otherwise).
 type KeyStore interface {
@@ -157,7 +157,7 @@ func LoadKeyring(ctx context.Context, ks KeyStore, root []byte) (*Keyring, error
 
 	// Startup accepts any root key that unwraps any present wrapper, so a
 	// crash mid root-rotation (dual-wrapped state) boots with either root
-	// (encryption ADR § Rotation). A wrapper at an unknown format version
+	// (encryption-model ADR § Rotation). A wrapper at an unknown format version
 	// aborts rather than guessing — refusal 5 — even if another opens.
 	master, err := k.unwrapMaster(root, wrappers)
 	if err != nil {

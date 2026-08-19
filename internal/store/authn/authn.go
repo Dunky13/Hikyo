@@ -214,7 +214,7 @@ func (r *Resolver) resolveEnv(ctx context.Context, s domain.Scope) (domain.Scope
 // Grants returns the principal's full grant set for formula evaluation. An
 // unknown principal simply has no grants — indistinguishable from a revoked
 // one, which is the contract. Current policy is read inside the operation's
-// own transaction; there is no authorization cache (permission ADR).
+// own transaction; there is no authorization cache (permission-model ADR).
 func (r *Resolver) Grants(ctx context.Context, p domain.PrincipalID) ([]domain.Grant, error) {
 	if r.sq != nil {
 		rows, err := r.sq.ListGrantsForPrincipal(ctx, string(p))
@@ -265,7 +265,7 @@ type OrgIdentity struct {
 //   - a grant at project or environment depth still names its org, so the
 //     developer who holds `read` on one environment sees the org that
 //     environment lives in — without it the rail would be empty for exactly
-//     the persona the permission ADR says drives the product;
+//     the persona the permission-model ADR says drives the product;
 //   - an INSTANCE-scoped grant names no org, so a principal holding only
 //     instance capabilities gets an empty set. Instance scope inherits
 //     downward, so expanding it here would silently reproduce the operator's

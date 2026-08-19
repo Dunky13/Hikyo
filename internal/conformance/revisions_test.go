@@ -826,11 +826,11 @@ func scenarioRestoreWrittenTimeClassification(t *testing.T, db *store.DB) {
 	}
 }
 
-// scenarioHistoricalExportFormula pins the export half of the revision ADR's
+// scenarioHistoricalExportFormula pins the export half of the revision-model ADR's
 // disclosure formula, stated separately because the capabilities imply nothing
 // about each other: CURRENT material is `read AND reveal`; HISTORICAL material
 // — any revision that is not the latest — is `read AND reveal-history`. The
-// permission ADR makes the two independently strippable grants, so an export
+// permission-model ADR makes the two independently strippable grants, so an export
 // must demand exactly the one that governs the material it serves: a
 // historian without current `reveal` exports old revisions and nothing else,
 // and a revealer without `reveal-history` exports the present and nothing
@@ -887,7 +887,7 @@ func scenarioHistoricalExportFormula(t *testing.T, db *store.DB) {
 // scenarioPublishSerialization is C4's first clause.
 //
 // TWO PUBLISHES COMPUTED FROM THE SAME BASELINE both commit, and the second one
-// must not silently revert the first. That is the failure the revision ADR
+// must not silently revert the first. That is the failure the revision-model ADR
 // names in full: "X publishing A=2 and Y publishing B=2 ... the later
 // latest-pointer advance silently reverts the other's key, because per-entry
 // freshness checks each pass and unique revision numbers alone do not linearize
@@ -1306,7 +1306,7 @@ func execConformance(t *testing.T, db *store.DB, query string, args ...any) {
 	}
 }
 
-// scenarioRotateTokenKey is C4's third clause, and the encryption ADR's CI
+// scenarioRotateTokenKey is C4's third clause, and the encryption-model ADR's CI
 // invariant 15: `rotate-token-key` changes the token WITHOUT touching content,
 // revision numbers, or pinned input revisions.
 //
@@ -1332,7 +1332,7 @@ func scenarioRotateTokenKey(t *testing.T, db *store.DB) {
 		t.Fatal("fixture broken: the snapshot pinned no value entries")
 	}
 
-	// The operator capability is `rotate-dek`: the permission ADR's capability
+	// The operator capability is `rotate-dek`: the permission-model ADR's capability
 	// set is closed and names four rotation atoms for five rotation verbs, and
 	// the root token key is a tier-3 key alongside the DEKs.
 	operator := newPrincipal(t, db, "usr_rotate_"+string(scope.Project), []grantSpec{

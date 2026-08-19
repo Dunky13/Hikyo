@@ -17,7 +17,7 @@ import (
 // First-administrator bootstrap (human-auth ADR § First-administrator
 // bootstrap).
 //
-// Ordering is fixed by the encryption ADR: the root key must be present and
+// Ordering is fixed by the encryption-model ADR: the root key must be present and
 // the instance initialized before any principal exists. No administrator
 // predates the crypto that protects them — which is why this runs after
 // app.Boot has loaded the keyring, and why it is a verb of the same binary
@@ -31,7 +31,7 @@ import (
 // with: `operator`, at instance scope, expanded from the ADR's own closed
 // table rather than from a bespoke list beside it.
 //
-// This reconciles two clauses of the permission ADR that pull apart at
+// This reconciles two clauses of the permission-model ADR that pull apart at
 // bootstrap, and the reconciliation is stated rather than assumed:
 //
 //   - Propagations → #16 says the first administrator MUST be bootstrapped

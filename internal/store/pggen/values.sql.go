@@ -90,7 +90,7 @@ type GetValueEntryParams struct {
 //
 // There is no UPDATE. A value write is delete-then-insert with a FRESH row id,
 // because the row id is bound into the ciphertext's AAD and an id bound into
-// an AAD is immutable and never reused (encryption ADR).
+// an AAD is immutable and never reused (encryption-model ADR).
 func (q *Queries) GetValueEntry(ctx context.Context, arg GetValueEntryParams) (ValueEntry, error) {
 	row := q.db.QueryRow(ctx, getValueEntry,
 		arg.ChainOrgID,

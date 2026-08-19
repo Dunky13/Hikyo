@@ -331,7 +331,7 @@ func runRevealNeedsACeremony(t *testing.T, db *store.DB) {
 		t.Fatalf("revealed %d secrets, want 2", revealed)
 	}
 	// One event PER KEY. "revealed 2 secrets" as a single row is exactly what
-	// the audit ADR forbids, and the count is what makes that checkable.
+	// the audit-model ADR forbids, and the count is what makes that checkable.
 	if got := disclosureRows(t, db) - before; got != 2 {
 		t.Fatalf("bulk reveal wrote %d disclosure rows, want one per key (2)", got)
 	}

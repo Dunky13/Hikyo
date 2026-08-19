@@ -1,5 +1,5 @@
 // Package crypto is the envelope package — the sole crypto chokepoint fixed
-// by the encryption ADR and placed here by the system-architecture ADR. It
+// by the encryption-model ADR and placed here by the system-architecture ADR. It
 // owns the keyring (root → master → tier-3 keys), the per-kind AAD schemas
 // with their injective length-prefixed encoding, the versioned ciphertext
 // envelope over XChaCha20-Poly1305, the DEK cache, root-key bootstrap, and
@@ -14,7 +14,7 @@ package crypto
 import "errors"
 
 // KeySize is the size of every key in the hierarchy: 256-bit, per the
-// encryption ADR.
+// encryption-model ADR.
 const KeySize = 32
 
 // Kind is the envelope kind byte. It selects the AAD schema, so identifiers
@@ -39,7 +39,7 @@ const (
 )
 
 // ErrUnknownFormat marks a ciphertext whose format version this build does
-// not know — startup refusal 5 of the encryption ADR ("abort rather than
+// not know — startup refusal 5 of the encryption-model ADR ("abort rather than
 // guess") depends on it being distinguishable.
 var ErrUnknownFormat = errors.New("crypto: unknown ciphertext format version")
 
@@ -49,7 +49,7 @@ var ErrUnknownFormat = errors.New("crypto: unknown ciphertext format version")
 var ErrDecrypt = errors.New("crypto: decryption failed")
 
 // Zero overwrites b. Best effort only — Go's GC gives no wipe guarantee, and
-// the encryption ADR makes no memory-secrecy claim.
+// the encryption-model ADR makes no memory-secrecy claim.
 func Zero(b []byte) {
 	for i := range b {
 		b[i] = 0

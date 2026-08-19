@@ -471,7 +471,7 @@ WHERE grant_origins.kind = 'scim'
 //
 // Provenance is `created_at` against `auth_instance_state.reactivated_at`, the
 // instant the restored instance came back. It is #76's own anchor, used the
-// same way the machine-identity ADR uses it for the federated `iat` floor: a
+// same way the machine-identities ADR uses it for the federated `iat` floor: a
 // row stamped at or before the restore came out of the archive, a row stamped
 // after it was written by this instance since. NULL means this datastore was
 // never restored, the comparison is NULL, and the statement matches nothing --

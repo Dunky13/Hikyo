@@ -22,7 +22,7 @@ type (
 // PrincipalID identifies a principal (human or machine) in the grant table.
 type PrincipalID string
 
-// Capability is one atom from the permission ADR's CLOSED set. The whole set
+// Capability is one atom from the permission-model ADR's CLOSED set. The whole set
 // is declared below (#55); Capabilities() is the closed enumeration the grant
 // API validates against, so a capability string that is not an atom is
 // refused rather than stored as an unreachable row.
@@ -48,7 +48,7 @@ const (
 	// Org.
 	CapManageProjects Capability = "manage-projects"
 
-	// The instance operator set (encryption ADR #14).
+	// The instance operator set (encryption-model ADR #14).
 	CapBackupExport     Capability = "backup-export"
 	CapRestore          Capability = "restore"
 	CapRotateRootKey    Capability = "rotate-root-key"
@@ -126,7 +126,7 @@ func IsCapability(c Capability) bool { _, ok := capabilityLevels[c]; return ok }
 // DeepestLevel returns the deepest scope level an atom may be granted at.
 func DeepestLevel(c Capability) (Level, bool) { l, ok := capabilityLevels[c]; return l, ok }
 
-// OperatorSet is the encryption ADR's instance operator set, in the order the
+// OperatorSet is the encryption-model ADR's instance operator set, in the order the
 // `operator` template seeds it.
 var OperatorSet = []Capability{
 	CapBackupExport, CapRestore, CapRotateRootKey, CapRotateMasterKey,
@@ -168,7 +168,7 @@ func (s Scope) Level() (Level, error) {
 	}
 }
 
-// Grant is the permission ADR's triple: (principal, capability, scope). The
+// Grant is the permission-model ADR's triple: (principal, capability, scope). The
 // principal is implied by the lookup; a zero Scope is an instance-scope
 // grant. Grants are purely additive — absence is denial, there are no deny
 // rules.
@@ -177,7 +177,7 @@ type Grant struct {
 	Scope      Scope
 }
 
-// ErrNotFound is the canonical "no such row" — and, per the permission ADR's
+// ErrNotFound is the canonical "no such row" — and, per the permission-model ADR's
 // unauthorized ≡ nonexistent rule, also the uniform outcome for every
 // tenant-scoped request the principal may not perform. Callers must not be
 // able to distinguish the two.

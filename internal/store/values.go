@@ -66,7 +66,7 @@ type ValueRepo interface {
 	ValueReader
 	// Put writes one cell of the proof's environment. It is delete-then-insert
 	// rather than an upsert because the row id is bound into the AAD: reusing
-	// the id of a superseded occurrence is the one thing the encryption ADR
+	// the id of a superseded occurrence is the one thing the encryption-model ADR
 	// forbids outright.
 	Put(ctx context.Context, p authz.Proof, entry NewValueEntry) error
 	// Clear removes one cell — the `set` → `absent` transition, which with no

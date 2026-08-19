@@ -29,7 +29,7 @@ import (
 // plaintext seed account by construction, landing in shell history, Compose
 // files, `docker inspect` output and process listings.
 //
-// Ordering is fixed by the encryption ADR: the root key must be present and
+// Ordering is fixed by the encryption-model ADR: the root key must be present and
 // the instance initialized before any principal exists. This command
 // therefore performs the same fail-closed boot sequence the server does,
 // minus the listener.
@@ -263,7 +263,7 @@ func runAdminReset(ctx context.Context, cfg *config.Config, log *slog.Logger, ar
 // --principal ID --capability CAP [--org ... --project ... --env ...]`.
 //
 // It is the ONLY authorization path in the system not evaluated against a
-// grant (permission ADR § Evaluation 6), and it exists for exactly one state
+// grant (permission-model ADR § Evaluation 6), and it exists for exactly one state
 // the lockout invariant cannot recover from in-product: an instance, or an
 // org, whose last `manage-members` holder is gone. Host access plus the root
 // key already means full control-plane compromise per the threat model, so

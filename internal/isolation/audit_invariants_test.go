@@ -1,7 +1,7 @@
 package isolation
 
 // The audit-model ADR's CI invariants (#45), joining the tenant-isolation
-// suite. Numbering here is the audit ADR's own (§ CI invariants); the
+// suite. Numbering here is the audit-model ADR's own (§ CI invariants); the
 // invariant → test map lives in docs/handoff/45-audit-core.md.
 
 import (
@@ -37,7 +37,7 @@ func loadAuditExemptions(t *testing.T) auditExemptions {
 	return out
 }
 
-// TestInvariantAuditCompleteness is the audit ADR's CI invariant 2, wired
+// TestInvariantAuditCompleteness is the audit-model ADR's CI invariant 2, wired
 // to the registry that is actually total: every operation and every wire
 // entry point maps to event type(s), carries `audited: none` under the
 // default-deny permit rule, or sits in the name-pinned exemption fixture

@@ -16,7 +16,7 @@ import (
 )
 
 // The conditional fetch cursor (#62, machine-identities ADR § Authentication,
-// authorization and the fetch path; revision ADR § Revision identity).
+// authorization and the fetch path; revision-model ADR § Revision identity).
 //
 // The acceptance criterion these discharge is mvp-boundary M1's "cursor
 // bind-tuple falsification (all four components) forces full fetch". Each
@@ -52,7 +52,7 @@ func runDeliveryCursorRoundTrip(t *testing.T, db *store.DB) {
 	// THE DELIVERED KEY SET IS WHAT THE SNAPSHOT DELIVERS, not what the project
 	// declares — "a delivered payload's key set is exactly the declared keys
 	// that RESOLVE in that environment, under the schema revision that snapshot
-	// pinned" (schema ADR § Closed schema). A declared key with no value
+	// pinned" (schema-model ADR § Closed schema). A declared key with no value
 	// resolves to nothing and is therefore not delivered at all, which is why
 	// this counts the snapshot's entries rather than the catalogue's rows.
 	if want := queryInt(t, db,
@@ -426,7 +426,7 @@ func TestDeliveryChangeTokenTracksTheManifestSQLite(t *testing.T) {
 	}
 
 	// RECLASSIFICATION moves the token even though no value changed. That is the
-	// schema ADR's amendment to the revision ADR, and the reason is concrete: an
+	// schema-model ADR's amendment to the revision-model ADR, and the reason is concrete: an
 	// adapter routing `secret` to a Secret and `config` to a ConfigMap would
 	// otherwise see an unchanged token across a reclassification and never fire
 	// the rollout that relocates the value.
@@ -448,7 +448,7 @@ func TestDeliveryChangeTokenTracksTheManifestSQLite(t *testing.T) {
 	}
 
 	// A PRESENCE RULE change does NOT move the token, and that inversion is the
-	// point. The token covers DELIVERED CONTENT ONLY (revision ADR § Revision
+	// point. The token covers DELIVERED CONTENT ONLY (revision-model ADR § Revision
 	// identity): `required_in` governs what a future publish may commit, not
 	// what this snapshot delivers, so tightening it must not fire a rollout wave
 	// across every consumer. The environment still advances to a NEW REVISION —

@@ -3,5 +3,5 @@
 package crypto
 
 // PR_SET_DUMPABLE is Linux-only; other Unix platforms get the core-dump
-// rlimit alone, exactly as the encryption ADR scopes it.
+// rlimit alone, exactly as the encryption-model ADR scopes it.
 func setNotDumpable() error { return nil }

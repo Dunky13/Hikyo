@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// Invariant 5 (encryption ADR § CI-enforced invariants): adversarial field
+// Invariant 5 (encryption-model ADR § CI-enforced invariants): adversarial field
 // values chosen to collide under naive concatenation must produce distinct
 // AADs.
 func TestAADInjectivity(t *testing.T) {

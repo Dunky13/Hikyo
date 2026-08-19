@@ -513,7 +513,7 @@ func scenarioSecretRuleChangeNeedsReveal(t *testing.T, db *store.DB) {
 
 // scenarioPresenceRules covers the statically decidable conflict, the explicit
 // set's foreign-key confinement, and the environment-lifecycle cascade the
-// schema ADR puts in the same serialization domain.
+// schema-model ADR puts in the same serialization domain.
 func scenarioPresenceRules(t *testing.T, db *store.DB) {
 	keys := &service.Keys{DB: db, Keyring: sharedKeyring(t, db)}
 	envs := &service.Environments{DB: db, Keyring: sharedKeyring(t, db)}
@@ -663,7 +663,7 @@ func scenarioKeyGroups(t *testing.T, db *store.DB) {
 	// scenario is about. Forbidden-and-absent is a valid environment, so the
 	// first declaration lands and the second is refused at DECLARATION time,
 	// before anything materializes — which is exactly the "statically decidable
-	// conflict" the schema ADR requires rejected there rather than at publish.
+	// conflict" the schema-model ADR requires rejected there rather than at publish.
 	user, err := keys.Create(t.Context(), actor, scope, service.KeySpec{
 		Name: "DB_USER", Classification: string(schema.Config),
 		Declaration: decl(schema.Rule{Type: schema.TypeString}),

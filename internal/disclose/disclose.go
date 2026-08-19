@@ -11,7 +11,7 @@
 //
 // Ordinary stdout is NOT a destination even when stdout is a TTY. A PTY is
 // allocatable by CI runners, `script`, tmux and service managers, so
-// isatty() proves neither presence nor intent — the Compose ADR's locked
+// isatty() proves neither presence nor intent — the compose-integration ADR's locked
 // finding about input, applied to output. The controlling terminal is a
 // different file: a log-capturing pipe does not receive it.
 package disclose

@@ -1,6 +1,6 @@
 package service
 
-// Backup export (#76, encryption ADR § Backups and exports, ops spec § 11).
+// Backup export (#76, encryption-model ADR § Backups and exports, ops spec § 11).
 //
 // Two properties are worth stating before the code, because both are easy to
 // lose in a refactor and neither is recoverable afterwards:

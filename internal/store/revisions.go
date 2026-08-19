@@ -12,7 +12,7 @@ import (
 // This package never sees plaintext here either: a pending change's material
 // and a snapshot entry's material both arrive sealed under the project DEK and
 // leave sealed. A draft is stored exactly like a published value because the
-// permission ADR treats it exactly like one -- "a pending secret's plaintext
+// permission-model ADR treats it exactly like one -- "a pending secret's plaintext
 // remains reveal-gated exactly as a published one is".
 
 // PendingOperation is what a draft does to its cell. Two states, because

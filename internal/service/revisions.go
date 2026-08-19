@@ -411,7 +411,7 @@ func (s *Revisions) Export(ctx context.Context, actor Actor, scope domain.Scope,
 	// in hand and "current or historical" is a fact rather than a guess. The
 	// reveal op cannot be chosen here: which one applies depends on whether
 	// the named revision IS the latest, and the two are independently
-	// strippable grants (permission ADR) -- demanding current `reveal` for a
+	// strippable grants (permission-model ADR) -- demanding current `reveal` for a
 	// historical export would refuse a caller the formula admits.
 	sealer, err := sealerFor(ctx, s.DB, s.Keyring, actor, authz.OpValueExport, scope)
 	if err != nil {
@@ -533,15 +533,15 @@ type TokenKeyRotation struct {
 // the new one for every subsequent derivation.
 //
 // WHAT IT DOES NOT TOUCH, which is the whole acceptance criterion (mvp-boundary
-// C4, encryption ADR CI invariant 15): no snapshot's content, no revision
+// C4, encryption-model ADR CI invariant 15): no snapshot's content, no revision
 // number, and no pinned input revision moves. It cannot, because a change token
 // is not stored anywhere -- it is derived at read from the live key over the
-// snapshot's delivery manifest. The encryption ADR's "invalidate the cache and
+// snapshot's delivery manifest. The encryption-model ADR's "invalidate the cache and
 // recompute eagerly" protocol exists because a cached token would otherwise
 // keep serving the old value; there is no cache here, so adopting the handle IS
 // the rotation, atomically, with nothing to resume after a crash.
 //
-// It rides the `rotate-dek` capability. The permission ADR's capability set is
+// It rides the `rotate-dek` capability. The permission-model ADR's capability set is
 // CLOSED and names four rotation atoms for five rotation verbs; the token key
 // is a tier-3 key alongside the DEKs, wrapped by the same master, retired
 // through the same one-active-per-scope index -- so `rotate-dek` is the tier-3

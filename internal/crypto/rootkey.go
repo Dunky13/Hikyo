@@ -10,7 +10,7 @@ import (
 	"os"
 )
 
-// Root-key bootstrap, per the encryption ADR: the operator-held 256-bit root
+// Root-key bootstrap, per the encryption-model ADR: the operator-held 256-bit root
 // key arrives as a file (`--root-key-file`, which also covers systemd
 // LoadCredential delivery) or the HIKYO_ROOT_KEY environment variable —
 // documented as the weakest tier, since an env value sits in process memory

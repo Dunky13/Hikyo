@@ -119,7 +119,7 @@ func (r sqliteValues) Put(ctx context.Context, p authz.Proof, entry NewValueEntr
 	}
 	// Delete-then-insert, never an upsert: the superseded row's id is bound
 	// into its ciphertext's AAD, and reusing it for new material is the one
-	// thing the encryption ADR forbids outright.
+	// thing the encryption-model ADR forbids outright.
 	if _, err := r.q.DeleteValueEntry(ctx, sqlitegen.DeleteValueEntryParams{
 		OrgID:         string(chain.Org),
 		ProjectID:     string(chain.Project),

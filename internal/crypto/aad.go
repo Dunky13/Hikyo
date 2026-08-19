@@ -5,7 +5,7 @@ import (
 	"math"
 )
 
-// Associated-data encoding, per the encryption ADR § Envelope format:
+// Associated-data encoding, per the encryption-model ADR § Envelope format:
 // injective by construction. Every AAD is a length-prefixed sequence — each
 // field emitted as a uint32 big-endian byte length followed by its bytes,
 // absent fields emitted as length zero, field order fixed by the schema for
@@ -48,7 +48,7 @@ func appendAAD(header []byte, a AAD) []byte {
 
 // ValueAAD binds a stored value ciphertext to exactly one row: kind `value`,
 // fields org_id, project_id, env_id, key_id, row_id, field_tag. (env_id per
-// the flat-model amendment to the encryption ADR — every value row has an
+// the flat-model amendment to the encryption-model ADR — every value row has an
 // owning environment.)
 type ValueAAD struct {
 	OrgID, ProjectID, EnvID, KeyID, RowID, FieldTag string

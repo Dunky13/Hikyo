@@ -59,7 +59,7 @@ func TestZeroRecipientsRefused(t *testing.T) {
 	}
 }
 
-// The scrypt stanza must be the only stanza in its container (encryption ADR
+// The scrypt stanza must be the only stanza in its container (encryption-model ADR
 // § Backups), so export takes public recipients or a passphrase, never both.
 func TestScryptExclusivityRefusedAtExport(t *testing.T) {
 	_, recipient := mustIdentity(t)

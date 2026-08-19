@@ -845,7 +845,7 @@ var wireRoutes = map[string][]Operation{
 	"http:DELETE /api/v1/orgs/{org}/projects/{project}/keys/{key}":   {OpKeyDelete},
 	"http:PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/name": {OpKeyRename},
 	// These two routes REACH a second operation at runtime - the reveal gate
-	// the schema ADR puts in front of a value-dependent rule change on a
+	// the schema-model ADR puts in front of a value-dependent rule change on a
 	// `secret` key, and in front of declassification. Both are listed for the
 	// same reason credential-reset lists its pair: the linkage must record
 	// every operation a route can reach, or the registry describes an
@@ -1033,7 +1033,7 @@ type Cache struct {
 	KeyConstructor string
 	// ProofGatedAt names the layer that supplies the proof for reads and
 	// writes. For the DEK LRU this is deliberately NOT inside the cache:
-	// internal/crypto is a locked leaf package (encryption ADR; enforced by
+	// internal/crypto is a locked leaf package (encryption-model ADR; enforced by
 	// the boundary test) and may not import the authorization package, so
 	// its accessors cannot take an authz.Proof. The access rule is therefore
 	// discharged one layer up, at the service seam that resolves a scope

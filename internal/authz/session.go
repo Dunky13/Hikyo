@@ -14,7 +14,7 @@ import (
 )
 
 // Session resolution sits HERE, on the transaction's authorizer, because the
-// human-auth ADR's propagation to the architecture ADR requires it: session
+// human-auth ADR's propagation to the system-architecture ADR requires it: session
 // resolution and the session-assurance check run inside the same chokepoint
 // as authorize(), in the same transaction, uncached. A middleware that
 // decided "authenticated" before a transaction existed would be exactly the

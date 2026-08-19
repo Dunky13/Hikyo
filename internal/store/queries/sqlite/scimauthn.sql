@@ -24,7 +24,7 @@ INSERT INTO scim_credentials
 VALUES (?, ?, ?, ?, ?, ?, ?, ?);
 
 -- Presentation resolves the verifier, never anything inside the value: kind,
--- binding, expiry and epoch are read from the row (machine-identity ADR).
+-- binding, expiry and epoch are read from the row (machine-identities ADR).
 -- hikyo:authn-resolution
 -- name: GetSCIMCredentialByVerifier :one
 SELECT id, org_id, binding_id, principal_id, verifier, credential_epoch, created_at,

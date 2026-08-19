@@ -35,7 +35,7 @@ import (
 // PUBLISH IS THE AUTHORITY. Saving is free -- a draft may hold a type-invalid
 // value, may clear a `required_in` key, may sit against a stale baseline. Every
 // one of those is refused at publish, loud, naming what failed. That is the
-// schema ADR's "advisory on save, authoritative at publish" made structural:
+// schema-model ADR's "advisory on save, authoritative at publish" made structural:
 // there is exactly one place where validation decides anything.
 
 // The AAD field tags and owner tables for the two sealed columns this slice
@@ -55,7 +55,7 @@ type Revisions struct {
 	Keyring *crypto.Keyring
 	// Advisory receives the metadata-only live-update events, AFTER commit.
 	// Nil disables the channel entirely, which is safe by construction:
-	// correctness never depends on delivery (revision ADR, Live updates).
+	// correctness never depends on delivery (revision-model ADR, Live updates).
 	Advisory *Advisory
 	// Auth supplies the reveal guard for the one disclosing method here,
 	// Export. Nil refuses every disclosure loudly.
@@ -245,7 +245,7 @@ func (s *Revisions) PublishPlanned(ctx context.Context, actor Actor, scope domai
 			s.PublishProbe.BeforeProjectLock(slices.Clone(versionIDs))
 		}
 		// One serialization domain per project, acquired BEFORE the freshness
-		// and authorization re-checks (schema ADR).
+		// and authorization re-checks (schema-model ADR).
 		if err := r.Projects().Lock(ctx, p); err != nil {
 			return err
 		}
@@ -671,7 +671,7 @@ func republish(ctx context.Context, r store.Repos, az *authz.TxAuthorizer, calle
 //
 // A semantic schema change -- a key created, renamed, deleted, reclassified,
 // retyped, re-scoped by presence, or moved between groups -- does NOT narrow to
-// a touched set the way a value publish does. The schema ADR's locked unit
+// a touched set the way a value publish does. The schema-model ADR's locked unit
 // stands exactly: such a change validates, requires publish authorization on,
 // and materializes a new snapshot for every environment in the project, even
 // where no value and no verdict changes, because its PINNED SCHEMA REVISION
@@ -682,7 +682,7 @@ func republish(ctx context.Context, r store.Repos, az *authz.TxAuthorizer, calle
 // rollout: the new revision records that the validation guarantee moved,
 // without disturbing anything.
 //
-// It also carries the authorization the schema ADR demands and #49 could not
+// It also carries the authorization the schema-model ADR demands and #49 could not
 // yet evaluate: `publish` on every affected environment, immediately before
 // commit. A principal holding `definitions-edit` alone can no longer loosen
 // production's validation, drop a presence protection or dissolve a key group
@@ -1144,7 +1144,7 @@ func validateResolved(cells []resolvedCell, presence []store.KeyPresence, envID 
 // plaintext. The pinned id moves on every real write (a cell is
 // delete-then-insert), so a publish that wrote a cell records `edited` even
 // when the bytes it wrote equal the bytes that were there: lineage is
-// write-presence, and per the revision ADR write-presence must carry no
+// write-presence, and per the revision-model ADR write-presence must carry no
 // information about the plaintext. A value diff here would hand any
 // edit+publish holder a guessing oracle -- stage a guess, publish it, read
 // "no lineage row" as `unchanged` -- which is exactly the oracle the ADR

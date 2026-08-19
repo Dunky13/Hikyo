@@ -66,7 +66,7 @@ type KeySpec struct {
 }
 
 // KeyMetadataUpdate is the NON-semantic update. It deliberately has no
-// classification field and no rule field: the schema ADR exempts exactly these
+// classification field and no rule field: the schema-model ADR exempts exactly these
 // four from per-environment publish authorization because they cannot change
 // what any environment delivers, and a fifth field here would silently widen
 // that exemption.
@@ -397,7 +397,7 @@ func emptiedMode(mode string, remaining int) string {
 // Reveal-gate attempt limiting
 // ---------------------------------------------------------------------------
 
-// The schema ADR requires every reveal-gated attempt to be "audited and
+// The schema-model ADR requires every reveal-gated attempt to be "audited and
 // rate-limited, per key and per principal". Rate limiting is DEFENCE IN DEPTH,
 // never the control — the control is that no predicate result reaches a
 // non-revealer, which is the gate itself. This bounds how fast a holder of
@@ -889,7 +889,7 @@ func readKey(ctx context.Context, r store.Repos, p authz.Proof, row store.Catalo
 
 // UpdateDeclaration replaces the value-dependent rules and the presence rules.
 //
-// THE ORDER IN THIS METHOD IS THE SECURITY PROPERTY. The schema ADR's
+// THE ORDER IN THIS METHOD IS THE SECURITY PROPERTY. The schema-model ADR's
 // load-bearing rule: changing a value-dependent rule on a `secret` key is a
 // disclosure, because the result bit itself is the leak — a principal holding
 // definitions-edit but not `reveal` can set `pattern: "^A"`, watch the publish
@@ -1242,7 +1242,7 @@ func (s *Keys) Delete(ctx context.Context, actor Actor, scope domain.Scope, id s
 			return err
 		}
 		// Deleting a key INVALIDATES every pending change referencing it
-		// (schema ADR § Key identity). Without this, Alice's staged edit to K
+		// (schema-model ADR § Key identity). Without this, Alice's staged edit to K
 		// stays publishable after Bob deletes K, and the publish resurrects a
 		// key the schema no longer declares. The rows are collected here and a
 		// publish naming one of those version ids is refused loudly by name.

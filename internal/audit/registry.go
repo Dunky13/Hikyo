@@ -32,7 +32,7 @@ const (
 	EventAuditExportCompleted EventType = "audit.export_completed"
 
 	// auth.* — human authentication (#47, human-auth ADR § Propagations to
-	// the audit ADR). Failures matter as much as successes, so every type
+	// the audit-model ADR). Failures matter as much as successes, so every type
 	// below licenses the failure outcome its path can produce.
 	//
 	// Note what these payloads deliberately do NOT carry: the presented
@@ -229,7 +229,7 @@ const (
 	// authority — the one authorization path not evaluated against a grant.
 	EventBreakGlassGrant EventType = "recovery.break_glass_grant"
 
-	// backup.* / restore.* — the operator lifecycle (#76, encryption ADR
+	// backup.* / restore.* — the operator lifecycle (#76, encryption-model ADR
 	// § Propagations "export and restore are auditable events"; ops spec § 11).
 	// All four are instance-trail, local host authority, and all four are
 	// SECURITY retention: a backup is a copy of every ciphertext in the
@@ -286,7 +286,7 @@ const (
 	// settings.key_reveal_gate_attempt is the disclosure-class record of EVERY
 	// reveal-gated attempt on a `secret` key — a value-dependent rule change or
 	// a declassification — whatever its outcome: allowed (success), refused
-	// (denied), or rate-limited (failure). The schema ADR's obligation is
+	// (denied), or rate-limited (failure). The schema-model ADR's obligation is
 	// "every attempt is audited", so the denied and limited cases matter most,
 	// and both roll their transaction back; the row therefore rides the
 	// rollback-surviving settlement path rather than an in-transaction insert.
@@ -322,7 +322,7 @@ const (
 	// current `secret` plaintext was opened under the caller's authority.
 	// `surface` says where: `cell` and `diff` are reads rendered to the
 	// principal, `copy` and `clone` are the source side of a duplication. The
-	// audit ADR lists these as separate disclosure entries; they are one type
+	// audit-model ADR lists these as separate disclosure entries; they are one type
 	// with a field because they disclose exactly the same thing, and an
 	// investigator filtering "who read this key" must not have to know four
 	// spellings.
@@ -576,7 +576,7 @@ const (
 	EventRemoteFetchFailed EventType = "remote.fetch_failed"
 	// remote.directory_viewed is the listing read, audited because it is
 	// FOREIGN STRUCTURE and `instance-directory` is a read-is-power grant — the
-	// audit ADR's own argument applied to this ADR's own data. Successful
+	// audit-model ADR's own argument applied to this ADR's own data. Successful
 	// fetches ride this event: the fetch happens because of the view, so they
 	// are not separately per-remote evented.
 	EventRemoteDirectoryViewed EventType = "remote.directory_viewed"
@@ -1539,7 +1539,7 @@ var registry = map[EventType]TypeSpec{
 		},
 	},
 
-	// Break-glass grants (#55, permission ADR - Break-glass). Instance trail
+	// Break-glass grants (#55, permission-model ADR - Break-glass). Instance trail
 	// only: local host authority has no session, no tenant actor and, by the
 	// ADR's own words, no grant to be evaluated against.
 	EventBreakGlassGrant: {
@@ -2342,7 +2342,7 @@ var grantSchema = Schema{
 	"unheld":           {Kind: KindBool, Required: true},
 	"target_class":     {Kind: KindString, Required: true},
 	"template":         {Kind: KindString},
-	// Origin fields (#73, scim ADR §10): origin arithmetic on a SURVIVING row
+	// Origin fields (#73, scim-provisioning ADR §10): origin arithmetic on a SURVIVING row
 	// is visible — a `grant.modified` carrying these three says which binding,
 	// which mapping row and which IdP group moved. They are optional because a
 	// manual grant has no binding to name, and answering "why can they?" is

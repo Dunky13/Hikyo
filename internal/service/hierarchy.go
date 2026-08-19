@@ -732,7 +732,7 @@ func (s *Environments) create(ctx context.Context, actor Actor, scope domain.Sco
 			}
 		}
 		// MATERIALIZE REVISION 1 before the environment becomes fetchable
-		// (schema ADR § Presence): an environment is never deliverable in a
+		// (schema-model ADR § Presence): an environment is never deliverable in a
 		// state no schema check has seen, and delivery reads only committed
 		// snapshots. A `mode: all` required key with nothing to satisfy it
 		// therefore refuses the creation here rather than producing an
@@ -1036,7 +1036,7 @@ func folderOf(f store.Folder) Folder {
 }
 
 // Folders owns the folder surface. Every method addresses PROJECT depth: the
-// scope lattice has no folder level (the permission ADR forbids folder-scoped
+// scope lattice has no folder level (the permission-model ADR forbids folder-scoped
 // grants outright), so the folder id is an ordinary argument that can only
 // resolve inside the project the proof already authorized.
 type Folders struct {
