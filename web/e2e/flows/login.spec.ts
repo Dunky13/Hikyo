@@ -66,43 +66,46 @@ test.describe('login', () => {
     expect(JSON.stringify(stored)).not.toContain('hik_1_');
   });
 
-  test('meets the pinned assertion set', async ({ page }) => {
-    await page.goto('/login');
+  for (const scheme of ['dark', 'light'] as const) {
+    test(`meets the pinned assertion set (${scheme})`, async ({ page }) => {
+      await page.emulateMedia({ colorScheme: scheme });
+      await page.goto('/login');
 
-    const card = page.locator('.login__card');
-    const submit = page.getByRole('button', { name: 'Sign in' });
-    const heading = page.getByRole('heading', { name: 'Sign in to Hikyo' });
-    const lede = page.getByText('Use the credential you established');
+      const card = page.locator('.login__card');
+      const submit = page.getByRole('button', { name: 'Sign in' });
+      const heading = page.getByRole('heading', { name: 'Sign in to Hikyo' });
+      const lede = page.getByText('Use the credential you established');
 
-    // Every interactive element is discovered and asserted; what the flow
-    // declares is only the DESIGN.md conformance that needs a name.
-    await expectPinnedAssertionSet(page, {
-      flow: 'login',
-      surface: 'login',
-      theme: 'dark',
-      text: [heading, lede],
-      radii: [
-        [card, 'container'],
-        [submit, 'control'],
-        [page.getByLabel('Username'), 'control'],
-        [page.getByLabel('Password'), 'control'],
-      ],
-      fonts: [
-        [heading, 'ui'],
-        [lede, 'ui'],
-      ],
-      colours: [
-        [heading, 'color', '--tx'],
-        [lede, 'color', '--tx-dim'],
-        [card, 'backgroundColor', '--bg-raise'],
-        [card, 'borderTopColor', '--line'],
-        [submit, 'backgroundColor', '--accent'],
-        [submit, 'color', '--on-accent'],
-      ],
-      hairlines: [card, page.getByLabel('Username')],
-      density: [[submit, '--touch']],
+      // Every interactive element is discovered and asserted; what the flow
+      // declares is only the DESIGN.md conformance that needs a name.
+      await expectPinnedAssertionSet(page, {
+        flow: 'login',
+        surface: 'login',
+        theme: scheme,
+        text: [heading, lede],
+        radii: [
+          [card, 'container'],
+          [submit, 'control'],
+          [page.getByLabel('Username'), 'control'],
+          [page.getByLabel('Password'), 'control'],
+        ],
+        fonts: [
+          [heading, 'ui'],
+          [lede, 'ui'],
+        ],
+        colours: [
+          [heading, 'color', '--tx'],
+          [lede, 'color', '--tx-dim'],
+          [card, 'backgroundColor', '--bg-raise'],
+          [card, 'borderTopColor', '--line'],
+          [submit, 'backgroundColor', '--accent'],
+          [submit, 'color', '--on-accent'],
+        ],
+        hairlines: [card, page.getByLabel('Username')],
+        density: [[submit, '--touch']],
+      });
     });
-  });
+  }
 
   // The palette is a dual-theme palette, so conformance is a dual-theme claim.
   test('matches the DESIGN.md palette in the light theme too', async ({ page }) => {

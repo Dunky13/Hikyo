@@ -328,12 +328,18 @@ func validateValue(key store.CatalogueKey, value string) error {
 	// Failure text is schema-derived; for a `secret` key the engine never puts
 	// instance data in it in the first place, so this carries nothing the
 	// caller may not see.
+	//
+	// It is a SAFE DETAIL rather than a log-only cause, for the same reason the
+	// presence vetoes beside it are: mvp-boundary C5 requires a schema-failing
+	// restore to block "loud, naming the keys", and a bare 400 leaves the human
+	// with a refusal and no key to act on. It is decided after authorization on
+	// a key the caller already named, so it discloses nothing they could not
+	// read from the catalogue.
 	parts := make([]string, 0, len(verdict.Errors))
 	for _, f := range verdict.Errors {
 		parts = append(parts, f.Keyword+": "+f.Message)
 	}
-	return fmt.Errorf("%w: value for %q is invalid (%s)",
-		domain.ErrInvalid, key.Name, strings.Join(parts, "; "))
+	return invalidDetail("value for %q is invalid (%s)", key.Name, strings.Join(parts, "; "))
 }
 
 // checkNotForbidden refuses a write where the schema says the key must never

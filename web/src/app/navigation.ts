@@ -18,6 +18,7 @@ export type SurfaceId =
   | 'projects'
   | 'settings'
   | 'matrix'
+  | 'history'
   | 'values'
   | 'machine-access'
   | 'remotes'
@@ -45,6 +46,18 @@ export const SURFACES: readonly Surface[] = [
     id: 'matrix',
     path: '/orgs/:org/projects/:project/matrix',
     label: 'Environment matrix',
+    section: null,
+  },
+  // The revision-history drawer (#59). It is the matrix WITH its history drawer
+  // open — the locked prototype's list+detail panes render over the matrix, not
+  // instead of it — so the path nests under the matrix and the element is the
+  // same component. `section: null` for the matrix's own reason: it addresses
+  // one project, and the environment and the per-key filter are query
+  // parameters, because per-key history is a filter and not a second surface.
+  {
+    id: 'history',
+    path: '/orgs/:org/projects/:project/matrix/history',
+    label: 'Revision history',
     section: null,
   },
   // The reveal / copy / write-only-edit surface (#58). `section: null` because

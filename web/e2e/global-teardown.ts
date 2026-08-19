@@ -10,7 +10,7 @@ import { readRunLog, unexecutedClaims } from './registry.ts';
  * entry to a flow's claim list passes the closure check while asserting
  * nothing about the new page.
  *
- * It is skipped under `--grep`, and only under `--grep`: a filtered run is
+ * It is skipped under `--grep` or a positional spec filter: a filtered run is
  * deliberately partial, and failing it would make the check something people
  * work around instead of with. CI runs unfiltered.
  *
@@ -32,9 +32,23 @@ export default function globalTeardown(config: FullConfig): void {
     );
   }
 
-  const filtered = String(config.grep) !== '/.*/';
+  // `config.grep` is NOT where a CLI `--grep` lands: Playwright leaves the
+  // resolved config's `grep` at `/.*/` and applies the CLI filter separately, so
+  // reading it alone made this check fire on every filtered run — after the
+  // tests passed, with a wall of lines about flows nobody asked to run. That is
+  // exactly the "check people work around instead of with" the note above warns
+  // against. The CLI is read from `process.argv` (global teardown runs in
+  // Playwright's own process), and the config field is still consulted because a
+  // `grep` set in `playwright.config.ts` does land there.
+  const grepped = process.argv.some(
+    (arg) => arg === '--grep' || arg === '-g' || arg.startsWith('--grep='),
+  );
+  const specFiltered = process.argv.some(
+    (arg) => arg.endsWith('.spec.ts') || arg.includes('/flows/'),
+  );
+  const filtered = grepped || specFiltered || String(config.grep) !== '/.*/';
   if (filtered) {
-    process.stdout.write('flow-registry execution check skipped: this run was filtered by --grep\n');
+    process.stdout.write('flow-registry execution check skipped: this run was filtered\n');
     return;
   }
   const missing = unexecutedClaims(readRunLog());

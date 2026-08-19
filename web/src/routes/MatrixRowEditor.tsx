@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { generatePath, Link } from 'react-router';
 
+import { historyHref } from '../api/history.ts';
 import type {
   MatrixKeyList,
   MatrixRef,
@@ -21,6 +22,7 @@ import {
   useProtectedPublishCeremony,
   type ProtectedPublishTarget,
 } from './useProtectedPublishCeremony.ts';
+import { useModalDialog } from './useModalDialog.ts';
 
 type MatrixKey = MatrixKeyList['items'][number];
 type Environment = EnvironmentList['items'][number];
@@ -62,7 +64,7 @@ export function MatrixRowEditor({
   onApply: (changes: readonly MatrixEditorChange[]) => Promise<void>;
   onCopy: (destinations: readonly string[], confirmProtected: boolean) => void;
 }) {
-  const dialog = useRef<HTMLDialogElement>(null);
+  const dialog = useModalDialog();
   const initialDrafts = useMemo(
     () =>
       new Map(
@@ -88,11 +90,6 @@ export function MatrixRowEditor({
   const [destinations, setDestinations] = useState<readonly string[]>([]);
   const [protectedCopyConfirmed, setProtectedCopyConfirmed] = useState(false);
   const protectedGuard = useProtectedPublishCeremony(refData);
-
-  useEffect(() => {
-    dialog.current?.showModal();
-    return () => dialog.current?.close();
-  }, []);
 
   const valuesPath = generatePath(surfaceById('values').path, {
     org: refData.org,
@@ -322,6 +319,17 @@ export function MatrixRowEditor({
               {busy || applying ? 'Saving drafts…' : `Save ${String(changes.length)} draft${changes.length === 1 ? '' : 's'}`}
             </button>
             <Link className="btn" to={valuesPath}>Open Values</Link>
+            {/*
+              The per-key history entry point. Per-key history is a FILTER over
+              the same lineage, so it is the history surface with `key` set —
+              never a second surface, and never a second fetch.
+            */}
+            <Link
+              className="btn"
+              to={historyHref({ ...refData, env: environment.id, keyId: keyRecord.id })}
+            >
+              {`History for ${keyRecord.name}`}
+            </Link>
             {keyRecord.classification === 'config' && sourceSet ? (
               <button
                 type="button"

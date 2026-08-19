@@ -1122,7 +1122,9 @@ export const zRevision = z.object({
     schema_revision: z.coerce.bigint().min(BigInt('-9223372036854775808'), { error: 'Invalid value: Expected int64 to be >= -9223372036854775808' }).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }),
     published_by: zId,
     published_at: z.iso.datetime(),
-    changed_keys: z.array(zChangedKey)
+    changed_keys: z.array(zChangedKey),
+    payload_present: z.boolean(),
+    collected_policy: z.string().optional()
 });
 
 export const zRevisionList = z.object({

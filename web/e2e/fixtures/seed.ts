@@ -2,7 +2,14 @@ import { createHmac } from 'node:crypto';
 
 import { z } from 'zod';
 
-import { ADMIN, BASE_URL } from './instance.ts';
+import {
+  fixtureApiCall as call,
+  fixtureBearer,
+  zFixtureIgnored as zIgnored,
+  zFixtureRevisionList as zRevisionList,
+  zFixtureStaged as zStaged,
+} from './api.ts';
+import { ADMIN } from './instance.ts';
 
 /**
  * The fixture tenant the reveal flow needs (#58).
@@ -51,6 +58,53 @@ export type Seeded = {
   config: string;
   /** Required only in production and intentionally absent: matrix problems fixture. */
   matrixRequired: string;
+  /**
+   * The revision-history fixture (#59), all in `dev`.
+   *
+   * Three published revisions with a secret edit and a config edit between
+   * them, plus one key whose declaration is TIGHTENED after publication — the
+   * only way to produce a historical state that is not restorable as-is, and
+   * the same recipe the `schema_failing_restore_blocks_loud` conformance
+   * scenario uses.
+   */
+  history: {
+    /** Its own project: the matrix flow asserts exact counts in `payments`. */
+    project: string;
+    /** The environment carrying the three value publishes. */
+    dev: string;
+    /** A second environment with one, so the drawer's tabs mean something. */
+    staging: string;
+    /** The config key edited between the two value publishes. */
+    configKey: string;
+    configKeyId: string;
+    /** The secret key edited between them: the ceremony's subject. */
+    secretKey: string;
+    secretKeyId: string;
+    /** Exact throwaway fixture material, for negative disclosure assertions only. */
+    secretValues: readonly string[];
+    /** The key whose value was valid when published and is not any more. */
+    tightenedKey: string;
+    tightenedKeyId: string;
+    /** The workload the pin lifecycle moves, by name and by principal id. */
+    pinnedWorkload: string;
+    pinnedWorkloadPrincipal: string;
+    /** A workload that follows latest, so the picker shows both states. */
+    spareWorkload: string;
+    /** The pin's remaining lifetime, inside the 30-day warning tier. */
+    pinExpiryDays: number;
+    /** Seed-state proof consumed only by the first history pass. */
+    revisionCount: number;
+    pinnedRevision: number;
+    pinExpiresAt: string;
+  };
+  /**
+   * NO REVISION NUMBERS travel in this fixture, deliberately.
+   *
+   * The flow MUTATES this project — it restores and publishes — and a two-pass
+   * run (desktop then mobile, one instance) would have the second pass asserting
+   * numbers the first one moved. The flow derives them at `beforeAll` instead,
+   * from the same `listRevisions` projection the seeding used.
+   */
   /** The seeding session's bearer token — the flows use cookies, not this. */
   token: string;
   principal: string;
@@ -142,52 +196,12 @@ export function totpCode(otpauthURI: string, at: Date = new Date()): string {
   return String(binary % 1_000_000).padStart(6, '0');
 }
 
-type Json = Record<string, unknown>;
-
 /** zCreated is every create response this fixture reads: it needs the id. */
 const zCreated = z.object({ id: z.string() });
 const zServiceAccount = z.object({ id: z.string(), principal_id: z.string() });
-const zStaged = z.object({ version_id: z.string() });
 const zEnrolStart = z.object({ otpauth_uri: z.string() });
 const zRotated = z.object({ session_token: z.string() });
 const zWhoAmI = z.object({ principal: z.object({ id: z.string() }) });
-// The fixture reads nothing out of these responses. The parse still earns its
-// place: it proves the server answered an OBJECT rather than, say, an error
-// page that happened to arrive with a 200.
-const zIgnored = z.object({});
-
-async function call<T>(
-  token: string,
-  method: string,
-  path: string,
-  schema: z.ZodType<T>,
-  body?: Json,
-): Promise<T> {
-  const resp = await fetch(`${BASE_URL}${path}`, {
-    method,
-    headers: {
-      'Content-Type': 'application/json',
-      // A bearer caller has no cookie leg and therefore no CSRF contract, which
-      // is what makes seeding a plain fetch rather than a cookie dance.
-      Authorization: `Bearer ${token}`,
-    },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-  });
-  if (!resp.ok) {
-    throw new Error(`${method} ${path} answered ${resp.status}: ${await resp.text()}`);
-  }
-  // Parsed, never trusted — the same rule the SPA's own client keeps. A
-  // fixture that read `resp.json()` straight would fail three frames from the
-  // mistake, in setup, where a clear message matters most.
-  const raw: unknown = resp.status === 204 ? {} : await resp.json();
-  const result = schema.safeParse(raw);
-  if (!result.success) {
-    throw new Error(
-      `${method} ${path} answered a shape the fixture does not expect: ${result.error.message}`,
-    );
-  }
-  return result.data;
-}
 
 /**
  * lastStep is the newest time step this process has spent a code on.
@@ -222,27 +236,7 @@ async function consumeCode(token: string, uri: string, path: string): Promise<st
 
 /** signIn is a fresh password session, as a bearer artifact. */
 async function signIn(): Promise<string> {
-  const resp = await fetch(`${BASE_URL}/api/v1/auth/local/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      username: ADMIN.username,
-      password: ADMIN.password,
-    }),
-  });
-  if (!resp.ok) {
-    throw new Error(`the seeding login answered ${resp.status}`);
-  }
-  const body: unknown = await resp.json();
-  if (typeof body !== 'object' || body === null) {
-    throw new Error('the seeding login answered a non-object body');
-  }
-  const record: Record<string, unknown> = { ...body };
-  const token = record['session_token'];
-  if (typeof token !== 'string') {
-    throw new Error('the seeding login returned no bearer token');
-  }
-  return token;
+  return fixtureBearer('the seeding login');
 }
 
 
@@ -266,6 +260,27 @@ export const REVEAL_GRANT = { capability: 'reveal', scope: 'instance' } as const
  * screen: the whole federation rule is that nothing folds case, resolves a URL
  * or strips a slash, so what is seeded and what is rendered must be one string.
  */
+/**
+ * HISTORY is the revision-history fixture's fixed vocabulary (#59).
+ *
+ * `tightened` is the recipe the `schema_failing_restore_blocks_loud`
+ * conformance scenario uses: publish a value that satisfies the declaration in
+ * force, publish a replacement, then TIGHTEN the declaration. The older
+ * revision is now not restorable as-is and not pinnable without a recorded
+ * override — a state that cannot be created any other way, because publication
+ * correctly refuses a value its own schema rejects.
+ */
+export const HISTORY = {
+  project: 'ledger',
+  configKey: 'LOG_LEVEL',
+  secretKey: 'DB_PASSWORD',
+  tightenedKey: 'WORKERS',
+  pinnedWorkload: 'ledger-api',
+  spareWorkload: 'ledger-batch',
+  /** The seeded pin's remaining lifetime, inside the 30-day warning tier. */
+  pinExpiryDays: 20,
+} as const;
+
 export const MACHINE = {
   workload: 'web-api',
   automation: 'nightly-export',
@@ -326,6 +341,13 @@ export async function seedTenant(
     // accounts, minting and binding are all `manage-identities`, which is a
     // separate atom from administering members.
     'manage-identities',
+    // The history drawer's own two (#59). `pin` is the pin lifecycle's
+    // authority; `reveal-history` is the independent grant that historical
+    // secret material takes — a restore that reads a superseded secret and a
+    // pin onto a non-current revision are both historical disclosures, and
+    // neither is covered by `reveal`.
+    'pin',
+    'reveal-history',
   ]) {
     runAdminGrant(['--principal', principal, '--capability', capability]);
   }
@@ -401,6 +423,47 @@ export async function seedTenant(
   const workload = await created(MACHINE.workload, 'workload');
   await created(MACHINE.automation, 'automation');
   await created(MACHINE.mintable, 'workload');
+
+  // The revision-history fixture lives in its OWN project (#59).
+  //
+  // The matrix flow asserts exact key counts and exact cell text in `payments`,
+  // so adding this ticket's three keys and three publishes there would break a
+  // locked surface's flow for a reason that has nothing to do with either
+  // ticket. One instance serves the whole suite; a second project is the cheap
+  // isolation.
+  const { id: historyProject } = await call(token, 'POST', `/api/v1/orgs/${org}/projects`, zCreated, {
+    name: 'ledger',
+  });
+  const { id: historyDev } = await call(
+    token,
+    'POST',
+    `/api/v1/orgs/${org}/projects/${historyProject}/environments`,
+    zCreated,
+    { name: 'development' },
+  );
+  const { id: historyStaging } = await call(
+    token,
+    'POST',
+    `/api/v1/orgs/${org}/projects/${historyProject}/environments`,
+    zCreated,
+    { name: 'staging' },
+  );
+  // Two workloads: the one the pin lifecycle moves, and one that stays on
+  // "follows latest" so the picker has both states to show.
+  const pinnedWorkload = await call(
+    token,
+    'POST',
+    `/api/v1/orgs/${org}/projects/${historyProject}/service-accounts`,
+    zServiceAccount,
+    { name: HISTORY.pinnedWorkload, kind: 'workload' },
+  );
+  await call(
+    token,
+    'POST',
+    `/api/v1/orgs/${org}/projects/${historyProject}/service-accounts`,
+    zServiceAccount,
+    { name: HISTORY.spareWorkload, kind: 'workload' },
+  );
 
   await call(
     token,
@@ -566,7 +629,156 @@ export async function seedTenant(
     { protected: true },
   );
 
+  // --- the revision-history fixture (#59) ----------------------------------
+  //
+  // Three publishes in `development`, a secret edit and a config edit between
+  // them, so the drawer has real lineage to render, a restore has exactly one
+  // clean row to stage, and the ceremony has a real historical secret to gate.
+  const historyKeys = new Map<string, string>();
+  for (const [name, classification, folderPath] of [
+    [HISTORY.configKey, 'config', 'app'],
+    [HISTORY.secretKey, 'secret', 'secrets'],
+    [HISTORY.tightenedKey, 'config', 'ops'],
+  ] as const) {
+    const createdKey = await call(
+      token,
+      'POST',
+      `/api/v1/orgs/${org}/projects/${historyProject}/keys`,
+      zCreated,
+      { name, classification, folder_path: folderPath, declaration: { rule: { type: 'string' } } },
+    );
+    historyKeys.set(name, createdKey.id);
+  }
+
+  const publishHistory = async (
+    environment: string,
+    values: ReadonlyArray<readonly [string, string]>,
+  ) => {
+    const versions: string[] = [];
+    for (const [name, value] of values) {
+      const staged = await call(
+        token,
+        'PUT',
+        `/api/v1/orgs/${org}/projects/${historyProject}/environments/${environment}/values/${name}`,
+        zStaged,
+        { value },
+      );
+      versions.push(staged.version_id);
+    }
+    await call(
+      token,
+      'POST',
+      `/api/v1/orgs/${org}/projects/${historyProject}/environments/${environment}/publish`,
+      zIgnored,
+      { version_ids: versions },
+    );
+  };
+
+  // r1 — everything present. WORKERS holds a value the CURRENT declaration
+  // still accepts; the tightening below is what makes r1 unrestorable.
+  await publishHistory(historyDev, [
+    [HISTORY.configKey, 'debug'],
+    [HISTORY.secretKey, 'hunter2-r1'],
+    [HISTORY.tightenedKey, 'not-an-integer'],
+  ]);
+  // r2 — the SECRET edit, and WORKERS moves to a value the tightened
+  // declaration will still accept, so restoring r2 stays clean.
+  await publishHistory(historyDev, [
+    [HISTORY.secretKey, 'hunter2-r2'],
+    [HISTORY.tightenedKey, '12'],
+  ]);
+  // r3 — the CONFIG edit, and the current revision. Restoring r2 therefore
+  // stages exactly one row: LOG_LEVEL back to `debug`.
+  await publishHistory(historyDev, [[HISTORY.configKey, 'info']]);
+  // Staging gets its own single revision, so the drawer's environment tabs
+  // switch between two real histories rather than one and an empty state.
+  await publishHistory(historyStaging, [[HISTORY.configKey, 'warn']]);
+
+  // The tightening. r1's `not-an-integer` was valid when it was published and
+  // is not any more: restoring it stages fine and PUBLISH refuses loud naming
+  // the key, and pinning r1 refuses until an explicit override is recorded.
+  const tightenedID = historyKeys.get(HISTORY.tightenedKey);
+  if (tightenedID === undefined) {
+    throw new Error('the history fixture did not create its tightened key');
+  }
+  await call(
+    token,
+    'PUT',
+    `/api/v1/orgs/${org}/projects/${historyProject}/keys/${tightenedID}/declaration`,
+    zIgnored,
+    {
+      declaration: { rule: { type: 'integer' } },
+      presence: { required_in: { mode: 'none' }, forbidden_in: { mode: 'none' } },
+    },
+  );
+
+  // A sliding window, as `payments`' development has: without one every
+  // disclosure in this project takes a ceremony, and the flow is about the
+  // history surface rather than about answering four passkey prompts.
+  await call(
+    token,
+    'PUT',
+    `/api/v1/orgs/${org}/projects/${historyProject}/environments/${historyDev}/settings`,
+    zIgnored,
+    { protected: false, reauth_window_seconds: 300 },
+  );
+
+  // The pre-existing pin, on the CURRENT revision so seeding needs no
+  // reveal-history ceremony. Its expiry sits inside the 30-day warning tier,
+  // which is what the drawer's expiry badge renders.
+  // The revision to pin is READ, never assumed: every schema act mints a
+  // revision of its own in every environment of the project — creating a key and
+  // tightening a declaration each advance the environment even though they
+  // change no value — so the three publishes above are emphatically not r1..r3.
+  const devHistory = await call(
+    token,
+    'GET',
+    `/api/v1/orgs/${org}/projects/${historyProject}/environments/${historyDev}/revisions`,
+    zRevisionList,
+  );
+  const currentRevision = devHistory.items[0]?.revision;
+  if (currentRevision === undefined) {
+    throw new Error('the history fixture published no revisions');
+  }
+
+  // Half a day of slack, so the drawer's whole-day countdown still reads
+  // `pinExpiryDays` however long the suite takes: `expires in 19 d` for 19.99
+  // days is the honest rounding, and a fixture that lands exactly on the
+  // boundary tests the clock rather than the badge.
+  const pinExpiry = new Date(Date.now() + (HISTORY.pinExpiryDays * 24 + 12) * 60 * 60 * 1000);
+  await call(
+    token,
+    'POST',
+    `/api/v1/orgs/${org}/projects/${historyProject}/environments/${historyDev}/pins`,
+    zIgnored,
+    {
+      workload_principal_id: pinnedWorkload.principal_id,
+      // The CURRENT revision, so seeding takes no reveal-history ceremony.
+      revision: currentRevision,
+      expires_at: pinExpiry.toISOString(),
+    },
+  );
+
   return {
+    history: {
+      project: historyProject,
+      dev: historyDev,
+      staging: historyStaging,
+      configKey: HISTORY.configKey,
+      configKeyId: historyKeys.get(HISTORY.configKey) ?? '',
+      secretKey: HISTORY.secretKey,
+      secretKeyId: historyKeys.get(HISTORY.secretKey) ?? '',
+      secretValues: ['hunter2-r1', 'hunter2-r2'],
+      tightenedKey: HISTORY.tightenedKey,
+      tightenedKeyId: tightenedID,
+      pinnedWorkload: HISTORY.pinnedWorkload,
+      spareWorkload: HISTORY.spareWorkload,
+      pinnedWorkloadPrincipal: pinnedWorkload.principal_id,
+      pinExpiryDays: HISTORY.pinExpiryDays,
+      revisionCount: devHistory.items.length,
+      pinnedRevision: currentRevision,
+      pinExpiresAt: pinExpiry.toISOString(),
+    },
     org,
     project,
     dev,

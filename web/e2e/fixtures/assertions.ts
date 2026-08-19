@@ -507,24 +507,34 @@ export async function expectNoStrayPills(page: Page): Promise<void> {
  * thought about it — and it is a superset of "touched", so it can only be
  * stricter.
  */
+// Keep negative assertions (for deliberately read-only surfaces) on the same
+// canonical set as the positive focus/touch sweep.
+export const INTERACTIVE_ELEMENT_SELECTOR = [
+  'a[href]',
+  'area[href]',
+  'button:not([disabled])',
+  'input:not([disabled]):not([type="hidden"])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  'summary',
+  'iframe',
+  'audio[controls]',
+  'video[controls]',
+  '[contenteditable]:not([contenteditable="false"])',
+  '[role="button"]',
+  '[role="link"]',
+  '[role="checkbox"]',
+  '[role="switch"]',
+  '[role="tab"]',
+  '[role="menuitem"]',
+  '[role="option"]',
+  '[tabindex]:not([tabindex="-1"])',
+].join(', ');
+
 export async function interactiveElements(page: Page): Promise<Locator[]> {
   // The native focusable set, not just the four obvious tags: `summary`,
   // editable regions and media controls are keyboard stops too, and a surface
   // that grows one should be asserted the day it renders.
-  const selector = [
-    'a[href]',
-    'area[href]',
-    'button:not([disabled])',
-    'input:not([disabled]):not([type="hidden"])',
-    'select:not([disabled])',
-    'textarea:not([disabled])',
-    'summary',
-    'iframe',
-    'audio[controls]',
-    'video[controls]',
-    '[contenteditable]:not([contenteditable="false"])',
-    '[tabindex]:not([tabindex="-1"])',
-  ].join(', ');
   // A MODAL DIALOG makes the rest of the document inert, and an inert element
   // is not an interactive one: focusing it is impossible by design, so
   // asserting a focus ring on it would fail for a reason that is the platform
@@ -532,11 +542,12 @@ export async function interactiveElements(page: Page): Promise<Locator[]> {
   // exactly the set inside it.
   const modal = page.locator('dialog[open]');
   const scope = (await modal.count()) > 0 ? modal.first() : page;
-  const all = scope.locator(selector);
+  const all = scope.locator(INTERACTIVE_ELEMENT_SELECTOR);
   const out: Locator[] = [];
   for (let i = 0; i < (await all.count()); i++) {
     const one = all.nth(i);
-    if (await one.isVisible()) {
+    const operable = await one.evaluate((element) => element.closest('[inert]') === null);
+    if (operable && await one.isVisible()) {
       out.push(one);
     }
   }

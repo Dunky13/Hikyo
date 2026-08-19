@@ -900,6 +900,21 @@ export type Revision = {
     published_by: Id;
     published_at: string;
     changed_keys: Array<ChangedKey>;
+    /**
+     * Whether this revision's payload still exists. Lineage is retained
+     * forever; a payload collected by retention policy leaves the entry
+     * in the history with this bit false, and diff, restore, pin and
+     * reveal on it are refused loud rather than reconstructed.
+     *
+     */
+    payload_present: boolean;
+    /**
+     * The retention policy stamped at collection, verbatim, and present
+     * only when `payload_present` is false. It is what the named refusal
+     * reports forever, so it is carried as an opaque string.
+     *
+     */
+    collected_policy?: string;
 };
 
 export type RevisionDetail = {

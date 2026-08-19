@@ -39,6 +39,7 @@ export const FLOWS: readonly Flow[] = [
   { id: 'shell', spec: 'flows/shell.spec.ts', surfaces: ['overview', 'projects', 'settings'] },
   { id: 'reveal', spec: 'flows/reveal.spec.ts', surfaces: ['values'] },
   { id: 'matrix', spec: 'flows/matrix.spec.ts', surfaces: ['matrix'] },
+  { id: 'history', spec: 'flows/history.spec.ts', surfaces: ['history'] },
   {
     id: 'machine-access',
     spec: 'flows/machine-access.spec.ts',
@@ -184,18 +185,20 @@ export function unexecutedClaims(log: string, flows: readonly ClosureCandidate[]
       .map((line) => line.trim())
       .filter((line) => line !== '')
       .map((line) => {
-        const [flow = '', surface = ''] = line.split('\t');
-        return `${flow}/${surface}`;
+        const [flow = '', surface = '', theme = ''] = line.split('\t');
+        return `${flow}/${surface}/${theme}`;
       }),
   );
   const missing: string[] = [];
   for (const flow of flows) {
     for (const surface of flow.surfaces) {
-      if (!ran.has(`${flow.id}/${surface}`)) {
-        missing.push(
-          `flow "${flow.id}" claims surface "${surface}" but the pinned assertion set never ran ` +
-            `on it — a claim nothing executes is a claim nothing checks`,
-        );
+      for (const theme of ['dark', 'light'] as const) {
+        if (!ran.has(`${flow.id}/${surface}/${theme}`)) {
+          missing.push(
+            `flow "${flow.id}" claims surface "${surface}" but the pinned assertion set never ran ` +
+              `on it in ${theme} theme — a claim nothing executes is a claim nothing checks`,
+          );
+        }
       }
     }
   }
