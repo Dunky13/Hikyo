@@ -62,31 +62,44 @@ func IsLoaderControlKey(name string) bool {
 	return false
 }
 
-// Unacknowledged applies the § 0.6 rule against a mapping's destination keys.
-// The acknowledgement is EXACT, not a wildcard:
+// Unacknowledged applies the § 0.6 rule as SET EQUALITY between the
+// acknowledgement and the mapped loader-control SUBSET — not merely "mapped":
 //
 //   - refused: mapped keys that are on the baseline but NOT acknowledged. A
 //     sync carrying any of these fails (`LoaderControlUnacknowledged`).
-//   - extraAcks: acknowledged names that are NOT among the mapped keys. An
-//     over-broad acknowledgement is itself a refusal — acknowledging `PATH`
-//     without mapping it is a latent grant that must not stand.
+//   - extraAcks: acknowledged names that are NOT in the mapped loader-control
+//     subset. This catches both an acknowledgement of a key that is not mapped
+//     at all AND an acknowledgement of a mapped NON-loader-control key (e.g.
+//     mapping [PATH, API_KEY] acknowledging [PATH, API_KEY]): acknowledging
+//     API_KEY is a latent grant that would pre-authorize a later baseline
+//     extension, so it is itself a refusal.
+//   - a duplicate in the acknowledgement is a refusal too (surfaced via
+//     extraAcks): the acknowledgement must be exactly the mapped loader-control
+//     set, and a repeated name is not that set.
 //
-// Both slices empty ⇒ the mapping satisfies the baseline. mapped is the list of
-// destination `secretKey`s the mapping delivers; acknowledged is
-// `spec.acknowledgedLoaderKeys`. Order-stable and de-duplicated so the caller's
-// condition message and the `acknowledged_keys` request parameter are
-// deterministic.
+// All slices empty ⇒ the acknowledgement equals the mapped loader-control set.
+// mapped is the list of destination `secretKey`s the mapping delivers;
+// acknowledged is `spec.acknowledgedLoaderKeys`. Order-stable and de-duplicated
+// so the caller's condition message and the `acknowledged_keys` request
+// parameter are deterministic.
 func Unacknowledged(mapped, acknowledged []string) (refused, extraAcks []string) {
 	ackSet := make(map[string]bool, len(acknowledged))
+	ackCount := make(map[string]int, len(acknowledged))
 	for _, a := range acknowledged {
 		ackSet[a] = true
+		ackCount[a]++
 	}
-	mappedSet := make(map[string]bool, len(mapped))
 
+	// The mapped loader-control subset: the only names an acknowledgement may
+	// legitimately contain.
+	mappedLC := make(map[string]bool, len(mapped))
 	seenRefused := make(map[string]bool)
 	for _, m := range mapped {
-		mappedSet[m] = true
-		if IsLoaderControlKey(m) && !ackSet[m] && !seenRefused[m] {
+		if !IsLoaderControlKey(m) {
+			continue
+		}
+		mappedLC[m] = true
+		if !ackSet[m] && !seenRefused[m] {
 			seenRefused[m] = true
 			refused = append(refused, m)
 		}
@@ -94,7 +107,9 @@ func Unacknowledged(mapped, acknowledged []string) (refused, extraAcks []string)
 
 	seenExtra := make(map[string]bool)
 	for _, a := range acknowledged {
-		if !mappedSet[a] && !seenExtra[a] {
+		// Not in the mapped loader-control subset, or a duplicate: either breaks
+		// exact set equality.
+		if (!mappedLC[a] || ackCount[a] > 1) && !seenExtra[a] {
 			seenExtra[a] = true
 			extraAcks = append(extraAcks, a)
 		}

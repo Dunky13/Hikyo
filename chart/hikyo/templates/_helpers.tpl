@@ -58,6 +58,11 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | quote }}
         {{- fail (printf "operator.designatedServiceAccounts[%s] entries must not be empty" $namespace) -}}
       {{- end -}}
     {{- end -}}
+    {{- if not (empty $.Values.operator.namespaces) -}}
+      {{- if not (has $namespace $.Values.operator.namespaces) -}}
+        {{- fail (printf "operator.designatedServiceAccounts[%s]: namespace %q is not in operator.namespaces; a TokenRequest grant for an unwatched namespace grants nothing" $namespace $namespace) -}}
+      {{- end -}}
+    {{- end -}}
   {{- end -}}
   {{- $resources := required "operator.resources is required" .Values.operator.resources -}}
   {{- $requests := required "operator.resources.requests is required" .Values.operator.resources.requests -}}
@@ -73,6 +78,47 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | quote }}
   {{- if not .Values.operator.leaderElection -}}
     {{- fail "operator.leaderElection must be true" -}}
   {{- end -}}
-  {{- $stampRootSecretName := required "operator.stampRootSecretName is required" .Values.operator.stampRootSecretName -}}
 {{- end -}}
+{{- end -}}
+
+{{/*
+hikyo.operator.namespaceRules is the per-namespace access rule set, rendered
+into the cluster-wide ClusterRole OR into each watched namespace's Role so both
+modes grant IDENTICAL namespace-scoped authority. It deliberately carries NO
+serviceaccounts/token rule — TokenRequest grants are per-namespace Roles in both
+modes (ADR § Identity: mandatory per-namespace, resourceNames-restricted).
+*/}}
+{{- define "hikyo.operator.namespaceRules" -}}
+- apiGroups: ["hikyo.dev"]
+  resources: ["hikyosecrets"]
+  # `patch` is used ONLY for JSON-merge finalizer bookkeeping (a merge patch on
+  # metadata.finalizers), never a whole-object update.
+  verbs: ["get", "list", "watch", "patch"]
+- apiGroups: ["hikyo.dev"]
+  resources: ["hikyosecrets/status"]
+  verbs: ["update", "patch"]
+# finalizers/update is required when the OwnerReferencesPermissionEnforcement
+# admission plugin is enabled, because controller ownerRefs carry
+# blockOwnerDeletion.
+- apiGroups: ["hikyo.dev"]
+  resources: ["hikyosecrets/finalizers"]
+  verbs: ["update"]
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["create", "patch"]
+# Secrets: EXACTLY get/create/update/patch — no list/watch. The operator reads
+# every Secret through the uncached API reader (no Secret informer), so
+# list/watch would only cache Secret values and enlarge the compromise blast
+# radius.
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "create", "update", "patch"]
+{{- if .Values.operator.triggerRollouts }}
+- apiGroups: ["apps"]
+  resources: ["deployments", "statefulsets", "daemonsets"]
+  verbs: ["get", "list", "watch", "patch"]
+{{- end }}
+- apiGroups: [""]
+  resources: ["serviceaccounts"]
+  verbs: ["get"]
 {{- end -}}

@@ -73,7 +73,10 @@ type operatorReconciler = operator.HikyoSecretReconciler
 
 func newReconciler(cl client.Client, sch *runtime.Scheme, rec record.EventRecorder, ownNS string) *operatorReconciler {
 	return &operatorReconciler{
-		Client:   cl,
+		Client: cl,
+		// Reader is the uncached read path in production (mgr.GetAPIReader()); the
+		// e2e's direct client serves uncached reads, so it doubles as both.
+		Reader:   cl,
 		Scheme:   sch,
 		Recorder: rec,
 		Config:   operator.Config{OwnNamespace: ownNS, TriggerRollouts: true},
@@ -213,16 +216,16 @@ func poll(t *testing.T, ctx context.Context, cond func(context.Context) (bool, e
 // scenario because rotate-token-key (scenario 2) invalidates every cursor and
 // the audit COUNT(*) assertions must run against a private trail.
 type opEnv struct {
-	t       *testing.T
-	ctx     context.Context
-	db      *store.DB
-	server  *httptest.Server
-	caPEM   []byte
-	scheme  *runtime.Scheme
-	cl      client.Client
-	cs      *kubernetes.Clientset
-	ns      string // scenario namespace (also the operator's own namespace)
-	fed     *service.Federation
+	t        *testing.T
+	ctx      context.Context
+	db       *store.DB
+	server   *httptest.Server
+	caPEM    []byte
+	scheme   *runtime.Scheme
+	cl       client.Client
+	cs       *kubernetes.Clientset
+	ns       string // scenario namespace (also the operator's own namespace)
+	fed      *service.Federation
 	recorder *record.FakeRecorder
 }
 
@@ -427,7 +430,7 @@ func (e *opEnv) createCR(s crSpec) *hikyov1.HikyoSecret {
 		ObjectMeta: metav1.ObjectMeta{Namespace: e.ns, Name: s.name},
 		Spec: hikyov1.HikyoSecretSpec{
 			InstanceRef: hikyov1.InstanceRef{Name: instanceName},
-			Scope:       hikyov1.Scope{Org: string(orgA), Project: string(prjA1), Environment: string(envA1)},
+			Scope:       hikyov1.Scope{Org: hikyov1.ScopeID(orgA), Project: hikyov1.ScopeID(prjA1), Environment: hikyov1.ScopeID(envA1)},
 			Target:      hikyov1.Target{Name: s.target},
 		},
 	}
@@ -438,7 +441,7 @@ func (e *opEnv) createCR(s crSpec) *hikyov1.HikyoSecret {
 		cr.Spec.Auth = hikyov1.AuthRef{ServiceAccountRef: &hikyov1.LocalObjectRef{Name: s.serviceAccount}}
 	}
 	for _, m := range s.mapping {
-		cr.Spec.Mapping = append(cr.Spec.Mapping, hikyov1.Mapping{Key: m[0], SecretKey: m[1]})
+		cr.Spec.Mapping = append(cr.Spec.Mapping, hikyov1.Mapping{Key: hikyov1.KeyName(m[0]), SecretKey: m[1]})
 	}
 	if s.projection != "" {
 		cr.Spec.Projection = s.projection

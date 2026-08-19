@@ -1,14 +1,11 @@
 {{- include "hikyo.operator.validate" . -}}
 {{- if .Values.operator.enabled }}
 {{- $operatorName := include "hikyo.operator.fullname" . -}}
-{{- $designatedNames := list -}}
-{{- range $_, $serviceAccounts := .Values.operator.designatedServiceAccounts -}}
-  {{- range $serviceAccounts -}}
-    {{- $designatedNames = append $designatedNames . -}}
-  {{- end -}}
-{{- end -}}
-{{- $designatedNames = sortAlpha (uniq $designatedNames) -}}
+{{- $releaseNS := .Release.Namespace -}}
 {{- if empty .Values.operator.namespaces }}
+# Cluster-wide authority: one ClusterRole carrying the cluster-scoped reads plus
+# the per-namespace access rules. It NEVER carries a serviceaccounts/token rule —
+# TokenRequest grants are always namespace-scoped Roles (below).
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -24,40 +21,7 @@ rules:
     resources: ["customresourcedefinitions"]
     resourceNames: ["hikyoinstances.hikyo.dev", "hikyosecrets.hikyo.dev"]
     verbs: ["get"]
-  - apiGroups: ["hikyo.dev"]
-    resources: ["hikyosecrets"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: ["hikyo.dev"]
-    resources: ["hikyosecrets/status"]
-    verbs: ["update", "patch"]
-  - apiGroups: ["hikyo.dev"]
-    resources: ["hikyosecrets/finalizers"]
-    verbs: ["update"]
-  - apiGroups: [""]
-    resources: ["events"]
-    verbs: ["create", "patch"]
-  # Secret list/watch are required by the operator informer, not broader write intent.
-  - apiGroups: [""]
-    resources: ["secrets"]
-    verbs: ["get", "list", "watch", "create", "update", "patch"]
-{{- if .Values.operator.triggerRollouts }}
-  - apiGroups: ["apps"]
-    resources: ["deployments", "statefulsets", "daemonsets"]
-    verbs: ["get", "list", "watch", "patch"]
-{{- end }}
-  - apiGroups: [""]
-    resources: ["serviceaccounts"]
-    verbs: ["get"]
-{{- if $designatedNames }}
-  # ClusterRole resourceNames can express only the honest cross-namespace union.
-  - apiGroups: [""]
-    resources: ["serviceaccounts/token"]
-    resourceNames:
-      {{- range $designatedNames }}
-      - {{ . | quote }}
-      {{- end }}
-    verbs: ["create"]
-{{- end }}
+  {{- include "hikyo.operator.namespaceRules" . | nindent 2 }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -73,8 +37,10 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: {{ $operatorName }}
-    namespace: {{ .Release.Namespace | quote }}
+    namespace: {{ $releaseNS | quote }}
 {{- else }}
+# Namespaced authority: a minimal ClusterRole (cluster-scoped reads only) plus a
+# Role/RoleBinding per watched namespace carrying the same access rules.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -105,12 +71,8 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: {{ $operatorName }}
-    namespace: {{ .Release.Namespace | quote }}
+    namespace: {{ $releaseNS | quote }}
 {{- range $namespace := .Values.operator.namespaces }}
-{{- $serviceAccounts := list }}
-{{- if hasKey $.Values.operator.designatedServiceAccounts $namespace }}
-  {{- $serviceAccounts = index $.Values.operator.designatedServiceAccounts $namespace }}
-{{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -121,40 +83,7 @@ metadata:
     {{- include "hikyo.labels" $ | nindent 4 }}
     app.kubernetes.io/component: operator
 rules:
-  - apiGroups: ["hikyo.dev"]
-    resources: ["hikyosecrets"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: ["hikyo.dev"]
-    resources: ["hikyosecrets/status"]
-    verbs: ["update", "patch"]
-  - apiGroups: ["hikyo.dev"]
-    resources: ["hikyosecrets/finalizers"]
-    verbs: ["update"]
-  - apiGroups: [""]
-    resources: ["events"]
-    verbs: ["create", "patch"]
-  # Secret list/watch are required by the operator informer, not broader write intent.
-  - apiGroups: [""]
-    resources: ["secrets"]
-    verbs: ["get", "list", "watch", "create", "update", "patch"]
-{{- if $.Values.operator.triggerRollouts }}
-  - apiGroups: ["apps"]
-    resources: ["deployments", "statefulsets", "daemonsets"]
-    verbs: ["get", "list", "watch", "patch"]
-{{- end }}
-  - apiGroups: [""]
-    resources: ["serviceaccounts"]
-    verbs: ["get"]
-{{- if $serviceAccounts }}
-  # TokenRequest authority is omitted unless this namespace has pinned names.
-  - apiGroups: [""]
-    resources: ["serviceaccounts/token"]
-    resourceNames:
-      {{- range $serviceAccounts }}
-      - {{ . | quote }}
-      {{- end }}
-    verbs: ["create"]
-{{- end }}
+  {{- include "hikyo.operator.namespaceRules" $ | nindent 2 }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -171,8 +100,91 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: {{ $operatorName }}
-    namespace: {{ $.Release.Namespace | quote }}
+    namespace: {{ $releaseNS | quote }}
 {{- end }}
+{{- end }}
+{{- range $namespace, $serviceAccounts := .Values.operator.designatedServiceAccounts }}
+{{- if $serviceAccounts }}
+---
+# TokenRequest authority is per-namespace in BOTH modes (ADR § Identity):
+# serviceaccounts/token `create`, restricted by resourceNames to this
+# namespace's designated ServiceAccounts. A ClusterRole can only express the
+# cross-namespace union, so the grant lives here even under cluster-wide watch.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $operatorName }}-token
+  namespace: {{ $namespace | quote }}
+  labels:
+    {{- include "hikyo.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: operator
+rules:
+  - apiGroups: [""]
+    resources: ["serviceaccounts/token"]
+    resourceNames:
+      {{- range (sortAlpha (uniq $serviceAccounts)) }}
+      - {{ . | quote }}
+      {{- end }}
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $operatorName }}-token
+  namespace: {{ $namespace | quote }}
+  labels:
+    {{- include "hikyo.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $operatorName }}-token
+subjects:
+  - kind: ServiceAccount
+    name: {{ $operatorName }}
+    namespace: {{ $releaseNS | quote }}
+{{- end }}
+{{- end }}
+{{- if not (empty .Values.operator.namespaces) }}
+---
+# Stamp-root Secret RBAC in the release namespace. Only needed in namespaced
+# mode: the cluster-wide ClusterRole already covers Secrets everywhere. The
+# operator reads/updates a name-restricted `hikyo-operator-stamp-root`, and needs
+# unrestricted `create` because a Secret that does not yet exist cannot be
+# named in a resourceNames rule.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $operatorName }}-stamp-root
+  namespace: {{ $releaseNS | quote }}
+  labels:
+    {{- include "hikyo.labels" . | nindent 4 }}
+    app.kubernetes.io/component: operator
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["hikyo-operator-stamp-root"]
+    verbs: ["get", "update"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $operatorName }}-stamp-root
+  namespace: {{ $releaseNS | quote }}
+  labels:
+    {{- include "hikyo.labels" . | nindent 4 }}
+    app.kubernetes.io/component: operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $operatorName }}-stamp-root
+subjects:
+  - kind: ServiceAccount
+    name: {{ $operatorName }}
+    namespace: {{ $releaseNS | quote }}
 {{- end }}
 ---
 # Leader election is namespace-local even when watched authority is cluster-wide.
@@ -180,7 +192,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: {{ $operatorName }}-leader-election
-  namespace: {{ .Release.Namespace | quote }}
+  namespace: {{ $releaseNS | quote }}
   labels:
     {{- include "hikyo.labels" . | nindent 4 }}
     app.kubernetes.io/component: operator
@@ -193,7 +205,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: {{ $operatorName }}-leader-election
-  namespace: {{ .Release.Namespace | quote }}
+  namespace: {{ $releaseNS | quote }}
   labels:
     {{- include "hikyo.labels" . | nindent 4 }}
     app.kubernetes.io/component: operator
@@ -204,5 +216,5 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: {{ $operatorName }}
-    namespace: {{ .Release.Namespace | quote }}
+    namespace: {{ $releaseNS | quote }}
 {{- end }}

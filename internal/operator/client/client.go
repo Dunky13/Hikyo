@@ -142,6 +142,97 @@ func NewClient(rawURL string, caBundlePEM []byte, userAgent string) (*Client, er
 	}, nil
 }
 
+// wireResponse is the presence-aware decode target: every § 0.1-required member
+// is a pointer so a MISSING member is distinguishable from a zero value. A `{}`
+// body must NOT decode to an OutcomeOK empty delivery (which would drop managed
+// data) — it is missing every required member and is rejected.
+type wireResponse struct {
+	Current             *bool      `json:"current"`
+	Cursor              *string    `json:"cursor"`
+	ChangeToken         *string    `json:"change_token"`
+	SchemaRevision      *int64     `json:"schema_revision"`
+	PinExpired          *bool      `json:"pin_expired"`
+	Keys                *[]wireKey `json:"keys"`
+	PinnedRevision      *int64     `json:"pinned_revision"`
+	CredentialExpiresAt *time.Time `json:"credential_expires_at"`
+}
+
+type wireKey struct {
+	Name           *string `json:"name"`
+	Classification *string `json:"classification"`
+	Presence       *string `json:"presence"`
+	Value          *string `json:"value"`
+}
+
+// validClassification / validPresence mirror the OpenAPI enums (KeyClassification,
+// DeliveredKey.presence). An out-of-range value is a delivery we cannot trust.
+var (
+	validClassification = map[string]bool{"secret": true, "config": true}
+	validPresence       = map[string]bool{"required": true, "forbidden": true, "optional": true, "set": true}
+)
+
+// decodeDelivery decodes a 200 body presence-aware, validates the § 0.1 required
+// members and their enums, and returns the reconciler's DeliveryResponse. Any
+// invalid delivery is an error (→ OutcomeFetchFailed); unknown additive members
+// are ignored (no DisallowUnknownFields), so the concurrent value-slice work
+// does not break the operator.
+func decodeDelivery(payload []byte) (*DeliveryResponse, error) {
+	var w wireResponse
+	if err := json.Unmarshal(payload, &w); err != nil {
+		return nil, fmt.Errorf("decode delivery response: %w", err)
+	}
+	switch {
+	case w.Current == nil:
+		return nil, errors.New("delivery response missing required member: current")
+	case w.Cursor == nil:
+		return nil, errors.New("delivery response missing required member: cursor")
+	case w.ChangeToken == nil:
+		return nil, errors.New("delivery response missing required member: change_token")
+	case w.SchemaRevision == nil:
+		return nil, errors.New("delivery response missing required member: schema_revision")
+	case w.PinExpired == nil:
+		return nil, errors.New("delivery response missing required member: pin_expired")
+	case w.Keys == nil:
+		return nil, errors.New("delivery response missing required member: keys")
+	}
+	// A "current" answer carries no keys — only a delivering fetch discloses.
+	if *w.Current && len(*w.Keys) != 0 {
+		return nil, errors.New("delivery response answered current but carried keys")
+	}
+
+	out := &DeliveryResponse{
+		Current:             *w.Current,
+		Cursor:              *w.Cursor,
+		ChangeToken:         *w.ChangeToken,
+		SchemaRevision:      *w.SchemaRevision,
+		PinExpired:          *w.PinExpired,
+		PinnedRevision:      w.PinnedRevision,
+		CredentialExpiresAt: w.CredentialExpiresAt,
+		Keys:                make([]DeliveredKey, 0, len(*w.Keys)),
+	}
+	for i, k := range *w.Keys {
+		switch {
+		case k.Name == nil:
+			return nil, fmt.Errorf("delivered key %d missing required member: name", i)
+		case k.Classification == nil:
+			return nil, fmt.Errorf("delivered key %q missing required member: classification", *k.Name)
+		case k.Presence == nil:
+			return nil, fmt.Errorf("delivered key %q missing required member: presence", *k.Name)
+		case !validClassification[*k.Classification]:
+			return nil, fmt.Errorf("delivered key %q has invalid classification %q", *k.Name, *k.Classification)
+		case !validPresence[*k.Presence]:
+			return nil, fmt.Errorf("delivered key %q has invalid presence %q", *k.Name, *k.Presence)
+		}
+		out.Keys = append(out.Keys, DeliveredKey{
+			Name:           *k.Name,
+			Classification: *k.Classification,
+			Presence:       *k.Presence,
+			Value:          k.Value,
+		})
+	}
+	return out, nil
+}
+
 // Fetch performs one conditional delivery fetch. It returns the decoded response
 // only on OutcomeOK; the other outcomes carry a descriptive error for the CR
 // condition and event, and a nil response.
@@ -159,10 +250,10 @@ func (c *Client) Fetch(ctx context.Context, r FetchRequest) (*DeliveryResponse, 
 	if r.Projection != "" {
 		q.Set("projection", r.Projection)
 	}
-	if len(r.AcknowledgedKeys) > 0 {
-		// form/explode:false — comma-joined (§ 0.1).
-		q.Set("acknowledged_keys", strings.Join(r.AcknowledgedKeys, ","))
-	}
+	// acknowledged_keys is ALWAYS sent — including an empty value
+	// (`acknowledged_keys=` present) — so the server records the acknowledged
+	// list on every fetch (§ 0.6/§ 0.10). form/explode:false → comma-joined.
+	q.Set("acknowledged_keys", strings.Join(r.AcknowledgedKeys, ","))
 	if enc := q.Encode(); enc != "" {
 		endpoint += "?" + enc
 	}
@@ -191,13 +282,16 @@ func (c *Client) Fetch(ctx context.Context, r FetchRequest) (*DeliveryResponse, 
 		if err != nil {
 			return nil, OutcomeFetchFailed, fmt.Errorf("operator client: read body: %w", err)
 		}
-		var out DeliveryResponse
-		if err := json.Unmarshal(payload, &out); err != nil {
-			// A 200 whose body we cannot decode is not a delivery we can act on;
-			// retain rather than scrub.
-			return nil, OutcomeFetchFailed, fmt.Errorf("operator client: decode delivery response: %w", err)
+		out, err := decodeDelivery(payload)
+		if err != nil {
+			// A 200 we cannot decode into a valid delivery — missing a required
+			// member, an out-of-range enum, a malformed key record — is NOT an
+			// authoritative empty delivery. Classify it OutcomeFetchFailed so the
+			// reconciler RETAINS the last Secret rather than acting on a bad 200
+			// (§ 0.4/§ 0.11). Unknown additive members are still ignored.
+			return nil, OutcomeFetchFailed, fmt.Errorf("operator client: %w", err)
 		}
-		return &out, OutcomeOK, nil
+		return out, OutcomeOK, nil
 	case resp.StatusCode == http.StatusNotFound:
 		return nil, OutcomeScrub, fmt.Errorf("operator client: authoritative refusal (404): scope nonexistent or read withdrawn")
 	case resp.StatusCode == http.StatusConflict:

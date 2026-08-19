@@ -39,6 +39,13 @@ var envIdentifier = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // identity the CR names — the operator holds none of its own.
 type HikyoSecretReconciler struct {
 	client.Client
+	// Reader is the UNCACHED API reader (mgr.GetAPIReader()). Every Secret and
+	// ServiceAccount read goes through it, never the informer cache: the operator
+	// holds only get/create/update/patch on Secrets (no list/watch), so a cached
+	// read would fail to start its informer, and — more importantly — the managed
+	// Secret's controller-ownership/UID is the authority test and must be read
+	// read-after-write, not from a cache that can lag a delete/recreate/re-own.
+	Reader   client.Reader
 	Scheme   *runtime.Scheme
 	Recorder record.EventRecorder
 	Config   Config
@@ -91,6 +98,15 @@ func (r *HikyoSecretReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 // reconcileActive is the non-deletion path.
 func (r *HikyoSecretReconciler) reconcileActive(ctx context.Context, cr *hikyov1.HikyoSecret) (ctrl.Result, error) {
+	// Reject an invalid resyncInterval loudly. The CRD pattern rejects malformed
+	// syntax at admission, but "0s"/non-positive/overflow pass the pattern yet
+	// cannot be a requeue cadence — never silently substitute 5m (§ 0.7).
+	if err := validateResyncInterval(cr); err != nil {
+		r.event(cr, corev1.EventTypeWarning, hikyov1.ReasonFetchFailed, "invalid resyncInterval: %v", err)
+		cr.Status.Lifecycle = hikyov1.LifecycleRetained
+		return r.done(ctx, cr, ctrl.Result{}, fmt.Errorf("operator: invalid resyncInterval: %w", err))
+	}
+
 	// Resolve the cluster-scoped instance.
 	var inst hikyov1.HikyoInstance
 	if err := r.Get(ctx, types.NamespacedName{Name: cr.Spec.InstanceRef.Name}, &inst); err != nil {
@@ -112,8 +128,13 @@ func (r *HikyoSecretReconciler) reconcileActive(ctx context.Context, cr *hikyov1
 	}
 
 	// Target-claim conflict (deterministic: earliest creationTimestamp, then
-	// lowest UID, wins) — refuse the loser before any write.
+	// lowest UID, wins) — an AUTHORITATIVE uncached list decides the claimant
+	// before any write (§ 0.5, decision 9). Runs before the fetch, so the loser
+	// never even fetches.
 	if conflicted, winner, err := r.targetClaimed(ctx, cr); err != nil {
+		if res, derr, handled := r.accessError(ctx, cr, err, "HikyoSecret list"); handled {
+			return res, derr
+		}
 		return ctrl.Result{}, err
 	} else if conflicted {
 		r.event(cr, corev1.EventTypeWarning, hikyov1.ReasonTargetClaimed,
@@ -127,9 +148,12 @@ func (r *HikyoSecretReconciler) reconcileActive(ctx context.Context, cr *hikyov1
 	meta.RemoveStatusCondition(&cr.Status.Conditions, hikyov1.ConditionConflict)
 
 	// Managed-Secret ownership pre-check: an existing target not controlled by
-	// this CR is a takeover attempt, refused (never adopted).
+	// this CR is a takeover attempt, refused (never adopted). Read uncached.
 	existing, existed, err := r.getManagedSecret(ctx, cr)
 	if err != nil {
+		if res, derr, handled := r.accessError(ctx, cr, err, "managed Secret"); handled {
+			return res, derr
+		}
 		return ctrl.Result{}, err
 	}
 	if existed && !metav1.IsControlledBy(existing, cr) {
@@ -148,7 +172,7 @@ func (r *HikyoSecretReconciler) reconcileActive(ctx context.Context, cr *hikyov1
 	for _, m := range cr.Spec.Mapping {
 		mappedKeys = append(mappedKeys, m.EffectiveSecretKey())
 	}
-	if refused, extra := delivery.Unacknowledged(mappedKeys, cr.Spec.AcknowledgedLoaderKeys); len(refused) > 0 || len(extra) > 0 {
+	if refused, extra := delivery.Unacknowledged(mappedKeys, acknowledgedKeys(cr)); len(refused) > 0 || len(extra) > 0 {
 		msg := loaderControlMessage(refused, extra)
 		r.event(cr, corev1.EventTypeWarning, hikyov1.ReasonLoaderControlUnacknowledged, "%s", msg)
 		r.setCond(cr, hikyov1.ConditionDelivery, metav1.ConditionFalse, hikyov1.ReasonLoaderControlUnacknowledged, msg)
@@ -156,12 +180,37 @@ func (r *HikyoSecretReconciler) reconcileActive(ctx context.Context, cr *hikyov1
 		return r.done(ctx, cr, r.resyncResult(cr), nil)
 	}
 
+	// Read and validate the stamp root ONCE, uncached, BEFORE contacting Hikyo
+	// (§ 0.2/decision 12). A read/validation failure is returned as a retain — it
+	// is never swallowed into cursor ineligibility (which would trigger a
+	// cursor-less plaintext fetch and a disclosure audit). Held for the whole
+	// reconcile so the stamp is computed without a second read; zeroed on return.
+	root, err := r.stampRoot(ctx)
+	if err != nil {
+		if res, derr, handled := r.accessError(ctx, cr, err, "stamp root Secret"); handled {
+			return res, derr
+		}
+		r.event(cr, corev1.EventTypeWarning, hikyov1.ReasonFetchFailed, "stamp root: %v", err)
+		r.setCond(cr, hikyov1.ConditionSynced, metav1.ConditionFalse, hikyov1.ReasonFetchFailed, err.Error())
+		cr.Status.Lifecycle = hikyov1.LifecycleRetained
+		return r.done(ctx, cr, ctrl.Result{}, err)
+	}
+	defer crypto.Zero(root)
+
 	// Cursor eligibility (§ 0.5) — present only when the recorded delivery is
 	// verifiably still in effect and the binding is unchanged.
-	fetchCursor := r.eligibleCursor(ctx, cr, &inst, cred, existing, existed)
+	fetchCursor := r.eligibleCursor(ctx, cr, &inst, cred, existing, existed, root)
 
-	// Fetch.
-	dc, err := r.clientFactory()(inst.Spec.URL, decodeCABundle(inst.Spec.CABundle))
+	// Fetch. A malformed caBundle is an error, never a silent fall-back to
+	// system roots (finding: base64-PEM wire shape).
+	caBundle, err := decodeCABundle(inst.Spec.CABundle)
+	if err != nil {
+		r.event(cr, corev1.EventTypeWarning, hikyov1.ReasonFetchFailed, "instance caBundle: %v", err)
+		r.setCond(cr, hikyov1.ConditionSynced, metav1.ConditionFalse, hikyov1.ReasonFetchFailed, err.Error())
+		cr.Status.Lifecycle = hikyov1.LifecycleRetained
+		return r.done(ctx, cr, ctrl.Result{}, err)
+	}
+	dc, err := r.clientFactory()(inst.Spec.URL, caBundle)
 	if err != nil {
 		r.event(cr, corev1.EventTypeWarning, hikyov1.ReasonFetchFailed, "build delivery client: %v", err)
 		r.setCond(cr, hikyov1.ConditionSynced, metav1.ConditionFalse, hikyov1.ReasonFetchFailed, err.Error())
@@ -169,10 +218,10 @@ func (r *HikyoSecretReconciler) reconcileActive(ctx context.Context, cr *hikyov1
 		return r.done(ctx, cr, ctrl.Result{}, err)
 	}
 	resp, outcome, fetchErr := dc.Fetch(ctx, opclient.FetchRequest{
-		Org: cr.Spec.Scope.Org, Project: cr.Spec.Scope.Project, Environment: cr.Spec.Scope.Environment,
+		Org: string(cr.Spec.Scope.Org), Project: string(cr.Spec.Scope.Project), Environment: string(cr.Spec.Scope.Environment),
 		Cursor:           fetchCursor,
 		Projection:       string(effectiveProjection(cr)),
-		AcknowledgedKeys: cr.Spec.AcknowledgedLoaderKeys,
+		AcknowledgedKeys: acknowledgedKeys(cr),
 		Bearer:           cred.token,
 	})
 
@@ -192,9 +241,20 @@ func (r *HikyoSecretReconciler) reconcileActive(ctx context.Context, cr *hikyov1
 		cr.Status.Lifecycle = hikyov1.LifecycleRetained
 		return r.done(ctx, cr, r.resyncResult(cr), nil)
 	case opclient.OutcomeScrub:
-		return r.scrub(ctx, cr, fetchErr)
+		return r.scrub(ctx, cr, fetchErr, root)
 	case opclient.OutcomeOK:
-		return r.deliver(ctx, cr, &inst, cred, resp, existing, existed)
+		if resp.Current && fetchCursor == "" {
+			// A "current" answer to a cursor-less request is a protocol violation:
+			// a full fetch was requested (no cursor was eligible), so "current"
+			// cannot be authoritative. Classify FetchFailed and retain rather than
+			// treat it as a no-op delivery (decision 6).
+			err := fmt.Errorf("operator: server answered current to a cursor-less fetch")
+			r.event(cr, corev1.EventTypeWarning, hikyov1.ReasonFetchFailed, "%v", err)
+			r.setCond(cr, hikyov1.ConditionSynced, metav1.ConditionFalse, hikyov1.ReasonFetchFailed, err.Error())
+			cr.Status.Lifecycle = hikyov1.LifecycleRetained
+			return r.done(ctx, cr, ctrl.Result{}, err)
+		}
+		return r.deliver(ctx, cr, &inst, cred, resp, existing, existed, root)
 	default:
 		return ctrl.Result{}, fmt.Errorf("operator: unhandled fetch outcome %v", outcome)
 	}
@@ -204,14 +264,32 @@ func (r *HikyoSecretReconciler) reconcileActive(ctx context.Context, cr *hikyov1
 // delivery (§ 0.4 normal, § 0.5 write ordering).
 func (r *HikyoSecretReconciler) deliver(
 	ctx context.Context, cr *hikyov1.HikyoSecret, inst *hikyov1.HikyoInstance, cred credential,
-	resp *opclient.DeliveryResponse, existing *corev1.Secret, existed bool,
+	resp *opclient.DeliveryResponse, existing *corev1.Secret, existed bool, root []byte,
 ) (ctrl.Result, error) {
 	r.applyCredentialExpiry(cr, resp.CredentialExpiresAt)
 
 	if resp.Current {
 		// Cursor answered current: no plaintext, no write. Its eligibility was
-		// already proven (a "current" answer is only served for an eligible
-		// cursor), so the recorded cursor/stamp stand.
+		// already proven, so the recorded cursor/stamp stand. Still evaluate
+		// rollout progression READ-ONLY (§ 0.3/decision 8): a workload that
+		// stalled after an earlier stamp patch must surface Rollout=False even on
+		// a current answer — no patch is written on this path.
+		stalled, err := r.observeRollout(ctx, cr, cr.Status.Stamp)
+		if err != nil {
+			if res, derr, handled := r.accessError(ctx, cr, err, "workload rollout status"); handled {
+				return res, derr
+			}
+			r.event(cr, corev1.EventTypeWarning, hikyov1.ReasonFetchFailed, "observe rollout: %v", err)
+			r.setCond(cr, hikyov1.ConditionSynced, metav1.ConditionFalse, hikyov1.ReasonFetchFailed, err.Error())
+			cr.Status.Lifecycle = hikyov1.LifecycleRetained
+			return r.done(ctx, cr, ctrl.Result{}, err)
+		}
+		if len(stalled) > 0 {
+			r.setCond(cr, hikyov1.ConditionRollout, metav1.ConditionFalse, hikyov1.ReasonStalled,
+				fmt.Sprintf("opted-in workloads not progressed after the stamp patch: %s", strings.Join(stalled, ", ")))
+		} else {
+			meta.RemoveStatusCondition(&cr.Status.Conditions, hikyov1.ConditionRollout)
+		}
 		r.setCond(cr, hikyov1.ConditionSynced, metav1.ConditionTrue, hikyov1.ReasonCurrent,
 			"conditional fetch answered current; managed Secret unchanged")
 		cr.Status.Lifecycle = hikyov1.LifecycleSynced
@@ -228,15 +306,15 @@ func (r *HikyoSecretReconciler) deliver(
 	data := map[string][]byte{}
 	pairs := make([]crypto.StampPair, 0, len(cr.Spec.Mapping))
 	for _, m := range cr.Spec.Mapping {
-		k, ok := byName[m.Key]
+		k, ok := byName[string(m.Key)]
 		if !ok {
-			missing = append(missing, m.Key)
+			missing = append(missing, string(m.Key))
 			continue
 		}
 		if k.Value == nil {
 			// Presence-only: a mapped secret the principal cannot reveal (or any
 			// mapped key delivered value-free). All-or-nothing turns on this.
-			presenceOnly = append(presenceOnly, m.Key)
+			presenceOnly = append(presenceOnly, string(m.Key))
 			continue
 		}
 		dest := m.EffectiveSecretKey()
@@ -276,7 +354,7 @@ func (r *HikyoSecretReconciler) deliver(
 	}
 
 	// Compute the per-target stamp over the delivered pairs.
-	stamp, err := r.computeStamp(ctx, inst, cr, pairs)
+	stamp, err := r.computeStamp(inst, cr, pairs, root)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -286,8 +364,16 @@ func (r *HikyoSecretReconciler) deliver(
 	// precondition; re-Get and verify).
 	written, err := r.writeManagedSecret(ctx, cr, data, existing, existed)
 	if err != nil {
-		// A write failure before the cursor is persisted leaves no cursor: the
-		// next reconcile is a full fetch (idempotent).
+		// A write failure before the cursor is persisted leaves NO cursor — a
+		// timed-out Update may have landed server-side, so the recorded cursor can
+		// no longer be trusted. Clear it (and the binding) BEFORE persisting status
+		// so the next reconcile is a full fetch (idempotent). Must precede
+		// accessError, which persists status via done().
+		cr.Status.Cursor = ""
+		cr.Status.CursorBinding = ""
+		if res, derr, handled := r.accessError(ctx, cr, err, "managed Secret write"); handled {
+			return res, derr
+		}
 		r.event(cr, corev1.EventTypeWarning, hikyov1.ReasonFetchFailed, "managed Secret write failed: %v", err)
 		r.setCond(cr, hikyov1.ConditionSynced, metav1.ConditionFalse, hikyov1.ReasonFetchFailed, err.Error())
 		cr.Status.Lifecycle = hikyov1.LifecycleRetained
@@ -295,20 +381,25 @@ func (r *HikyoSecretReconciler) deliver(
 	}
 
 	// § 0.5 step 2: workload patches (gated by TRIGGER_ROLLOUTS). A patch FAILURE
-	// does not roll back the Secret but DOES block the cursor advance, so the
-	// next reconcile re-attempts. A patched-but-not-progressed workload
-	// (Rollout=False/Stalled) is informational and does NOT block the cursor —
-	// delivery succeeded.
+	// does not roll back the Secret, but it IS a failure before the cursor write,
+	// so the cursor must be cleared (decision 7) — the old recorded cursor would
+	// otherwise let the next reconcile receive "current" and permanently skip the
+	// failed patch. The next full fetch re-attempts the roll (idempotent).
 	stalled, rolloutErr := r.patchWorkloads(ctx, cr, stamp)
 	if rolloutErr != nil {
-		r.event(cr, corev1.EventTypeWarning, hikyov1.ReasonStalled, "workload patch: %v", rolloutErr)
-		r.setCond(cr, hikyov1.ConditionRollout, metav1.ConditionFalse, hikyov1.ReasonStalled, rolloutErr.Error())
-		// Secret written but rollout patch failed: retain the delivered Secret,
-		// do not advance the cursor, requeue with backoff.
-		cr.Status.Lifecycle = hikyov1.LifecycleSynced
+		// The Secret was written; keep stamp/UID/RV consistent, clear the
+		// cursor/binding (decision 7) so no "current" can skip the pending patch.
+		cr.Status.Cursor = ""
+		cr.Status.CursorBinding = ""
 		cr.Status.Stamp = stamp
 		cr.Status.ManagedSecretUID = string(written.UID)
 		cr.Status.ManagedSecretResourceVersion = written.ResourceVersion
+		if res, derr, handled := r.accessError(ctx, cr, rolloutErr, "workload patch"); handled {
+			return res, derr
+		}
+		r.event(cr, corev1.EventTypeWarning, hikyov1.ReasonStalled, "workload patch: %v", rolloutErr)
+		r.setCond(cr, hikyov1.ConditionRollout, metav1.ConditionFalse, hikyov1.ReasonStalled, rolloutErr.Error())
+		cr.Status.Lifecycle = hikyov1.LifecycleSynced
 		r.setCond(cr, hikyov1.ConditionSynced, metav1.ConditionTrue, hikyov1.ReasonDelivered,
 			"values delivered to the managed Secret")
 		return r.done(ctx, cr, ctrl.Result{}, rolloutErr)
@@ -347,6 +438,17 @@ func loaderControlMessage(refused, extra []string) string {
 		fmt.Fprintf(&b, "; acknowledged but not mapped: %s", strings.Join(extra, ", "))
 	}
 	return b.String()
+}
+
+// acknowledgedKeys renders spec.acknowledgedLoaderKeys as plain strings for the
+// loader-control check and the fetch parameter. Always non-nil-safe; a nil slice
+// yields an empty slice, which the client still sends as `acknowledged_keys=`.
+func acknowledgedKeys(cr *hikyov1.HikyoSecret) []string {
+	out := make([]string, 0, len(cr.Spec.AcknowledgedLoaderKeys))
+	for _, k := range cr.Spec.AcknowledgedLoaderKeys {
+		out = append(out, string(k))
+	}
+	return out
 }
 
 // effectiveProjection returns the CR's projection, defaulting to full.

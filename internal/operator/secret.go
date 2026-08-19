@@ -29,21 +29,18 @@ func stampPairsFromData(data map[string][]byte) []crypto.StampPair {
 }
 
 // computeStamp derives the per-target stamp key from the operator's local root
-// and computes the stamp. The key is zeroed after use.
+// (read and validated ONCE per reconcile by the caller, held in root) and
+// computes the stamp. The derived key is zeroed after use; the root's lifetime
+// is the caller's.
 func (r *HikyoSecretReconciler) computeStamp(
-	ctx context.Context, inst *hikyov1.HikyoInstance, cr *hikyov1.HikyoSecret, pairs []crypto.StampPair,
+	inst *hikyov1.HikyoInstance, cr *hikyov1.HikyoSecret, pairs []crypto.StampPair, root []byte,
 ) (string, error) {
-	root, err := r.stampRoot(ctx)
-	if err != nil {
-		return "", err
-	}
-	defer crypto.Zero(root)
 	key, err := crypto.StampKey(root, string(inst.UID), string(cr.UID), cr.Spec.Target.Name)
 	if err != nil {
 		return "", err
 	}
 	defer crypto.Zero(key)
-	return crypto.Stamp(key, pairs), nil
+	return crypto.Stamp(key, pairs)
 }
 
 // stampRoot reads (or, on first need, creates) the operator's 32-byte random
@@ -53,7 +50,9 @@ func (r *HikyoSecretReconciler) computeStamp(
 func (r *HikyoSecretReconciler) stampRoot(ctx context.Context) ([]byte, error) {
 	key := types.NamespacedName{Namespace: r.Config.OwnNamespace, Name: hikyov1.StampRootSecretName}
 	var sec corev1.Secret
-	err := r.Get(ctx, key, &sec)
+	// Uncached: the operator's own namespace is deliberately outside the watch
+	// set (§ Scoping), so this Secret is only reachable through the APIReader.
+	err := r.Reader.Get(ctx, key, &sec)
 	if err == nil {
 		root := sec.Data[hikyov1.StampRootKey]
 		if len(root) != crypto.KeySize {
@@ -82,7 +81,7 @@ func (r *HikyoSecretReconciler) stampRoot(ctx context.Context) ([]byte, error) {
 	if err := r.Create(ctx, create); err != nil {
 		if apierrors.IsAlreadyExists(err) {
 			var again corev1.Secret
-			if gerr := r.Get(ctx, key, &again); gerr != nil {
+			if gerr := r.Reader.Get(ctx, key, &again); gerr != nil {
 				return nil, fmt.Errorf("operator: re-read stamp root after race: %w", gerr)
 			}
 			existing := again.Data[hikyov1.StampRootKey]
@@ -138,9 +137,15 @@ func (r *HikyoSecretReconciler) writeManagedSecret(
 // verifyManagedSecret re-Gets the managed Secret and confirms its data is
 // byte-exact what was written (§ 0.5 step 1's verify).
 func (r *HikyoSecretReconciler) verifyManagedSecret(ctx context.Context, cr *hikyov1.HikyoSecret, want map[string][]byte) (*corev1.Secret, error) {
+	// Uncached read-after-write: proves the write actually landed AND that the
+	// object we own is still ours. A cached read could return a pre-write copy,
+	// or miss a concurrent delete/recreate/re-own between write and verify.
 	var got corev1.Secret
-	if err := r.Get(ctx, types.NamespacedName{Namespace: cr.Namespace, Name: cr.Spec.Target.Name}, &got); err != nil {
+	if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: cr.Namespace, Name: cr.Spec.Target.Name}, &got); err != nil {
 		return nil, fmt.Errorf("operator: re-read managed Secret: %w", err)
+	}
+	if !metav1.IsControlledBy(&got, cr) {
+		return nil, fmt.Errorf("operator: managed Secret %q is not controlled by this CR after write (deleted/recreated/re-owned)", cr.Spec.Target.Name)
 	}
 	if !dataEqual(got.Data, want) {
 		return nil, fmt.Errorf("operator: managed Secret data did not match what was written")
@@ -164,13 +169,16 @@ func dataEqual(a, b map[string][]byte) bool {
 // refusal, § 0.4 case 3): data → empty, stamp recomputed over the empty set and
 // patched into opted-in workloads, cursor cleared, Scrubbed=True. It follows the
 // same write ordering as a delivery — the empty state IS a delivery.
-func (r *HikyoSecretReconciler) scrub(ctx context.Context, cr *hikyov1.HikyoSecret, cause error) (ctrl.Result, error) {
+func (r *HikyoSecretReconciler) scrub(ctx context.Context, cr *hikyov1.HikyoSecret, cause error, root []byte) (ctrl.Result, error) {
 	inst := &hikyov1.HikyoInstance{}
 	if err := r.Get(ctx, types.NamespacedName{Name: cr.Spec.InstanceRef.Name}, inst); err != nil {
 		return ctrl.Result{}, err
 	}
 	existing, existed, err := r.getManagedSecret(ctx, cr)
 	if err != nil {
+		if res, derr, handled := r.accessError(ctx, cr, err, "managed Secret"); handled {
+			return res, derr
+		}
 		return ctrl.Result{}, err
 	}
 	// Only converge a Secret we own; an unowned target is never touched.
@@ -182,24 +190,33 @@ func (r *HikyoSecretReconciler) scrub(ctx context.Context, cr *hikyov1.HikyoSecr
 	}
 
 	empty := map[string][]byte{}
-	stamp, err := r.computeStamp(ctx, inst, cr, nil)
+	stamp, err := r.computeStamp(inst, cr, nil, root)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
 
 	written, err := r.writeManagedSecret(ctx, cr, empty, existing, existed)
 	if err != nil {
+		// Failure before the cursor write leaves no cursor (decision 7); clear it
+		// before persisting status (accessError persists via done()).
+		cr.Status.Cursor = ""
+		cr.Status.CursorBinding = ""
+		if res, derr, handled := r.accessError(ctx, cr, err, "managed Secret write"); handled {
+			return res, derr
+		}
 		r.setCond(cr, hikyov1.ConditionSynced, metav1.ConditionFalse, hikyov1.ReasonFetchFailed, err.Error())
 		cr.Status.Lifecycle = hikyov1.LifecycleRetained
 		return r.done(ctx, cr, ctrl.Result{}, err)
 	}
 
 	// The Secret is now empty (values withdrawn). Record the scrubbed state.
+	// AuthorizationWithdrawn belongs to Scrubbed=True ONLY (§ 0.3's closed table);
+	// Synced is NOT given this reason — Ready derives False from Scrubbed=True.
+	// Remove any stale Synced condition rather than leaving a Delivered=True.
 	r.event(cr, corev1.EventTypeWarning, hikyov1.ReasonAuthorizationWithdrawn, "authorization withdrawn (404): %v", cause)
 	r.setCond(cr, hikyov1.ConditionScrubbed, metav1.ConditionTrue, hikyov1.ReasonAuthorizationWithdrawn,
 		"authorization withdrawn; managed Secret converged to empty")
-	r.setCond(cr, hikyov1.ConditionSynced, metav1.ConditionFalse, hikyov1.ReasonAuthorizationWithdrawn,
-		"managed Secret scrubbed")
+	meta.RemoveStatusCondition(&cr.Status.Conditions, hikyov1.ConditionSynced)
 	// Cursor cleared — never advanced on a refusal.
 	cr.Status.Cursor = ""
 	cr.Status.CursorBinding = ""
@@ -214,6 +231,9 @@ func (r *HikyoSecretReconciler) scrub(ctx context.Context, cr *hikyov1.HikyoSecr
 	// Secret stays scrubbed, the workload is retried, never silently left
 	// referencing the pre-scrub stamp.
 	if _, patchErr := r.patchWorkloads(ctx, cr, stamp); patchErr != nil {
+		if res, derr, handled := r.accessError(ctx, cr, patchErr, "workload patch"); handled {
+			return res, derr
+		}
 		r.setCond(cr, hikyov1.ConditionRollout, metav1.ConditionFalse, hikyov1.ReasonStalled, patchErr.Error())
 		return r.done(ctx, cr, ctrl.Result{}, patchErr)
 	}

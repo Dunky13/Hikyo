@@ -3,6 +3,7 @@ package operator
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -56,10 +57,16 @@ func (r *HikyoSecretReconciler) acquireBootstrap(
 ) (credential, ctrl.Result, bool, error) {
 	var sec corev1.Secret
 	name := cr.Spec.Auth.SecretRef.Name
-	if err := r.Get(ctx, types.NamespacedName{Namespace: cr.Namespace, Name: name}, &sec); err != nil {
+	// Uncached: the operator holds no list/watch on Secrets, and the credential
+	// object's identity must be read fresh (its UID+resourceVersion binds the
+	// cursor).
+	if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: cr.Namespace, Name: name}, &sec); err != nil {
 		if apierrors.IsNotFound(err) {
 			return r.designationRefusal(ctx, cr, hikyov1.ReasonSecretNotDesignated,
 				fmt.Sprintf("bootstrap Secret %q not found", name))
+		}
+		if res, derr, handled := r.accessError(ctx, cr, err, "bootstrap Secret"); handled {
+			return credential{}, res, true, derr
 		}
 		return credential{}, ctrl.Result{}, true, err
 	}
@@ -85,10 +92,15 @@ func (r *HikyoSecretReconciler) acquireFederation(
 ) (credential, ctrl.Result, bool, error) {
 	var sa corev1.ServiceAccount
 	name := cr.Spec.Auth.ServiceAccountRef.Name
-	if err := r.Get(ctx, types.NamespacedName{Namespace: cr.Namespace, Name: name}, &sa); err != nil {
+	// Uncached: RBAC grants only `get` on ServiceAccounts (no list/watch), so a
+	// cached read could never start its informer.
+	if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: cr.Namespace, Name: name}, &sa); err != nil {
 		if apierrors.IsNotFound(err) {
 			return r.designationRefusal(ctx, cr, hikyov1.ReasonServiceAccountNotDesignated,
 				fmt.Sprintf("ServiceAccount %q not found", name))
+		}
+		if res, derr, handled := r.accessError(ctx, cr, err, "ServiceAccount"); handled {
+			return credential{}, res, true, derr
 		}
 		return credential{}, ctrl.Result{}, true, err
 	}
@@ -158,15 +170,16 @@ func mismatchedInstance(labels map[string]string, instanceName string) bool {
 // binding digest is unchanged.
 func (r *HikyoSecretReconciler) eligibleCursor(
 	ctx context.Context, cr *hikyov1.HikyoSecret, inst *hikyov1.HikyoInstance,
-	cred credential, existing *corev1.Secret, existed bool,
+	cred credential, existing *corev1.Secret, existed bool, root []byte,
 ) string {
 	if cr.Status.Cursor == "" || !existed || !metav1.IsControlledBy(existing, cr) {
 		return ""
 	}
 	// stamp(current Secret data) must equal the recorded stamp — a tampered or
-	// externally-edited Secret discards the cursor.
+	// externally-edited Secret discards the cursor. root is the pre-validated
+	// stamp root read once for this reconcile.
 	pairs := stampPairsFromData(existing.Data)
-	stamp, err := r.computeStamp(ctx, inst, cr, pairs)
+	stamp, err := r.computeStamp(inst, cr, pairs, root)
 	if err != nil || stamp != cr.Status.Stamp {
 		return ""
 	}
@@ -180,9 +193,9 @@ func bindingInputFor(cr *hikyov1.HikyoSecret, inst *hikyov1.HikyoInstance, cred 
 	return bindingInput{
 		credentialUID:             cred.uid,
 		credentialResourceVersion: cred.resourceVersion,
-		org:                       cr.Spec.Scope.Org,
-		project:                   cr.Spec.Scope.Project,
-		environment:               cr.Spec.Scope.Environment,
+		org:                       string(cr.Spec.Scope.Org),
+		project:                   string(cr.Spec.Scope.Project),
+		environment:               string(cr.Spec.Scope.Environment),
 		projection:                string(effectiveProjection(cr)),
 		mapping:                   cr.Spec.Mapping,
 		targetName:                cr.Spec.Target.Name,
@@ -195,7 +208,9 @@ func bindingInputFor(cr *hikyov1.HikyoSecret, inst *hikyov1.HikyoInstance, cred 
 // If this CR is not the winner it is the loser and must not write.
 func (r *HikyoSecretReconciler) targetClaimed(ctx context.Context, cr *hikyov1.HikyoSecret) (bool, string, error) {
 	var list hikyov1.HikyoSecretList
-	if err := r.List(ctx, &list, client.InNamespace(cr.Namespace)); err != nil {
+	// Authoritative UNCACHED list (decision 9): the claimant is decided from the
+	// live API, not a cache that could let two CRs each believe they won.
+	if err := r.Reader.List(ctx, &list, client.InNamespace(cr.Namespace)); err != nil {
 		return false, "", err
 	}
 	claimants := make([]*hikyov1.HikyoSecret, 0, 2)
@@ -224,7 +239,9 @@ func (r *HikyoSecretReconciler) targetClaimed(ctx context.Context, cr *hikyov1.H
 // getManagedSecret fetches the target Secret; existed=false on NotFound.
 func (r *HikyoSecretReconciler) getManagedSecret(ctx context.Context, cr *hikyov1.HikyoSecret) (*corev1.Secret, bool, error) {
 	var sec corev1.Secret
-	err := r.Get(ctx, types.NamespacedName{Namespace: cr.Namespace, Name: cr.Spec.Target.Name}, &sec)
+	// Uncached read-after-write: controller-ownership/UID is the authority test,
+	// and a cache could lag a delete/recreate/re-own.
+	err := r.Reader.Get(ctx, types.NamespacedName{Namespace: cr.Namespace, Name: cr.Spec.Target.Name}, &sec)
 	if apierrors.IsNotFound(err) {
 		return nil, false, nil
 	}
@@ -277,15 +294,14 @@ func (r *HikyoSecretReconciler) event(cr *hikyov1.HikyoSecret, etype, reason, fo
 }
 
 // done finalizes the Ready summary, sets observedGeneration, and writes the
-// status subresource LAST. It returns the given result, preferring a real error
-// over a status-write error only when the caller had none.
+// status subresource LAST. A status-write failure is JOINED with the reconcile
+// error rather than discarded — losing the condition/cursor write is itself a
+// fault that must surface (finding: fail-loud handling).
 func (r *HikyoSecretReconciler) done(ctx context.Context, cr *hikyov1.HikyoSecret, res ctrl.Result, err error) (ctrl.Result, error) {
 	r.setReady(cr)
 	cr.Status.ObservedGeneration = cr.Generation
 	if uerr := r.Status().Update(ctx, cr); uerr != nil {
-		if err == nil {
-			err = uerr
-		}
+		err = errors.Join(err, uerr)
 	}
 	return res, err
 }
@@ -329,11 +345,28 @@ func (r *HikyoSecretReconciler) setReady(cr *hikyov1.HikyoSecret) {
 		fmt.Sprintf("not ready: %s", blockingReason))
 }
 
+// validateResyncInterval parses spec.resyncInterval and refuses a non-positive
+// or otherwise unusable value LOUDLY (§ 0.7). The CRD pattern rejects malformed
+// syntax at admission; this catches the values the pattern still admits ("0s",
+// "0h") that cannot be a requeue cadence. Empty is fine (the 5m default applies).
+func validateResyncInterval(cr *hikyov1.HikyoSecret) error {
+	if cr.Spec.ResyncInterval == "" {
+		return nil
+	}
+	d, err := time.ParseDuration(cr.Spec.ResyncInterval)
+	if err != nil {
+		return fmt.Errorf("%q: %w", cr.Spec.ResyncInterval, err)
+	}
+	if d <= 0 {
+		return fmt.Errorf("%q is not a positive duration", cr.Spec.ResyncInterval)
+	}
+	return nil
+}
+
 // resyncResult is the success-path requeue at spec.resyncInterval (default 5m).
-// The CRD pattern-validates the duration string, so a parse failure is
-// unreachable for an admitted CR; the 5m fallback is defensive belt-and-braces,
-// not a silent acceptance of bad input (a malformed value is rejected at
-// admission, loud).
+// The value was already validated by validateResyncInterval at the top of the
+// reconcile, so a parse failure here is unreachable; the 5m fallback covers only
+// the empty (defaulted) case.
 func (r *HikyoSecretReconciler) resyncResult(cr *hikyov1.HikyoSecret) ctrl.Result {
 	d := 5 * time.Minute
 	if cr.Spec.ResyncInterval != "" {
@@ -344,6 +377,24 @@ func (r *HikyoSecretReconciler) resyncResult(cr *hikyov1.HikyoSecret) ctrl.Resul
 	return ctrl.Result{RequeueAfter: d}
 }
 
+// accessError classifies an RBAC access failure. On apierrors.IsForbidden it
+// sets Unreconciled=True/NamespaceNotBound — the ADR § Scoping visible authority
+// failure for a CR in a namespace the operator's RBAC does not reach — emits an
+// event, persists status where the status RBAC permits, and returns handled=true
+// so the caller returns (res, err). Any other error is the caller's to return
+// raw (handled=false, so the switch falls through).
+func (r *HikyoSecretReconciler) accessError(ctx context.Context, cr *hikyov1.HikyoSecret, err error, what string) (ctrl.Result, error, bool) {
+	if !apierrors.IsForbidden(err) {
+		return ctrl.Result{}, nil, false
+	}
+	msg := fmt.Sprintf("forbidden accessing %s (namespace not bound to operator authority): %v", what, err)
+	r.event(cr, corev1.EventTypeWarning, hikyov1.ReasonNamespaceNotBound, "%s", msg)
+	r.setCond(cr, hikyov1.ConditionUnreconciled, metav1.ConditionTrue, hikyov1.ReasonNamespaceNotBound, msg)
+	cr.Status.Lifecycle = hikyov1.LifecycleUnreconciled
+	res, derr := r.done(ctx, cr, ctrl.Result{}, err)
+	return res, derr, true
+}
+
 // ensureFinalizer keeps the orphan finalizer present iff creationPolicy=Orphan.
 // done=true means the caller returns after the mutation requeues.
 func (r *HikyoSecretReconciler) ensureFinalizer(ctx context.Context, cr *hikyov1.HikyoSecret) (ctrl.Result, bool, error) {
@@ -351,15 +402,23 @@ func (r *HikyoSecretReconciler) ensureFinalizer(ctx context.Context, cr *hikyov1
 	has := controllerutil.ContainsFinalizer(cr, hikyov1.OrphanFinalizer)
 	switch {
 	case wantFinalizer && !has:
-		controllerutil.AddFinalizer(cr, hikyov1.OrphanFinalizer)
-		return ctrl.Result{}, true, r.Update(ctx, cr)
+		return ctrl.Result{}, true, r.patchFinalizers(ctx, cr, controllerutil.AddFinalizer)
 	case !wantFinalizer && has:
 		// Owner policy needs no finalizer (§ 0.2); drop a stale one.
-		controllerutil.RemoveFinalizer(cr, hikyov1.OrphanFinalizer)
-		return ctrl.Result{}, true, r.Update(ctx, cr)
+		return ctrl.Result{}, true, r.patchFinalizers(ctx, cr, controllerutil.RemoveFinalizer)
 	default:
 		return ctrl.Result{}, false, nil
 	}
+}
+
+// patchFinalizers mutates only metadata.finalizers via a JSON MERGE patch — the
+// operator's `hikyosecrets` RBAC carries `patch` for exactly this bookkeeping
+// (decision 2), never `update` of the whole object. mutate is
+// controllerutil.AddFinalizer or RemoveFinalizer.
+func (r *HikyoSecretReconciler) patchFinalizers(ctx context.Context, cr *hikyov1.HikyoSecret, mutate func(client.Object, string) bool) error {
+	base := cr.DeepCopy()
+	mutate(cr, hikyov1.OrphanFinalizer)
+	return r.Patch(ctx, cr, client.MergeFrom(base))
 }
 
 // finalize handles CR deletion: an Orphan CR strips the managed Secret's
@@ -373,15 +432,19 @@ func (r *HikyoSecretReconciler) finalize(ctx context.Context, cr *hikyov1.HikyoS
 	if err := r.stripOwnerRef(ctx, cr); err != nil {
 		return ctrl.Result{}, err
 	}
-	controllerutil.RemoveFinalizer(cr, hikyov1.OrphanFinalizer)
-	if err := r.Update(ctx, cr); err != nil {
+	if err := r.patchFinalizers(ctx, cr, controllerutil.RemoveFinalizer); err != nil {
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{}, nil
 }
 
 // stripOwnerRef removes this CR's controller ownerReference from the managed
-// Secret, leaving it unowned (the Orphan handover).
+// Secret, leaving it unowned (the Orphan handover). It reads uncached, updates
+// with the resourceVersion precondition from that read (so a concurrent GC race
+// fails the Update rather than clobbering), then RE-READS uncached and verifies
+// the ownerRef is gone before the caller removes the finalizer — an
+// unverified strip that left the ownerRef would let garbage collection delete
+// the Secret the moment the finalizer is dropped (§ 0.2 Orphan ordering).
 func (r *HikyoSecretReconciler) stripOwnerRef(ctx context.Context, cr *hikyov1.HikyoSecret) error {
 	sec, existed, err := r.getManagedSecret(ctx, cr)
 	if err != nil || !existed {
@@ -390,31 +453,39 @@ func (r *HikyoSecretReconciler) stripOwnerRef(ctx context.Context, cr *hikyov1.H
 	if !metav1.IsControlledBy(sec, cr) {
 		return nil
 	}
-	kept := sec.OwnerReferences[:0]
+	kept := make([]metav1.OwnerReference, 0, len(sec.OwnerReferences))
 	for _, ref := range sec.OwnerReferences {
 		if ref.UID != cr.UID {
 			kept = append(kept, ref)
 		}
 	}
 	sec.OwnerReferences = kept
-	return r.Update(ctx, sec)
+	// Carries the resourceVersion from the uncached read → optimistic precondition.
+	if err := r.Update(ctx, sec); err != nil {
+		return fmt.Errorf("operator: strip ownerRef: %w", err)
+	}
+	// Re-read uncached and prove the strip landed before releasing the CR.
+	var again corev1.Secret
+	if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: cr.Namespace, Name: cr.Spec.Target.Name}, &again); err != nil {
+		return fmt.Errorf("operator: re-read after ownerRef strip: %w", err)
+	}
+	if metav1.IsControlledBy(&again, cr) {
+		return fmt.Errorf("operator: managed Secret %q still controlled by this CR after strip; refusing to release", cr.Spec.Target.Name)
+	}
+	return nil
 }
 
 // decodeCABundle base64-decodes the instance CA bundle. Empty → nil (system
-// roots). A malformed value is an error, not a silent fallback to system roots.
-func decodeCABundle(b64 string) []byte {
+// roots). A malformed value is a hard ERROR — never reinterpreted as raw PEM,
+// which would silently change the locked base64-PEM wire shape and could fail
+// open to a weaker trust posture (parse, don't cast).
+func decodeCABundle(b64 string) ([]byte, error) {
 	if b64 == "" {
-		return nil
+		return nil, nil
 	}
 	raw, err := base64.StdEncoding.DecodeString(b64)
 	if err != nil {
-		// The CRD documents base64 PEM, but some tooling stores raw PEM. Rather
-		// than silently drop the bundle (which would fail OPEN to system roots —
-		// the exact hostile-server hole the pinned CA closes), pass the raw bytes
-		// through: NewClient's AppendCertsFromPEM then either accepts a genuine
-		// PEM block or refuses loudly with "no valid PEM certificate". The failure
-		// is surfaced at client build, never swallowed into a weaker trust posture.
-		return []byte(b64)
+		return nil, fmt.Errorf("caBundle is not valid base64 (the CRD documents base64-encoded PEM): %w", err)
 	}
-	return raw
+	return raw, nil
 }

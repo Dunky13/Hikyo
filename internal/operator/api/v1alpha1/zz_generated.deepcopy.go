@@ -203,7 +203,7 @@ func (in *HikyoSecretSpec) DeepCopyInto(out *HikyoSecretSpec) {
 	out.Target = in.Target
 	if in.AcknowledgedLoaderKeys != nil {
 		in, out := &in.AcknowledgedLoaderKeys, &out.AcknowledgedLoaderKeys
-		*out = make([]string, len(*in))
+		*out = make([]KeyName, len(*in))
 		copy(*out, *in)
 	}
 }

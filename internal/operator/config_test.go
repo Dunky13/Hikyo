@@ -31,7 +31,7 @@ func TestLoadConfigDefaults(t *testing.T) {
 func TestLoadConfigNamespacesAndOverrides(t *testing.T) {
 	cfg, err := LoadConfig(envFrom(map[string]string{
 		"HIKYO_OPERATOR_NAMESPACE":        "ops",
-		"HIKYO_OPERATOR_NAMESPACES":       "team-a, team-b ,team-a",
+		"HIKYO_OPERATOR_NAMESPACES":       "team-a, team-b ",
 		"HIKYO_OPERATOR_TRIGGER_ROLLOUTS": "false",
 		"HIKYO_OPERATOR_METRICS_ADDR":     ":9000",
 	}))
@@ -41,7 +41,7 @@ func TestLoadConfigNamespacesAndOverrides(t *testing.T) {
 	if cfg.TriggerRollouts {
 		t.Error("TriggerRollouts should be false")
 	}
-	if !reflect.DeepEqual(cfg.Namespaces, []string{"team-a", "team-b", "team-a"}) {
+	if !reflect.DeepEqual(cfg.Namespaces, []string{"team-a", "team-b"}) {
 		t.Errorf("Namespaces = %v", cfg.Namespaces)
 	}
 	if cfg.MetricsAddr != ":9000" {
@@ -50,6 +50,25 @@ func TestLoadConfigNamespacesAndOverrides(t *testing.T) {
 	// Explicit HIKYO_OPERATOR_NAMESPACE wins over POD_NAMESPACE.
 	if cfg.OwnNamespace != "ops" {
 		t.Errorf("OwnNamespace = %q", cfg.OwnNamespace)
+	}
+}
+
+func TestLoadConfigRejectsBadNamespaces(t *testing.T) {
+	for name, ns := range map[string]string{
+		"empty segment (trailing comma)": "team-a,",
+		"empty segment (double comma)":   "team-a,,team-b",
+		"duplicate":                      "team-a,team-a",
+		"invalid uppercase":              "Team-A",
+		"invalid underscore":             "team_a",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := LoadConfig(envFrom(map[string]string{
+				"POD_NAMESPACE":             "ops",
+				"HIKYO_OPERATOR_NAMESPACES": ns,
+			})); err == nil {
+				t.Fatalf("namespaces %q must be rejected", ns)
+			}
+		})
 	}
 }
 

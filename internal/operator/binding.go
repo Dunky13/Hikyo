@@ -42,7 +42,7 @@ type bindingInput struct {
 func bindingDigest(in bindingInput) string {
 	pairs := make([][2]string, 0, len(in.mapping))
 	for _, m := range in.mapping {
-		pairs = append(pairs, [2]string{m.Key, m.EffectiveSecretKey()})
+		pairs = append(pairs, [2]string{string(m.Key), m.EffectiveSecretKey()})
 	}
 	slices.SortFunc(pairs, func(a, b [2]string) int {
 		if c := strings.Compare(a[1], b[1]); c != 0 {

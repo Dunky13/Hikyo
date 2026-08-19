@@ -17,7 +17,7 @@ Operator: enabled
   mode: {{ if empty .Values.operator.namespaces }}cluster-wide{{ else }}namespaced{{ end }}
   namespaces: {{ if empty .Values.operator.namespaces }}all{{ else }}{{ join "," .Values.operator.namespaces }}{{ end }}
   trigger rollouts: {{ .Values.operator.triggerRollouts }}
-  stamp root Secret: {{ .Values.operator.stampRootSecretName }} (created by the operator)
+  stamp root Secret: hikyo-operator-stamp-root (created by the operator in {{ .Release.Namespace }})
 {{- else }}
 Operator: disabled
 {{- end }}

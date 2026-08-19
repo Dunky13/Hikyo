@@ -70,6 +70,36 @@ func TestUnacknowledgedExtraAckIsRefusal(t *testing.T) {
 	}
 }
 
+func TestUnacknowledgedMappedNonLoaderAckIsRefusal(t *testing.T) {
+	// mapping [PATH, API_KEY] acknowledging [PATH, API_KEY]: API_KEY is mapped
+	// but is not a loader-control key, so acknowledging it is a latent grant —
+	// set equality with the mapped loader-control subset ({PATH}) fails.
+	refused, extra := Unacknowledged(
+		[]string{"PATH", "API_KEY"},
+		[]string{"PATH", "API_KEY"},
+	)
+	if len(refused) != 0 {
+		t.Fatalf("refused = %v, want none", refused)
+	}
+	if !reflect.DeepEqual(extra, []string{"API_KEY"}) {
+		t.Fatalf("extra = %v, want [API_KEY]", extra)
+	}
+}
+
+func TestUnacknowledgedDuplicateAckIsRefusal(t *testing.T) {
+	// A repeated acknowledgement is not the exact mapped loader-control set.
+	refused, extra := Unacknowledged(
+		[]string{"PATH"},
+		[]string{"PATH", "PATH"},
+	)
+	if len(refused) != 0 {
+		t.Fatalf("refused = %v, want none", refused)
+	}
+	if !reflect.DeepEqual(extra, []string{"PATH"}) {
+		t.Fatalf("extra = %v, want [PATH] (duplicate)", extra)
+	}
+}
+
 func TestUnacknowledgedPartialAck(t *testing.T) {
 	// PATH acknowledged, LD_PRELOAD not → LD_PRELOAD still refused.
 	refused, extra := Unacknowledged(
