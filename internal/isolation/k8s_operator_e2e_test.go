@@ -12,6 +12,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -170,6 +171,7 @@ func testRotateTokenKey(t *testing.T, restCfg *rest.Config, sch *runtime.Scheme)
 	}
 	baselineGen := e.getDeployment("rotapp").Generation
 	baselineRS := e.replicaSetCount("rotapp")
+	baselineTemplate := e.getDeployment("rotapp").Spec.Template.DeepCopy()
 
 	// #2: cursor valid, server answers current — no write.
 	must(t, e.reconcile(r, "cr-rot"))
@@ -185,10 +187,20 @@ func testRotateTokenKey(t *testing.T, restCfg *rest.Config, sch *runtime.Scheme)
 
 	// #3: the operator still presents its cursor, but the server answers a full
 	// delivery; content unchanged → identical stamp → no patch / no ReplicaSet churn.
-	must(t, e.reconcile(r, "cr-rot"))
+	// Drive this reconcile through the recording client so the "no restart wave"
+	// claim is proven by ZERO workload writes, not merely inferred from an unchanged
+	// generation.
+	var ops []string
+	rr := e.reconcilerWith(&recordingClient{Client: e.cl, ops: &ops})
+	must(t, e.reconcile(rr, "cr-rot"))
 	requireCondition(t, e.getCR("cr-rot"), hikyov1.ConditionSynced, metav1.ConditionTrue, hikyov1.ReasonDelivered)
+	// The fetch was full and presented the (now-invalid) cursor: disposition=full,
+	// cursor_presented=true.
 	if got := e.countFullFetchWithCursor(); got != 1 {
 		t.Fatalf("full-with-cursor fetch count = %d, want exactly 1 (the post-rotate fetch)", got)
+	}
+	if got := countOp(ops, "workload"); got != 0 {
+		t.Fatalf("post-rotate reconcile issued %d workload write(s), want 0 (a restart wave the ADR forbids): %v", got, ops)
 	}
 	if got := stampOf(e.getDeployment("rotapp"), "rot-secret"); got != baselineStamp {
 		t.Fatalf("stamp changed after rotate: %q → %q (a restart wave the ADR forbids)", baselineStamp, got)
@@ -199,6 +211,22 @@ func testRotateTokenKey(t *testing.T, restCfg *rest.Config, sch *runtime.Scheme)
 	if got := e.replicaSetCount("rotapp"); got != baselineRS {
 		t.Fatalf("ReplicaSet count changed after rotate: %d → %d (a restart wave)", baselineRS, got)
 	}
+	// The full pod template — not just its stamp annotation — is byte-identical
+	// before vs after: nothing at all in the workload spec moved.
+	if after := e.getDeployment("rotapp").Spec.Template; !apiequality.Semantic.DeepEqual(*baselineTemplate, after) {
+		t.Fatalf("PodTemplateSpec changed after rotate:\n  before: %+v\n  after:  %+v", *baselineTemplate, after)
+	}
+}
+
+// countOp counts recordingClient op labels of a given kind.
+func countOp(ops []string, label string) int {
+	n := 0
+	for _, o := range ops {
+		if o == label {
+			n++
+		}
+	}
+	return n
 }
 
 func (e *opEnv) replicaSetCount(deployment string) int {
