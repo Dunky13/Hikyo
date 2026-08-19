@@ -17,6 +17,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -203,7 +204,7 @@ func runRun(ctx context.Context, ios IO, args []string) error {
 	// Opt-in governs SERVING, not saving — a silent save failure is the silent
 	// fallback the house forbids, so it is a hard error.
 	if live && cfg != nil {
-		if err := saveRunSnapshot(ios, cfg, stateDir, entry, org, project, env, configOnly, resp); err != nil {
+		if err := saveRunSnapshot(cfg, stateDir, entry, org, project, env, configOnly, resp); err != nil {
 			return failf(ExitInternal, "hikyo run: saving offline snapshot: %v", err)
 		}
 	}
@@ -262,8 +263,7 @@ func serveRunOffline(ios IO, cfg *compose.Config, stateDir string, entry TrustEn
 // records the server credential id beside it. The snapshot's TargetNames is
 // ["__run__"] (run holds no render target), so ContextMatches refuses a render
 // snapshot for run and vice versa (finding 3).
-func saveRunSnapshot(ios IO, cfg *compose.Config, stateDir string, entry TrustEntry, org, project, env string, configOnly bool, resp apigen.DeliveryResponse) error {
-	_ = ios
+func saveRunSnapshot(cfg *compose.Config, stateDir string, entry TrustEntry, org, project, env string, configOnly bool, resp apigen.DeliveryResponse) error {
 	keys, err := loadLocalKeys(stateDir)
 	if err != nil {
 		return err
@@ -1695,13 +1695,6 @@ func isUnrevealedSecret(k apigen.DeliveredKey) bool {
 		k.Classification == apigen.KeyClassificationSecret && k.Value == nil
 }
 
-func valueOf(k apigen.DeliveredKey) string {
-	if k.Value == nil {
-		return ""
-	}
-	return *k.Value
-}
-
 func deliveredValues(keys []apigen.DeliveredKey) map[string]string {
 	out := map[string]string{}
 	for _, k := range keys {
@@ -1909,6 +1902,12 @@ func resolveChildCommand(command string) (string, error) {
 // file on PATH that lacks execute permission. It reads the PROCESS PATH (the
 // same one exec.LookPath consulted), not an injected env, so the two agree.
 func pathHasNonExecutable(command string) bool {
+	// Windows has no 0o111 execute bit (executability is by extension via
+	// PATHEXT), so this Unix-mode scan would misclassify; LookPath already
+	// classifies correctly there.
+	if runtime.GOOS == "windows" {
+		return false
+	}
 	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
 		if dir == "" {
 			dir = "."

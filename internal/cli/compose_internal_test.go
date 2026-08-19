@@ -498,6 +498,9 @@ func TestComposeRenderConfigOnlyMixedTarget(t *testing.T) {
 			SchemaRevision: 1,
 			Keys: []apigen.DeliveredKey{
 				{KeyId: "key_cfg", Name: "DATABASE_URL", Classification: apigen.KeyClassificationConfig, Presence: apigen.DeliveredKeyPresenceSet, Value: strPtr("postgres://x")},
+				// A delivered config key with NO value (genuinely unset): must never
+				// be emitted as OPTIONAL= (finding 7).
+				{KeyId: "key_opt", Name: "OPTIONAL", Classification: apigen.KeyClassificationConfig, Presence: apigen.DeliveredKeyPresenceOptional, Value: nil},
 			},
 		})))
 	}))
@@ -506,7 +509,7 @@ func TestComposeRenderConfigOnlyMixedTarget(t *testing.T) {
 	dir := t.TempDir()
 	content := "version: 1\ninstance: " + server.URL + "\norg: org_1\nproject: prj_1\nenvironment: env_1\n" +
 		"slug: acme\nruntime_dir: " + runtimeDir + "\n" +
-		"targets:\n  api:\n    keys: [key_cfg, key_sec]\n    services: [api]\n"
+		"targets:\n  api:\n    keys: [key_cfg, key_opt, key_sec]\n    services: [api]\n"
 	if err := os.WriteFile(filepath.Join(dir, composeConfigName), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -533,6 +536,9 @@ func TestComposeRenderConfigOnlyMixedTarget(t *testing.T) {
 	}
 	if strings.Contains(envBody, "key_sec") || strings.Contains(envBody, "=\n\n") {
 		t.Fatalf("an omitted secret produced an env entry: %q", envBody)
+	}
+	if strings.Contains(envBody, "OPTIONAL") {
+		t.Fatalf("an unset delivered value was emitted as NAME=: %q", envBody)
 	}
 }
 
@@ -669,6 +675,29 @@ func TestComposeRenderOfflineRefusesUnacknowledged(t *testing.T) {
 	// No offline record was written (the refusal precedes any disclosure).
 	if _, files, _ := compose.Pending(sd); len(files) != 0 {
 		t.Fatalf("an offline record was written before the refusal: %d files", len(files))
+	}
+}
+
+// TestOfflineRenderSnapshotRefusedForRun is the review's BLOCKER direction: a
+// RENDER snapshot (target-selected rows) must NOT be served to offline `run`,
+// which would bypass run's full-manifest all-or-nothing check (finding 3).
+func TestOfflineRenderSnapshotRefusedForRun(t *testing.T) {
+	origin := "http://127.0.0.1:1" // closed
+	dir := t.TempDir()
+	writeComposeConfigOffline(t, dir, origin, "org_1", "prj_1", "env_1", "acme")
+	_, stateDir := machineState(t, origin)
+	// Seed a RENDER snapshot (TargetNames ["api"]) at the run slug.
+	seedRenderSnapshot(t, filepath.Join(stateDir, "compose", "acme"), origin, "api",
+		[]compose.SnapshotRow{{Name: "DATABASE_URL", KeyID: "key_1", Classification: "config", Value: "postgres://cached"}})
+
+	ios, _, stderr := composeIO(stateDir, dir, "wl_token", nil)
+	ios.Exec = func(_ string, _, _ []string) error { t.Fatal("run must not exec off a render snapshot"); return nil }
+	code := Run(t.Context(), ios, []string{"run", "--", "true"})
+	if code != ExitRefused {
+		t.Fatalf("run off a render snapshot exit=%d, want ExitRefused; stderr=%s", code, stderr)
+	}
+	if !strings.Contains(stderr.String(), "different context") {
+		t.Fatalf("mode-mismatch refusal not surfaced by name: %s", stderr)
 	}
 }
 
