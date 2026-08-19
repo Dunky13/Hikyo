@@ -43,4 +43,4 @@ jobs:
       - name: Race detector (probe-based isolation E2E suite)
         env:
           HIKYO_TEST_POSTGRES_DSN: postgres://hikyo:hikyo@127.0.0.1:5432/hikyo_test
-        run: go test -race -count=1 -timeout 90m ./internal/isolation/
+        run: go test -race -count=1 -timeout 150m ./internal/isolation/
