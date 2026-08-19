@@ -2283,3 +2283,455 @@ select {
     display: none;
   }
 }
+
+/* --- Chrome surfaces: members, settings, account, instance (#60) ---------- */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 72ch;
+}
+
+.page h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.page__lede {
+  margin: 0;
+  color: var(--tx-dim);
+  max-width: 68ch;
+}
+
+/* The sticky jump index: the pattern for every sectioned surface since
+   app-chrome iteration 9. Plain anchors — the browser already scrolls to a
+   fragment and moves focus there. */
+.jump {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 8px 0;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+
+.jump ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.jump__link {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--touch);
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  color: var(--tx);
+  text-decoration: none;
+}
+
+.jump__link:hover {
+  border-color: var(--accent);
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: none;
+}
+
+.panel h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--tx-dim);
+}
+
+.panel h3 {
+  margin: 4px 0 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.panel--danger {
+  border-color: var(--danger);
+}
+
+.panel__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.field__hint {
+  margin: 0;
+  color: var(--tx-dim);
+  font-size: 13px;
+  max-width: 68ch;
+}
+
+.btn--quiet {
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: 13px;
+}
+
+/* --- members ------------------------------------------------------------- */
+
+.grants {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.grants th,
+.grants td {
+  padding: 10px 8px;
+  border-top: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.grants th {
+  color: var(--tx-dim);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.chip--wide {
+  border-color: var(--accent);
+}
+
+.capabilities {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.capability {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.capability__name {
+  color: var(--tx);
+}
+
+.inspect {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.inspect .field {
+  min-width: 220px;
+}
+
+.inspect__answer {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-container);
+  background: var(--bg);
+  color: var(--tx);
+}
+
+/* --- the grant modal ----------------------------------------------------- */
+
+.grant-modal__mode {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-container);
+}
+
+.grant-modal__mode legend {
+  padding: 0 6px;
+  color: var(--tx-dim);
+  font-size: 13px;
+}
+
+.capgrid {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  /* No inner scroller: `.ceremony` is a scrolling flex column, and a second
+     scroll container inside one shrinks its siblings into each other — which
+     on a phone put the mode fieldset on top of the checklist and made the
+     rows unclickable while still passing every visibility check. */
+  flex: none;
+}
+
+.capitem {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.capitem .chk {
+  display: flex;
+}
+
+.explain__toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  min-height: 32px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--bg-raise);
+  color: var(--tx);
+  cursor: pointer;
+  list-style: none;
+}
+
+.explain {
+  display: contents;
+}
+
+.explain__toggle::-webkit-details-marker {
+  display: none;
+}
+
+.explain__text {
+  grid-column: 1 / -1;
+  margin: 0 0 6px;
+  color: var(--tx-dim);
+  font-size: 13px;
+}
+
+.blast__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  flex: none;
+}
+
+.blast__list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-container);
+  background: var(--bg);
+}
+
+.blast__project {
+  font-weight: 700;
+}
+
+.blast__envs {
+  color: var(--tx-dim);
+}
+
+/* --- settings ------------------------------------------------------------ */
+
+.retention__current,
+.danger-zone__state {
+  margin: 0;
+  color: var(--tx);
+}
+
+.retention__bounds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.retention__bounds .field {
+  min-width: 200px;
+}
+
+.danger-zone {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.danger-zone__hint {
+  margin: 0;
+  color: var(--tx-dim);
+  font-size: 13px;
+}
+
+.envpolicy {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.envpolicy__row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-container);
+  background: var(--bg);
+}
+
+.project-retention-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.project-retention-list h3 {
+  margin: 4px 0 0;
+}
+
+.project-retention-list__items {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.project-retention-list__items li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-container);
+  background: var(--bg);
+}
+
+.project-retention-list__items li > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* --- account & instance -------------------------------------------------- */
+
+.factors {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.factor {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-container);
+  background: var(--bg);
+}
+
+.factor__meta {
+  display: block;
+  color: var(--tx-dim);
+  font-size: 13px;
+}
+
+.enrolment {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-container);
+  background: var(--bg);
+}
+
+.enrolment__uri {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--tx);
+}
+
+.codes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.codes li {
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-container);
+  background: var(--bg);
+  text-align: center;
+}
+
+.policy-impact {
+  padding: 12px;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-container);
+  background: color-mix(in oklch, var(--bg), var(--danger) 8%);
+}
+
+.origin-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.projects__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* A checkbox is an interactive element like any other, and the 44px floor is
+   not waived because the platform draws it small. Only on a coarse pointer:
+   a 44px checkbox beside 14px text is wrong with a mouse. */
+@media (pointer: coarse) {
+  .chk input[type='checkbox'],
+  .chk input[type='radio'],
+  .field.chk input[type='checkbox'] {
+    width: var(--touch);
+    height: var(--touch);
+  }
+
+  .explain__toggle,
+  .btn--quiet {
+    min-width: var(--touch);
+    min-height: var(--touch);
+  }
+}

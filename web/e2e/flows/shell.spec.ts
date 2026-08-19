@@ -7,6 +7,7 @@ import {
 import { ADMIN, STORAGE_STATE } from '../fixtures/instance.ts';
 import { surfacesForFlow } from '../registry.ts';
 
+
 /**
  * Flow: the application chrome (registry surfaces `overview`, `projects`,
  * `settings`).
@@ -30,7 +31,7 @@ async function openNav(page: Page): Promise<void> {
       await toggle.click();
     }
   }
-  await expect(page.getByRole('navigation', { name: 'Sections' })).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'Sections', exact: true })).toBeVisible();
 }
 
 test.describe('app chrome', () => {
@@ -54,12 +55,12 @@ test.describe('app chrome', () => {
   test('a deep link is served by the instance, not just by the router', async ({ page }) => {
     // The SPA-fallback rule seen from the outside: a full page load of an
     // application route must return the document, uncached, not a 404.
-    const response = await page.goto('/settings');
+    const response = await page.goto('/projects');
     expect(response?.status(), 'a deep link did not fall back to the document').toBe(200);
     expect(response?.headers()['cache-control'], 'the document was served cacheable').toBe(
       'no-cache',
     );
-    await expect(page.getByRole('heading', { name: 'Settings', level: 1 })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Projects', level: 1 })).toBeVisible();
   });
 
   test('switches theme and keeps the choice explicit', async ({ page }) => {

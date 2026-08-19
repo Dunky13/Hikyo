@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { matchPath, NavLink, Outlet, useLocation } from 'react-router';
+import { generatePath, matchPath, NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 
 import { useLogout, useOrgs, type WhoAmI } from '../api/session.ts';
 import { retentionBanner, useRetentionHealth } from '../api/retention.ts';
@@ -10,7 +10,7 @@ import {
   themeLabel,
   type ThemeChoice,
 } from '../app/theme.ts';
-import { SECTIONS, SURFACES } from '../app/navigation.ts';
+import { needsOrg, SECTIONS, SURFACES, surfaceById, type Surface } from '../app/navigation.ts';
 
 /**
  * The application chrome skeleton (prototype/app-chrome iteration 15, sidebar
@@ -30,21 +30,63 @@ export function Shell({ session }: { session: WhoAmI }) {
   const orgs = useOrgs(true);
   const retentionHealth = useRetentionHealth(true);
   const location = useLocation();
+  const navigate = useNavigate();
   const [navOpen, setNavOpen] = useState(false);
-  const [activeOrgId, setActiveOrgId] = useState('');
+  const [chosenOrgId, setChosenOrgId] = useState('');
 
   // A navigation on a phone must close the sheet it was chosen from.
   useEffect(() => setNavOpen(false), [location.pathname]);
 
-  const items = orgs.data?.items ?? [];
-  const activeOrg = items.find((org) => org.id === activeOrgId) ?? items[0];
+  const items = orgs.data === undefined ? [] : orgs.data.items;
+  const here = matchedSurface(location.pathname);
+  const routeOrgId = here?.params.org === undefined ? '' : here.params.org;
+
+  // A deep link is a selection too. Persist it only after the organisation
+  // listing confirms the id, then unscoped destinations keep the same tenant.
+  useEffect(() => {
+    if (routeOrgId !== '' && items.some((org) => org.id === routeOrgId)) {
+      setChosenOrgId(routeOrgId);
+    }
+  }, [items, routeOrgId]);
+
+  /**
+   * The active organisation is the ROUTE's when the route names one, and the
+   * rail's choice otherwise.
+   *
+   * The route wins for a reason worth keeping: an org-scoped surface is
+   * addressed by its path, so a deep link, a reload and a shared URL all land
+   * on the same organisation — and a breadcrumb that named the rail's last
+   * choice while the page below administered a different organisation would be
+   * a lie in the one place a human checks for it.
+   */
+  const chosenOrg = items.find((org) => org.id === chosenOrgId);
+  const fallbackOrg = chosenOrg === undefined ? items[0] : chosenOrg;
+  const activeOrgId =
+    routeOrgId !== '' ? routeOrgId : fallbackOrg === undefined ? '' : fallbackOrg.id;
+  const activeOrgName = items.find((org) => org.id === activeOrgId)?.name ?? activeOrgId;
   const pruneWarning = retentionBanner(retentionHealth.data, retentionHealth.isError);
 
-  useEffect(() => {
-    if (activeOrg !== undefined && activeOrg.id !== activeOrgId) {
-      setActiveOrgId(activeOrg.id);
+  /**
+   * chooseOrg is what a rail circle does. Setting the state is only half of
+   * it: while the current surface is addressed BY organisation, switching has
+   * to move the address too, or the rail would mark one organisation while the
+   * page kept administering another. A deeper org-scoped route (a project's
+   * settings, the matrix) carries parameters the new organisation has no
+   * values for, so switching lands on its project list — the surface a human
+   * arriving in an organisation actually wants.
+   */
+  const chooseOrg = (org: string) => {
+    setChosenOrgId(org);
+    if (here === undefined || !needsOrg(here.surface)) {
+      return;
     }
-  }, [activeOrg, activeOrgId]);
+    const extra = Object.keys(here.params).filter((key) => key !== 'org' && key !== '*');
+    void navigate(
+      extra.length === 0
+        ? generatePath(here.surface.path, { ...here.params, org })
+        : surfaceById('projects').path,
+    );
+  };
 
   return (
     <div className="chrome" data-nav={navOpen ? 'open' : 'closed'}>
@@ -68,10 +110,10 @@ export function Shell({ session }: { session: WhoAmI }) {
               <button
                 type="button"
                 className="avatar"
-                aria-current={org.id === activeOrg?.id}
+                aria-current={org.id === activeOrgId}
                 aria-label={`Organisation ${org.name}`}
                 title={org.name}
-                onClick={() => setActiveOrgId(org.id)}
+                onClick={() => chooseOrg(org.id)}
               >
                 {monogram(org.name)}
               </button>
@@ -96,35 +138,48 @@ export function Shell({ session }: { session: WhoAmI }) {
           </p>
         ) : null}
         {orgs.isError ? (
-          <p className="alert" role="status">
+          <p className="alert" role="alert">
             <span className="alert__glyph" aria-hidden="true">
               !
             </span>
             <span>Your organisations could not be loaded. Reload to try again.</span>
           </p>
         ) : null}
-        {SECTIONS.map((section) => (
-          <div className="sidebar__section" key={section.title}>
-            <h2>{section.title}</h2>
-            <ul className="sidebar__items">
-              {section.items.map((item) => (
-                <li key={item.path}>
-                  <NavLink className="sidebar__link" to={item.path} end={item.path === '/'}>
-                    {item.label}
-                  </NavLink>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))}
+        {SECTIONS.map((section) => {
+          // An org-scoped destination needs an organisation to point at. With
+          // none active the entry is absent rather than dead: a link that
+          // resolves to `/orgs//members` is a 404 dressed as navigation.
+          const entries = section.items.filter((item) => !needsOrg(item) || activeOrgId !== '');
+          if (entries.length === 0) {
+            return null;
+          }
+          return (
+            <div className="sidebar__section" key={section.title}>
+              <h2>{section.title}</h2>
+              <ul className="sidebar__items">
+                {entries.map((item) => (
+                  <li key={item.path}>
+                    <NavLink
+                      className="sidebar__link"
+                      to={needsOrg(item) ? generatePath(item.path, { org: activeOrgId }) : item.path}
+                      end={item.path === '/'}
+                    >
+                      {item.label}
+                    </NavLink>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          );
+        })}
       </nav>
 
       <div className="main">
         <header className="header">
           <ol className="header__crumbs" aria-label="Breadcrumb">
-            <li>{activeOrg?.name ?? 'No organisation'}</li>
+            <li>{activeOrgId === '' ? 'No organisation' : activeOrgName}</li>
             <li aria-hidden="true">/</li>
-            <li>{currentLabel(location.pathname)}</li>
+            <li>{here?.surface.label ?? 'Not found'}</li>
           </ol>
           <span className="header__spacer" />
           <ThemeToggle />
@@ -158,7 +213,7 @@ export function Shell({ session }: { session: WhoAmI }) {
           </p>
         ) : null}
         <main className="content" id="content" tabIndex={-1}>
-          <Outlet context={{ activeOrgId: activeOrg?.id ?? '' }} />
+          <Outlet context={{ activeOrgId }} />
         </main>
       </div>
     </div>
@@ -221,13 +276,22 @@ function ThemeToggle() {
   );
 }
 
-function currentLabel(pathname: string): string {
+/**
+ * matchedSurface resolves the current path against the CLOSED surface list —
+ * the same table the router is generated from, so the breadcrumb and the
+ * organisation the chrome believes it is in can never drift from the route
+ * that is actually rendered.
+ */
+function matchedSurface(
+  pathname: string,
+): { surface: Surface; params: Record<string, string | undefined> } | undefined {
   for (const surface of SURFACES) {
-    if (matchPath({ path: surface.path, end: true }, pathname) !== null) {
-      return surface.label;
+    const match = matchPath({ path: surface.path, end: true }, pathname);
+    if (match !== null) {
+      return { surface, params: match.params };
     }
   }
-  return 'Not found';
+  return undefined;
 }
 
 /** monogram is the identity circle's content: one or two letters, never an image. */
@@ -237,7 +301,16 @@ function monogram(name: string): string {
     return '?';
   }
   if (words.length === 1) {
-    return (words[0] ?? '').slice(0, 2).toUpperCase();
+    const only = words[0];
+    if (only === undefined) {
+      throw new Error('one-word monogram has no word');
+    }
+    return only.slice(0, 2).toUpperCase();
   }
-  return ((words[0]?.[0] ?? '') + (words[1]?.[0] ?? '')).toUpperCase();
+  const first = words[0];
+  const second = words[1];
+  if (first === undefined || second === undefined) {
+    throw new Error('multi-word monogram has fewer than two words');
+  }
+  return (first.charAt(0) + second.charAt(0)).toUpperCase();
 }

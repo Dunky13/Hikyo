@@ -708,11 +708,6 @@ export function bindingFailureText(error: unknown): string {
   return `${identityRefusalText(error)} The binding may still have been created: check the account's rows and revoke anything you did not expect.`;
 }
 
-/**
- * grantFailureText: a lost response may still have widened every live
- * credential's reach, which is exactly the change the warning existed to make
- * deliberate — so it must not be reported as "nothing happened".
- */
-export function grantFailureText(error: unknown): string {
-  return `${identityRefusalText(error)} The grant may still have landed: the scope column shows what the account reaches now, so check it before acting again.`;
-}
+// One mapper for every grant surface. Re-exporting preserves the machine-access
+// import while keeping refusal semantics in the access module that owns them.
+export { grantFailureText } from './access.ts';

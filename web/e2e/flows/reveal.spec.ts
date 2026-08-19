@@ -128,15 +128,21 @@ async function publishOwnDraft(page: Page, environment: string, key: string): Pr
           return `signals ${String(signals.status)}`;
         }
         const body: unknown = await signals.json();
-        if (typeof body !== 'object' || body === null || !Array.isArray((body as { cells?: unknown }).cells)) {
+        if (typeof body !== 'object' || body === null) {
           return 'signals: not a cells object';
         }
-        const cells: unknown[] = (body as { cells: unknown[] }).cells;
-        const cell = cells.find(
-          (c): c is { name: string; pending_version_id?: string } =>
-            typeof c === 'object' && c !== null && (c as { name?: unknown }).name === input.key,
-        );
-        versionID = cell?.pending_version_id;
+        const cells: unknown = Object(body)['cells'];
+        if (!Array.isArray(cells)) {
+          return 'signals: not a cells object';
+        }
+        const cell = cells.find((candidate: unknown) => {
+          if (typeof candidate !== 'object' || candidate === null) {
+            return false;
+          }
+          return Object(candidate)['name'] === input.key;
+        });
+        const pendingVersion = cell === undefined ? undefined : Object(cell)['pending_version_id'];
+        versionID = typeof pendingVersion === 'string' ? pendingVersion : undefined;
         if (versionID === undefined) {
           await new Promise((resolve) => setTimeout(resolve, 100));
         }

@@ -14,8 +14,10 @@ import { readRunLog, unexecutedClaims } from './registry.ts';
  * deliberately partial, and failing it would make the check something people
  * work around instead of with. CI runs unfiltered.
  *
- * `--shard` is REFUSED rather than skipped. CI parallelises by project, where
- * every shard still runs every flow and this check keeps its full force; a
+ * `--shard` is REFUSED rather than skipped. CI #169 parallelises by viewport
+ * project, where each runner still runs every flow and both themes; one runner
+ * legitimately sees only one viewport. The run log names each project, so a
+ * combined run must close every claim independently for both viewports. A
  * `--shard` run splits the flows themselves, so the log is partial while the
  * run still looks complete. Left alone it would fail as a wall of "claims more
  * than it runs" lines that say nothing about the real cause, so it says it.
@@ -41,7 +43,12 @@ export default function globalTeardown(config: FullConfig): void {
   // Playwright's own process), and the config field is still consulted because a
   // `grep` set in `playwright.config.ts` does land there.
   const grepped = process.argv.some(
-    (arg) => arg === '--grep' || arg === '-g' || arg.startsWith('--grep='),
+    (arg) =>
+      arg === '--grep' ||
+      arg === '-g' ||
+      arg.startsWith('--grep=') ||
+      arg === '--grep-invert' ||
+      arg.startsWith('--grep-invert='),
   );
   const specFiltered = process.argv.some(
     (arg) => arg.endsWith('.spec.ts') || arg.includes('/flows/'),

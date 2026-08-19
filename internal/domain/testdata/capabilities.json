@@ -1,0 +1,97 @@
+{
+  "capabilities": [
+    { "id": "audit-read", "deepest": "environment" },
+    { "id": "backup-export", "deepest": "instance" },
+    { "id": "credential-reset", "deepest": "org" },
+    { "id": "definitions-edit", "deepest": "project" },
+    { "id": "edit", "deepest": "environment" },
+    { "id": "instance-config", "deepest": "instance" },
+    { "id": "instance-directory", "deepest": "instance" },
+    { "id": "manage-adapters", "deepest": "project" },
+    { "id": "manage-identities", "deepest": "project" },
+    { "id": "manage-members", "deepest": "project" },
+    { "id": "manage-projects", "deepest": "org" },
+    { "id": "pin", "deepest": "environment" },
+    { "id": "project-settings", "deepest": "project" },
+    { "id": "publish", "deepest": "environment" },
+    { "id": "read", "deepest": "environment" },
+    { "id": "reencrypt", "deepest": "instance" },
+    { "id": "restore", "deepest": "instance" },
+    { "id": "reveal", "deepest": "environment" },
+    { "id": "reveal-history", "deepest": "environment" },
+    { "id": "rotate-dek", "deepest": "instance" },
+    { "id": "rotate-master-key", "deepest": "instance" },
+    { "id": "rotate-root-key", "deepest": "instance" },
+    { "id": "scim-provision", "deepest": "org" }
+  ],
+  "templates": [
+    {
+      "id": "admin",
+      "levels": ["org", "project"],
+      "seeds_by_level": {
+        "org": ["read", "edit", "publish", "pin", "definitions-edit", "manage-identities", "manage-adapters", "project-settings", "manage-members", "reveal", "reveal-history", "manage-projects"],
+        "project": ["read", "edit", "publish", "pin", "definitions-edit", "manage-identities", "manage-adapters", "project-settings", "manage-members", "reveal", "reveal-history"]
+      }
+    },
+    {
+      "id": "editor",
+      "levels": ["org", "project", "environment"],
+      "seeds_by_level": {
+        "environment": ["read", "edit"],
+        "org": ["read", "edit"],
+        "project": ["read", "edit"]
+      }
+    },
+    {
+      "id": "historian",
+      "levels": ["org", "project", "environment"],
+      "seeds_by_level": {
+        "environment": ["reveal-history"],
+        "org": ["reveal-history"],
+        "project": ["reveal-history"]
+      }
+    },
+    {
+      "id": "maintainer",
+      "levels": ["org", "project"],
+      "seeds_by_level": {
+        "org": ["read", "edit", "publish", "pin", "definitions-edit", "manage-identities", "manage-adapters"],
+        "project": ["read", "edit", "publish", "pin", "definitions-edit", "manage-identities", "manage-adapters"]
+      }
+    },
+    {
+      "id": "operator",
+      "levels": ["instance"],
+      "seeds_by_level": {
+        "instance": ["backup-export", "restore", "rotate-root-key", "rotate-master-key", "rotate-dek", "reencrypt", "instance-config", "manage-members"]
+      }
+    },
+    {
+      "id": "publisher",
+      "levels": ["org", "project", "environment"],
+      "seeds_by_level": {
+        "environment": ["read", "edit", "publish", "pin"],
+        "org": ["read", "edit", "publish", "pin"],
+        "project": ["read", "edit", "publish", "pin"]
+      }
+    },
+    {
+      "id": "revealer",
+      "levels": ["org", "project", "environment"],
+      "seeds_by_level": {
+        "environment": ["reveal"],
+        "org": ["reveal"],
+        "project": ["reveal"]
+      }
+    },
+    {
+      "id": "viewer",
+      "levels": ["org", "project", "environment"],
+      "seeds_by_level": {
+        "environment": ["read"],
+        "org": ["read"],
+        "project": ["read"]
+      }
+    }
+  ]
+}

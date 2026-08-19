@@ -34,15 +34,30 @@ export function Projects() {
                 <strong>{project.name}</strong>
                 <span className="mono">{project.id}</span>
               </div>
-              <Link
-                className="btn"
-                to={generatePath(surfaceById('matrix').path, {
-                  org: activeOrgId,
-                  project: project.id,
-                })}
-              >
-                Open matrix
-              </Link>
+              <span className="projects__actions">
+                <Link
+                  className="btn"
+                  to={generatePath(surfaceById('matrix').path, {
+                    org: activeOrgId,
+                    project: project.id,
+                  })}
+                >
+                  Open matrix
+                </Link>
+                {/* Project settings addresses ONE project, so this is where it
+                    is reached from: no static sidebar entry could know which
+                    project to mean. */}
+                <Link
+                  className="btn"
+                  aria-label={`Settings for ${project.name}`}
+                  to={generatePath(surfaceById('project-settings').path, {
+                    org: activeOrgId,
+                    project: project.id,
+                  })}
+                >
+                  Settings
+                </Link>
+              </span>
             </li>
           ))}
         </ul>

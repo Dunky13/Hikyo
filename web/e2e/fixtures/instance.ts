@@ -1,5 +1,5 @@
 import { chromium, type Page } from '@playwright/test';
-import { z } from 'zod';
+import { z, type ZodType } from 'zod';
 
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { createHash, X509Certificate } from 'node:crypto';
@@ -206,7 +206,11 @@ function cookieHeader(instance: Instance): string {
 }
 
 function csrfToken(instance: Instance): string {
-  return instance.cookies.find((c) => c.name === '__Host-hikyo-csrf')?.value ?? '';
+  const token = instance.cookies.find((cookie) => cookie.name === '__Host-hikyo-csrf')?.value;
+  if (token === undefined || token === '') {
+    throw new Error('the fixture instance has no CSRF cookie');
+  }
+  return token;
 }
 
 /**
@@ -540,6 +544,10 @@ async function establishCredential(instance: Instance): Promise<void> {
  * Written before the first sign-in on purpose: a grant that predates every
  * session cannot invalidate one.
  */
+const DIRECTORY_GRANT_ID = 'grt_00000000-0000-7000-8000-00000000e2e1';
+const DIRECTORY_ORIGIN_ID = 'gor_00000000-0000-7000-8000-00000000e2e2';
+export const INSTANCE_GRANT_TARGET = 'usr_00000000-0000-7000-8000-00000000e2e3';
+
 function seedDirectoryGrant(dir: string): void {
   const db = new DatabaseSync(join(dir, 'hikyo-dev.db'));
   try {
@@ -549,17 +557,33 @@ function seedDirectoryGrant(dir: string): void {
       throw new Error('no bootstrap principal to grant instance-directory to');
     }
     const at = new Date().toISOString().replace('Z', '000Z');
+    // A non-login human target for the instance-grant flow. Machine
+    // principals are intentionally invalid here: workloads require explicit
+    // environment depth and automations require project depth. An account row
+    // is unnecessary because this principal never authenticates; it only lets
+    // the UI prove a valid create/revoke lifecycle without invalidating the
+    // sole administrator's own session.
+    db.prepare(
+      `INSERT INTO principals (id, kind, created_at, session_generation, reconciled_epoch)
+       VALUES (?, 'human', ?, 1, (SELECT restore_epoch FROM auth_instance_state WHERE id = 1))`,
+    ).run(INSTANCE_GRANT_TARGET, at);
+    // The ids obey the contract's ID grammar (`^[a-z]{2,8}_[0-9a-fA-F-]{36}$`),
+    // and that is not cosmetics. Every listing that carries a grant row is
+    // parsed against the generated schema at the SPA boundary, so a
+    // hand-written id like `grn_e2e_directory` makes the whole instance-grant
+    // listing fail to parse — which is the client being right and the fixture
+    // being wrong. Fixed rather than accommodated (#60).
     db.prepare(
       `INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at)
-       VALUES ('grn_e2e_directory', ?, 'instance-directory', NULL, NULL, NULL, ?)`,
-    ).run(principal, at);
+       VALUES (?, ?, 'instance-directory', NULL, NULL, NULL, ?)`,
+    ).run(DIRECTORY_GRANT_ID, principal, at);
     // A grant row with no origin is the state the permission model forbids:
     // the membership surface INNER JOINs origins, so a grant nobody can point
     // at the reason for would simply not be seen.
     db.prepare(
       `INSERT INTO grant_origins (id, grant_id, kind, subject, created_at)
-       VALUES ('gor_e2e_directory', 'grn_e2e_directory', 'manual', ?, ?)`,
-    ).run(principal, at);
+       VALUES (?, ?, 'manual', ?, ?)`,
+    ).run(DIRECTORY_ORIGIN_ID, DIRECTORY_GRANT_ID, principal, at);
   } finally {
     db.close();
   }
@@ -753,6 +777,9 @@ async function stepUpWithSeededTotp(instance: Instance): Promise<void> {
  */
 const zSeeded = z.object({
   org: z.string(),
+  orgName: z.string(),
+  orgB: z.string(),
+  orgBName: z.string(),
   project: z.string(),
   dev: z.string(),
   prod: z.string(),
@@ -846,6 +873,7 @@ const zStorageState = z.object({
  * halfway through the suite, from a cause several tests in the past.
  */
 async function mintStorageState(keepForeign?: readonly Cookie[]): Promise<void> {
+  const initialMint = keepForeign !== undefined;
   const foreign =
     keepForeign ??
     (existsSync(STORAGE_STATE)
@@ -876,11 +904,17 @@ async function mintStorageState(keepForeign?: readonly Cookie[]): Promise<void> 
         automaticPresenceSimulation: true,
       },
     });
+    if (!initialMint) {
+      await cdp.send('WebAuthn.addCredential', {
+        authenticatorId,
+        credential: readPasskey(),
+      });
+    }
 
     const failure = await page.evaluate(sessionScript, {
       username: ADMIN.username,
       password: ADMIN.password,
-      enrol: true,
+      enrol: initialMint,
       stepUp: true,
     });
     if (failure !== null) {
@@ -892,7 +926,7 @@ async function mintStorageState(keepForeign?: readonly Cookie[]): Promise<void> 
     });
     const credential = credentials[0];
     if (credential === undefined) {
-      throw new Error('the virtual authenticator holds no credential after enrolment');
+      throw new Error('the virtual authenticator holds no credential after the session mint');
     }
 
     mkdirSync(fileURLToPath(new URL('../.auth', import.meta.url)), {
@@ -903,7 +937,7 @@ async function mintStorageState(keepForeign?: readonly Cookie[]): Promise<void> 
       STORAGE_STATE,
       JSON.stringify({ ...state, cookies: [...state.cookies, ...foreign] }),
     );
-    writeFileSync(PASSKEY, JSON.stringify(credential));
+    writePasskey(parseCredential(credential));
   } finally {
     await browser.close();
   }
@@ -957,8 +991,11 @@ export function parseCredential(value: unknown): VirtualCredential {
   return zVirtualCredential.parse(value);
 }
 
-/** Attach the shared real passkey to one Chromium page and persist its advanced counter. */
-export async function installPasskeyAuthenticator(page: Page): Promise<() => Promise<void>> {
+/** Attach a virtual authenticator and persist the shared credential when it is loaded. */
+export async function installPasskeyAuthenticator(
+  page: Page,
+  credential: 'shared' | 'empty' = 'shared',
+): Promise<() => Promise<void>> {
   const session = await page.context().newCDPSession(page);
   await session.send('WebAuthn.enable');
   const { authenticatorId } = await session.send('WebAuthn.addVirtualAuthenticator', {
@@ -971,12 +1008,22 @@ export async function installPasskeyAuthenticator(page: Page): Promise<() => Pro
       automaticPresenceSimulation: true,
     },
   });
-  // Load the already-enrolled credential instead of enrolling again: enrolment
-  // advances the session generation and invalidates the suite's shared session.
-  await session.send('WebAuthn.addCredential', { authenticatorId, credential: readPasskey() });
+  // Most flows load the already-enrolled credential instead of enrolling
+  // again. The account enrolment drill deliberately uses an empty, second
+  // authenticator: creating another discoverable credential for the same user
+  // on one authenticator replaces its resident entry locally.
+  const sharedPasskey = credential === 'shared' ? readPasskey() : null;
+  if (sharedPasskey !== null) {
+    await session.send('WebAuthn.addCredential', { authenticatorId, credential: sharedPasskey });
+  }
   return async () => {
+    if (sharedPasskey === null) {
+      return;
+    }
     const { credentials } = await session.send('WebAuthn.getCredentials', { authenticatorId });
-    const advanced = credentials[0];
+    const advanced = credentials.find(
+      (credential) => credential.credentialId === sharedPasskey.credentialId,
+    );
     if (advanced === undefined) {
       throw new Error('the shared virtual authenticator lost its passkey credential');
     }
@@ -984,6 +1031,45 @@ export async function installPasskeyAuthenticator(page: Page): Promise<() => Pro
     // counter looks like a cloned authenticator and disables the credential.
     writePasskey(parseCredential(advanced));
   };
+}
+
+/**
+ * browserApi performs one API call on the PAGE's own session — its cookies,
+ * its synchronizer token.
+ *
+ * Flows use it for fixture work a surface has no control for (creating the
+ * throwaway project a settings drill deletes, reading a service account's
+ * principal id). Deliberately the page's session rather than a bearer one: a
+ * second artifact would be a second thing that can be stale, and the CSRF
+ * contract is exercised on the way through rather than bypassed.
+ */
+export async function browserApi<T>(
+  page: Page,
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE',
+  path: string,
+  schema: ZodType<T>,
+  body?: unknown,
+): Promise<T> {
+  // Scoped to THIS instance's origin. The shared jar also carries the serving
+  // instance's cookies (#71 runs two instances), and an unscoped read can hand
+  // back the other origin's synchronizer token — which the CSRF gate refuses
+  // with a 401 that looks exactly like a dead session, several calls from the
+  // mistake.
+  const cookies = await page.context().cookies(BASE_URL);
+  const csrf = cookies.find((cookie) => cookie.name === '__Host-hikyo-csrf')?.value;
+  if (csrf === undefined || csrf === '') {
+    throw new Error(`${method} ${path} cannot run: the page has no CSRF cookie for ${BASE_URL}`);
+  }
+  const response = await page.request.fetch(`${BASE_URL}${path}`, {
+    method,
+    headers: { 'Content-Type': 'application/json', 'X-Hikyo-CSRF': csrf },
+    ...(body === undefined ? {} : { data: body }),
+  });
+  if (!response.ok()) {
+    throw new Error(`${method} ${path} answered ${response.status()}: ${await response.text()}`);
+  }
+  const value: unknown = response.status() === 204 ? null : await response.json();
+  return schema.parse(value);
 }
 
 export async function establishSession(page: Page, stepUp = true): Promise<void> {
