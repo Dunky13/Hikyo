@@ -1,5 +1,5 @@
 // Package delivery owns the canonical encodings the machine fetch path keys:
-// the delivery manifest the change token covers, and the four-tuple the
+// the delivery manifest the change token covers, and the tuple the
 // conditional cursor is bound to.
 //
 // It holds encoding and nothing else. The keying lives in internal/crypto
@@ -16,12 +16,46 @@ import (
 	"strings"
 )
 
+// MaxAcknowledgedKeys bounds the loader-control acknowledgement list a machine
+// fetch may present (k8s ADR § 0.9). It is the single source of truth for that
+// bound: the service refuses a longer list as a caller error BEFORE any work,
+// and the audit registry caps the recorded list at the same number, so the two
+// can never drift into a state where a list the service accepts is one the
+// audit write then rejects loudly.
+const MaxAcknowledgedKeys = 64
+
 // ManifestVersion is the canonical encoding's version, carried INSIDE the
 // signed bytes as well as on the token string. Inside matters: without it, two
 // different encodings of the same content could produce the same token under a
 // scheme change, which is the collision a version prefix on the outside cannot
 // prevent.
 const ManifestVersion = "v1"
+
+// Mode is the delivery projection: which keys the fetch is authorized to
+// deliver at all. It is a SERVER-SIDE AUTHORIZED TERM (k8s ADR § Refresh), not
+// a client-side filter — `config-only` omits `secret` keys from the delivery
+// and from the manifest the change token covers — and it is bound into the
+// cursor so a mode change invalidates it.
+type Mode string
+
+const (
+	// ModeFull delivers every key the caller is authorized to see.
+	ModeFull Mode = "full"
+	// ModeConfigOnly omits `secret` keys entirely — from the delivery and from
+	// the manifest, not presence-only.
+	ModeConfigOnly Mode = "config-only"
+)
+
+// NormalizeMode maps the empty mode to the default. It is applied before the
+// mode is bound into the cursor, so a cursor never encodes "" for a state that
+// `full` also describes — the two would otherwise be one state under two
+// cursors.
+func NormalizeMode(m Mode) Mode {
+	if m == "" {
+		return ModeFull
+	}
+	return m
+}
 
 // Presence is what the fetch surface reports about a key in one environment.
 //
@@ -62,8 +96,11 @@ type Row struct {
 	// The manifest is computed server-side, from a snapshot the server already
 	// holds in plaintext for the length of the operation, and the token that
 	// comes out is KEYED: it is unforgeable and un-invertible without the
-	// scoped key, so it flows into pod annotations and logs as ordinary
-	// non-secret metadata while the values it covers never leave the server.
+	// scoped key, so it flows into logs and change-detection caches as ordinary
+	// non-secret metadata. The token is change-detection material only and
+	// never a workload-visible value (k8s ADR § Declared amendment); the
+	// plaintext this field carries reaches an authorized consumer through the
+	// fetch surface's own per-value disclosure records, never through the token.
 	Value string
 }
 
@@ -88,7 +125,7 @@ func Manifest(rows []Row) []byte {
 	return out
 }
 
-// Cursor is the four-tuple a conditional fetch's cursor is bound to. The ADR is
+// Cursor is the tuple a conditional fetch's cursor is bound to. The ADR is
 // explicit that it is "never the environment's change token alone", and each
 // component closes a distinct failure:
 //
@@ -104,6 +141,23 @@ func Manifest(rows []Row) []byte {
 //	AuthorizationRevision the principal's authority moved at all — a grant
 //	                      added, removed or narrowed.
 //	PinGeneration         a pin was created, reassigned or released.
+//	Mode                  the delivery projection (`full` vs `config-only`)
+//	                      moved. `config-only` delivers and covers a strictly
+//	                      smaller manifest, so a mode flip must invalidate the
+//	                      cursor even when nothing else changed.
+//	PinnedHistoricalRevision
+//	                      the delivered snapshot became a pinned NON-CURRENT
+//	                      revision (or which one it is). This closes a failure
+//	                      the other components cannot see: when a pin that WAS
+//	                      current is overtaken by a later publish, the pinned
+//	                      snapshot's content, the caller's grants, the
+//	                      authorization revision and the pin generation are all
+//	                      unchanged — yet the secret-value authority term flips
+//	                      from `reveal` to `reveal-history`, so a caller holding
+//	                      `reveal` but not `reveal-history` silently loses the
+//	                      secret's plaintext. Without this term the stale cursor
+//	                      still matches and the fetch answers "current" for a
+//	                      state that now discloses strictly less.
 type Cursor struct {
 	ChangeToken string
 	// Projection is the caller's authorized delivery projection: the sorted
@@ -114,13 +168,26 @@ type Cursor struct {
 	AuthorizationRevision int64
 	// PinGeneration is the (principal, environment) pin counter.
 	PinGeneration int64
+	// Mode is the delivery projection mode, normalized (never ""). It is bound
+	// in so every outstanding pre-projection cursor mismatches exactly once,
+	// which is the designed upgrade path — no cursor-versioning machinery.
+	Mode Mode
+	// PinnedHistoricalRevision is the pinned revision when the delivered
+	// snapshot is a pinned NON-CURRENT revision, and 0 otherwise (unpinned, or
+	// a pin still on the environment's latest). Revisions are >= 1, so 0 is an
+	// unambiguous "not pinned-historical". Binding the pinned revision rather
+	// than a bare bool is deliberate: it is the revision whose history the
+	// delivery discloses, which is exactly what the `reveal-history` term
+	// authorizes, so a cursor that names it re-binds every value re-pin without
+	// leaning on the pin generation alone.
+	PinnedHistoricalRevision int64
 }
 
 // CursorVersion is the tuple encoding's version, inside the signed bytes for
 // the same reason ManifestVersion is.
 const CursorVersion = "v1"
 
-// EncodeCursor renders the four-tuple canonically. Every component is
+// EncodeCursor renders the tuple canonically. Every component is
 // length-prefixed and the projection is sorted, so the encoding is injective:
 // two different tuples cannot produce one cursor, which is what makes
 // "recompute and compare" a sound test rather than a heuristic.
@@ -131,6 +198,12 @@ func EncodeCursor(c Cursor) []byte {
 
 	out := appendField(nil, CursorVersion)
 	out = appendField(out, c.ChangeToken)
+	// The mode is encoded UNCONDITIONALLY, with the empty value normalized to
+	// the default first, so `full` always contributes a fixed field rather than
+	// nothing — a conditional encode would let a pre-projection cursor keep
+	// matching a `full` fetch, which is exactly the once-only mismatch this
+	// field exists to force.
+	out = appendField(out, string(NormalizeMode(c.Mode)))
 	out = binary.AppendUvarint(out, uint64(len(projection)))
 	for _, p := range projection {
 		out = appendField(out, p)
@@ -140,6 +213,11 @@ func EncodeCursor(c Cursor) []byte {
 	// large number instead of an obviously wrong one.
 	out = binary.AppendVarint(out, c.AuthorizationRevision)
 	out = binary.AppendVarint(out, c.PinGeneration)
+	// Encoded UNCONDITIONALLY, like the mode: the zero value (0, "not
+	// pinned-historical") always contributes a fixed field, so a
+	// pinned-current fetch and an unpinned fetch of the same content agree,
+	// and the transition to pinned-non-current moves the cursor exactly once.
+	out = binary.AppendVarint(out, c.PinnedHistoricalRevision)
 	return out
 }
 

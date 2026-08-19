@@ -15,6 +15,7 @@ expected='{
 	"fuzz": false,
 	"generated": false,
 	"headline_guarantee": false,
+	"k8s_e2e": false,
 	"lint": false,
 	"race": false,
 	"release_snapshot": false,
@@ -36,7 +37,7 @@ web_actual=$(printf '%s\n' 'web/src/routes/Values.tsx' | "$classifier" --files)
 if ! printf '%s\n' "$web_actual" | jq -e '
 	.web == true and
 	.release_snapshot == true and
-	([.client, .docs, .fuzz, .generated, .headline_guarantee, .lint, .race, .supply_chain_checks, .test] |
+	([.client, .docs, .fuzz, .generated, .headline_guarantee, .k8s_e2e, .lint, .race, .supply_chain_checks, .test] |
 		all(. == false))
 ' >/dev/null; then
 	printf 'changed-path classifier fixture failed: web-only plan was wrong\n' >&2
@@ -53,7 +54,7 @@ if ! printf '%s\n' "$core_actual" | jq -e '
 	.race == true and
 	.test == true and
 	.web == true and
-	([.client, .docs, .lint, .supply_chain_checks] | all(. == false))
+	([.client, .docs, .k8s_e2e, .lint, .supply_chain_checks] | all(. == false))
 ' >/dev/null; then
 	printf 'changed-path classifier fixture failed: core plan was wrong\n' >&2
 	printf 'actual: %s\n' "$core_actual" >&2
@@ -70,7 +71,7 @@ if ! printf '%s\n' "$api_actual" | jq -e '
 	.race == true and
 	.test == true and
 	.web == true and
-	([.docs, .lint, .supply_chain_checks] | all(. == false))
+	([.docs, .k8s_e2e, .lint, .supply_chain_checks] | all(. == false))
 ' >/dev/null; then
 	printf 'changed-path classifier fixture failed: API plan was wrong\n' >&2
 	printf 'actual: %s\n' "$api_actual" >&2
@@ -82,7 +83,7 @@ if ! printf '%s\n' "$client_actual" | jq -e '
 	.client == true and
 	.release_snapshot == true and
 	.web == true and
-	([.docs, .fuzz, .generated, .headline_guarantee, .lint, .race, .supply_chain_checks, .test] |
+	([.docs, .fuzz, .generated, .headline_guarantee, .k8s_e2e, .lint, .race, .supply_chain_checks, .test] |
 		all(. == false))
 ' >/dev/null; then
 	printf 'changed-path classifier fixture failed: client plan was wrong\n' >&2
@@ -95,7 +96,7 @@ if ! printf '%s\n' "$release_actual" | jq -e '
 	.lint == true and
 	.release_snapshot == true and
 	.supply_chain_checks == true and
-	([.client, .docs, .fuzz, .generated, .headline_guarantee, .race, .test, .web] | all(. == false))
+	([.client, .docs, .fuzz, .generated, .headline_guarantee, .k8s_e2e, .race, .test, .web] | all(. == false))
 ' >/dev/null; then
 	printf 'changed-path classifier fixture failed: release plan was wrong\n' >&2
 	printf 'actual: %s\n' "$release_actual" >&2
@@ -106,7 +107,7 @@ license_actual=$(printf '%s\n' 'LICENSE' | "$classifier" --files)
 if ! printf '%s\n' "$license_actual" | jq -e '
 	.docs == true and
 	.release_snapshot == true and
-	([.client, .fuzz, .generated, .headline_guarantee, .lint, .race, .supply_chain_checks, .test, .web] |
+	([.client, .fuzz, .generated, .headline_guarantee, .k8s_e2e, .lint, .race, .supply_chain_checks, .test, .web] |
 		all(. == false))
 ' >/dev/null; then
 	printf 'changed-path classifier fixture failed: LICENSE plan was wrong\n' >&2
@@ -121,7 +122,7 @@ if ! printf '%s\n' "$main_gate_actual" | jq -e '
 	.lint == true and
 	.release_snapshot == true and
 	.supply_chain_checks == true and
-	([.client, .fuzz, .generated, .headline_guarantee, .race, .test, .web] | all(. == false))
+	([.client, .fuzz, .generated, .headline_guarantee, .k8s_e2e, .race, .test, .web] | all(. == false))
 ' >/dev/null; then
 	printf 'changed-path classifier fixture failed: main CI gate plan was wrong\n' >&2
 	printf 'actual: %s\n' "$main_gate_actual" >&2
@@ -135,7 +136,7 @@ for docs_script in \
 	if ! printf '%s\n' "$docs_script_actual" | jq -e '
 		.docs == true and
 		.lint == true and
-		([.client, .fuzz, .generated, .headline_guarantee, .race, .release_snapshot, .supply_chain_checks, .test, .web] |
+		([.client, .fuzz, .generated, .headline_guarantee, .k8s_e2e, .race, .release_snapshot, .supply_chain_checks, .test, .web] |
 			all(. == false))
 	' >/dev/null; then
 		printf 'changed-path classifier fixture failed: %s plan was wrong\n' \
@@ -173,7 +174,7 @@ if ! printf '%s\n' "$fallback_actual" | jq -e '
 	.lint == true and
 	.release_snapshot == true and
 	.supply_chain_checks == true and
-	([.client, .fuzz, .generated, .headline_guarantee, .race, .test, .web] | all(. == false))
+	([.client, .fuzz, .generated, .headline_guarantee, .k8s_e2e, .race, .test, .web] | all(. == false))
 ' >/dev/null; then
 	printf 'changed-path classifier fixture failed: fallback-channel plan was wrong\n' >&2
 	printf 'actual: %s\n' "$fallback_actual" >&2
@@ -188,11 +189,59 @@ if ! printf '%s\n' "$mixed_actual" | jq -e '
 	.docs == true and
 	.release_snapshot == true and
 	.web == true and
-	([.client, .fuzz, .generated, .headline_guarantee, .lint, .race, .supply_chain_checks, .test] |
+	([.client, .fuzz, .generated, .headline_guarantee, .k8s_e2e, .lint, .race, .supply_chain_checks, .test] |
 		all(. == false))
 ' >/dev/null; then
 	printf 'changed-path classifier fixture failed: mixed plan was not a union\n' >&2
 	printf 'actual: %s\n' "$mixed_actual" >&2
+	exit 1
+fi
+
+for operator_path in \
+	'internal/operator/reconciler.go' \
+	'internal/isolation/k8s_operator_e2e_test.go'; do
+	operator_actual=$(printf '%s\n' "$operator_path" | "$classifier" --files)
+	if ! printf '%s\n' "$operator_actual" | jq -e '
+		.k8s_e2e == true and
+		.generated == true and
+		.headline_guarantee == true and
+		.fuzz == true and
+		.race == true and
+		.release_snapshot == true and
+		.test == true and
+		.web == true and
+		([.client, .docs, .lint, .supply_chain_checks] | all(. == false))
+	' >/dev/null; then
+		printf 'changed-path classifier fixture failed: %s did not select k8s_e2e\n' \
+			"$operator_path" >&2
+		printf 'actual: %s\n' "$operator_actual" >&2
+		exit 1
+	fi
+done
+
+crds_actual=$(printf '%s\n' 'chart/hikyo/crds/hikyo.dev_hikyosecrets.yaml' | "$classifier" --files)
+if ! printf '%s\n' "$crds_actual" | jq -e '
+	.k8s_e2e == true and
+	.generated == true and
+	.lint == true and
+	.release_snapshot == true and
+	.supply_chain_checks == true and
+	([.client, .docs, .fuzz, .headline_guarantee, .race, .test, .web] | all(. == false))
+' >/dev/null; then
+	printf 'changed-path classifier fixture failed: generated CRDs plan was wrong\n' >&2
+	printf 'actual: %s\n' "$crds_actual" >&2
+	exit 1
+fi
+
+k8s_runner_actual=$(printf '%s\n' 'scripts/ci/k8s-e2e.sh' | "$classifier" --files)
+if ! printf '%s\n' "$k8s_runner_actual" | jq -e '
+	.k8s_e2e == true and
+	.lint == true and
+	([.client, .docs, .fuzz, .generated, .headline_guarantee, .race, .release_snapshot, .supply_chain_checks, .test, .web] |
+		all(. == false))
+' >/dev/null; then
+	printf 'changed-path classifier fixture failed: k8s-e2e runner plan was wrong\n' >&2
+	printf 'actual: %s\n' "$k8s_runner_actual" >&2
 	exit 1
 fi
 

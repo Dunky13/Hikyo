@@ -2416,7 +2416,7 @@ var operations = map[Operation]opSpec{
 			StoreCatalogueRevisionGet:  true,
 			StoreAuditTenantInsert:     true,
 		},
-		events: []audit.EventType{audit.EventDeliveryFetched},
+		events: []audit.EventType{audit.EventDeliveryFetched, audit.EventDisclosure},
 	},
 	// --- SCIM provisioning (#73) ---------------------------------------------
 	//

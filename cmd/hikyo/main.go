@@ -16,6 +16,7 @@ import (
 	"github.com/Hikyo-Org/hikyo/internal/cli"
 	"github.com/Hikyo-Org/hikyo/internal/config"
 	"github.com/Hikyo-Org/hikyo/internal/importer"
+	"github.com/Hikyo-Org/hikyo/internal/operator"
 )
 
 // Set by GoReleaser. Development builds deliberately identify themselves as
@@ -51,6 +52,8 @@ func run() int {
 		return 0
 	case cmd == "server":
 		return runServer(ctx, args)
+	case cmd == "operator":
+		return runOperatorMode(ctx)
 	case cmd == "migrate":
 		return runMigrate(ctx, args)
 	case cmd == "admin":
@@ -102,6 +105,21 @@ func runServer(ctx context.Context, args []string) int {
 	}
 	if err := srv.Serve(ctx); err != nil {
 		log.Error("server failed", "err", err)
+		return 1
+	}
+	return 0
+}
+
+// runOperatorMode is the `hikyo operator` deployable (k8s-integration ADR): a
+// separate process, not a mode of the running server. It loads no keyring and no
+// root key — configuration is HIKYO_OPERATOR_* env only, read inside
+// internal/operator. It is a real multicall MODE, never a client verb, so it is
+// absent from app.ClientVerbs.
+func runOperatorMode(ctx context.Context) int {
+	operator.Version = version
+	log := app.Logger(false)
+	if err := operator.Run(ctx, log); err != nil {
+		log.Error("operator failed", "err", err)
 		return 1
 	}
 	return 0
@@ -170,6 +188,9 @@ func usage() {
 server commands:
   hikyo server [--dev] [--listen ADDR] [--auto-migrate=BOOL]
   hikyo migrate
+
+kubernetes operator (separate deployable; HIKYO_OPERATOR_* env only):
+  hikyo operator
 
 version:
   hikyo version

@@ -49,13 +49,20 @@ type Identity struct {
 	// CredentialID names the machine credential presented, and is empty for
 	// a human. It is the forensic answer to "which token", which is the
 	// question after a leak — one service account holds several.
-	CredentialID      string
-	Artifact          string
-	Assurance         Assurance
-	CreatedAt         time.Time
-	LastSeenAt        time.Time
-	IdleExpiresAt     time.Time
-	AbsoluteExpiresAt time.Time
+	CredentialID string
+	Artifact     string
+	// CredentialExpiresAt is the presenting MACHINE credential's expiry when it
+	// is finite, and the zero time for an indefinite credential or a human
+	// session (which has its own idle/absolute clocks instead). The delivery
+	// surface returns it so a consumer can raise the ADR's ahead-of-time
+	// expiry condition; it is read from the same credential row resolution
+	// already loaded, never a second read.
+	CredentialExpiresAt time.Time
+	Assurance           Assurance
+	CreatedAt           time.Time
+	LastSeenAt          time.Time
+	IdleExpiresAt       time.Time
+	AbsoluteExpiresAt   time.Time
 	// CSRFVerifier is the browser session's synchronizer-token verifier, nil
 	// for a CLI session. Carrying the VERIFIER (a hash) rather than the token
 	// out of the transaction is safe and lets the transport enforce the CSRF

@@ -1,0 +1,69 @@
+{{- include "hikyo.operator.validate" . -}}
+{{- if .Values.operator.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "hikyo.operator.fullname" . }}
+  labels:
+    {{- include "hikyo.labels" . | nindent 4 }}
+    app.kubernetes.io/component: operator
+spec:
+  replicas: {{ .Values.operator.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "hikyo.name" . }}-operator
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "hikyo.name" . }}-operator
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: operator
+    spec:
+      serviceAccountName: {{ include "hikyo.operator.fullname" . }}
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: operator
+          image: "{{ .Values.image.repository }}@{{ required "image.digest is required" .Values.image.digest }}"
+          imagePullPolicy: IfNotPresent
+          args: ["operator"]
+          env:
+            - name: HIKYO_OPERATOR_NAMESPACES
+              value: {{ join "," .Values.operator.namespaces | quote }}
+            - name: HIKYO_OPERATOR_TRIGGER_ROLLOUTS
+              value: {{ ternary "true" "false" .Values.operator.triggerRollouts | quote }}
+            - name: HIKYO_OPERATOR_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          ports:
+            - name: metrics
+              containerPort: 8080
+            - name: health
+              containerPort: 8081
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+          resources:
+            {{- toYaml .Values.operator.resources | nindent 12 }}
+{{- end }}

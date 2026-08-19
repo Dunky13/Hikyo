@@ -5024,6 +5024,8 @@ paths:
       - $ref: "#/components/parameters/ProjectID"
       - $ref: "#/components/parameters/EnvironmentID"
       - $ref: "#/components/parameters/DeliveryCursor"
+      - $ref: "#/components/parameters/DeliveryProjection"
+      - $ref: "#/components/parameters/DeliveryAcknowledgedKeys"
     get:
       operationId: fetchDelivery
       tags: [delivery]
@@ -5032,17 +5034,19 @@ paths:
         The machine fetch surface. Presenting a current cursor answers
         `current: true` with NO content and no key names — only a fetch that
         actually delivers values is a disclosure — and either disposition emits
-        exactly one immutable access record.
+        exactly one immutable access record, plus one immutable disclosure
+        record per delivered value.
 
         Authorization is evaluated on the conditional path EXACTLY as on the
         delivering path, so a caller who has lost `read` receives the uniform
         nonexistent response rather than "current".
 
-        Today there are no value tables, so what is delivered is the key
-        catalogue and each key's declared presence for this environment: config
-        keys and secret PRESENCE only, no plaintext anywhere. That is the surface
-        the Compose and Kubernetes integrations consume, and it is the seam the
-        value tables land behind.
+        What a key delivers is decided server-side, per key, in-transaction: a
+        `config` key carries its plaintext under `read`; a `secret` key carries
+        its plaintext under `read ∧ reveal` (or `read ∧ reveal-history` for a
+        pinned non-current revision), and otherwise arrives presence-only with
+        no value. This is the surface the Compose and Kubernetes integrations
+        consume to converge their delivery targets.
 
         Both a `hik_` bearer credential and an externally issued OIDC ID token
         authenticate here, with identical authority: a machine principal's
@@ -8504,6 +8508,40 @@ components:
       schema:
         type: string
         maxLength: 128
+    DeliveryProjection:
+      name: projection
+      in: query
+      required: false
+      description: |
+        A SERVER-SIDE AUTHORIZED TERM, never a client-side filter (k8s ADR §
+        Refresh). `config-only` omits `secret` keys from the delivery entirely
+        — not presence-only, gone — and from the manifest the change token is
+        computed over, and the mode is bound into the conditional-fetch cursor
+        so a projection change invalidates it. `full` (the default) delivers
+        every key the caller is authorized to see.
+      schema:
+        type: string
+        enum: [full, config-only]
+        default: full
+    DeliveryAcknowledgedKeys:
+      name: acknowledged_keys
+      in: query
+      required: false
+      style: form
+      explode: false
+      description: |
+        The loader-control keys the consumer explicitly acknowledges, so the
+        server's fetch audit record carries which acknowledgement was in force
+        for this delivery (k8s ADR § Loader-control). The server RECORDS it and
+        otherwise ignores it — it filters nothing and refuses nothing; the
+        loader-control refusal is enforced by the operator against its mapping,
+        which the server cannot see. Comma-separated, each item under the key
+        grammar, at most 64.
+      schema:
+        type: array
+        maxItems: 64
+        items:
+          $ref: "#/components/schemas/KeyName"
     ScimBindingID:
       name: binding
       in: path
@@ -11028,16 +11066,27 @@ components:
       additionalProperties: false
       required: [name, classification, presence]
       description: |
-        One key as the machine surface delivers it. There is deliberately NO
-        value property, and its absence is not a placeholder: no plaintext
-        crosses this surface, so the ticket that adds values has to add the
-        member deliberately.
+        One key as the machine surface delivers it. `value` is present IFF the
+        plaintext was actually delivered to this caller; its absence means
+        presence-only — the key exists and the snapshot delivers it, but this
+        caller was not authorized to receive the plaintext (a `secret` key
+        without `reveal`), so no plaintext crossed. Whether a value crosses is
+        decided server-side per key: `config` under `read`, `secret` under
+        `read ∧ reveal` (or `read ∧ reveal-history` for a pinned non-current
+        revision).
       properties:
         name:
           type: string
           maxLength: 256
         classification:
           $ref: "#/components/schemas/KeyClassification"
+        value:
+          type: string
+          maxLength: 65536
+          description: |
+            The delivered plaintext. Present ONLY when the caller was
+            authorized to receive it (see the schema description); absent for a
+            presence-only key. The maxLength matches the value-write bound.
         presence:
           type: string
           enum: [required, forbidden, optional, set]
@@ -11070,19 +11119,30 @@ components:
             BOTH dispositions so a caller told "current" can keep polling without
             re-fetching to learn its own cursor.
 
-            It is bound to four things — the change token, the caller's
-            authorized delivery projection, the principal's authorization
-            revision, and the pin generation — never to content alone. Any
-            authorization movement therefore invalidates it and produces a full
-            authorized delivery rather than a "current" answer.
+            It is bound to the change token, the caller's authorized delivery
+            projection, the principal's authorization revision, the pin
+            generation, and the projection mode — never to content alone. Any
+            authorization or projection movement therefore invalidates it and
+            produces a full authorized delivery rather than a "current" answer.
         change_token:
           type: string
           maxLength: 128
           description: |
-            The keyed delivery-manifest token, `v1:`-prefixed. Keyed rather than
-            a content digest, so it is unforgeable and un-invertible without the
-            server key and may flow into pod annotations, logs and
+            The keyed delivery-manifest token, `v1:`-prefixed. It is
+            change-detection material ONLY — the conditional-fetch cursor's
+            input — and is never itself a workload-visible value (k8s ADR §
+            Declared amendment): what reaches a pod annotation is the
+            consumer's client-side per-target keyed stamp, not this token.
+            Keyed rather than a content digest, so it is unforgeable and
+            un-invertible without the server key and may flow into logs and
             change-detection caches as ordinary non-secret metadata.
+        credential_expires_at:
+          $ref: "#/components/schemas/Timestamp"
+          description: |
+            The presenting credential's expiry when it is finite — a bearer
+            credential's `expires_at`, a federated binding's expiry. ABSENT for
+            an indefinite credential. The operator surfaces it as the ADR's
+            ahead-of-time expiry condition and event.
         schema_revision:
           type: integer
           minimum: 0
