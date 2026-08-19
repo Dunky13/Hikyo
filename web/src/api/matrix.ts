@@ -1,12 +1,10 @@
 import {
   clearValue,
   copyValues,
-  getEnvironmentSettings,
   getEnvironmentSignals,
   listKeyGroups,
   listKeys,
   listPendingDrafts,
-  listProjects,
   listValues,
   publishPendingChanges,
   setValue,
@@ -14,12 +12,10 @@ import {
 import {
   zEnvironmentSignals,
   zCopyValuesResult,
-  zEnvironmentSettings,
   zKeyGroupList,
   zKeyList,
   zPendingChange,
   zPendingDraftList,
-  zProjectList,
   zPublishResult,
   zValueList,
 } from '@hikyo/zod';
@@ -28,7 +24,10 @@ import { z } from 'zod';
 
 import { ApiError, parsed } from './client.ts';
 import { callerSafeRefusal, pinsKey, revisionsKey } from './history.ts';
-import { useEnvironments, valuesKey, type EnvRef } from './values.ts';
+import { environmentSettingsQueryOptions, useEnvironments } from './settings.ts';
+import { valuesKey } from './values.ts';
+
+export { useProjects } from './settings.ts';
 
 /**
  * Whole-project matrix API boundary.
@@ -239,30 +238,15 @@ const signalsKey = (
   environment: string,
 ): readonly [string, string, string, string] =>
   ['matrix-signals', ref.org, ref.project, environment];
-const settingsKey = (
-  ref: MatrixRef,
-  environment: string,
-): readonly [string, string, string, string] =>
-  ['matrix-settings', ref.org, ref.project, environment];
 const pendingDraftsKey = (
   ref: MatrixRef,
   environment: string,
 ): readonly [string, string, string, string] =>
   ['matrix-pending', ref.org, ref.project, environment];
 
-export function useProjects(org: string) {
-  return useQuery({
-    queryKey: ['projects', org],
-    queryFn: () => parsed(listProjects({ path: { org } }), zProjectList),
-    enabled: org !== '',
-    retry: false,
-  });
-}
-
 export function useMatrixProject(ref: MatrixRef) {
   const queries = useQueryClient();
-  const environmentRef: EnvRef = { ...ref, environment: '' };
-  const environments = useEnvironments(environmentRef);
+  const environments = useEnvironments(ref.org, ref.project);
   const keys = useQuery({
     queryKey: matrixKeysKey(ref),
     queryFn: () => parsed(listKeys({ path: ref }), zKeyList),
@@ -275,7 +259,7 @@ export function useMatrixProject(ref: MatrixRef) {
     enabled: ref.org !== '' && ref.project !== '',
     retry: false,
   });
-  const environmentItems = environments.data?.items ?? [];
+  const environmentItems = environments.data === undefined ? [] : environments.data.items;
   const values = useQueries({
     queries: environmentItems.map((environment) => ({
       queryKey: valuesKey({ ...ref, environment: environment.id }),
@@ -288,17 +272,9 @@ export function useMatrixProject(ref: MatrixRef) {
     })),
   });
   const settings = useQueries({
-    queries: environmentItems.map((environment) => ({
-      queryKey: settingsKey(ref, environment.id),
-      queryFn: () =>
-        parsed(
-          getEnvironmentSettings({
-            path: { ...ref, environment: environment.id },
-          }),
-          zEnvironmentSettings,
-        ),
-      retry: false,
-    })),
+    queries: environmentItems.map((environment) =>
+      environmentSettingsQueryOptions(ref.org, ref.project, environment.id),
+    ),
   });
   const signals = useQueries({
     queries: environmentItems.map((environment) => ({

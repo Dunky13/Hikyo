@@ -2,14 +2,18 @@ import type { ReactElement } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router';
 
 import { useSession } from '../api/session.ts';
+import { AccountSecurity } from '../routes/AccountSecurity.tsx';
 import { CLIReauth } from '../routes/CLIReauth.tsx';
+import { InstanceAdmin } from '../routes/InstanceAdmin.tsx';
 import { Login } from '../routes/Login.tsx';
 import { MachineAccess } from '../routes/MachineAccess.tsx';
 import { Matrix } from '../routes/Matrix.tsx';
+import { Members } from '../routes/Members.tsx';
+import { OrgSettings } from '../routes/OrgSettings.tsx';
 import { NotFound, Overview } from '../routes/Placeholder.tsx';
+import { ProjectSettings } from '../routes/ProjectSettings.tsx';
 import { Projects } from '../routes/Projects.tsx';
 import { Remotes } from '../routes/Remotes.tsx';
-import { Sessions } from '../routes/Sessions.tsx';
 import { Shell } from '../routes/Shell.tsx';
 import { Values } from '../routes/Values.tsx';
 import { WorkspaceApprove } from '../routes/WorkspaceApprove.tsx';
@@ -31,7 +35,11 @@ const ELEMENTS: Record<SurfaceId, ReactElement> = {
   overview: <Overview />,
   projects: <Projects />,
   remotes: <Remotes />,
-  settings: <Sessions />,
+  members: <Members />,
+  'org-settings': <OrgSettings />,
+  'project-settings': <ProjectSettings />,
+  'instance-admin': <InstanceAdmin />,
+  settings: <AccountSecurity />,
   matrix: <Matrix />,
   // The same surface with its history drawer open. The route table is the only
   // place that knows the path, so the element reads the state as a prop rather

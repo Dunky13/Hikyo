@@ -46,6 +46,12 @@ type stubAuth struct {
 
 type cliReauthAuth struct{ stubAuth }
 
+type emptyAccountReads struct{ stubAuth }
+
+func (emptyAccountReads) ListIdentities(context.Context, string) ([]service.ExternalIdentityView, error) {
+	return nil, nil
+}
+
 func (cliReauthAuth) StartCLIReauth(context.Context, string, string, string, []string, string, string) (service.CLIReauthStart, error) {
 	return service.CLIReauthStart{State: "front-channel-state", ExpiresAt: time.Date(2026, 8, 17, 4, 5, 0, 0, time.UTC)}, nil
 }
@@ -442,6 +448,20 @@ func call(t *testing.T, srv *httptest.Server, method, path, bearer string, body 
 		}
 	}
 	return resp, payload
+}
+
+func TestEmptyAccountCollectionsEncodeAsArrays(t *testing.T) {
+	srv := newTestServer(t, emptyAccountReads{}, stubOrgs{})
+
+	_, methods := call(t, srv, http.MethodGet, api.PathPrefix+"/auth/methods", "", nil)
+	if !strings.Contains(string(methods), `"providers":[]`) {
+		t.Fatalf("empty auth providers must be an array: %s", methods)
+	}
+
+	_, identities := call(t, srv, http.MethodGet, api.PathPrefix+"/auth/identities", "live", nil)
+	if !strings.Contains(string(identities), `"identities":[]`) {
+		t.Fatalf("empty external identities must be an array: %s", identities)
+	}
 }
 
 func TestCLIReauthOnlyRedeemDisclosesRotatedBearer(t *testing.T) {

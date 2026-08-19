@@ -1,5 +1,5 @@
 import AxeBuilder from '@axe-core/playwright';
-import { expect, type Locator, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 
 import { recordPinnedRun } from '../registry.ts';
 
@@ -591,7 +591,12 @@ export type PinnedSurface = {
  * teardown says so.
  */
 export async function expectPinnedAssertionSet(page: Page, surface: PinnedSurface): Promise<void> {
-  recordPinnedRun({ flow: surface.flow, surface: surface.surface, theme: surface.theme });
+  recordPinnedRun({
+    project: test.info().project.name,
+    flow: surface.flow,
+    surface: surface.surface,
+    theme: surface.theme,
+  });
 
   await expectNoSeriousAxeViolations(page);
 

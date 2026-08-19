@@ -1,13 +1,49 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 import {
-  expectColourToken,
   expectContrast,
   expectPinnedAssertionSet,
   expectStatusIsTextAndAria,
   measureSurfaceLuminance,
 } from '../fixtures/assertions.ts';
 import { ADMIN } from '../fixtures/instance.ts';
+
+async function expectLoginSurface(page: Page, theme: 'dark' | 'light') {
+  await page.emulateMedia({ colorScheme: theme });
+  await page.goto('/login');
+
+  const card = page.locator('.login__card');
+  const submit = page.getByRole('button', { name: 'Sign in' });
+  const heading = page.getByRole('heading', { name: 'Sign in to Hikyo' });
+  const lede = page.getByText('Use the credential you established');
+
+  await expectPinnedAssertionSet(page, {
+    flow: 'login',
+    surface: 'login',
+    theme,
+    text: [heading, lede],
+    radii: [
+      [card, 'container'],
+      [submit, 'control'],
+      [page.getByLabel('Username'), 'control'],
+      [page.getByLabel('Password'), 'control'],
+    ],
+    fonts: [
+      [heading, 'ui'],
+      [lede, 'ui'],
+    ],
+    colours: [
+      [heading, 'color', '--tx'],
+      [lede, 'color', '--tx-dim'],
+      [card, 'backgroundColor', '--bg-raise'],
+      [card, 'borderTopColor', '--line'],
+      [submit, 'backgroundColor', '--accent'],
+      [submit, 'color', '--on-accent'],
+    ],
+    hairlines: [card, page.getByLabel('Username')],
+    density: [[submit, '--touch']],
+  });
+}
 
 /**
  * Flow: login (registry surface `login`).
@@ -66,58 +102,13 @@ test.describe('login', () => {
     expect(JSON.stringify(stored)).not.toContain('hik_1_');
   });
 
+  // The palette is a dual-theme palette, so conformance is a dual-theme claim:
+  // the pinned set runs on the surface in both schemes.
   for (const scheme of ['dark', 'light'] as const) {
     test(`meets the pinned assertion set (${scheme})`, async ({ page }) => {
-      await page.emulateMedia({ colorScheme: scheme });
-      await page.goto('/login');
-
-      const card = page.locator('.login__card');
-      const submit = page.getByRole('button', { name: 'Sign in' });
-      const heading = page.getByRole('heading', { name: 'Sign in to Hikyo' });
-      const lede = page.getByText('Use the credential you established');
-
-      // Every interactive element is discovered and asserted; what the flow
-      // declares is only the DESIGN.md conformance that needs a name.
-      await expectPinnedAssertionSet(page, {
-        flow: 'login',
-        surface: 'login',
-        theme: scheme,
-        text: [heading, lede],
-        radii: [
-          [card, 'container'],
-          [submit, 'control'],
-          [page.getByLabel('Username'), 'control'],
-          [page.getByLabel('Password'), 'control'],
-        ],
-        fonts: [
-          [heading, 'ui'],
-          [lede, 'ui'],
-        ],
-        colours: [
-          [heading, 'color', '--tx'],
-          [lede, 'color', '--tx-dim'],
-          [card, 'backgroundColor', '--bg-raise'],
-          [card, 'borderTopColor', '--line'],
-          [submit, 'backgroundColor', '--accent'],
-          [submit, 'color', '--on-accent'],
-        ],
-        hairlines: [card, page.getByLabel('Username')],
-        density: [[submit, '--touch']],
-      });
+      await expectLoginSurface(page, scheme);
     });
   }
-
-  // The palette is a dual-theme palette, so conformance is a dual-theme claim.
-  test('matches the DESIGN.md palette in the light theme too', async ({ page }) => {
-    await page.goto('/login');
-    await page.emulateMedia({ colorScheme: 'light' });
-    const card = page.locator('.login__card');
-    const submit = page.getByRole('button', { name: 'Sign in' });
-    await expectColourToken(page, page.getByRole('heading', { name: 'Sign in to Hikyo' }), 'color', '--tx');
-    await expectColourToken(page, card, 'backgroundColor', '--bg-raise');
-    await expectColourToken(page, card, 'borderTopColor', '--line');
-    await expectColourToken(page, submit, 'backgroundColor', '--accent');
-  });
 
   test('is dark by default and follows the platform preference', async ({ page }) => {
     await page.goto('/login');

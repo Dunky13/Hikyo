@@ -25,7 +25,10 @@ func (a *API) AuthMethods(ctx context.Context, _ apigen.AuthMethodsRequestObject
 		a.fault(ctx, "auth methods", err)
 		return apigen.AuthMethods500JSONResponse{InternalJSONResponse: apigen.InternalJSONResponse(errorBody(apigen.ErrorCodeInternal, ""))}, nil
 	}
-	out := apigen.AuthMethods{LocalLoginEnabled: localEnabled}
+	out := apigen.AuthMethods{
+		LocalLoginEnabled: localEnabled,
+		Providers:         make([]apigen.AuthMethodProvider, 0, len(providers)),
+	}
 	for _, p := range providers {
 		out.Providers = append(out.Providers, apigen.AuthMethodProvider{
 			Slug: p.Slug, DisplayName: p.DisplayName, Kind: apigen.IdentityProviderKind(p.Kind),
@@ -143,7 +146,7 @@ func (a *API) ListIdentities(ctx context.Context, _ apigen.ListIdentitiesRequest
 		a.fault(ctx, "list identities", err)
 		return apigen.ListIdentities500JSONResponse{InternalJSONResponse: apigen.InternalJSONResponse(errorBody(apigen.ErrorCodeInternal, ""))}, nil
 	}
-	out := apigen.IdentityList{}
+	out := apigen.IdentityList{Identities: make([]apigen.ExternalIdentity, 0, len(rows))}
 	for _, r := range rows {
 		out.Identities = append(out.Identities, apigen.ExternalIdentity{
 			Id: r.ID, Kind: apigen.IdentityProviderKind(r.Kind), Issuer: r.Issuer,

@@ -39,6 +39,21 @@ import { ADMIN } from './instance.ts';
 
 export type Seeded = {
   org: string;
+  /** The fixture tenant's name, which the chrome surfaces render. */
+  orgName: string;
+  /**
+   * A SECOND real organisation, holding nothing.
+   *
+   * It exists so the org rail has something to switch TO and so the instance
+   * administration surface has more than one row to list. It is created and
+   * left ungranted on purpose: `listMyOrgs` projects the organisations a
+   * caller's own grants NAME, and every grant in this fixture is
+   * instance-scoped — so neither organisation appears in the bootstrap
+   * administrator's rail, and the shell flow's zero-organisation state (a
+   * locked #56 surface state) survives this ticket untouched.
+   */
+  orgB: string;
+  orgBName: string;
   project: string;
   /** The open environment: a sliding window applies. */
   dev: string;
@@ -240,16 +255,10 @@ async function signIn(): Promise<string> {
 }
 
 
-/**
- * seedTenant creates the org, project, two environments, three keys and their
- * values, and marks production protected.
- *
- * `runAdminGrant` is the break-glass local-authority verb: the bootstrap
- * administrator holds `operator` at instance scope and deliberately NO
- * disclosure capability (the permission model refuses to hand the first admin
- * secret access over every org that will ever exist), so the value authority
- * has to be granted explicitly — exactly as an operator would.
- */
+/** The two organisation names the chrome flows read off the screen. */
+export const ORG_NAME = 'Ceremonies';
+export const ORG_B_NAME = 'Wayfinder';
+
 /** REVEAL_GRANT is the instance-scope `reveal` row the write-only flow toggles. */
 export const REVEAL_GRANT = { capability: 'reveal', scope: 'instance' } as const;
 
@@ -300,6 +309,10 @@ export async function grantReveal(token: string, principal: string): Promise<voi
   });
 }
 
+/**
+ * Creates the tenant corpus and explicitly grants the bootstrap administrator
+ * only the authority each flow needs; organisation creation seeds no member.
+ */
 export async function seedTenant(
   runAdminGrant: (args: readonly string[]) => void,
 ): Promise<Seeded> {
@@ -374,7 +387,10 @@ export async function seedTenant(
   token = await consumeCode(token, uri, '/api/v1/auth/totp/step-up');
 
   const { id: org } = await call(token, 'POST', '/api/v1/orgs', zCreated, {
-    name: 'Ceremonies',
+    name: ORG_NAME,
+  });
+  const { id: orgB } = await call(token, 'POST', '/api/v1/orgs', zCreated, {
+    name: ORG_B_NAME,
   });
 
   // The federation issuer is instance-scoped configuration, so it is
@@ -780,6 +796,9 @@ export async function seedTenant(
       pinExpiresAt: pinExpiry.toISOString(),
     },
     org,
+    orgName: ORG_NAME,
+    orgB,
+    orgBName: ORG_B_NAME,
     project,
     dev,
     prod,

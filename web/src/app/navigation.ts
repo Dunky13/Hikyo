@@ -16,6 +16,10 @@ export type SurfaceId =
   | 'login'
   | 'overview'
   | 'projects'
+  | 'members'
+  | 'org-settings'
+  | 'project-settings'
+  | 'instance-admin'
   | 'settings'
   | 'matrix'
   | 'history'
@@ -38,7 +42,37 @@ export const SURFACES: readonly Surface[] = [
   { id: 'overview', path: '/', label: 'Overview', section: 'Organisation' },
   { id: 'projects', path: '/projects', label: 'Projects', section: 'Organisation' },
   { id: 'remotes', path: '/remotes', label: 'Remotes', section: 'Organisation' },
-  { id: 'settings', path: '/settings', label: 'Settings', section: 'Account' },
+  // The two org-scoped chrome surfaces (#60). Their org is ROUTE DATA, not
+  // chrome state: a members page and a settings page each administer ONE
+  // organisation, and a path that did not name it would make a deep link, a
+  // reload and a shared URL depend on which circle the rail happened to have
+  // active. They still appear in the sidebar — the rail's active organisation
+  // is what fills the parameter, and the entry is absent while there is no
+  // organisation to fill it with, which is the honest rendering of the
+  // zero-organisation state rather than a link that resolves to nothing.
+  { id: 'members', path: '/orgs/:org/members', label: 'Members', section: 'Organisation' },
+  {
+    id: 'org-settings',
+    path: '/orgs/:org/settings',
+    label: 'Organisation settings',
+    section: 'Organisation',
+  },
+  // Project settings addresses ONE project, exactly like the matrix, so no
+  // static sidebar entry could know which one to mean. It is reached from the
+  // project list and by deep link.
+  {
+    id: 'project-settings',
+    path: '/orgs/:org/projects/:project/settings',
+    label: 'Project settings',
+    section: null,
+  },
+  {
+    id: 'instance-admin',
+    path: '/instance',
+    label: 'Instance administration',
+    section: 'Instance',
+  },
+  { id: 'settings', path: '/settings', label: 'Account & security', section: 'Account' },
   // The environment matrix addresses one whole project. Like the
   // environment-scoped value surface, its org and project are route data, so
   // no static sidebar destination can point at it honestly.
@@ -99,7 +133,7 @@ export const SURFACES: readonly Surface[] = [
   { id: 'workspace-callback', path: '/workspace/callback', label: 'Returning', section: null },
 ];
 
-export type Section = {
+type Section = {
   readonly title: string;
   readonly items: readonly Surface[];
 };
@@ -107,7 +141,10 @@ export type Section = {
 /** SECTIONS is the sidebar, derived so it cannot drift from the surface list. */
 export const SECTIONS: readonly Section[] = Object.entries(
   SURFACES.filter((s) => s.section !== null).reduce<Record<string, Surface[]>>((acc, surface) => {
-    const key = surface.section ?? '';
+    if (surface.section === null) {
+      throw new Error(`navigation surface ${surface.id} lost its section`);
+    }
+    const key = surface.section;
     (acc[key] ??= []).push(surface);
     return acc;
   }, {}),
@@ -141,6 +178,16 @@ const CHROMELESS_IDS: readonly SurfaceId[] = [
 export const CHROMELESS: readonly Surface[] = SURFACES.filter((s) =>
   CHROMELESS_IDS.includes(s.id),
 );
+
+/**
+ * needsOrg reports whether a surface's path carries the active organisation.
+ *
+ * Derived from the path rather than declared beside it: a second flag is a
+ * second thing to forget, and the parameter is the fact.
+ */
+export function needsOrg(surface: Surface): boolean {
+  return surface.path.includes(':org');
+}
 
 export function surfaceById(id: SurfaceId): Surface {
   const found = SURFACES.find((s) => s.id === id);

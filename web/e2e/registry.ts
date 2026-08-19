@@ -36,7 +36,22 @@ export type Flow = {
 
 export const FLOWS: readonly Flow[] = [
   { id: 'login', spec: 'flows/login.spec.ts', surfaces: ['login'] },
-  { id: 'shell', spec: 'flows/shell.spec.ts', surfaces: ['overview', 'projects', 'settings'] },
+  // `settings` moved to the account flow when the skeleton's session list grew
+  // into the whole account & security surface (#60): the chrome flow is about
+  // navigation, and a surface with six panels of its own earns its own flow.
+  { id: 'shell', spec: 'flows/shell.spec.ts', surfaces: ['overview', 'projects'] },
+  { id: 'members', spec: 'flows/members.spec.ts', surfaces: ['members'] },
+  {
+    id: 'chrome-settings',
+    spec: 'flows/settings.spec.ts',
+    surfaces: ['org-settings', 'project-settings'],
+  },
+  { id: 'account', spec: 'flows/account.spec.ts', surfaces: ['settings'] },
+  {
+    id: 'instance-admin',
+    spec: 'flows/instance-admin.spec.ts',
+    surfaces: ['instance-admin'],
+  },
   { id: 'reveal', spec: 'flows/reveal.spec.ts', surfaces: ['values'] },
   { id: 'matrix', spec: 'flows/matrix.spec.ts', surfaces: ['matrix'] },
   { id: 'history', spec: 'flows/history.spec.ts', surfaces: ['history'] },
@@ -149,9 +164,11 @@ export function surfacesForFlow(flowID: string): readonly Surface[] {
 // are separate processes, this suite runs with `workers: 1`, and a line per
 // surface-and-theme is a few dozen bytes per run.
 //
-// CI parallelism does not change that. It shards by PROJECT, one runner each,
-// and a runner is a whole run: its own log, its own single writer, and — since
-// both projects run every flow — its own complete set of claims to check.
+// CI parallelism does not change that. It shards by VIEWPORT project, one
+// runner each (#169), so a legitimate run sees only the project recorded in
+// that shard. A combined run records both. For EVERY project that appears
+// anywhere in the log, every flow/surface/theme claim must appear for that
+// same project; one complete viewport can never conceal a partial second one.
 // ponytail: single-writer append. The shapes that would need merging are a
 // worker split (blocked by the fixture's single administrator, see
 // playwright.config.ts) and a `--shard` split of the flows, which global
@@ -160,11 +177,20 @@ export function surfacesForFlow(flowID: string): readonly Surface[] {
 export const RUN_LOG = fileURLToPath(new URL('.runs/pinned.log', import.meta.url));
 
 /** recordPinnedRun notes that the pinned set executed on one surface. */
-export function recordPinnedRun(entry: { flow: string; surface: string; theme: string }): void {
+export function recordPinnedRun(entry: {
+  project: string;
+  flow: string;
+  surface: string;
+  theme: string;
+}): void {
   mkdirSync(dirname(RUN_LOG), { recursive: true });
   // Append, not read-modify-write: every worker and every test adds to the
   // same log and none of them needs to see the others.
-  writeFileSync(RUN_LOG, `${entry.flow}\t${entry.surface}\t${entry.theme}\n`, { flag: 'a' });
+  writeFileSync(
+    RUN_LOG,
+    `${entry.project}\t${entry.flow}\t${entry.surface}\t${entry.theme}\n`,
+    { flag: 'a' },
+  );
 }
 
 /** resetRunLog empties the log so a run is never judged on a previous one's. */
@@ -179,25 +205,35 @@ export function resetRunLog(): void {
  * testable without a browser.
  */
 export function unexecutedClaims(log: string, flows: readonly ClosureCandidate[] = FLOWS): string[] {
+  const entries = log
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '')
+    .map((line) => {
+      const [project = '', flow = '', surface = '', theme = ''] = line.split('\t');
+      return { project, flow, surface, theme };
+    });
+  const projects = new Set(entries.map((entry) => entry.project).filter((project) => project !== ''));
+  if (projects.size === 0) {
+    return ['the pinned assertion run log contains no Playwright project'];
+  }
   const ran = new Set(
-    log
-      .split('\n')
-      .map((line) => line.trim())
-      .filter((line) => line !== '')
-      .map((line) => {
-        const [flow = '', surface = '', theme = ''] = line.split('\t');
-        return `${flow}/${surface}/${theme}`;
-      }),
+    entries.map(
+      (entry) => `${entry.project}/${entry.flow}/${entry.surface}/${entry.theme}`,
+    ),
   );
   const missing: string[] = [];
-  for (const flow of flows) {
-    for (const surface of flow.surfaces) {
-      for (const theme of ['dark', 'light'] as const) {
-        if (!ran.has(`${flow.id}/${surface}/${theme}`)) {
-          missing.push(
-            `flow "${flow.id}" claims surface "${surface}" but the pinned assertion set never ran ` +
-              `on it in ${theme} theme — a claim nothing executes is a claim nothing checks`,
-          );
+  for (const project of projects) {
+    for (const flow of flows) {
+      for (const surface of flow.surfaces) {
+        for (const theme of ['dark', 'light']) {
+          if (!ran.has(`${project}/${flow.id}/${surface}/${theme}`)) {
+            missing.push(
+              `project "${project}": flow "${flow.id}" claims surface "${surface}" but the ` +
+                `pinned assertion set never ran on it in the ${theme} theme — a claim nothing ` +
+                `executes is a claim nothing checks`,
+            );
+          }
         }
       }
     }

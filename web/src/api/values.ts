@@ -130,9 +130,11 @@ export function useRevealWindow(env: EnvRef): UseQueryResult<RevealWindow> {
 
 /**
  * base64url helpers. WebAuthn's JSON shapes carry binary as base64url and the
- * browser's credential API wants ArrayBuffers, so exactly one place converts.
+ * browser's credential API wants ArrayBuffers, so exactly one place converts —
+ * exported so the account-security enrolment ceremonies (#60) share it rather
+ * than growing a second, subtly different copy.
  */
-function fromBase64URL(value: string): ArrayBuffer {
+export function fromBase64URL(value: string): ArrayBuffer {
   const padded = value.replace(/-/g, '+').replace(/_/g, '/');
   const binary = atob(padded + '='.repeat((4 - (padded.length % 4)) % 4));
   // An ArrayBuffer, not a Uint8Array view: `BufferSource` wants a view over a
@@ -147,7 +149,7 @@ function fromBase64URL(value: string): ArrayBuffer {
   return buffer;
 }
 
-function toBase64URL(buffer: ArrayBuffer): string {
+export function toBase64URL(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);
   let binary = '';
   for (const byte of bytes) {

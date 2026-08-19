@@ -88,7 +88,7 @@ describe('the closed flow registry', () => {
 
 describe('surfacesForFlow', () => {
   it('resolves a flow\'s claims to the router\'s own records', () => {
-    expect(surfacesForFlow('shell').map((s) => s.id)).toEqual(['overview', 'projects', 'settings']);
+    expect(surfacesForFlow('shell').map((s) => s.id)).toEqual(['overview', 'projects']);
     expect(surfacesForFlow('login').map((s) => s.path)).toEqual(['/login']);
   });
 
@@ -107,23 +107,38 @@ describe('the execution half of closure', () => {
   // "every claim ran", so the arithmetic has to be the registry's own.
   const claims = FLOWS.flatMap((flow) => flow.surfaces.map((surface) => [flow.id, surface]));
 
-  it('is satisfied when every claim ran', () => {
+  it('is satisfied when every claim ran in both themes', () => {
     expect(
       unexecutedClaims(
-        log(...claims.flatMap(([f, s]) => [`${f}\t${s}\tdark`, `${f}\t${s}\tlight`])),
+        log(
+          ...claims.flatMap(([f, s]) => [
+            `desktop\t${f}\t${s}\tdark`,
+            `desktop\t${f}\t${s}\tlight`,
+          ]),
+        ),
       ),
     ).toEqual([]);
   });
 
-  it('fails when every surface ran in only one theme', () => {
-    const problems = unexecutedClaims(log(...claims.map(([f, s]) => `${f}\t${s}\tdark`)));
+  it('fails when only the dark-theme assertion ran', () => {
+    const problems = unexecutedClaims(
+      log(...claims.map(([f, s]) => `desktop\t${f}\t${s}\tdark`)),
+    );
     expect(problems).toHaveLength(claims.length);
-    expect(problems.every((problem) => problem.includes('in light theme'))).toBe(true);
+    expect(problems[0]).toContain('light theme');
+  });
+
+  it('fails when only the light-theme assertion ran', () => {
+    const problems = unexecutedClaims(
+      log(...claims.map(([f, s]) => `desktop\t${f}\t${s}\tlight`)),
+    );
+    expect(problems).toHaveLength(claims.length);
+    expect(problems[0]).toContain('dark theme');
   });
 
   it('fails a surface that was claimed but never asserted', () => {
     const [first = ['', '']] = claims;
-    const problems = unexecutedClaims(log(`${first[0]}\t${first[1]}\tdark`));
+    const problems = unexecutedClaims(log(`desktop\t${first[0]}\t${first[1]}\tdark`));
     expect(problems).toHaveLength(claims.length * 2 - 1);
     for (const [, surface] of claims.slice(1)) {
       expect(problems.join(' ')).toContain(
@@ -133,14 +148,30 @@ describe('the execution half of closure', () => {
   });
 
   it('fails everything when nothing ran at all', () => {
-    expect(unexecutedClaims('')).toHaveLength(claims.length * 2);
+    expect(unexecutedClaims('')).toEqual([
+      'the pinned assertion run log contains no Playwright project',
+    ]);
   });
 
   it('does not accept another flow\'s execution as this one\'s', () => {
     // `shell/overview` is not `login/login`, however similar the surface ids.
-    const problems = unexecutedClaims(log('shell\tlogin\tdark'), [
+    const problems = unexecutedClaims(log('desktop\tshell\tlogin\tdark'), [
       { id: 'login', spec: 'flows/login.spec.ts', surfaces: ['login'] },
     ]);
     expect(problems).toHaveLength(2);
+  });
+
+  it('fails every missing claim for a project that appears anywhere in a combined run', () => {
+    const completeDesktop = claims.flatMap(([f, s]) => [
+      `desktop\t${f}\t${s}\tdark`,
+      `desktop\t${f}\t${s}\tlight`,
+    ]);
+    const onlyOneMobileClaim = [`mobile\t${claims[0]?.[0]}\t${claims[0]?.[1]}\tdark`];
+
+    const problems = unexecutedClaims(log(...completeDesktop, ...onlyOneMobileClaim));
+
+    expect(problems).toHaveLength(claims.length * 2 - 1);
+    expect(problems[0]).toContain('project "mobile"');
+    expect(problems.join(' ')).not.toContain('project "desktop"');
   });
 });
