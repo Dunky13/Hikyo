@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/Hikyo-Org/hikyo/internal/authz"
 	"github.com/Hikyo-Org/hikyo/internal/crypto"
@@ -290,6 +291,8 @@ func runAuthorizationMovementInvalidatesCursor(t *testing.T, db *store.DB) {
 	seedDeliveryCatalogue(t, db)
 	del := deliverySvc(t, db)
 	ident := identitySvc(db)
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	ident.Now = func() time.Time { return now }
 	env := scopeEnv(orgA, prjA1, envA1)
 
 	// A workload service account with `read(env_a1)` and a bearer credential, so
