@@ -2,14 +2,12 @@ package compose
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
+	"reflect"
 
 	"github.com/Hikyo-Org/hikyo/internal/crypto"
 )
@@ -17,44 +15,68 @@ import (
 // Conditional-fetch cursor state (compose-integration ADR § "Cursor rules").
 //
 // The stored cursor is local state that can desynchronize from local delivery
-// state, which the server cannot see. It is presented ONLY when the three-part
-// test holds: every binding matches, every target's generation named in the
-// cursor equals the one in the managed block, and that generation is present
-// AND complete. On any failure the client performs a full authorized fetch.
-// After a reboot the tmpfs render is gone while a persistent cursor would still
-// read "current" — the three-part test is what stops the server answering
-// "current" and leaving rendering impossible.
+// state, which the server cannot see. It is presented ONLY when EVERY binding
+// field matches, the exact render-target set matches, and each target's
+// generation named in the cursor equals the managed-block stamp AND is present,
+// complete, and has its <target>.env file on disk. On any failure the client
+// performs a full authorized fetch.
+//
+// The binding is one typed struct — credential, environment, config-only mode,
+// pinned revision, authorized projection, and the canonical target→key-id
+// membership map (compose ADR § Cursor rules: "credential identity,
+// environment, pin generation, authorized delivery projection, delivery mode,
+// and the render-target id set"). Binding to the target→key-id MAP, not a flat
+// id list, is deliberate: the ADR fixes that membership is by immutable key id,
+// so a cursor must invalidate when a key moves into or out of a target, not
+// only when the flat union of ids changes.
 
 const cursorFile = "cursor.json"
 
-// CursorState is the persisted cursor plus the bindings that make it eligible.
-type CursorState struct {
-	Cursor           string            `json:"cursor"`
-	CredentialID     string            `json:"credential_id"`
-	Environment      string            `json:"environment"`
-	ConfigOnly       bool              `json:"config_only"`
-	TargetIDsHash    string            `json:"target_ids_hash"`
-	PinGeneration    string            `json:"pin_generation,omitempty"`
-	GenerationStamps map[string]string `json:"generation_stamps"`
+// CursorBinding is the full set of authorization-bound coordinates a cursor is
+// tied to. Any change to any field invalidates the cursor.
+type CursorBinding struct {
+	CredentialID   string `json:"credential_id"`
+	Environment    string `json:"environment"`
+	ConfigOnly     bool   `json:"config_only"`
+	PinnedRevision int64  `json:"pinned_revision"` // 0 = unpinned (current)
+	// Projection is the authorized delivery capability list, canonicalized.
+	Projection []string `json:"projection"`
+	// TargetKeyIDs is the render-target membership: target name → its immutable
+	// key ids. Both the key set and the target set are compared exactly.
+	TargetKeyIDs map[string][]string `json:"target_key_ids"`
 }
 
-// HashTargetIDs is a canonical, order-independent hash of the render-target id
-// set, so a cursor is invalidated when the target composition changes.
-func HashTargetIDs(ids []string) string {
-	sorted := append([]string(nil), ids...)
-	sort.Strings(sorted)
-	h := sha256.New()
-	for _, id := range sorted {
-		// length-prefixed so ("a","bc") and ("ab","c") differ.
-		var n [8]byte
-		l := len(id)
-		for i := 0; i < 8; i++ {
-			n[i] = byte(l >> (8 * (7 - i)))
-		}
-		h.Write(n[:])
-		h.Write([]byte(id))
+// canonical returns a copy with the projection and every key-id list sorted and
+// deduplicated, so equality is order- and duplicate-invariant.
+func (b CursorBinding) canonical() CursorBinding {
+	out := CursorBinding{
+		CredentialID:   b.CredentialID,
+		Environment:    b.Environment,
+		ConfigOnly:     b.ConfigOnly,
+		PinnedRevision: b.PinnedRevision,
+		Projection:     crypto.CanonicalStringSet(b.Projection),
 	}
-	return hex.EncodeToString(h.Sum(nil))
+	if b.TargetKeyIDs != nil {
+		out.TargetKeyIDs = make(map[string][]string, len(b.TargetKeyIDs))
+		for t, ids := range b.TargetKeyIDs {
+			out.TargetKeyIDs[t] = crypto.CanonicalStringSet(ids)
+		}
+	}
+	return out
+}
+
+// Equal reports whether two bindings are identical after canonicalization,
+// including the EXACT target set (an extra or missing target → not equal).
+func (b CursorBinding) Equal(other CursorBinding) bool {
+	return reflect.DeepEqual(b.canonical(), other.canonical())
+}
+
+// CursorState is the persisted cursor plus the binding that makes it eligible
+// and the per-target generation stamps the cursor was issued against.
+type CursorState struct {
+	Cursor           string            `json:"cursor"`
+	Binding          CursorBinding     `json:"binding"`
+	GenerationStamps map[string]string `json:"generation_stamps"`
 }
 
 // LoadCursor strictly parses cursor.json. A missing file returns (nil, nil):
@@ -77,8 +99,7 @@ func LoadCursor(stateDir string) (*CursorState, error) {
 }
 
 // SaveCursor writes cursor.json atomically (0600). The CLI calls it ONLY after
-// a successful, committed render — NEVER after a refused or failed one (the
-// cursor is never advanced past a render that did not happen).
+// a successful, committed render — NEVER after a refused or failed one.
 func SaveCursor(stateDir string, c CursorState) error {
 	data, err := json.Marshal(c)
 	if err != nil {
@@ -90,32 +111,56 @@ func SaveCursor(stateDir string, c CursorState) error {
 	return nil
 }
 
-// EligibleCursor returns the stored cursor and true only when it passes the
-// full three-part eligibility test against the current local delivery state.
-func EligibleCursor(state *CursorState, currentStamps map[string]string, runtimeDir, credentialID, env string, configOnly bool, targetIDs []string) (string, bool) {
+// EligibleCursor returns the stored cursor and true only when the full
+// eligibility test holds against the current local delivery state: the binding
+// matches `want` (every field and the exact target set), and for EVERY target
+// the cursor's generation equals the managed-block stamp, is present and
+// complete, and its <target>.env file exists in the generation directory.
+func EligibleCursor(state *CursorState, want CursorBinding, currentStamps map[string]string, runtimeDir string) (string, bool) {
 	if state == nil {
 		return "", false
 	}
-	// Binding checks.
-	if state.CredentialID != credentialID ||
-		state.Environment != env ||
-		state.ConfigOnly != configOnly ||
-		state.TargetIDsHash != HashTargetIDs(targetIDs) {
+	if !state.Binding.Equal(want) {
 		return "", false
 	}
-	if len(state.GenerationStamps) == 0 {
+	// The target set is authoritative from the binding. The cursor and the
+	// managed-block stamps must each cover EXACTLY those targets — no more, no
+	// fewer. The loop below proves want.TargetKeyIDs ⊆ (GenerationStamps with
+	// matching values) and want.TargetKeyIDs ⊆ (currentStamps with matching
+	// values); equal cardinality closes the other direction, so an EXTRA entry in
+	// either map (a target the cursor was not issued for) makes the sets unequal
+	// and the cursor ineligible.
+	if len(state.GenerationStamps) != len(want.TargetKeyIDs) {
 		return "", false
 	}
-	// Every target's cursor generation must equal the managed-block stamp AND
-	// that generation must be present and complete on disk.
-	for target, stamp := range state.GenerationStamps {
+	if len(currentStamps) != len(want.TargetKeyIDs) {
+		return "", false
+	}
+	// All generation checks run through ONE os.Root confined to the runtime dir,
+	// so a crafted stamp/target cannot escape and the <target>.env check is
+	// fd-relative (root.Lstat does not follow the final component: a dir or a
+	// symlink in place of the regular file is refused).
+	root, err := os.OpenRoot(runtimeDir)
+	if err != nil {
+		return "", false
+	}
+	defer root.Close()
+	for target := range want.TargetKeyIDs {
+		stamp, ok := state.GenerationStamps[target]
+		if !ok {
+			return "", false
+		}
 		if err := crypto.ParseStamp(stamp); err != nil {
 			return "", false
 		}
 		if currentStamps[target] != stamp {
 			return "", false
 		}
-		if _, complete := GenerationState(runtimeDir, stamp); !complete {
+		if _, complete := generationStateRoot(root, stamp); !complete {
+			return "", false
+		}
+		fi, err := root.Lstat(stamp + "/" + target + ".env")
+		if err != nil || !fi.Mode().IsRegular() {
 			return "", false
 		}
 	}

@@ -88,6 +88,53 @@ func TestLoadOrCreateLocalKeyRejectsShortKey(t *testing.T) {
 	}
 }
 
+// TestLoadOrCreateLocalKeyRefusesSymlinkedDir: a symlinked state dir is refused
+// even when its target is a conforming 0700 dir — os.OpenRoot follows a
+// symlinked root, so the post-open Lstat is what closes it (#9).
+func TestLoadOrCreateLocalKeyRefusesSymlinkedDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink semantics are the unix leg")
+	}
+	base := t.TempDir()
+	real := filepath.Join(base, "real")
+	if err := os.Mkdir(real, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(base, "state")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadOrCreateLocalKey(link); err == nil {
+		t.Fatal("expected refusal for a symlinked state dir")
+	}
+}
+
+// TestLoadOrCreateLocalKeyRefusesEscapingKeySymlink: local.key being a symlink
+// that points OUT of the state dir is refused by os.Root (path escapes) — the
+// platform-uniform, security-relevant symlink case. An in-root, non-escaping key
+// symlink is platform-dependent (Linux ELOOP, darwin follows) and harmless
+// inside the 0700 dir the euid owns, so it is not asserted here (#9).
+func TestLoadOrCreateLocalKeyRefusesEscapingKeySymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink semantics are the unix leg")
+	}
+	base := t.TempDir()
+	dir := filepath.Join(base, "state")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(base, "outside.key")
+	if err := os.WriteFile(outside, make([]byte, KeySize), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(dir, "local.key")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadOrCreateLocalKey(dir); err == nil {
+		t.Fatal("expected refusal for a local.key symlink escaping the state dir")
+	}
+}
+
 func TestStampShapeAndGrammar(t *testing.T) {
 	k := loadKeys(t)
 	s := k.Stamp([]byte("hello"))
@@ -118,8 +165,8 @@ func baseSnapshotAAD() SnapshotAAD {
 		ProjectID:      "prj_1",
 		EnvironmentID:  "env_1",
 		CredentialID:   "cred_1",
-		Revision:       7,
-		Pinned:         false,
+		PinnedRevision: 7,
+		ChangeToken:    "v1:manifest-token-1",
 		Projection:     []string{"read", "reveal"},
 		ConfigOnly:     false,
 		TargetNames:    []string{"api", "worker"},
@@ -128,15 +175,24 @@ func baseSnapshotAAD() SnapshotAAD {
 	}
 }
 
+func mustCanonical(t *testing.T, a SnapshotAAD) []byte {
+	t.Helper()
+	b, err := a.Canonical()
+	if err != nil {
+		t.Fatalf("Canonical: %v", err)
+	}
+	return b
+}
+
 func TestSnapshotSealOpenRoundTrip(t *testing.T) {
 	k := loadKeys(t)
-	aad := baseSnapshotAAD()
+	hdr := mustCanonical(t, baseSnapshotAAD())
 	pt := []byte(`{"rows":[]}`)
-	rec, err := k.SealSnapshot(aad, pt)
+	rec, err := k.SealSnapshot(hdr, pt)
 	if err != nil {
 		t.Fatalf("seal: %v", err)
 	}
-	got, err := k.OpenSnapshot(aad, rec)
+	got, err := k.OpenSnapshot(hdr, rec)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -145,28 +201,45 @@ func TestSnapshotSealOpenRoundTrip(t *testing.T) {
 	}
 }
 
+// Canonical() sorts and deduplicates the list fields, so an unsorted or
+// duplicate-bearing list produces byte-identical header bytes and opens.
+func TestSnapshotCanonicalIsOrderAndDupInvariant(t *testing.T) {
+	k := loadKeys(t)
+	base := baseSnapshotAAD()
+	rec, err := k.SealSnapshot(mustCanonical(t, base), []byte("p"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	permuted := base
+	permuted.TargetNames = []string{"worker", "api", "api"} // reordered + duplicate
+	permuted.Projection = []string{"reveal", "read", "reveal"}
+	if _, err := k.OpenSnapshot(mustCanonical(t, permuted), rec); err != nil {
+		t.Errorf("reordered/deduplicated lists should canonicalize identically: %v", err)
+	}
+}
+
 func TestSnapshotAADTamperTable(t *testing.T) {
 	k := loadKeys(t)
 	base := baseSnapshotAAD()
-	rec, err := k.SealSnapshot(base, []byte("payload"))
+	rec, err := k.SealSnapshot(mustCanonical(t, base), []byte("payload"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	mutations := map[string]func(*SnapshotAAD){
-		"instance":    func(a *SnapshotAAD) { a.InstanceOrigin = "https://evil.example" },
-		"org":         func(a *SnapshotAAD) { a.OrgID = "org_2" },
-		"project":     func(a *SnapshotAAD) { a.ProjectID = "prj_2" },
-		"environment": func(a *SnapshotAAD) { a.EnvironmentID = "env_2" },
-		"credential":  func(a *SnapshotAAD) { a.CredentialID = "cred_2" },
-		"revision":    func(a *SnapshotAAD) { a.Revision = 8 },
-		"pinned":      func(a *SnapshotAAD) { a.Pinned = true },
-		"projection":  func(a *SnapshotAAD) { a.Projection = []string{"read"} },
-		"config_only": func(a *SnapshotAAD) { a.ConfigOnly = true },
-		"targets":     func(a *SnapshotAAD) { a.TargetNames = []string{"api"} },
-		"issued_at":   func(a *SnapshotAAD) { a.IssuedAt = "2026-08-19T10:00:01Z" },
-		"expires_at":  func(a *SnapshotAAD) { a.ExpiresAt = "2026-08-27T10:00:00Z" },
+		"instance":     func(a *SnapshotAAD) { a.InstanceOrigin = "https://evil.example" },
+		"org":          func(a *SnapshotAAD) { a.OrgID = "org_2" },
+		"project":      func(a *SnapshotAAD) { a.ProjectID = "prj_2" },
+		"environment":  func(a *SnapshotAAD) { a.EnvironmentID = "env_2" },
+		"credential":   func(a *SnapshotAAD) { a.CredentialID = "cred_2" },
+		"revision":     func(a *SnapshotAAD) { a.PinnedRevision = 8 },
+		"change_token": func(a *SnapshotAAD) { a.ChangeToken = "v1:manifest-token-2" },
+		"projection":   func(a *SnapshotAAD) { a.Projection = []string{"read"} },
+		"config_only":  func(a *SnapshotAAD) { a.ConfigOnly = true },
+		"targets":      func(a *SnapshotAAD) { a.TargetNames = []string{"api"} },
+		"issued_at":    func(a *SnapshotAAD) { a.IssuedAt = "2026-08-19T10:00:01Z" },
+		"expires_at":   func(a *SnapshotAAD) { a.ExpiresAt = "2026-08-27T10:00:00Z" },
 		// Injectivity across the list boundary: moving an element between the
-		// two adjacent list fields must NOT decrypt.
+		// two list fields must NOT decrypt.
 		"list-shift": func(a *SnapshotAAD) {
 			a.Projection = []string{"read", "reveal", "api"}
 			a.TargetNames = []string{"worker"}
@@ -174,11 +247,10 @@ func TestSnapshotAADTamperTable(t *testing.T) {
 	}
 	for name, mut := range mutations {
 		tampered := base
-		// copy slices so mutation does not alias base
 		tampered.Projection = append([]string(nil), base.Projection...)
 		tampered.TargetNames = append([]string(nil), base.TargetNames...)
 		mut(&tampered)
-		if _, err := k.OpenSnapshot(tampered, rec); !errors.Is(err, ErrDecrypt) {
+		if _, err := k.OpenSnapshot(mustCanonical(t, tampered), rec); !errors.Is(err, ErrDecrypt) {
 			t.Errorf("mutation %q: OpenSnapshot err = %v, want ErrDecrypt", name, err)
 		}
 	}
@@ -187,11 +259,38 @@ func TestSnapshotAADTamperTable(t *testing.T) {
 func TestSnapshotWrongKeyFails(t *testing.T) {
 	k1 := loadKeys(t)
 	k2 := loadKeys(t)
-	rec, err := k1.SealSnapshot(baseSnapshotAAD(), []byte("x"))
+	hdr := mustCanonical(t, baseSnapshotAAD())
+	rec, err := k1.SealSnapshot(hdr, []byte("x"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := k2.OpenSnapshot(baseSnapshotAAD(), rec); !errors.Is(err, ErrDecrypt) {
+	if _, err := k2.OpenSnapshot(hdr, rec); !errors.Is(err, ErrDecrypt) {
 		t.Errorf("cross-key open err = %v, want ErrDecrypt", err)
+	}
+}
+
+func TestSnapshotContextMatches(t *testing.T) {
+	base := baseSnapshotAAD()
+	ctx := SnapshotContext{
+		InstanceOrigin: base.InstanceOrigin, OrgID: base.OrgID, ProjectID: base.ProjectID,
+		EnvironmentID: base.EnvironmentID, CredentialID: base.CredentialID,
+		ConfigOnly: base.ConfigOnly, TargetNames: []string{"worker", "api"}, // unsorted set
+	}
+	if err := base.ContextMatches(ctx); err != nil {
+		t.Errorf("matching context rejected: %v", err)
+	}
+	for _, bad := range []func(*SnapshotContext){
+		func(c *SnapshotContext) { c.EnvironmentID = "env_2" },
+		func(c *SnapshotContext) { c.CredentialID = "cred_2" },
+		func(c *SnapshotContext) { c.ConfigOnly = true },
+		func(c *SnapshotContext) { c.TargetNames = []string{"api"} },
+		func(c *SnapshotContext) { c.TargetNames = []string{"api", "worker", "extra"} },
+	} {
+		bc := ctx
+		bc.TargetNames = append([]string(nil), ctx.TargetNames...)
+		bad(&bc)
+		if err := base.ContextMatches(bc); err == nil {
+			t.Error("mismatched context accepted")
+		}
 	}
 }

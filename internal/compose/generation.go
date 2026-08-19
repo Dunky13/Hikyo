@@ -21,6 +21,11 @@ import (
 // ordering between "write the values" and "write the stamp" to get wrong. The
 // single mutable artifact is the stamp file, committed by one atomic rename.
 //
+// The writer lock is not a convention but an unforgeable guard: BeginRender
+// returns a *RenderLock, and WriteGeneration / CommitStamps / Recover / GC are
+// methods on it. A caller cannot mutate the runtime dir without holding the
+// lock, because there is no other way to reach those verbs.
+//
 // DECISIONS taken here (brief-sanctioned, documented per the ADR's request):
 //   - The stamp variables live in a managed block of <project dir>/.env
 //     (Compose auto-loads only that file for interpolation), delimited by the
@@ -28,9 +33,10 @@ import (
 //   - Foreign lines are preserved byte-for-byte including their line endings
 //     (LF or CRLF). The managed block's OWN lines are always written with LF —
 //     it is generated, not hand-edited.
-//   - Target name → variable: upper-snake, with '-' mapped to '_'. Target names
-//     match ^[a-z][a-z0-9-]*$ so '_' in the variable can only have come from a
-//     '-', making the reverse mapping unambiguous.
+//   - One generation directory per TARGET per content: a render writes
+//     <runtimeDir>/<stamp>/<target>.env, where <stamp> keys that target's
+//     content. Every write/read under the runtime dir goes through an os.Root
+//     confined to it, so a crafted stamp or target cannot escape the tree.
 
 const (
 	managedBegin = "# >>> hikyo compose (managed, do not edit) >>>"
@@ -51,17 +57,31 @@ const (
 	// crypto.Stamp's own "hikyo-stamp-v1\x00" prefix.
 	targetContentDomain = "hikyo-target-content-v1\x00"
 
+	// targetSep separates the target name from the content in a stamp's canonical
+	// input. The target grammar (targetNameGrammar) admits no NUL byte, so the
+	// FIRST NUL after targetContentDomain splits (target, content) unambiguously —
+	// two distinct (target, content) pairs cannot collide into the same bytes.
+	targetSep = "\x00"
+
 	// DefaultGenerationsKept is the retention beyond the current stamp
 	// (ops-spec § 6: current + previous 3).
 	DefaultGenerationsKept = 3
 )
 
-// TargetStamp is the stamp over one target's rendered content: the canonical
-// per-target-content encoding fed to the keyed stamp. Keep the two domain
-// prefixes in their two layers — this one here, crypto.Stamp's inside.
-func TargetStamp(keys *crypto.LocalKeys, content []byte) string {
-	buf := make([]byte, 0, len(targetContentDomain)+len(content))
+// TargetStamp is the stamp over one target's rendered content, BOUND to the
+// target name: the canonical input is
+// "hikyo-target-content-v1\x00" + target + "\x00" + content, fed to the keyed
+// stamp. Binding the name is why two DIFFERENT targets that happen to render
+// byte-identical content still get DIFFERENT stamps (and thus different
+// generation directories) — without it, the second target would find the first
+// target's complete directory and fail to re-verify its own absent
+// <target>.env. Keep the two domain prefixes in their two layers — this one
+// here, crypto.Stamp's inside.
+func TargetStamp(keys *crypto.LocalKeys, target string, content []byte) string {
+	buf := make([]byte, 0, len(targetContentDomain)+len(target)+len(targetSep)+len(content))
 	buf = append(buf, targetContentDomain...)
+	buf = append(buf, target...)
+	buf = append(buf, targetSep...)
 	buf = append(buf, content...)
 	return keys.Stamp(buf)
 }
@@ -81,14 +101,14 @@ func targetFromVar(v string) (string, bool) {
 
 // Probe is the crash seam (mirrors service.DeliveryConformanceProbe). Production
 // leaves it nil; tests inject an error to simulate a crash at a deterministic
-// point and assert the recovery invariant.
+// durability boundary and assert the recovery invariant.
 type Probe interface {
+	AfterGenerationDirCreated(stamp string) error
 	BeforeGenerationComplete(stamp string) error
 	BeforeStampRename() error
 }
 
-// Writer owns a per-project state directory and serializes render/sync/adopt
-// through the writer lock.
+// Writer owns a per-project state directory and mints RenderLocks.
 type Writer struct {
 	stateDir string
 	probe    Probe
@@ -99,10 +119,25 @@ func NewWriter(stateDir string, probe Probe) *Writer {
 	return &Writer{stateDir: stateDir, probe: probe}
 }
 
-// BeginRender takes the non-blocking per-project writer lock. A second holder
-// fails fast — a crash releases the lock (the OS drops it on process death),
-// unlike an O_EXCL lock file that would wedge forever.
-func (w *Writer) BeginRender() (unlock func(), err error) {
+// RenderLock is the held writer lock and the capability to mutate the runtime
+// dir and the stamp file. It is returned by BeginRender and released by Close.
+type RenderLock struct {
+	w          *Writer
+	projectDir string
+	fl         *flock.Flock
+	closed     bool
+}
+
+// errLockReleased is returned by every RenderLock verb — including a second
+// Close — once the lock has been released: the capability is spent and using it
+// would mutate the runtime dir without holding the serialization it stands for.
+var errLockReleased = errors.New("compose: render lock already released")
+
+// BeginRender takes the non-blocking per-project writer lock and returns a
+// handle scoped to projectDir (whose managed .env block is the stamp file). A
+// second holder fails fast — a crash releases the lock (the OS drops it on
+// process death), unlike an O_EXCL lock file that would wedge forever.
+func (w *Writer) BeginRender(projectDir string) (*RenderLock, error) {
 	fl := flock.New(filepath.Join(w.stateDir, lockName))
 	locked, err := fl.TryLock()
 	if err != nil {
@@ -118,77 +153,155 @@ func (w *Writer) BeginRender() (unlock func(), err error) {
 		_ = fl.Unlock()
 		return nil, fmt.Errorf("compose: chmod lock file: %w", err)
 	}
-	return func() { _ = fl.Unlock() }, nil
+	return &RenderLock{w: w, projectDir: projectDir, fl: fl}, nil
 }
 
-// WriteGeneration writes an immutable generation directory <runtimeDir>/<stamp>/
-// holding one <target>.env per entry (0600), fsynced, then a .complete marker
-// written LAST. An existing COMPLETE directory is a no-op (content is identical
-// by construction — the stamp keys the content). An existing INCOMPLETE one is
-// a torn write: it is removed and rewritten.
-func (w *Writer) WriteGeneration(runtimeDir, stamp string, files map[string][]byte) error {
-	if err := crypto.ParseStamp(stamp); err != nil {
-		return fmt.Errorf("compose: refusing to write generation: %w", err)
+// Close releases the writer lock. A second Close is refused, not a silent
+// double-unlock.
+func (rl *RenderLock) Close() error {
+	if rl.closed {
+		return errLockReleased
 	}
-	genDir := filepath.Join(runtimeDir, stamp)
+	rl.closed = true
+	return rl.fl.Unlock()
+}
 
-	present, complete := GenerationState(runtimeDir, stamp)
-	if present && complete {
-		return nil
+// WriteGeneration writes an immutable generation directory
+// <runtimeDir>/<stamp>/ holding one <target>.env (0600), fsynced, then a
+// .complete marker written LAST, where <stamp> is computed here as
+// TargetStamp(keys, content) — never supplied by the caller. The target name is
+// grammar-validated and all I/O is directory-relative under an os.Root, so a
+// crafted target or stamp cannot escape the runtime dir. It returns the stamp.
+//
+// An existing COMPLETE directory is re-verified: its <target>.env bytes must
+// re-stamp to the same name (immutable-by-construction), else it is a hard
+// error, not a silent trust or overwrite. An existing INCOMPLETE one is a torn
+// write: removed and rewritten.
+func (rl *RenderLock) WriteGeneration(runtimeDir string, keys *crypto.LocalKeys, target string, content []byte) (string, error) {
+	if rl.closed {
+		return "", errLockReleased
 	}
-	if present && !complete {
-		if err := os.RemoveAll(genDir); err != nil {
-			return fmt.Errorf("compose: remove incomplete generation %s: %w", stamp, err)
-		}
+	if !targetNameGrammar.MatchString(target) {
+		return "", fmt.Errorf("compose: refusing to write generation: invalid target name %q", target)
 	}
+	stamp := TargetStamp(keys, target, content)
+	envName := target + ".env"
+
 	if err := os.MkdirAll(runtimeDir, 0o700); err != nil {
-		return fmt.Errorf("compose: create runtime dir: %w", err)
+		return "", fmt.Errorf("compose: create runtime dir: %w", err)
+	}
+	// The runtime dir itself must not be a symlink: os.OpenRoot below confines
+	// lookups WITHIN the root but follows a symlinked root path, and the Chmod
+	// would follow it too. Lstat the final component and refuse a symlink before
+	// touching it; all further I/O then goes through the os.Root.
+	if li, err := os.Lstat(runtimeDir); err != nil {
+		return "", fmt.Errorf("compose: lstat runtime dir: %w", err)
+	} else if li.Mode()&os.ModeSymlink != 0 {
+		return "", fmt.Errorf("compose: runtime dir %s is a symlink; refusing", runtimeDir)
 	}
 	// Explicit 0700, not umask-dependent (ADR § Where plaintext lives).
 	if err := os.Chmod(runtimeDir, 0o700); err != nil {
-		return fmt.Errorf("compose: chmod runtime dir: %w", err)
+		return "", fmt.Errorf("compose: chmod runtime dir: %w", err)
 	}
-	if err := os.Mkdir(genDir, 0o700); err != nil {
-		return fmt.Errorf("compose: create generation dir: %w", err)
+	root, err := os.OpenRoot(runtimeDir)
+	if err != nil {
+		return "", fmt.Errorf("compose: open runtime dir: %w", err)
 	}
-	if err := os.Chmod(genDir, 0o700); err != nil {
-		return fmt.Errorf("compose: chmod generation dir: %w", err)
-	}
+	defer root.Close()
 
-	// Deterministic order so the directory fsync sees a stable set.
-	names := make([]string, 0, len(files))
-	for t := range files {
-		names = append(names, t)
+	present, complete := generationStateRoot(root, stamp)
+	if present && complete {
+		existing, err := root.ReadFile(stamp + "/" + envName)
+		if err != nil {
+			return "", fmt.Errorf("compose: re-verify generation %s: %w", stamp, err)
+		}
+		if TargetStamp(keys, target, existing) != stamp {
+			return "", fmt.Errorf("compose: existing generation %s content does not match its stamp; refusing", stamp)
+		}
+		return stamp, nil
 	}
-	sort.Strings(names)
-	for _, t := range names {
-		fp := filepath.Join(genDir, t+".env")
-		if err := writeFileFsync(fp, files[t], 0o600); err != nil {
-			return fmt.Errorf("compose: write %s.env: %w", t, err)
+	if present && !complete {
+		if err := root.RemoveAll(stamp); err != nil {
+			return "", fmt.Errorf("compose: remove incomplete generation %s: %w", stamp, err)
 		}
 	}
-	if err := fsyncDir(genDir); err != nil {
-		return fmt.Errorf("compose: fsync generation dir: %w", err)
+	if err := root.Mkdir(stamp, 0o700); err != nil {
+		return "", fmt.Errorf("compose: create generation dir: %w", err)
+	}
+	if err := root.Chmod(stamp, 0o700); err != nil {
+		return "", fmt.Errorf("compose: chmod generation dir: %w", err)
+	}
+	if err := writeFileFsyncRoot(root, stamp+"/"+envName, content, 0o600); err != nil {
+		return "", fmt.Errorf("compose: write %s: %w", envName, err)
+	}
+	if err := fsyncRootPath(root, stamp); err != nil {
+		return "", fmt.Errorf("compose: fsync generation dir: %w", err)
 	}
 
-	// Crash seam: a failure here leaves the directory present-but-incomplete,
-	// which Recover/GC collect and no cursor accepts.
-	if w.probe != nil {
-		if err := w.probe.BeforeGenerationComplete(stamp); err != nil {
-			return err
+	// Crash seam: the generation dir exists but the runtime dir entry is not yet
+	// fsynced. Recover/GC collect it and no cursor accepts it.
+	if rl.w.probe != nil {
+		if err := rl.w.probe.AfterGenerationDirCreated(stamp); err != nil {
+			return "", err
 		}
 	}
-	if err := writeFileFsync(filepath.Join(genDir, completeMarker), nil, 0o600); err != nil {
-		return fmt.Errorf("compose: write completion marker: %w", err)
+	// Make the generation directory ENTRY durable in the runtime dir before the
+	// stamp rename that will reference it (ADR § Generations, atomicity).
+	if err := fsyncRootPath(root, "."); err != nil {
+		return "", fmt.Errorf("compose: fsync runtime dir: %w", err)
 	}
-	if err := fsyncDir(genDir); err != nil {
-		return fmt.Errorf("compose: fsync generation dir after marker: %w", err)
+
+	// Crash seam: a failure here leaves the directory present-but-incomplete.
+	if rl.w.probe != nil {
+		if err := rl.w.probe.BeforeGenerationComplete(stamp); err != nil {
+			return "", err
+		}
 	}
-	return nil
+	if err := writeFileFsyncRoot(root, stamp+"/"+completeMarker, nil, 0o600); err != nil {
+		return "", fmt.Errorf("compose: write completion marker: %w", err)
+	}
+	if err := fsyncRootPath(root, stamp); err != nil {
+		return "", fmt.Errorf("compose: fsync generation dir after marker: %w", err)
+	}
+	return stamp, nil
+}
+
+// writeFileFsyncRoot writes name relative to root (truncating), chmods to perm
+// explicitly (umask-independent), and fsyncs the file.
+func writeFileFsyncRoot(root *os.Root, name string, data []byte, perm os.FileMode) error {
+	f, err := root.OpenFile(name, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, perm)
+	if err != nil {
+		return err
+	}
+	if err := f.Chmod(perm); err != nil {
+		f.Close()
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
+}
+
+// generationStateRoot reports presence/completeness of a stamp dir under root.
+func generationStateRoot(root *os.Root, stamp string) (present, complete bool) {
+	if _, err := root.Stat(stamp); err != nil {
+		return false, false
+	}
+	if _, err := root.Stat(stamp + "/" + completeMarker); err != nil {
+		return true, false
+	}
+	return true, true
 }
 
 // GenerationState reports whether a generation directory is present and whether
-// it carries its completion marker.
+// it carries its completion marker. It is a read-only check used by doctor and
+// the cursor over a resolved, absolute runtime dir.
 func GenerationState(runtimeDir, stamp string) (present, complete bool) {
 	genDir := filepath.Join(runtimeDir, stamp)
 	if _, err := os.Stat(genDir); err != nil {
@@ -202,29 +315,42 @@ func GenerationState(runtimeDir, stamp string) (present, complete bool) {
 
 // CommitStamps rewrites the managed block of <projectDir>/.env with the given
 // per-target stamps and atomically renames it into place — the single commit
-// point. Every non-managed line is preserved byte-for-byte; the file may not
-// exist yet.
-func (w *Writer) CommitStamps(projectDir string, stamps map[string]string) error {
+// point. The existing file is validated as carrying exactly one well-formed
+// managed block BEFORE any rewrite; every non-managed line is preserved
+// byte-for-byte; the file's mode and ownership are preserved (never widened),
+// and a file that does not exist yet is created 0600.
+func (rl *RenderLock) CommitStamps(stamps map[string]string) error {
+	if rl.closed {
+		return errLockReleased
+	}
 	for t, s := range stamps {
 		if err := crypto.ParseStamp(s); err != nil {
 			return fmt.Errorf("compose: refusing to commit stamp for %q: %w", t, err)
 		}
 	}
-	envPath := filepath.Join(projectDir, ".env")
+	envPath := filepath.Join(rl.projectDir, ".env")
 	raw, err := os.ReadFile(envPath)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("compose: read .env: %w", err)
 	}
-	next := spliceManagedBlock(raw, renderManagedBlock(stamps))
+	// Validate the existing managed block is well-formed (single, no duplicate
+	// markers/variables, terminated) before touching anything.
+	if _, err := parseManagedBlock(raw); err != nil {
+		return err
+	}
+	next, err := spliceManagedBlock(raw, renderManagedBlock(stamps))
+	if err != nil {
+		return err
+	}
 
 	// Crash seam: before the rename, .env still names the OLD stamps, and the
 	// old generation is intact — values and stamp never disagree.
-	if w.probe != nil {
-		if err := w.probe.BeforeStampRename(); err != nil {
+	if rl.w.probe != nil {
+		if err := rl.w.probe.BeforeStampRename(); err != nil {
 			return err
 		}
 	}
-	if err := atomicWrite(envPath, next, 0o644); err != nil {
+	if err := atomicWriteEnv(envPath, next); err != nil {
 		return fmt.Errorf("compose: commit stamp file: %w", err)
 	}
 	return nil
@@ -253,24 +379,84 @@ func renderManagedBlock(stamps map[string]string) []byte {
 	return []byte(b.String())
 }
 
-// spliceManagedBlock replaces an existing managed block in raw with block, or
-// appends block. Foreign lines keep their exact bytes and terminators.
-func spliceManagedBlock(raw, block []byte) []byte {
-	lines := splitKeepEnds(raw)
-	begin, end := -1, -1
+// locateManagedBlock finds THE single managed block in lines, refusing
+// duplicate markers, a nested block, an end without a begin, and an
+// unterminated block. Returns begin/end line indices, or (-1,-1) when absent.
+func locateManagedBlock(lines [][]byte) (begin, end int, err error) {
+	begin, end = -1, -1
 	for i, ln := range lines {
 		switch trimLineEnd(ln) {
 		case managedBegin:
-			if begin == -1 {
-				begin = i
-			}
-		case managedEnd:
 			if begin != -1 && end == -1 {
-				end = i
+				return -1, -1, fmt.Errorf("compose: nested hikyo managed block in .env (line %d)", i+1)
 			}
+			if begin != -1 {
+				return -1, -1, fmt.Errorf("compose: duplicate hikyo managed block in .env (line %d)", i+1)
+			}
+			begin = i
+		case managedEnd:
+			if begin == -1 {
+				return -1, -1, fmt.Errorf("compose: hikyo managed-block end without a begin in .env (line %d)", i+1)
+			}
+			if end != -1 {
+				return -1, -1, fmt.Errorf("compose: duplicate hikyo managed-block end in .env (line %d)", i+1)
+			}
+			end = i
 		}
 	}
-	if begin != -1 && end != -1 && end >= begin {
+	if begin != -1 && end == -1 {
+		return -1, -1, errors.New("compose: unterminated hikyo managed block in .env")
+	}
+	return begin, end, nil
+}
+
+// parseManagedBlock validates and parses the managed block into a target→stamp
+// map. A malformed structure, a duplicate variable, an unknown variable, or a
+// malformed stamp is a HARD ERROR — never a default. No block yields an empty map.
+func parseManagedBlock(raw []byte) (map[string]string, error) {
+	lines := splitKeepEnds(raw)
+	begin, end, err := locateManagedBlock(lines)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]string{}
+	if begin == -1 {
+		return out, nil
+	}
+	for _, ln := range lines[begin+1 : end] {
+		content := trimLineEnd(ln)
+		if content == "" {
+			continue
+		}
+		key, val, ok := strings.Cut(content, "=")
+		if !ok {
+			return nil, fmt.Errorf("compose: malformed managed line %q in .env", content)
+		}
+		target, ok := targetFromVar(key)
+		if !ok {
+			return nil, fmt.Errorf("compose: unexpected variable %q in managed block", key)
+		}
+		if _, dup := out[target]; dup {
+			return nil, fmt.Errorf("compose: duplicate variable %q in managed block", key)
+		}
+		if err := crypto.ParseStamp(val); err != nil {
+			return nil, fmt.Errorf("compose: %w", err)
+		}
+		out[target] = val
+	}
+	return out, nil
+}
+
+// spliceManagedBlock replaces the single managed block in raw with block, or
+// appends block. Foreign lines keep their exact bytes and terminators. It
+// returns an error if raw's managed block is malformed.
+func spliceManagedBlock(raw, block []byte) ([]byte, error) {
+	lines := splitKeepEnds(raw)
+	begin, end, err := locateManagedBlock(lines)
+	if err != nil {
+		return nil, err
+	}
+	if begin != -1 && end != -1 {
 		var out []byte
 		for _, ln := range lines[:begin] {
 			out = append(out, ln...)
@@ -279,7 +465,7 @@ func spliceManagedBlock(raw, block []byte) []byte {
 		for _, ln := range lines[end+1:] {
 			out = append(out, ln...)
 		}
-		return out
+		return out, nil
 	}
 	// Not present: append. Ensure a separating newline if the file does not end
 	// with one.
@@ -287,7 +473,7 @@ func spliceManagedBlock(raw, block []byte) []byte {
 	if len(out) > 0 && out[len(out)-1] != '\n' {
 		out = append(out, '\n')
 	}
-	return append(out, block...)
+	return append(out, block...), nil
 }
 
 // splitKeepEnds splits into lines each INCLUDING its trailing '\n' (the last
@@ -316,8 +502,8 @@ func trimLineEnd(line []byte) string {
 }
 
 // CurrentStamps parses the managed block of <projectDir>/.env into a
-// target→stamp map. Each stamp is grammar-checked; a malformed stamp is a HARD
-// ERROR, never a default. A file with no managed block yields an empty map.
+// target→stamp map, with the same strict validation as parseManagedBlock. A
+// file with no managed block yields an empty map.
 func CurrentStamps(projectDir string) (map[string]string, error) {
 	raw, err := os.ReadFile(filepath.Join(projectDir, ".env"))
 	if err != nil {
@@ -326,54 +512,33 @@ func CurrentStamps(projectDir string) (map[string]string, error) {
 		}
 		return nil, fmt.Errorf("compose: read .env: %w", err)
 	}
-	out := map[string]string{}
-	inBlock := false
-	for _, ln := range splitKeepEnds(raw) {
-		content := trimLineEnd(ln)
-		switch content {
-		case managedBegin:
-			inBlock = true
-			continue
-		case managedEnd:
-			inBlock = false
-			continue
-		}
-		if !inBlock {
-			continue
-		}
-		key, val, ok := strings.Cut(content, "=")
-		if !ok {
-			return nil, fmt.Errorf("compose: malformed managed line %q in .env", content)
-		}
-		target, ok := targetFromVar(key)
-		if !ok {
-			return nil, fmt.Errorf("compose: unexpected variable %q in managed block", key)
-		}
-		if err := crypto.ParseStamp(val); err != nil {
-			return nil, fmt.Errorf("compose: %w", err)
-		}
-		out[target] = val
-	}
-	return out, nil
+	return parseManagedBlock(raw)
 }
 
 // Recover removes torn generation directories — those lacking their completion
-// marker — under runtimeDir. It must be called under the writer lock.
-func (w *Writer) Recover(runtimeDir string) error {
-	entries, err := os.ReadDir(runtimeDir)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
-		return fmt.Errorf("compose: recover: %w", err)
+// marker — under runtimeDir. Every top-level entry must be a valid stamp
+// directory; a foreign entry is a hard error naming it. It is a method on the
+// held lock, so it can only run under serialization.
+func (rl *RenderLock) Recover(runtimeDir string) error {
+	if rl.closed {
+		return errLockReleased
 	}
+	root, entries, err := openRuntimeEntries(runtimeDir)
+	if err != nil || root == nil {
+		return err
+	}
+	defer root.Close()
 	for _, e := range entries {
-		if !e.IsDir() {
-			continue
+		name := e.Name()
+		if err := crypto.ParseStamp(name); err != nil {
+			return fmt.Errorf("compose: refusing to recover: foreign entry %q under runtime dir %s", name, runtimeDir)
 		}
-		if _, complete := GenerationState(runtimeDir, e.Name()); !complete {
-			if err := os.RemoveAll(filepath.Join(runtimeDir, e.Name())); err != nil {
-				return fmt.Errorf("compose: recover remove %s: %w", e.Name(), err)
+		if !e.IsDir() {
+			return fmt.Errorf("compose: refusing to recover: stamp-named entry %q under runtime dir %s is not a directory", name, runtimeDir)
+		}
+		if _, complete := generationStateRoot(root, name); !complete {
+			if err := root.RemoveAll(name); err != nil {
+				return fmt.Errorf("compose: recover remove %s: %w", name, err)
 			}
 		}
 	}
@@ -381,21 +546,28 @@ func (w *Writer) Recover(runtimeDir string) error {
 }
 
 // GC removes generation directories not named by any current stamp beyond the
-// `keep` most recent (by mtime). It NEVER removes a current generation, and it
-// removes INCOMPLETE directories regardless of age (torn writes are
-// unreferenced). Must be called under the writer lock.
-func (w *Writer) GC(runtimeDir string, currentStamps map[string]string, keep int) error {
+// `keep` most recent (by mtime). Current stamps are derived by reading the
+// managed block itself, not trusted from a caller. It NEVER removes a current
+// generation, removes INCOMPLETE directories regardless of age, and errors on a
+// foreign entry. It is a method on the held lock.
+func (rl *RenderLock) GC(runtimeDir string, keep int) error {
+	if rl.closed {
+		return errLockReleased
+	}
+	currentStamps, err := CurrentStamps(rl.projectDir)
+	if err != nil {
+		return err
+	}
 	current := make(map[string]struct{}, len(currentStamps))
 	for _, s := range currentStamps {
 		current[s] = struct{}{}
 	}
-	entries, err := os.ReadDir(runtimeDir)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
-		return fmt.Errorf("compose: gc: %w", err)
+
+	root, entries, err := openRuntimeEntries(runtimeDir)
+	if err != nil || root == nil {
+		return err
 	}
+	defer root.Close()
 
 	type gen struct {
 		name  string
@@ -403,16 +575,18 @@ func (w *Writer) GC(runtimeDir string, currentStamps map[string]string, keep int
 	}
 	var superseded []gen
 	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
 		name := e.Name()
+		if err := crypto.ParseStamp(name); err != nil {
+			return fmt.Errorf("compose: refusing to gc: foreign entry %q under runtime dir %s", name, runtimeDir)
+		}
+		if !e.IsDir() {
+			return fmt.Errorf("compose: refusing to gc: stamp-named entry %q under runtime dir %s is not a directory", name, runtimeDir)
+		}
 		if _, isCurrent := current[name]; isCurrent {
 			continue // never collect a current generation
 		}
-		if _, complete := GenerationState(runtimeDir, name); !complete {
-			// Incomplete and not current: remove regardless of age.
-			if err := os.RemoveAll(filepath.Join(runtimeDir, name)); err != nil {
+		if _, complete := generationStateRoot(root, name); !complete {
+			if err := root.RemoveAll(name); err != nil {
 				return fmt.Errorf("compose: gc remove incomplete %s: %w", name, err)
 			}
 			continue
@@ -423,15 +597,38 @@ func (w *Writer) GC(runtimeDir string, currentStamps map[string]string, keep int
 		}
 		superseded = append(superseded, gen{name: name, mtime: info.ModTime().UnixNano()})
 	}
-	// Keep the `keep` most recent superseded generations; remove the rest.
 	sort.Slice(superseded, func(i, j int) bool { return superseded[i].mtime > superseded[j].mtime })
 	for i, g := range superseded {
 		if i < keep {
 			continue
 		}
-		if err := os.RemoveAll(filepath.Join(runtimeDir, g.name)); err != nil {
+		if err := root.RemoveAll(g.name); err != nil {
 			return fmt.Errorf("compose: gc remove %s: %w", g.name, err)
 		}
 	}
 	return nil
+}
+
+// openRuntimeEntries opens runtimeDir as an os.Root and lists its top-level
+// entries. A missing runtime dir returns (nil, nil, nil) — nothing to do.
+func openRuntimeEntries(runtimeDir string) (*os.Root, []os.DirEntry, error) {
+	root, err := os.OpenRoot(runtimeDir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil, nil
+		}
+		return nil, nil, fmt.Errorf("compose: open runtime dir: %w", err)
+	}
+	d, err := root.Open(".")
+	if err != nil {
+		root.Close()
+		return nil, nil, fmt.Errorf("compose: open runtime dir: %w", err)
+	}
+	entries, err := d.ReadDir(-1)
+	d.Close()
+	if err != nil {
+		root.Close()
+		return nil, nil, fmt.Errorf("compose: list runtime dir: %w", err)
+	}
+	return root, entries, nil
 }

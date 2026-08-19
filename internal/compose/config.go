@@ -38,6 +38,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -153,6 +154,13 @@ func (c *Config) validate() error {
 	}
 	if len(c.Targets) == 0 {
 		return fmt.Errorf("hikyo-compose.yaml: at least one target is required under `targets`")
+	}
+	// runtime_dir is optional (the CLI resolves a default per ops-spec § 6);
+	// when set it MUST be absolute, because env_file resolves relative to the
+	// compose file and plaintext must land at a known tmpfs path, never a
+	// git-worktree-relative one.
+	if c.RuntimeDir != "" && !filepath.IsAbs(c.RuntimeDir) {
+		return fmt.Errorf("hikyo-compose.yaml: `runtime_dir` %q must be an absolute path", c.RuntimeDir)
 	}
 	for name, tgt := range c.Targets {
 		if !targetNameGrammar.MatchString(name) {

@@ -3,8 +3,11 @@
 package crypto
 
 import (
+	"crypto/rand"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 )
 
 // The Windows leg. POSIX mode bits and euid ownership have no direct
@@ -15,30 +18,54 @@ import (
 // Windows security APIs and belongs with the ticket that ships a supported
 // Windows client.
 
-func ensureSecureDir(dir string) error {
-	info, err := os.Stat(dir)
-	if os.IsNotExist(err) {
+func loadOrCreateMasterKey(dir string) ([]byte, error) {
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
-			return fmt.Errorf("crypto: create state dir %s: %w", dir, err)
+			return nil, fmt.Errorf("crypto: create state dir %s: %w", dir, err)
 		}
-		return nil
+	} else if err != nil {
+		return nil, fmt.Errorf("crypto: stat state dir %s: %w", dir, err)
 	}
-	if err != nil {
-		return fmt.Errorf("crypto: stat state dir %s: %w", dir, err)
-	}
-	if !info.IsDir() {
-		return fmt.Errorf("crypto: state path %s exists but is not a directory", dir)
-	}
-	return nil
-}
+	path := filepath.Join(dir, localKeyName)
 
-func checkSecureFile(f *os.File) error {
-	info, err := f.Stat()
-	if err != nil {
-		return fmt.Errorf("crypto: stat %s: %w", f.Name(), err)
+	f, err := os.OpenFile(path, os.O_RDONLY, 0)
+	switch {
+	case err == nil:
+		defer f.Close()
+		key := make([]byte, KeySize)
+		if _, err := io.ReadFull(f, key); err != nil {
+			return nil, fmt.Errorf("crypto: read %s: %w", path, err)
+		}
+		if extra, _ := f.Read(make([]byte, 1)); extra != 0 {
+			return nil, fmt.Errorf("crypto: %s is not a %d-byte local key", path, KeySize)
+		}
+		return key, nil
+	case os.IsNotExist(err):
+		key := make([]byte, KeySize)
+		if _, err := io.ReadFull(rand.Reader, key); err != nil {
+			return nil, fmt.Errorf("crypto: randomness unavailable, refusing to create local key: %w", err)
+		}
+		w, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err != nil {
+			Zero(key)
+			return nil, fmt.Errorf("crypto: create %s: %w", path, err)
+		}
+		if _, err := w.Write(key); err != nil {
+			w.Close()
+			Zero(key)
+			return nil, fmt.Errorf("crypto: write %s: %w", path, err)
+		}
+		if err := w.Sync(); err != nil {
+			w.Close()
+			Zero(key)
+			return nil, fmt.Errorf("crypto: fsync %s: %w", path, err)
+		}
+		if err := w.Close(); err != nil {
+			Zero(key)
+			return nil, fmt.Errorf("crypto: close %s: %w", path, err)
+		}
+		return key, nil
+	default:
+		return nil, fmt.Errorf("crypto: open %s: %w", path, err)
 	}
-	if !info.Mode().IsRegular() {
-		return fmt.Errorf("crypto: %s is not a regular file", f.Name())
-	}
-	return nil
 }
