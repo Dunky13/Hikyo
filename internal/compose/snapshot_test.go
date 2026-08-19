@@ -13,7 +13,7 @@ func snapAAD(issued, expires string) crypto.SnapshotAAD {
 	return crypto.SnapshotAAD{
 		InstanceOrigin: "https://hikyo.example",
 		OrgID:          "org_1", ProjectID: "prj_1", EnvironmentID: "env_1",
-		CredentialID: "cred_1", PinnedRevision: 3, ChangeToken: "v1:manifest-token",
+		CredentialID: "cred_1", CredentialFingerprint: "fp_1", PinnedRevision: 3, ChangeToken: "v1:manifest-token",
 		Projection: []string{"read", "reveal"}, ConfigOnly: false,
 		TargetNames: []string{"api"},
 		IssuedAt:    issued, ExpiresAt: expires,
@@ -25,7 +25,7 @@ func snapCtx() crypto.SnapshotContext {
 	return crypto.SnapshotContext{
 		InstanceOrigin: "https://hikyo.example",
 		OrgID:          "org_1", ProjectID: "prj_1", EnvironmentID: "env_1",
-		CredentialID: "cred_1", ConfigOnly: false,
+		CredentialFingerprint: "fp_1", ConfigOnly: false,
 		TargetNames: []string{"api"},
 	}
 }

@@ -8554,9 +8554,13 @@ components:
       in: query
       required: false
       description: |
-        Requests the distinct config-only authorized projection. The mode is
-        bound into the cursor while the change token remains over the full
-        environment manifest.
+        Requests the distinct config-only authorized projection: `config` keys
+        are delivered with their value; `secret` keys are delivered
+        PRESENCE-ONLY (`presence: set`, no value) rather than omitted, because
+        `read` already confers that they exist and delivering their presence
+        keeps a projected-out secret distinguishable from a deleted key. The
+        mode is bound into the cursor while the change token remains over the
+        full environment manifest.
       schema:
         type: boolean
         default: false
@@ -11087,6 +11091,9 @@ components:
         One key as the machine surface delivers it. Config rows carry value;
         secret rows carry value only when the caller's projection admits the
         served revision, otherwise presence remains visible without plaintext.
+        Under the config-only projection a secret is delivered PRESENCE-ONLY
+        (`presence: set`, no value) — not omitted — so a projected-out secret
+        stays distinguishable from a deleted key.
       properties:
         key_id:
           $ref: "#/components/schemas/ID"

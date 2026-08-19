@@ -145,10 +145,30 @@ func runDeliveryCursorRoundTrip(t *testing.T, db *store.DB) {
 	if configOnly.ChangeToken != first.ChangeToken {
 		t.Fatal("config-only changed the full-manifest change token")
 	}
+	// Config-only delivers config keys with a value and secrets PRESENCE-ONLY
+	// (presence set, no value): read already confers presence, and delivering it
+	// keeps a projected-out secret distinguishable from a deleted key (R1-7).
+	sawSecretPresence := false
 	for _, key := range configOnly.Keys {
-		if key.Classification != string(schema.Config) {
+		if key.Presence != delivery.PresenceSet {
+			t.Fatalf("config-only key %s presence = %q, want set", key.Name, key.Presence)
+		}
+		switch key.Classification {
+		case string(schema.Config):
+			if key.Value == nil {
+				t.Fatalf("config-only omitted the value of config key %s", key.Name)
+			}
+		case string(schema.Secret):
+			if key.Value != nil {
+				t.Fatalf("config-only delivered the VALUE of secret key %s; want presence-only", key.Name)
+			}
+			sawSecretPresence = true
+		default:
 			t.Fatalf("config-only delivered %s key %s", key.Classification, key.Name)
 		}
+	}
+	if !sawSecretPresence {
+		t.Fatal("config-only did not deliver any secret as presence-only; the projected-out secret must still be visible as presence")
 	}
 	configCurrent, err := del.FetchAsMode(t.Context(), caller, env, configOnly.Cursor, true)
 	if err != nil || !configCurrent.Current {

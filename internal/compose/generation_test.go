@@ -72,7 +72,7 @@ func TestWriteGenerationAndState(t *testing.T) {
 	if p, c := GenerationState(rt, stamp); p || c {
 		t.Fatal("state should be absent before write")
 	}
-	got, err := rl.WriteGeneration(rt, keys, "api", []byte("API=1\n"))
+	got, _, err := rl.WriteGeneration(rt, keys, "api", []byte("API=1\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestWriteGenerationAndState(t *testing.T) {
 		t.Fatalf("api.env = %q err=%v", b, err)
 	}
 	// Re-write is a no-op (idempotent; content re-stamps to the same name).
-	if _, err := rl.WriteGeneration(rt, keys, "api", []byte("API=1\n")); err != nil {
+	if _, _, err := rl.WriteGeneration(rt, keys, "api", []byte("API=1\n")); err != nil {
 		t.Fatalf("idempotent rewrite: %v", err)
 	}
 }
@@ -97,7 +97,7 @@ func TestWriteGenerationRejectsBadTarget(t *testing.T) {
 	keys := testKeys(t)
 	rl := begin(t, t.TempDir(), nil)
 	for _, bad := range []string{"../evil", "API", "a/b", "", ".."} {
-		if _, err := rl.WriteGeneration(rt, keys, bad, []byte("x")); err == nil {
+		if _, _, err := rl.WriteGeneration(rt, keys, bad, []byte("x")); err == nil {
 			t.Errorf("WriteGeneration(%q) accepted an invalid target name", bad)
 		}
 	}
@@ -109,7 +109,7 @@ func TestWriteGenerationExistingMismatch(t *testing.T) {
 	_, rt := dirs(t)
 	keys := testKeys(t)
 	rl := begin(t, t.TempDir(), nil)
-	stamp, err := rl.WriteGeneration(rt, keys, "api", []byte("API=1\n"))
+	stamp, _, err := rl.WriteGeneration(rt, keys, "api", []byte("API=1\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +117,7 @@ func TestWriteGenerationExistingMismatch(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(rt, stamp, "api.env"), []byte("API=EVIL\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := rl.WriteGeneration(rt, keys, "api", []byte("API=1\n")); err == nil {
+	if _, _, err := rl.WriteGeneration(rt, keys, "api", []byte("API=1\n")); err == nil {
 		t.Fatal("expected a hard error re-verifying tampered generation content")
 	}
 }
@@ -153,7 +153,7 @@ func TestCrashAfterDirCreatedLeavesUnreferenced(t *testing.T) {
 	keys := testKeys(t)
 	rl := begin(t, t.TempDir(), errProbe{failAfterCreate: true})
 	stamp := TargetStamp(keys, "api", []byte("x"))
-	if _, err := rl.WriteGeneration(rt, keys, "api", []byte("x")); err == nil {
+	if _, _, err := rl.WriteGeneration(rt, keys, "api", []byte("x")); err == nil {
 		t.Fatal("expected injected error")
 	}
 	if p, c := GenerationState(rt, stamp); !p || c {
@@ -172,7 +172,7 @@ func TestCrashBeforeCompleteLeavesUnreferenced(t *testing.T) {
 	keys := testKeys(t)
 	rl := begin(t, t.TempDir(), errProbe{failComplete: true})
 	stamp := TargetStamp(keys, "api", []byte("x"))
-	if _, err := rl.WriteGeneration(rt, keys, "api", []byte("x")); err == nil {
+	if _, _, err := rl.WriteGeneration(rt, keys, "api", []byte("x")); err == nil {
 		t.Fatal("expected injected error")
 	}
 	if p, c := GenerationState(rt, stamp); !p || c {
@@ -384,7 +384,7 @@ func TestWriteGenerationDirModes(t *testing.T) {
 	rl := begin(t, t.TempDir(), nil)
 	old := setUmask(0o177)
 	defer setUmask(old)
-	stamp, err := rl.WriteGeneration(rt, keys, "api", []byte("x"))
+	stamp, _, err := rl.WriteGeneration(rt, keys, "api", []byte("x"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -448,7 +448,7 @@ func TestGCKeepsCurrentPlusThree(t *testing.T) {
 	// Six complete generations of target "api" with increasing mtime.
 	stamps := make([]string, 6)
 	for i := range stamps {
-		s, err := rl.WriteGeneration(rt, keys, "api", []byte{byte('a' + i)})
+		s, _, err := rl.WriteGeneration(rt, keys, "api", []byte{byte('a' + i)})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -479,7 +479,7 @@ func TestGCRemovesIncompleteRegardlessOfAge(t *testing.T) {
 	keys := testKeys(t)
 	rl := begin(t, t.TempDir(), errProbe{failComplete: true})
 	torn := TargetStamp(keys, "api", []byte("torn"))
-	_, _ = rl.WriteGeneration(rt, keys, "api", []byte("torn")) // fails at marker
+	_, _, _ = rl.WriteGeneration(rt, keys, "api", []byte("torn")) // fails at marker
 	old := time.Unix(1, 0)
 	_ = os.Chtimes(filepath.Join(rt, torn), old, old)
 
@@ -513,11 +513,11 @@ func TestTwoTargetsSameContentDistinctGenerations(t *testing.T) {
 	rl := begin(t, t.TempDir(), nil)
 	content := []byte("SHARED=1\n")
 
-	sApi, err := rl.WriteGeneration(rt, keys, "api", content)
+	sApi, _, err := rl.WriteGeneration(rt, keys, "api", content)
 	if err != nil {
 		t.Fatal(err)
 	}
-	sWorker, err := rl.WriteGeneration(rt, keys, "worker", content)
+	sWorker, _, err := rl.WriteGeneration(rt, keys, "worker", content)
 	if err != nil {
 		t.Fatalf("second target with identical content must render: %v", err)
 	}
@@ -531,10 +531,10 @@ func TestTwoTargetsSameContentDistinctGenerations(t *testing.T) {
 		t.Fatalf("worker.env = %q err=%v", b, err)
 	}
 	// Idempotent re-render of each still verifies against its own directory.
-	if _, err := rl.WriteGeneration(rt, keys, "api", content); err != nil {
+	if _, _, err := rl.WriteGeneration(rt, keys, "api", content); err != nil {
 		t.Fatalf("api re-render: %v", err)
 	}
-	if _, err := rl.WriteGeneration(rt, keys, "worker", content); err != nil {
+	if _, _, err := rl.WriteGeneration(rt, keys, "worker", content); err != nil {
 		t.Fatalf("worker re-render: %v", err)
 	}
 }
@@ -556,7 +556,7 @@ func TestWriteGenerationRefusesSymlinkedRuntimeDir(t *testing.T) {
 	}
 	keys := testKeys(t)
 	rl := begin(t, t.TempDir(), nil)
-	if _, err := rl.WriteGeneration(link, keys, "api", []byte("x")); err == nil {
+	if _, _, err := rl.WriteGeneration(link, keys, "api", []byte("x")); err == nil {
 		t.Fatal("WriteGeneration must refuse a symlinked runtime dir")
 	}
 }
@@ -568,7 +568,7 @@ func TestWriteGenerationAcceptsExistingPlainRuntimeDir(t *testing.T) {
 	}
 	keys := testKeys(t)
 	rl := begin(t, t.TempDir(), nil)
-	if _, err := rl.WriteGeneration(rt, keys, "api", []byte("x")); err != nil {
+	if _, _, err := rl.WriteGeneration(rt, keys, "api", []byte("x")); err != nil {
 		t.Fatalf("WriteGeneration with existing plain runtime dir: %v", err)
 	}
 	info, err := os.Stat(rt)
@@ -601,7 +601,7 @@ func TestRenderLockRefusedAfterClose(t *testing.T) {
 	if err := lock.Close(); !errors.Is(err, errLockReleased) {
 		t.Errorf("second Close err = %v, want errLockReleased", err)
 	}
-	if _, err := lock.WriteGeneration(rt, keys, "api", []byte("x")); !errors.Is(err, errLockReleased) {
+	if _, _, err := lock.WriteGeneration(rt, keys, "api", []byte("x")); !errors.Is(err, errLockReleased) {
 		t.Errorf("WriteGeneration after Close err = %v, want errLockReleased", err)
 	}
 	if err := lock.CommitStamps(map[string]string{"api": TargetStamp(keys, "api", []byte("x"))}); !errors.Is(err, errLockReleased) {

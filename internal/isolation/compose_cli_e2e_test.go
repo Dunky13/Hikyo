@@ -404,6 +404,44 @@ func TestComposeCLISyncBlastRadiusSQLite(t *testing.T) {
 	}
 }
 
+// TestComposeCLISyncRematerializesWipedRuntime: a reboot loses the tmpfs runtime
+// dir while the committed .env still points at the same stamp. The next sync
+// re-materialises that generation (unchanged stamp) and MUST re-apply through
+// docker up — the env_file vanished with the tmpfs and the stack is running
+// against nothing (R1-10). `docker compose up -d` is idempotent on an unchanged
+// config hash, so a needless up is harmless; a skipped one is a broken stack.
+func TestComposeCLISyncRematerializesWipedRuntimeSQLite(t *testing.T) {
+	rig := bootComposeRig(t, store.EngineSQLite)
+	_, tokenFile := rig.mintWorkload(t)
+	work := t.TempDir()
+	runtimeDir := tmpfsRuntimeDir(t)
+	writeRenderConfig(t, work, rig.origin, runtimeDir)
+
+	// Render once so the stack is materialized; nothing is published afterward, so
+	// the stamp will not move on its own.
+	if code, _, stderr := rig.runCLI(t, work, nil, "compose", "render", "--token-file", tokenFile); code != cli.ExitOK {
+		t.Fatalf("render exit=%d; stderr=%s", code, stderr)
+	}
+
+	// Simulate the reboot: the tmpfs runtime dir is gone, the committed .env is
+	// not.
+	if err := os.RemoveAll(runtimeDir); err != nil {
+		t.Fatal(err)
+	}
+
+	docker, dockerLog := fakeDockerRecording(t, runtimeDir)
+	code, _, stderr := rig.runCLIDocker(t, work, docker, "compose", "sync", "--token-file", tokenFile)
+	if code != cli.ExitOK {
+		t.Fatalf("sync after wipe exit=%d; stderr=%s", code, stderr)
+	}
+	if !strings.Contains(stderr, "rendered api generation v1-") {
+		t.Fatalf("sync did not report the re-materialised generation as moved: %s", stderr)
+	}
+	if log := readFile(t, dockerLog); !strings.Contains(log, "compose up -d") {
+		t.Fatalf("sync did not re-apply the wiped stack through docker up: %q", log)
+	}
+}
+
 // TestComposeCLISyncApplyPendingRetry: a sync whose `docker compose up -d` FAILS
 // leaves an apply-pending marker, so the NEXT sync — even with nothing to move —
 // retries the apply and, on success, clears the marker (finding 10).

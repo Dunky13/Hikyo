@@ -171,32 +171,36 @@ func (rl *RenderLock) Close() error {
 // .complete marker written LAST, where <stamp> is computed here as
 // TargetStamp(keys, content) — never supplied by the caller. The target name is
 // grammar-validated and all I/O is directory-relative under an os.Root, so a
-// crafted target or stamp cannot escape the runtime dir. It returns the stamp.
+// crafted target or stamp cannot escape the runtime dir. It returns the stamp
+// and whether it MATERIALISED the generation on disk (wrote it because the
+// directory was absent or incomplete). A re-materialisation with an unchanged
+// stamp is what tells `sync` to re-apply after a wiped tmpfs (R1-10): the config
+// hash did not move, but the env_file vanished and must be recreated.
 //
 // An existing COMPLETE directory is re-verified: its <target>.env bytes must
 // re-stamp to the same name (immutable-by-construction), else it is a hard
 // error, not a silent trust or overwrite. An existing INCOMPLETE one is a torn
 // write: removed and rewritten.
-func (rl *RenderLock) WriteGeneration(runtimeDir string, keys *crypto.LocalKeys, target string, content []byte) (string, error) {
+func (rl *RenderLock) WriteGeneration(runtimeDir string, keys *crypto.LocalKeys, target string, content []byte) (string, bool, error) {
 	if rl.closed {
-		return "", errLockReleased
+		return "", false, errLockReleased
 	}
 	if !targetNameGrammar.MatchString(target) {
-		return "", fmt.Errorf("compose: refusing to write generation: invalid target name %q", target)
+		return "", false, fmt.Errorf("compose: refusing to write generation: invalid target name %q", target)
 	}
 	stamp := TargetStamp(keys, target, content)
 	envName := target + ".env"
 
 	parent, err := os.OpenRoot(filepath.Dir(runtimeDir))
 	if err != nil {
-		return "", fmt.Errorf("compose: open runtime dir parent: %w", err)
+		return "", false, fmt.Errorf("compose: open runtime dir parent: %w", err)
 	}
 	defer parent.Close()
 	base := filepath.Base(runtimeDir)
 	created := false
 	if err := parent.Mkdir(base, 0o700); err != nil {
 		if !errors.Is(err, os.ErrExist) {
-			return "", fmt.Errorf("compose: create runtime dir: %w", err)
+			return "", false, fmt.Errorf("compose: create runtime dir: %w", err)
 		}
 	} else {
 		created = true
@@ -207,87 +211,87 @@ func (rl *RenderLock) WriteGeneration(runtimeDir string, keys *crypto.LocalKeys,
 	// call created; existing entries go directly through the identity checks.
 	if created {
 		if err := parent.Chmod(base, 0o700); err != nil {
-			return "", fmt.Errorf("compose: bootstrap runtime dir mode %s: %w", runtimeDir, err)
+			return "", false, fmt.Errorf("compose: bootstrap runtime dir mode %s: %w", runtimeDir, err)
 		}
 	}
 	info, err := parent.Lstat(base)
 	if err != nil {
-		return "", fmt.Errorf("compose: lstat runtime dir %s: %w", runtimeDir, err)
+		return "", false, fmt.Errorf("compose: lstat runtime dir %s: %w", runtimeDir, err)
 	}
 	if !info.IsDir() {
-		return "", fmt.Errorf("compose: runtime dir %s is not a directory; refusing", runtimeDir)
+		return "", false, fmt.Errorf("compose: runtime dir %s is not a directory; refusing", runtimeDir)
 	}
 	root, err := parent.OpenRoot(base)
 	if err != nil {
-		return "", fmt.Errorf("compose: open runtime dir %s: %w", runtimeDir, err)
+		return "", false, fmt.Errorf("compose: open runtime dir %s: %w", runtimeDir, err)
 	}
 	defer root.Close()
 	st, err := root.Stat(".")
 	if err != nil {
-		return "", fmt.Errorf("compose: stat opened runtime dir %s: %w", runtimeDir, err)
+		return "", false, fmt.Errorf("compose: stat opened runtime dir %s: %w", runtimeDir, err)
 	}
 	if !os.SameFile(info, st) {
-		return "", fmt.Errorf("compose: runtime dir %s was swapped while opening; refusing", runtimeDir)
+		return "", false, fmt.Errorf("compose: runtime dir %s was swapped while opening; refusing", runtimeDir)
 	}
 	if err := root.Chmod(".", 0o700); err != nil {
-		return "", fmt.Errorf("compose: chmod runtime dir %s: %w", runtimeDir, err)
+		return "", false, fmt.Errorf("compose: chmod runtime dir %s: %w", runtimeDir, err)
 	}
 
 	present, complete := generationStateRoot(root, stamp)
 	if present && complete {
 		existing, err := root.ReadFile(stamp + "/" + envName)
 		if err != nil {
-			return "", fmt.Errorf("compose: re-verify generation %s: %w", stamp, err)
+			return "", false, fmt.Errorf("compose: re-verify generation %s: %w", stamp, err)
 		}
 		if TargetStamp(keys, target, existing) != stamp {
-			return "", fmt.Errorf("compose: existing generation %s content does not match its stamp; refusing", stamp)
+			return "", false, fmt.Errorf("compose: existing generation %s content does not match its stamp; refusing", stamp)
 		}
-		return stamp, nil
+		return stamp, false, nil
 	}
 	if present && !complete {
 		if err := root.RemoveAll(stamp); err != nil {
-			return "", fmt.Errorf("compose: remove incomplete generation %s: %w", stamp, err)
+			return "", false, fmt.Errorf("compose: remove incomplete generation %s: %w", stamp, err)
 		}
 	}
 	if err := root.Mkdir(stamp, 0o700); err != nil {
-		return "", fmt.Errorf("compose: create generation dir: %w", err)
+		return "", false, fmt.Errorf("compose: create generation dir: %w", err)
 	}
 	if err := root.Chmod(stamp, 0o700); err != nil {
-		return "", fmt.Errorf("compose: chmod generation dir: %w", err)
+		return "", false, fmt.Errorf("compose: chmod generation dir: %w", err)
 	}
 	if err := writeFileFsyncRoot(root, stamp+"/"+envName, content, 0o600); err != nil {
-		return "", fmt.Errorf("compose: write %s: %w", envName, err)
+		return "", false, fmt.Errorf("compose: write %s: %w", envName, err)
 	}
 	if err := fsyncRootPath(root, stamp); err != nil {
-		return "", fmt.Errorf("compose: fsync generation dir: %w", err)
+		return "", false, fmt.Errorf("compose: fsync generation dir: %w", err)
 	}
 
 	// Crash seam: the generation dir exists but the runtime dir entry is not yet
 	// fsynced. Recover/GC collect it and no cursor accepts it.
 	if rl.w.probe != nil {
 		if err := rl.w.probe.AfterGenerationDirCreated(stamp); err != nil {
-			return "", err
+			return "", false, err
 		}
 	}
 	// Make the generation directory ENTRY durable in the runtime dir before the
 	// stamp rename that will reference it (ADR § Generations, atomicity).
 	if err := fsyncRootPath(root, "."); err != nil {
-		return "", fmt.Errorf("compose: fsync runtime dir: %w", err)
+		return "", false, fmt.Errorf("compose: fsync runtime dir: %w", err)
 	}
 
 	// Crash seam: a failure here leaves the directory present-but-incomplete.
 	if rl.w.probe != nil {
 		if err := rl.w.probe.BeforeGenerationComplete(stamp); err != nil {
-			return "", err
+			return "", false, err
 		}
 	}
 	if err := writeFileFsyncRoot(root, stamp+"/"+completeMarker, nil, 0o600); err != nil {
-		return "", fmt.Errorf("compose: write completion marker: %w", err)
+		return "", false, fmt.Errorf("compose: write completion marker: %w", err)
 	}
 	if err := fsyncRootPath(root, stamp); err != nil {
-		return "", fmt.Errorf("compose: fsync generation dir after marker: %w", err)
+		return "", false, fmt.Errorf("compose: fsync generation dir after marker: %w", err)
 	}
-	return stamp, nil
+	return stamp, true, nil
 }
 
 // writeFileFsyncRoot writes name relative to root (truncating), chmods to perm

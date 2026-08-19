@@ -2385,6 +2385,9 @@ type DeclareValuesRequest struct {
 // DeliveredKey One key as the machine surface delivers it. Config rows carry value;
 // secret rows carry value only when the caller's projection admits the
 // served revision, otherwise presence remains visible without plaintext.
+// Under the config-only projection a secret is delivered PRESENCE-ONLY
+// (`presence: set`, no value) — not omitted — so a projected-out secret
+// stays distinguishable from a deleted key.
 type DeliveredKey struct {
 	// Classification Classification IS the sensitivity boundary. A matrix row is uniformly
 	// secret or config; it changes only through the reclassification
@@ -5491,9 +5494,13 @@ type FetchDeliveryParams struct {
 	// serve and compares.
 	Cursor *DeliveryCursor `form:"cursor,omitempty" json:"cursor,omitempty"`
 
-	// ConfigOnly Requests the distinct config-only authorized projection. The mode is
-	// bound into the cursor while the change token remains over the full
-	// environment manifest.
+	// ConfigOnly Requests the distinct config-only authorized projection: `config` keys
+	// are delivered with their value; `secret` keys are delivered
+	// PRESENCE-ONLY (`presence: set`, no value) rather than omitted, because
+	// `read` already confers that they exist and delivering their presence
+	// keeps a projected-out secret distinguishable from a deleted key. The
+	// mode is bound into the cursor while the change token remains over the
+	// full environment manifest.
 	ConfigOnly *DeliveryConfigOnly `form:"config_only,omitempty" json:"config_only,omitempty"`
 }
 

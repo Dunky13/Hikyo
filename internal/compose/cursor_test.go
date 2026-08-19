@@ -33,7 +33,7 @@ func buildEligible(t *testing.T, runtime string) (CursorState, CursorBinding, ma
 	t.Helper()
 	k := testKeys(t)
 	rl := begin(t, t.TempDir(), nil)
-	stamp, err := rl.WriteGeneration(runtime, k, "api", []byte("api-content"))
+	stamp, _, err := rl.WriteGeneration(runtime, k, "api", []byte("api-content"))
 	if err != nil {
 		t.Fatal(err)
 	}

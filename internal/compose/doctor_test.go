@@ -72,7 +72,7 @@ func fullyHealthyInput(t *testing.T) DoctorInput {
 	runtime := filepath.Join(t.TempDir(), "runtime")
 	keys := testKeys(t)
 	rl := begin(t, t.TempDir(), nil)
-	stamp, err := rl.WriteGeneration(runtime, keys, "api", []byte("content"))
+	stamp, _, err := rl.WriteGeneration(runtime, keys, "api", []byte("content"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,11 +108,11 @@ func TestDoctorPrefixCollisionTargets(t *testing.T) {
 	runtime := filepath.Join(t.TempDir(), "runtime")
 	keys := testKeys(t)
 	rl := begin(t, t.TempDir(), nil)
-	sApi, err := rl.WriteGeneration(runtime, keys, "api", []byte("a"))
+	sApi, _, err := rl.WriteGeneration(runtime, keys, "api", []byte("a"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	sSrv, err := rl.WriteGeneration(runtime, keys, "api-server", []byte("b"))
+	sSrv, _, err := rl.WriteGeneration(runtime, keys, "api-server", []byte("b"))
 	if err != nil {
 		t.Fatal(err)
 	}

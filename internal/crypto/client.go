@@ -132,8 +132,19 @@ type SnapshotAAD struct {
 	OrgID          string `json:"org_id"`
 	ProjectID      string `json:"project_id"`
 	EnvironmentID  string `json:"environment_id"`
-	CredentialID   string `json:"credential_id"`
-	ConfigOnly     bool   `json:"config_only"`
+	// CredentialID is the server-asserted credential id. It is authenticated
+	// metadata (bound into the AAD, returned to the caller for the offline
+	// records' credential_id) but is NOT part of SnapshotContext: it is a mutable
+	// on-disk value the box could rewrite, so it supplies no offline expectation.
+	CredentialID string `json:"credential_id"`
+	// CredentialFingerprint is the LOCAL, offline-derivable identity of the
+	// credential the snapshot was fetched with — hex(sha256(domain ‖ token)). The
+	// CLI recomputes it from the PRESENTED token at load and ContextMatches
+	// refuses the snapshot by name if it differs, so a rotated token cannot serve
+	// the old snapshot even fully offline (nothing mutable on disk supplies the
+	// expectation — the presented token does).
+	CredentialFingerprint string `json:"credential_fingerprint"`
+	ConfigOnly            bool   `json:"config_only"`
 	// TargetNames is the render-target id set.
 	TargetNames []string `json:"target_names"`
 	// PinnedRevision is the resolved historical revision when the snapshot was
@@ -158,18 +169,21 @@ type SnapshotAAD struct {
 }
 
 // SnapshotContext is the offline-known subset of the AAD: the identity, org,
-// project, environment, credential, config-only mode, and target set the box
-// can reconstruct WITHOUT reaching the server. LoadSnapshot compares it against
-// the stored header; the remaining fields (revision/projection/issued/expires)
-// are taken from the header and returned to the caller.
+// project, environment, credential FINGERPRINT, config-only mode, and target set
+// the box can reconstruct WITHOUT reaching the server. The credential is bound
+// by its local fingerprint (recomputed from the presented token), NOT by the
+// server-asserted credential id, which is mutable on disk. LoadSnapshot compares
+// it against the stored header; the remaining fields
+// (revision/projection/issued/expires) are taken from the header and returned to
+// the caller.
 type SnapshotContext struct {
-	InstanceOrigin string
-	OrgID          string
-	ProjectID      string
-	EnvironmentID  string
-	CredentialID   string
-	ConfigOnly     bool
-	TargetNames    []string
+	InstanceOrigin        string
+	OrgID                 string
+	ProjectID             string
+	EnvironmentID         string
+	CredentialFingerprint string
+	ConfigOnly            bool
+	TargetNames           []string
 }
 
 // Canonical is the deterministic header-bytes encoding of the full AAD tuple:
@@ -210,7 +224,7 @@ func (a SnapshotAAD) ContextMatches(expect SnapshotContext) error {
 		{"org", a.OrgID, expect.OrgID},
 		{"project", a.ProjectID, expect.ProjectID},
 		{"environment", a.EnvironmentID, expect.EnvironmentID},
-		{"credential", a.CredentialID, expect.CredentialID},
+		{"credential", a.CredentialFingerprint, expect.CredentialFingerprint},
 	} {
 		if f.got != f.exp {
 			return fmt.Errorf("crypto: snapshot %s %q does not match local context %q", f.name, f.got, f.exp)

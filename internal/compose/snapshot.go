@@ -26,7 +26,8 @@ import (
 // full AAD tuple (revision, projection, issuance, expiry). The container
 // therefore stores that tuple as a cleartext, AEAD-authenticated header and the
 // caller supplies only the SnapshotContext it knows offline (identity, org,
-// project, environment, credential, config-only mode, target set).
+// project, environment, credential fingerprint of the presented token,
+// config-only mode, target set).
 //
 //	container = "HKS1" ‖ uint32-BE(len(header)) ‖ header ‖ sealed-payload
 //

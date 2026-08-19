@@ -291,7 +291,7 @@ func TestRunStaleLineOnOfflineServe(t *testing.T) {
 	// Pre-seed the snapshot for slug "acme".
 	slug := "acme"
 	sd := filepath.Join(stateDir, "compose", slug)
-	seedRunSnapshot(t, sd, origin)
+	seedRunSnapshot(t, sd, origin, "wl_token")
 
 	ios, _, stderr := composeIO(stateDir, dir, "wl_token", nil)
 	var captured []string
@@ -313,7 +313,7 @@ func TestRunOfflineExpiredRefused(t *testing.T) {
 	dir := t.TempDir()
 	writeComposeConfigOffline(t, dir, origin, "org_1", "prj_1", "env_1", "acme")
 	_, stateDir := machineState(t, origin)
-	seedRunSnapshot(t, filepath.Join(stateDir, "compose", "acme"), origin)
+	seedRunSnapshot(t, filepath.Join(stateDir, "compose", "acme"), origin, "wl_token")
 
 	ios, _, stderr := composeIO(stateDir, dir, "wl_token", nil)
 	// The snapshot was issued ~1h ago; advance the clock past the 7 d maximum.
@@ -325,6 +325,65 @@ func TestRunOfflineExpiredRefused(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "maximum stale age") {
 		t.Fatalf("expiry refusal message wrong: %s", stderr)
+	}
+}
+
+// TestRunOfflineRefusesRotatedToken: a snapshot saved under token A is refused
+// offline when token B is presented, BY NAME on the credential coordinate — the
+// binding is the LOCAL fingerprint of the presented token in the AEAD-
+// authenticated header, so a rotated credential cannot serve the old snapshot
+// even fully offline, with nothing mutable on disk supplying the expectation
+// (R1-3). No `server-credential` record exists to rewrite.
+func TestRunOfflineRefusesRotatedToken(t *testing.T) {
+	origin := "http://127.0.0.1:1" // closed port → offline path
+	dir := t.TempDir()
+	writeComposeConfigOffline(t, dir, origin, "org_1", "prj_1", "env_1", "acme")
+	_, stateDir := machineState(t, origin)
+	// Snapshot bound to token A.
+	seedRunSnapshot(t, filepath.Join(stateDir, "compose", "acme"), origin, "token-A")
+
+	// Present token B offline.
+	ios, _, stderr := composeIO(stateDir, dir, "token-B", nil)
+	ios.Exec = func(_ string, _, _ []string) error {
+		t.Fatal("exec must not run off a snapshot bound to a different token")
+		return nil
+	}
+	code := Run(t.Context(), ios, []string{"run", "--", "true"})
+	if code != ExitRefused {
+		t.Fatalf("rotated-token offline run exit=%d, want ExitRefused; stderr=%s", code, stderr)
+	}
+	if !strings.Contains(stderr.String(), "different context") || !strings.Contains(stderr.String(), "credential") {
+		t.Fatalf("refusal did not name the credential binding: %s", stderr)
+	}
+}
+
+// TestComposeRenderOfflineRefusesMissingKey: after LoadSnapshot the offline path
+// verifies per-target membership — every configured target key id must be
+// present in the sealed payload rows. A configured key absent from the snapshot
+// is refused BY ID (R1-3, the render-target set check at key granularity).
+func TestComposeRenderOfflineRefusesMissingKey(t *testing.T) {
+	origin := "http://127.0.0.1:1"
+	dir := t.TempDir()
+	runtimeDir := filepath.Join(t.TempDir(), "runtime")
+	// The config target declares key_1 AND key_absent; the seeded snapshot only
+	// carries key_1.
+	content := "version: 1\ninstance: " + origin + "\norg: org_1\nproject: prj_1\nenvironment: env_1\n" +
+		"slug: acme\nruntime_dir: " + runtimeDir + "\nsnapshot:\n  offline_serve: true\n" +
+		"targets:\n  api:\n    keys: [key_1, key_absent]\n    services: [api]\n"
+	if err := os.WriteFile(filepath.Join(dir, composeConfigName), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, stateDir := machineState(t, origin)
+	seedRenderSnapshot(t, filepath.Join(stateDir, "compose", "acme"), origin, "wl_token", "api",
+		[]compose.SnapshotRow{{Name: "DATABASE_URL", KeyID: "key_1", Classification: "config", Value: "postgres://cached"}})
+
+	ios, _, stderr := composeIO(stateDir, dir, "wl_token", nil)
+	code := Run(t.Context(), ios, []string{"compose", "render"})
+	if code != ExitRefused {
+		t.Fatalf("offline render missing key exit=%d, want ExitRefused; stderr=%s", code, stderr)
+	}
+	if !strings.Contains(stderr.String(), "key_absent") || !strings.Contains(stderr.String(), "not present in the last snapshot") {
+		t.Fatalf("refusal did not name the missing key id: %s", stderr)
 	}
 }
 
@@ -399,6 +458,37 @@ func TestRunNonExecutableIs126(t *testing.T) {
 	}
 }
 
+// TestRunRefusesRelativePathEntry: a command that resolves ONLY through a
+// relative PATH entry (`.`) yields exec.ErrDot; resolveChildCommand treats it as
+// NOT FOUND (127) naming the relative entry and never executes the cwd-controlled
+// script (NEW-1).
+func TestRunRefusesRelativePathEntry(t *testing.T) {
+	server := deliveryServer(t, deliveryResp(nil))
+	defer server.Close()
+	_, stateDir := machineState(t, server.URL)
+
+	cwd := t.TempDir()
+	prog := filepath.Join(cwd, "cwd-prog")
+	if err := os.WriteFile(prog, []byte("#!/bin/sh\n"), 0o755); err != nil { // executable, in cwd
+		t.Fatal(err)
+	}
+	t.Chdir(cwd)
+	t.Setenv("PATH", ".") // only a relative entry resolves the command
+
+	ios, _, stderr := composeIO(stateDir, t.TempDir(), "wl_token", nil)
+	ios.Exec = func(_ string, _, _ []string) error {
+		t.Fatal("exec must not run a command resolved via a relative PATH entry")
+		return nil
+	}
+	code := Run(t.Context(), ios, []string{"run", "--instance", "local", "--org", "org_1", "--project", "prj_1", "--env", "env_1", "--", "cwd-prog"})
+	if code != ExitCommandNotFound {
+		t.Fatalf("relative-PATH command exit=%d, want 127; stderr=%s", code, stderr)
+	}
+	if !strings.Contains(stderr.String(), "relative PATH entry") {
+		t.Fatalf("refusal did not name the relative PATH entry: %s", stderr)
+	}
+}
+
 // TestComposeRenderCursorRebindsOnCredentialChange: rendering with token A then
 // token B must NOT present the cursor — the cursor binds to a local fingerprint
 // of the presented token, so a different token forces a full fetch (finding 8).
@@ -466,7 +556,7 @@ func TestOfflineSnapshotModeBinding(t *testing.T) {
 	}
 	_, stateDir := machineState(t, origin)
 	// Seed a RUN snapshot (TargetNames ["__run__"]) at the render slug.
-	seedRunSnapshot(t, filepath.Join(stateDir, "compose", "acme"), origin)
+	seedRunSnapshot(t, filepath.Join(stateDir, "compose", "acme"), origin, "wl_token")
 
 	ios, _, stderr := composeIO(stateDir, dir, "wl_token", nil)
 	code := Run(t.Context(), ios, []string{"compose", "render"})
@@ -490,8 +580,9 @@ func TestComposeRenderConfigOnlyMixedTarget(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
-		// config_only projection: only the config key is delivered; the secret is
-		// omitted entirely.
+		// config_only projection: the config key carries a value, the secret is
+		// delivered PRESENCE-ONLY (presence set, no value — R1-7), and an unset
+		// config key carries no value.
 		_, _ = w.Write([]byte(deliveryJSON(t, apigen.DeliveryResponse{
 			ChangeToken: "v1:t1", CredentialId: "cred_1", Current: false, Cursor: "v1:c1",
 			IssuedAt: time.Now().UTC(), SnapshotExpiresAt: time.Now().UTC().Add(7 * 24 * time.Hour),
@@ -501,6 +592,9 @@ func TestComposeRenderConfigOnlyMixedTarget(t *testing.T) {
 				// A delivered config key with NO value (genuinely unset): must never
 				// be emitted as OPTIONAL= (finding 7).
 				{KeyId: "key_opt", Name: "OPTIONAL", Classification: apigen.KeyClassificationConfig, Presence: apigen.DeliveredKeyPresenceOptional, Value: nil},
+				// Secret delivered presence-only under config-only: confers presence
+				// for the membership check but never renders a value (R1-7).
+				{KeyId: "key_sec", Name: "DB_PASSWORD", Classification: apigen.KeyClassificationSecret, Presence: apigen.DeliveredKeyPresenceSet, Value: nil},
 			},
 		})))
 	}))
@@ -534,11 +628,53 @@ func TestComposeRenderConfigOnlyMixedTarget(t *testing.T) {
 	if !strings.Contains(envBody, "DATABASE_URL=") {
 		t.Fatalf("config value not rendered: %q", envBody)
 	}
-	if strings.Contains(envBody, "key_sec") || strings.Contains(envBody, "=\n\n") {
-		t.Fatalf("an omitted secret produced an env entry: %q", envBody)
+	if strings.Contains(envBody, "DB_PASSWORD") || strings.Contains(envBody, "key_sec") || strings.Contains(envBody, "=\n\n") {
+		t.Fatalf("a presence-only secret produced an env entry: %q", envBody)
 	}
 	if strings.Contains(envBody, "OPTIONAL") {
 		t.Fatalf("an unset delivered value was emitted as NAME=: %q", envBody)
+	}
+}
+
+// TestComposeRenderConfigOnlyRefusesDeletedKey: under --config-only a configured
+// key id the server does not deliver AT ALL (not even presence-only) is a
+// genuinely deleted key and must be REFUSED by id — no longer indistinguishable
+// from a projected-out secret (R1-7).
+func TestComposeRenderConfigOnlyRefusesDeletedKey(t *testing.T) {
+	runtimeDir := filepath.Join(t.TempDir(), "runtime")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if !strings.HasSuffix(r.URL.Path, "/delivery") {
+			http.NotFound(w, r)
+			return
+		}
+		// key_gone is configured but not delivered at all.
+		_, _ = w.Write([]byte(deliveryJSON(t, apigen.DeliveryResponse{
+			ChangeToken: "v1:t1", CredentialId: "cred_1", Current: false, Cursor: "v1:c1",
+			IssuedAt: time.Now().UTC(), SnapshotExpiresAt: time.Now().UTC().Add(7 * 24 * time.Hour),
+			SchemaRevision: 1,
+			Keys: []apigen.DeliveredKey{
+				{KeyId: "key_cfg", Name: "DATABASE_URL", Classification: apigen.KeyClassificationConfig, Presence: apigen.DeliveredKeyPresenceSet, Value: strPtr("postgres://x")},
+			},
+		})))
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	content := "version: 1\ninstance: " + server.URL + "\norg: org_1\nproject: prj_1\nenvironment: env_1\n" +
+		"slug: acme\nruntime_dir: " + runtimeDir + "\n" +
+		"targets:\n  api:\n    keys: [key_cfg, key_gone]\n    services: [api]\n"
+	if err := os.WriteFile(filepath.Join(dir, composeConfigName), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, stateDir := machineState(t, server.URL)
+	ios, _, stderr := composeIO(stateDir, dir, "wl_token", nil)
+	code := Run(t.Context(), ios, []string{"compose", "render", "--config-only"})
+	if code != ExitRefused {
+		t.Fatalf("deleted key id under config-only exit=%d, want ExitRefused; stderr=%s", code, stderr)
+	}
+	if !strings.Contains(stderr.String(), "key_gone") || !strings.Contains(stderr.String(), "not delivered") {
+		t.Fatalf("refusal did not name the deleted key id: %s", stderr)
 	}
 }
 
@@ -661,7 +797,7 @@ func TestComposeRenderOfflineRefusesUnacknowledged(t *testing.T) {
 	}
 	_, stateDir := machineState(t, origin)
 	sd := filepath.Join(stateDir, "compose", "acme")
-	seedRenderSnapshot(t, sd, origin, "api",
+	seedRenderSnapshot(t, sd, origin, "wl_token", "api",
 		[]compose.SnapshotRow{{Name: "LD_PRELOAD", KeyID: "key_ld", Classification: "config", Value: "/evil.so"}})
 
 	ios, _, stderr := composeIO(stateDir, dir, "wl_token", nil)
@@ -687,7 +823,7 @@ func TestOfflineRenderSnapshotRefusedForRun(t *testing.T) {
 	writeComposeConfigOffline(t, dir, origin, "org_1", "prj_1", "env_1", "acme")
 	_, stateDir := machineState(t, origin)
 	// Seed a RENDER snapshot (TargetNames ["api"]) at the run slug.
-	seedRenderSnapshot(t, filepath.Join(stateDir, "compose", "acme"), origin, "api",
+	seedRenderSnapshot(t, filepath.Join(stateDir, "compose", "acme"), origin, "wl_token", "api",
 		[]compose.SnapshotRow{{Name: "DATABASE_URL", KeyID: "key_1", Classification: "config", Value: "postgres://cached"}})
 
 	ios, _, stderr := composeIO(stateDir, dir, "wl_token", nil)
@@ -702,9 +838,9 @@ func TestOfflineRenderSnapshotRefusedForRun(t *testing.T) {
 }
 
 // seedRenderSnapshot writes a render-mode snapshot (TargetNames [target]) with
-// the given rows, plus the server-credential record, so an offline render can
-// open it.
-func seedRenderSnapshot(t *testing.T, stateDir, origin, target string, rows []compose.SnapshotRow) {
+// the given rows, bound to the fingerprint of `token`, so an offline render that
+// presents the SAME token can open it (R1-3 — no server-credential record).
+func seedRenderSnapshot(t *testing.T, stateDir, origin, token, target string, rows []compose.SnapshotRow) {
 	t.Helper()
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		t.Fatal(err)
@@ -716,15 +852,13 @@ func seedRenderSnapshot(t *testing.T, stateDir, origin, target string, rows []co
 	issued := time.Now().UTC().Add(-time.Hour)
 	aad := crypto.SnapshotAAD{
 		InstanceOrigin: origin, OrgID: "org_1", ProjectID: "prj_1", EnvironmentID: "env_1",
-		CredentialID: "cred_1", ChangeToken: "v1:tok", Projection: []string{"read"},
+		CredentialID: "cred_1", CredentialFingerprint: credentialFingerprint(token),
+		ChangeToken: "v1:tok", Projection: []string{"read"},
 		TargetNames: []string{target},
 		IssuedAt:    issued.Format(time.RFC3339), ExpiresAt: issued.Add(7 * 24 * time.Hour).Format(time.RFC3339),
 	}
 	payload := compose.SnapshotPayload{Rows: rows, GenerationStamps: map[string]string{target: "v1-00000000000000000000000000000000"}}
 	if err := compose.SaveSnapshot(stateDir, keys, aad, payload); err != nil {
-		t.Fatal(err)
-	}
-	if err := saveServerCredential(stateDir, "cred_1"); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -782,7 +916,7 @@ func writeComposeConfigOffline(t *testing.T, dir, instance, org, project, env, s
 	}
 }
 
-func seedRunSnapshot(t *testing.T, stateDir, origin string) {
+func seedRunSnapshot(t *testing.T, stateDir, origin, token string) {
 	t.Helper()
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		t.Fatal(err)
@@ -797,15 +931,13 @@ func seedRunSnapshot(t *testing.T, stateDir, origin string) {
 	issued := time.Now().UTC().Add(-time.Hour)
 	aad := crypto.SnapshotAAD{
 		InstanceOrigin: origin, OrgID: "org_1", ProjectID: "prj_1", EnvironmentID: "env_1",
-		CredentialID: "cred_1", PinnedRevision: 0, ChangeToken: "v1:tok",
+		CredentialID: "cred_1", CredentialFingerprint: credentialFingerprint(token),
+		PinnedRevision: 0, ChangeToken: "v1:tok",
 		Projection: []string{"read"}, TargetNames: []string{runGenerationKey},
 		IssuedAt: issued.Format(time.RFC3339), ExpiresAt: issued.Add(7 * 24 * time.Hour).Format(time.RFC3339),
 	}
 	payload := compose.SnapshotPayload{Rows: rows, GenerationStamps: map[string]string{runGenerationKey: stamp}}
 	if err := compose.SaveSnapshot(stateDir, keys, aad, payload); err != nil {
-		t.Fatal(err)
-	}
-	if err := saveServerCredential(stateDir, "cred_1"); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -49,21 +49,13 @@ const (
 	// (^[a-z][a-z0-9-]*$) so it can never collide with a real target named
 	// "run".
 	runGenerationKey = "__run__"
-	// serverCredentialFile records the server-asserted credential_id from the
-	// last successful LIVE fetch. It is NOT the killed offline.meta.json sidecar:
-	// that carried the AAD tuple + name→key_id map, both now inside the
-	// self-describing snapshot (header + sealed payload). This file carries the
-	// EXPECTATION the offline path compares the snapshot header against — and an
-	// expectation cannot, by definition, live inside the artifact being verified
-	// (the box cannot reconstruct a server-asserted id offline). The local
-	// credential fingerprint (credentialFingerprint) is stored ONLY in the cursor
-	// per the compose ADR; this file holds the server id only.
-	serverCredentialFile = "server-credential"
 
 	// credentialFingerprintDomain domain-separates the LOCAL credential
-	// fingerprint that binds a cursor to the presented token (compose ADR
-	// § Cursor rules). It is a purely local identity: swapping tokens changes the
-	// fingerprint and invalidates the cursor before it is presented.
+	// fingerprint that binds BOTH the cursor and the offline snapshot to the
+	// presented token (compose ADR § Cursor rules; R1-3). It is a purely local
+	// identity: swapping tokens changes the fingerprint and invalidates the cursor
+	// before it is presented and refuses the old snapshot by name at load. The
+	// bytes are frozen — changing them would pointlessly invalidate live cursors.
 	credentialFingerprintDomain = "hikyo-cursor-cred-v1\x00"
 
 	machineRevealOptIn = "secret plaintext requires the per-project machine-reveal opt-in and then a `reveal` grant; " +
@@ -72,10 +64,11 @@ const (
 
 // credentialFingerprint is the local, offline-derivable identity of the
 // presented credential: hex(sha256(domain ‖ token))[:32] (compose ADR § Cursor
-// rules — "the stored cursor is bound to credential identity"). ONE helper so
-// the save-site and the compare-site cannot drift. The server-asserted
-// credential_id (a different value) binds the snapshot AAD; this binds the
-// cursor.
+// rules — "the stored cursor is bound to credential identity"). ONE helper for
+// every save-site and compare-site so they cannot drift — it binds BOTH the
+// cursor AND the offline snapshot's credential (R1-3), so a rotated token
+// refuses the old snapshot by name even fully offline. The server-asserted
+// credential_id (a different value) remains authenticated metadata in the AAD.
 func credentialFingerprint(token string) string {
 	sum := sha256.Sum256([]byte(credentialFingerprintDomain + token))
 	return hex.EncodeToString(sum[:])[:32]
@@ -120,7 +113,7 @@ func runRun(ctx context.Context, ios IO, args []string) error {
 	if err != nil {
 		return err
 	}
-	client, entry, resolved, _, err := resolveMachineTarget(st, ios, flags, cfg, cfgDir, "run")
+	client, entry, resolved, token, err := resolveMachineTarget(st, ios, flags, cfg, cfgDir, "run")
 	if err != nil {
 		return err
 	}
@@ -159,7 +152,7 @@ func runRun(ctx context.Context, ios IO, args []string) error {
 		live    bool
 	)
 	if ferr != nil {
-		f, herr := serveRunOffline(ios, cfg, stateDir, entry, org, project, env, configOnly, ack, ferr)
+		f, herr := serveRunOffline(ios, cfg, stateDir, entry, org, project, env, token, configOnly, ack, ferr)
 		if herr != nil {
 			return herr
 		}
@@ -204,7 +197,7 @@ func runRun(ctx context.Context, ios IO, args []string) error {
 	// Opt-in governs SERVING, not saving — a silent save failure is the silent
 	// fallback the house forbids, so it is a hard error.
 	if live && cfg != nil {
-		if err := saveRunSnapshot(cfg, stateDir, entry, org, project, env, configOnly, resp); err != nil {
+		if err := saveRunSnapshot(cfg, stateDir, entry, org, project, env, token, configOnly, resp); err != nil {
 			return failf(ExitInternal, "hikyo run: saving offline snapshot: %v", err)
 		}
 	}
@@ -233,7 +226,7 @@ func runRun(ctx context.Context, ios IO, args []string) error {
 // stale line, and returns them. Any other failure (or no opt-in) is surfaced
 // unchanged. The snapshot is bound to run's identity: TargetNames ["__run__"],
 // so a render snapshot cannot be served here (finding 3).
-func serveRunOffline(ios IO, cfg *compose.Config, stateDir string, entry TrustEntry, org, project, env string, configOnly bool, ack []string, fetchErr error) (map[string]string, error) {
+func serveRunOffline(ios IO, cfg *compose.Config, stateDir string, entry TrustEntry, org, project, env, token string, configOnly bool, ack []string, fetchErr error) (map[string]string, error) {
 	if !isUnavailable(fetchErr) {
 		return nil, fetchErr
 	}
@@ -241,7 +234,7 @@ func serveRunOffline(ios IO, cfg *compose.Config, stateDir string, entry TrustEn
 		fmt.Fprintln(ios.Stderr, "hikyo run: offline serve is not enabled for this stack; set snapshot.offline_serve: true in hikyo-compose.yaml to serve stale values during an outage")
 		return nil, fetchErr
 	}
-	payload, aad, err := loadOfflineSnapshot(ios, cfg, stateDir, entry, org, project, env, configOnly, []string{runGenerationKey})
+	payload, aad, err := loadOfflineSnapshot(ios, cfg, stateDir, entry, org, project, env, token, configOnly, []string{runGenerationKey})
 	if err != nil {
 		return nil, err
 	}
@@ -259,11 +252,12 @@ func serveRunOffline(ios IO, cfg *compose.Config, stateDir string, entry TrustEn
 	return rowsToValues(payload.Rows), nil
 }
 
-// saveRunSnapshot seals the delivered env plus one run "generation" stamp and
-// records the server credential id beside it. The snapshot's TargetNames is
-// ["__run__"] (run holds no render target), so ContextMatches refuses a render
-// snapshot for run and vice versa (finding 3).
-func saveRunSnapshot(cfg *compose.Config, stateDir string, entry TrustEntry, org, project, env string, configOnly bool, resp apigen.DeliveryResponse) error {
+// saveRunSnapshot seals the delivered env plus one run "generation" stamp. The
+// snapshot's TargetNames is ["__run__"] (run holds no render target), so
+// ContextMatches refuses a render snapshot for run and vice versa (finding 3),
+// and its credential binding is the fingerprint of the presented token (R1-3),
+// authenticated in the header — no separate credential record on disk.
+func saveRunSnapshot(cfg *compose.Config, stateDir string, entry TrustEntry, org, project, env, token string, configOnly bool, resp apigen.DeliveryResponse) error {
 	keys, err := loadLocalKeys(stateDir)
 	if err != nil {
 		return err
@@ -274,11 +268,8 @@ func saveRunSnapshot(cfg *compose.Config, stateDir string, entry TrustEntry, org
 	// WriteGeneration does — so the __run__ sentinel is legal here).
 	stamp := compose.TargetStamp(keys, runGenerationKey, canonicalRows(rows))
 	payload := compose.SnapshotPayload{Rows: rows, GenerationStamps: map[string]string{runGenerationKey: stamp}}
-	aad := buildDeliveryAAD(entry, org, project, env, resp, configOnly, []string{runGenerationKey})
-	if err := saveSnapshot(stateDir, keys, aad, payload); err != nil {
-		return err
-	}
-	return saveServerCredential(stateDir, resp.CredentialId)
+	aad := buildDeliveryAAD(entry, org, project, env, resp, token, configOnly, []string{runGenerationKey})
+	return saveSnapshot(stateDir, keys, aad, payload)
 }
 
 // ---------------------------------------------------------------------------
@@ -400,7 +391,7 @@ func composeRenderCore(ctx context.Context, ios IO, st *State, flags commonFlags
 
 	resp, ferr := fetchDelivery(ctx, client, org, project, env, configOnly, present)
 	if ferr != nil {
-		moved, err := composeRenderOffline(ctx, ios, lock, cfg, cfgDir, stateDir, runtimeDir, keys, entry, org, project, env, configOnly, ferr)
+		moved, err := composeRenderOffline(ctx, ios, lock, cfg, cfgDir, stateDir, runtimeDir, keys, entry, org, project, env, token, configOnly, ferr)
 		return moved, rp, err
 	}
 	if resp.Current {
@@ -434,19 +425,25 @@ func composeRenderApply(ios IO, lock *compose.RenderLock, cfg *compose.Config, s
 		for _, id := range tgt.Keys {
 			k, ok := byID[id]
 			if !ok {
-				// A target key id the server did not deliver. Under --config-only
-				// the server omits secrets ENTIRELY, so a missing id there is a
-				// legitimately-projected-out secret → SKIP (finding 7). Under the
-				// FULL projection a missing id means the target cannot render as
-				// declared → refuse.
-				if configOnly {
-					continue
-				}
-				refusals = append(refusals, fmt.Sprintf("%s: %s: key id was not delivered by the server under the full projection", name, id))
+				// The server delivers EVERY projected key id: config keys with a
+				// value, and — under --config-only — secrets as presence-only rows
+				// (R1-7). A configured id that is not delivered at all therefore
+				// means the target cannot render as declared → refuse in both modes
+				// (an omitted secret is no longer indistinguishable from a deleted
+				// key).
+				refusals = append(refusals, fmt.Sprintf("%s: %s: key id was not delivered by the server", name, id))
 				continue
 			}
 			if !configOnly && isUnrevealedSecret(k) {
 				refusals = append(refusals, fmt.Sprintf("%s: %s: secret has no value — %s", name, k.Name, machineRevealOptIn))
+				continue
+			}
+			// Under --config-only a secret is delivered PRESENCE-ONLY (no value):
+			// record its presence in the snapshot so the offline path can tell a
+			// projected-out secret from a deleted key (R1-7), but never render it
+			// into the env — no NAME=, no loader-control check, no rendered row.
+			if configOnly && k.Classification == apigen.KeyClassificationSecret {
+				srows = append(srows, compose.SnapshotRow{Name: k.Name, KeyID: k.KeyId, Classification: string(k.Classification), Value: ""})
 				continue
 			}
 			// A delivered row with no value is genuinely unset / projected-out:
@@ -487,12 +484,14 @@ func composeRenderApply(ios IO, lock *compose.RenderLock, cfg *compose.Config, s
 	moved := false
 	for _, r := range results {
 		allRows = append(allRows, r.rows...)
-		stamp, err := lock.WriteGeneration(runtimeDir, keys, r.name, r.content)
+		stamp, materialized, err := lock.WriteGeneration(runtimeDir, keys, r.name, r.content)
 		if err != nil {
 			return false, failf(ExitInternal, "compose render: write generation %s: %v", r.name, err)
 		}
 		finalStamps[r.name] = stamp
-		if currentStamps[r.name] != stamp {
+		// moved when the stamp changed OR the generation had to be re-materialised
+		// (the tmpfs copy was lost): either way sync must re-apply (R1-10).
+		if currentStamps[r.name] != stamp || materialized {
 			moved = true
 			lines = append(lines, fmt.Sprintf("rendered %s generation %s → %s", r.name, stamp, filepath.Join(runtimeDir, stamp, r.name+".env")))
 		} else {
@@ -510,12 +509,9 @@ func composeRenderApply(ios IO, lock *compose.RenderLock, cfg *compose.Config, s
 	// without a snapshot could read "current" after a reboot with nothing to
 	// serve. If the cursor save fails the snapshot still stands and the next
 	// render does a full fetch.
-	aad := buildDeliveryAAD(entry, org, project, env, resp, configOnly, cfg.TargetNames())
+	aad := buildDeliveryAAD(entry, org, project, env, resp, token, configOnly, cfg.TargetNames())
 	if err := saveSnapshot(stateDir, keys, aad, compose.SnapshotPayload{Rows: allRows, GenerationStamps: finalStamps}); err != nil {
 		return false, failf(ExitInternal, "compose render: save snapshot: %v", err)
-	}
-	if err := saveServerCredential(stateDir, resp.CredentialId); err != nil {
-		return false, failf(ExitInternal, "compose render: save credential record: %v", err)
 	}
 	if err := saveCursor(stateDir, cfg, resp, token, env, configOnly, finalStamps); err != nil {
 		return false, failf(ExitInternal, "compose render: save cursor: %v", err)
@@ -530,7 +526,7 @@ func composeRenderApply(ios IO, lock *compose.RenderLock, cfg *compose.Config, s
 // composeRenderOffline renders each target from the last snapshot when the
 // server is unreachable and the stack opted in. Row→key_id now comes from the
 // sealed payload's rows (finding 3: no cleartext sidecar).
-func composeRenderOffline(ctx context.Context, ios IO, lock *compose.RenderLock, cfg *compose.Config, cfgDir, stateDir, runtimeDir string, keys *crypto.LocalKeys, entry TrustEntry, org, project, env string, configOnly bool, fetchErr error) (bool, error) {
+func composeRenderOffline(ctx context.Context, ios IO, lock *compose.RenderLock, cfg *compose.Config, cfgDir, stateDir, runtimeDir string, keys *crypto.LocalKeys, entry TrustEntry, org, project, env, token string, configOnly bool, fetchErr error) (bool, error) {
 	_ = ctx
 	if !isUnavailable(fetchErr) {
 		return false, fetchErr
@@ -539,7 +535,7 @@ func composeRenderOffline(ctx context.Context, ios IO, lock *compose.RenderLock,
 		fmt.Fprintln(ios.Stderr, "hikyo compose render: offline serve is not enabled for this stack; set snapshot.offline_serve: true to render from the last snapshot during an outage")
 		return false, fetchErr
 	}
-	payload, aad, err := loadOfflineSnapshot(ios, cfg, stateDir, entry, org, project, env, configOnly, cfg.TargetNames())
+	payload, aad, err := loadOfflineSnapshot(ios, cfg, stateDir, entry, org, project, env, token, configOnly, cfg.TargetNames())
 	if err != nil {
 		return false, err
 	}
@@ -566,11 +562,18 @@ func composeRenderOffline(ctx context.Context, ios IO, lock *compose.RenderLock,
 		for _, id := range tgt.Keys {
 			r, ok := byID[id]
 			if !ok {
-				// Config-only projection legitimately omits secrets (finding 7).
-				if configOnly {
-					continue
-				}
+				// Every configured target key id must be present in the sealed
+				// payload rows — the render-target set check at key granularity
+				// (R1-3). A config_only snapshot records secrets as presence-only
+				// rows (below), so an absent id means a genuinely deleted key →
+				// refuse by id in both modes (R1-7: no silent config_only skip).
 				refusals = append(refusals, fmt.Sprintf("%s: %s: not present in the last snapshot", name, id))
+				continue
+			}
+			// A presence-only secret row (config_only, no value) confers presence
+			// for the membership check above but never renders into the env
+			// (mirror of the live nil-value skip, R1-7).
+			if configOnly && r.Classification == string(apigen.KeyClassificationSecret) {
 				continue
 			}
 			rows = append(rows, compose.Row{Name: r.Name, Value: r.Value})
@@ -625,13 +628,15 @@ func composeRenderOffline(ctx context.Context, ios IO, lock *compose.RenderLock,
 	var lines []string
 	moved := false
 	for _, r := range results {
-		stamp, err := lock.WriteGeneration(runtimeDir, keys, r.name, r.content)
+		stamp, materialized, err := lock.WriteGeneration(runtimeDir, keys, r.name, r.content)
 		if err != nil {
 			return false, failf(ExitInternal, "compose render: write generation %s: %v", r.name, err)
 		}
 		finalStamps[r.name] = stamp
 		fmt.Fprintf(ios.Stderr, "serving stale from %s, generation %s\n", aad.IssuedAt, stamp)
-		if currentStamps[r.name] != stamp {
+		// moved when the stamp changed OR the generation had to be re-materialised
+		// (the tmpfs copy was lost): either way sync must re-apply (R1-10).
+		if currentStamps[r.name] != stamp || materialized {
 			moved = true
 			lines = append(lines, fmt.Sprintf("rendered %s generation %s → %s", r.name, stamp, filepath.Join(runtimeDir, stamp, r.name+".env")))
 		} else {
@@ -1197,58 +1202,28 @@ func toAPIRecords(recs []compose.OfflineRecord) []apigen.OfflineDeliveryRecord {
 }
 
 // ---------------------------------------------------------------------------
-// snapshot / cursor / server-credential helpers (thin wrappers over internal/compose)
+// snapshot / cursor helpers (thin wrappers over internal/compose)
 // ---------------------------------------------------------------------------
 
 func saveSnapshot(stateDir string, keys *crypto.LocalKeys, aad crypto.SnapshotAAD, payload compose.SnapshotPayload) error {
 	return compose.SaveSnapshot(stateDir, keys, aad, payload)
 }
 
-// saveServerCredential records the server-asserted credential_id from the last
-// live fetch (see serverCredentialFile). It is written atomically 0600 AFTER the
-// snapshot is durable.
-func saveServerCredential(stateDir, credentialID string) error {
-	if strings.TrimSpace(credentialID) == "" {
-		return fmt.Errorf("server credential id is empty")
-	}
-	return writeFileAtomic0600(filepath.Join(stateDir, serverCredentialFile), []byte(credentialID))
-}
-
-// loadServerCredential reads the recorded server credential id. A missing
-// record is a hard refusal, never a silent skip: the offline path cannot verify
-// a snapshot's credential binding without it.
-func loadServerCredential(stateDir string) (string, error) {
-	b, err := os.ReadFile(filepath.Join(stateDir, serverCredentialFile))
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return "", failf(ExitRefused, "offline serve is enabled but no credential record has been saved for this stack yet")
-		}
-		return "", failf(ExitRefused, "offline serve: reading credential record: %v", err)
-	}
-	id := strings.TrimSpace(string(b))
-	if id == "" {
-		return "", failf(ExitRefused, "offline serve: credential record is empty")
-	}
-	return id, nil
-}
-
 // loadOfflineSnapshot opens the persisted snapshot for offline serve under the
 // SnapshotContext the box can reconstruct offline: origin/org/project/env from
 // the invocation, config_only, the mode's target set (["__run__"] for run, the
-// configured targets for render), and the recorded server credential id.
-// ContextMatches refuses a transplanted snapshot BY NAME before any crypto.
-func loadOfflineSnapshot(ios IO, cfg *compose.Config, stateDir string, entry TrustEntry, org, project, env string, configOnly bool, targetNames []string) (compose.SnapshotPayload, crypto.SnapshotAAD, error) {
+// configured targets for render), and the LOCAL fingerprint of the presented
+// token (R1-3 — a rotated token refuses the old snapshot by name, offline, with
+// nothing mutable on disk supplying the expectation). ContextMatches refuses a
+// transplanted snapshot BY NAME before any crypto.
+func loadOfflineSnapshot(ios IO, cfg *compose.Config, stateDir string, entry TrustEntry, org, project, env, token string, configOnly bool, targetNames []string) (compose.SnapshotPayload, crypto.SnapshotAAD, error) {
 	var zeroP compose.SnapshotPayload
 	var zeroA crypto.SnapshotAAD
 	keys, err := loadLocalKeys(stateDir)
 	if err != nil {
 		return zeroP, zeroA, err
 	}
-	credID, err := loadServerCredential(stateDir)
-	if err != nil {
-		return zeroP, zeroA, err
-	}
-	ctx := snapshotContext(entry, org, project, env, credID, configOnly, targetNames)
+	ctx := snapshotContext(entry, org, project, env, token, configOnly, targetNames)
 	payload, aad, err := compose.LoadSnapshot(stateDir, keys, ctx, ios.now(), cfg.SnapshotMaxAge())
 	if err != nil {
 		if errors.Is(err, compose.ErrSnapshotContext) {
@@ -1268,14 +1243,16 @@ func loadOfflineSnapshot(ios IO, cfg *compose.Config, stateDir string, entry Tru
 }
 
 // snapshotContext assembles the offline-known SnapshotContext (crypto ADR
-// § "AAD binds the container to its context").
-func snapshotContext(entry TrustEntry, org, project, env, credentialID string, configOnly bool, targetNames []string) crypto.SnapshotContext {
+// § "AAD binds the container to its context"). The credential is bound by the
+// LOCAL fingerprint of the presented token (R1-3), the SAME helper the cursor
+// uses, so both refuse a rotated token without reaching the server.
+func snapshotContext(entry TrustEntry, org, project, env, token string, configOnly bool, targetNames []string) crypto.SnapshotContext {
 	names := append([]string(nil), targetNames...)
 	sort.Strings(names)
 	return crypto.SnapshotContext{
 		InstanceOrigin: entry.Origin,
 		OrgID:          org, ProjectID: project, EnvironmentID: env,
-		CredentialID: credentialID, ConfigOnly: configOnly,
+		CredentialFingerprint: credentialFingerprint(token), ConfigOnly: configOnly,
 		TargetNames: names,
 	}
 }
@@ -1786,7 +1763,7 @@ func targetKeyIDs(cfg *compose.Config) map[string][]string {
 // resolved pin when the server served a pin, else 0 (unpinned "current") — it is
 // NOT the schema revision. ChangeToken is the server's keyed manifest token
 // binding content identity into the header (findings 7/8, on the wire).
-func buildDeliveryAAD(entry TrustEntry, org, project, env string, resp apigen.DeliveryResponse, configOnly bool, targetNames []string) crypto.SnapshotAAD {
+func buildDeliveryAAD(entry TrustEntry, org, project, env string, resp apigen.DeliveryResponse, token string, configOnly bool, targetNames []string) crypto.SnapshotAAD {
 	pinned := int64(0)
 	if resp.PinnedRevision != nil {
 		pinned = *resp.PinnedRevision
@@ -1796,10 +1773,14 @@ func buildDeliveryAAD(entry TrustEntry, org, project, env string, resp apigen.De
 	return crypto.SnapshotAAD{
 		InstanceOrigin: entry.Origin,
 		OrgID:          org, ProjectID: project, EnvironmentID: env,
-		CredentialID:   resp.CredentialId,
-		PinnedRevision: pinned,
-		ChangeToken:    resp.ChangeToken,
-		Projection:     deliveryProjection(resp.Keys), ConfigOnly: configOnly,
+		// CredentialID is authenticated server-asserted metadata (returned to the
+		// caller for the offline records' credential_id); CredentialFingerprint is
+		// the LOCAL binding ContextMatches actually compares (R1-3).
+		CredentialID:          resp.CredentialId,
+		CredentialFingerprint: credentialFingerprint(token),
+		PinnedRevision:        pinned,
+		ChangeToken:           resp.ChangeToken,
+		Projection:            deliveryProjection(resp.Keys), ConfigOnly: configOnly,
 		TargetNames: names,
 		// RFC3339Nano (not RFC3339): the server issues at sub-second precision, and
 		// second-truncation would make two fetches within the same wall-clock
@@ -1833,21 +1814,28 @@ func hasErrorFinding(findings []compose.Finding) bool {
 	return hasSeverity(findings, compose.SeverityError)
 }
 
-// serverAgreementCodes is the family sync's pre-render gate excludes: these are
-// the freshness findings sync exists to REPAIR, not the local integrity it must
-// not proceed past (finding 11).
-var serverAgreementCodes = map[string]bool{
+// syncRepairableCodes is the family sync's pre-render gate excludes: these are
+// the findings sync's own render REPAIRS, not the local integrity it must not
+// proceed past (finding 11). Two groups: the server-agreement freshness family
+// (the staleness sync exists to reconcile), and the runtime-generation family
+// (`generation_absent`/`generation_incomplete` — a wiped or torn tmpfs copy the
+// render re-materialises, R1-10). Gating on either would brick sync on exactly
+// the state it is invoked to fix (every publish, every fresh box, every reboot
+// that lost the tmpfs).
+var syncRepairableCodes = map[string]bool{
 	"server_manifest_drift": true,
 	"never_rendered":        true,
 	"server_stamp_unknown":  true,
 	"server_unreachable":    true,
+	"generation_absent":     true,
+	"generation_incomplete": true,
 }
 
-// hasBlockingError reports whether any error finding OUTSIDE the server-agreement
+// hasBlockingError reports whether any error finding OUTSIDE the sync-repairable
 // family is present — the set sync gates on before rendering.
 func hasBlockingError(findings []compose.Finding) bool {
 	for _, f := range findings {
-		if f.Severity == compose.SeverityError && !serverAgreementCodes[f.Code] {
+		if f.Severity == compose.SeverityError && !syncRepairableCodes[f.Code] {
 			return true
 		}
 	}
@@ -1866,6 +1854,12 @@ func isNotFound(err error) bool {
 // file is a flag, not an env var), and it must never reach the child or any
 // subprocess the CLI spawns (finding 1). Building the child env from this — not
 // os.Environ() — means the credential was never present, not stripped after.
+//
+// CREDENTIALS_DIRECTORY is deliberately NOT stripped (R1-1, accepted): it is a
+// directory PATH, not a secret, and access to the files under it is per-open and
+// uid-gated by systemd — so stripping the variable protects nothing, while
+// stripping it would break a child that legitimately consumes its own systemd
+// credentials.
 func sanitizedEnviron() []string {
 	src := os.Environ()
 	out := make([]string, 0, len(src))
@@ -1884,10 +1878,18 @@ func sanitizedEnviron() []string {
 // ErrNotFound (verified on darwin), so that case is detected by scanning PATH; a
 // command containing a path separator is stat'd directly and LookPath surfaces
 // fs.ErrPermission (finding 13).
+//
+// A command resolved ONLY via a relative PATH entry (`.` or any non-absolute
+// dir) returns exec.ErrDot: Go deliberately refuses to run cwd-controlled code
+// implicitly, and so do we — treat it as NOT FOUND (127), naming the relative
+// entry, never execute it (NEW-1).
 func resolveChildCommand(command string) (string, error) {
 	path, err := exec.LookPath(command)
-	if err == nil || errors.Is(err, exec.ErrDot) {
+	if err == nil {
 		return path, nil
+	}
+	if errors.Is(err, exec.ErrDot) {
+		return "", failf(ExitCommandNotFound, "hikyo run: %s: resolved only via the relative PATH entry %q; refusing to execute cwd-controlled code — use an absolute path or a PATH of absolute directories", command, filepath.Dir(path))
 	}
 	if errors.Is(err, fs.ErrPermission) {
 		return "", failf(ExitCommandNotExecutable, "hikyo run: %s: found but not executable", command)

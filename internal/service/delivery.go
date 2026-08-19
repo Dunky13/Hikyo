@@ -586,17 +586,20 @@ func deliveryRows(ctx context.Context, r store.Repos, p authz.Proof, sealer *cry
 		rows = append(rows, delivery.Row{
 			Key: entry.KeyName, Classification: entry.Classification, Value: string(plain),
 		})
-		// Config-only is a distinct authorized projection. Secret rows are
-		// omitted entirely; read already confers their presence, so this choice
-		// creates no new existence probe and keeps the response unambiguous.
-		if configOnly && entry.Classification == string(schema.Secret) {
-			continue
-		}
+		// Config-only is a distinct authorized projection. A secret is delivered
+		// PRESENCE-ONLY (presence: set, no value): `read` already confers that the
+		// key exists (ADR: "read already confers knowledge that those keys exist"),
+		// so this discloses nothing new, and — unlike omitting it — it keeps a
+		// projected-out secret distinguishable from a deleted config key (R1-7).
+		secretUnderConfigOnly := configOnly && entry.Classification == string(schema.Secret)
 		key := DeliveredKey{
 			KeyID: entry.KeyID, Name: entry.KeyName, Classification: entry.Classification,
 			Presence: delivery.PresenceSet,
 		}
-		if entry.Classification == string(schema.Config) || canReveal {
+		// A secret under config_only carries no value even when the caller could
+		// reveal outside that projection; config values, and revealable secret
+		// values under the full projection, carry theirs.
+		if !secretUnderConfigOnly && (entry.Classification == string(schema.Config) || canReveal) {
 			value := string(plain)
 			key.Value = &value
 		}

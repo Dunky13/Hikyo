@@ -160,18 +160,19 @@ func TestStampShapeAndGrammar(t *testing.T) {
 
 func baseSnapshotAAD() SnapshotAAD {
 	return SnapshotAAD{
-		InstanceOrigin: "https://hikyo.example.internal",
-		OrgID:          "org_1",
-		ProjectID:      "prj_1",
-		EnvironmentID:  "env_1",
-		CredentialID:   "cred_1",
-		PinnedRevision: 7,
-		ChangeToken:    "v1:manifest-token-1",
-		Projection:     []string{"read", "reveal"},
-		ConfigOnly:     false,
-		TargetNames:    []string{"api", "worker"},
-		IssuedAt:       "2026-08-19T10:00:00Z",
-		ExpiresAt:      "2026-08-26T10:00:00Z",
+		InstanceOrigin:        "https://hikyo.example.internal",
+		OrgID:                 "org_1",
+		ProjectID:             "prj_1",
+		EnvironmentID:         "env_1",
+		CredentialID:          "cred_1",
+		CredentialFingerprint: "fp_1",
+		PinnedRevision:        7,
+		ChangeToken:           "v1:manifest-token-1",
+		Projection:            []string{"read", "reveal"},
+		ConfigOnly:            false,
+		TargetNames:           []string{"api", "worker"},
+		IssuedAt:              "2026-08-19T10:00:00Z",
+		ExpiresAt:             "2026-08-26T10:00:00Z",
 	}
 }
 
@@ -226,18 +227,19 @@ func TestSnapshotAADTamperTable(t *testing.T) {
 		t.Fatal(err)
 	}
 	mutations := map[string]func(*SnapshotAAD){
-		"instance":     func(a *SnapshotAAD) { a.InstanceOrigin = "https://evil.example" },
-		"org":          func(a *SnapshotAAD) { a.OrgID = "org_2" },
-		"project":      func(a *SnapshotAAD) { a.ProjectID = "prj_2" },
-		"environment":  func(a *SnapshotAAD) { a.EnvironmentID = "env_2" },
-		"credential":   func(a *SnapshotAAD) { a.CredentialID = "cred_2" },
-		"revision":     func(a *SnapshotAAD) { a.PinnedRevision = 8 },
-		"change_token": func(a *SnapshotAAD) { a.ChangeToken = "v1:manifest-token-2" },
-		"projection":   func(a *SnapshotAAD) { a.Projection = []string{"read"} },
-		"config_only":  func(a *SnapshotAAD) { a.ConfigOnly = true },
-		"targets":      func(a *SnapshotAAD) { a.TargetNames = []string{"api"} },
-		"issued_at":    func(a *SnapshotAAD) { a.IssuedAt = "2026-08-19T10:00:01Z" },
-		"expires_at":   func(a *SnapshotAAD) { a.ExpiresAt = "2026-08-27T10:00:00Z" },
+		"instance":               func(a *SnapshotAAD) { a.InstanceOrigin = "https://evil.example" },
+		"org":                    func(a *SnapshotAAD) { a.OrgID = "org_2" },
+		"project":                func(a *SnapshotAAD) { a.ProjectID = "prj_2" },
+		"environment":            func(a *SnapshotAAD) { a.EnvironmentID = "env_2" },
+		"credential":             func(a *SnapshotAAD) { a.CredentialID = "cred_2" },
+		"credential_fingerprint": func(a *SnapshotAAD) { a.CredentialFingerprint = "fp_2" },
+		"revision":               func(a *SnapshotAAD) { a.PinnedRevision = 8 },
+		"change_token":           func(a *SnapshotAAD) { a.ChangeToken = "v1:manifest-token-2" },
+		"projection":             func(a *SnapshotAAD) { a.Projection = []string{"read"} },
+		"config_only":            func(a *SnapshotAAD) { a.ConfigOnly = true },
+		"targets":                func(a *SnapshotAAD) { a.TargetNames = []string{"api"} },
+		"issued_at":              func(a *SnapshotAAD) { a.IssuedAt = "2026-08-19T10:00:01Z" },
+		"expires_at":             func(a *SnapshotAAD) { a.ExpiresAt = "2026-08-27T10:00:00Z" },
 		// Injectivity across the list boundary: moving an element between the
 		// two list fields must NOT decrypt.
 		"list-shift": func(a *SnapshotAAD) {
@@ -273,7 +275,7 @@ func TestSnapshotContextMatches(t *testing.T) {
 	base := baseSnapshotAAD()
 	ctx := SnapshotContext{
 		InstanceOrigin: base.InstanceOrigin, OrgID: base.OrgID, ProjectID: base.ProjectID,
-		EnvironmentID: base.EnvironmentID, CredentialID: base.CredentialID,
+		EnvironmentID: base.EnvironmentID, CredentialFingerprint: base.CredentialFingerprint,
 		ConfigOnly: base.ConfigOnly, TargetNames: []string{"worker", "api"}, // unsorted set
 	}
 	if err := base.ContextMatches(ctx); err != nil {
@@ -281,7 +283,7 @@ func TestSnapshotContextMatches(t *testing.T) {
 	}
 	for _, bad := range []func(*SnapshotContext){
 		func(c *SnapshotContext) { c.EnvironmentID = "env_2" },
-		func(c *SnapshotContext) { c.CredentialID = "cred_2" },
+		func(c *SnapshotContext) { c.CredentialFingerprint = "fp_2" },
 		func(c *SnapshotContext) { c.ConfigOnly = true },
 		func(c *SnapshotContext) { c.TargetNames = []string{"api"} },
 		func(c *SnapshotContext) { c.TargetNames = []string{"api", "worker", "extra"} },
