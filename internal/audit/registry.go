@@ -3,6 +3,8 @@ package audit
 import (
 	"sort"
 	"strings"
+
+	"github.com/Hikyo-Org/hikyo/internal/delivery"
 )
 
 // EventType is one closed-registry entry, named category.action. An
@@ -2100,9 +2102,15 @@ var registry = map[EventType]TypeSpec{
 			// The loader-control keys the consumer acknowledged, RECORDED AS
 			// PRESENTED — not sorted, not deduped — because the audit answer the
 			// ADR wants is "which acknowledgement was in force for this delivery"
-			// (k8s ADR § Loader-control). The list may be empty. Key names are
-			// schema, never values, so recording them is safe.
-			"acknowledged_keys": {Kind: KindStringList, MaxLen: 64, MaxBytes: 128},
+			// (k8s ADR § Loader-control). REQUIRED: the contract records the
+			// presented list on every fetch, an empty list included, so a payload
+			// that omits the member is rejected rather than recording a silent
+			// absence — an empty list passes because present-and-empty is not
+			// omission. The list may be empty. Key names are schema, never values,
+			// so recording them is safe. MaxLen shares delivery's single source of
+			// truth with the service's up-front refusal, so the bound the service
+			// enforces and the one this write demands cannot drift apart.
+			"acknowledged_keys": {Kind: KindStringList, Required: true, MaxLen: delivery.MaxAcknowledgedKeys, MaxBytes: 128},
 			// The number of VALUES actually delivered — config values plus the
 			// secret values this caller was authorized to receive. It is the
 			// count of identity.disclosure rows this fetch emitted, and it is

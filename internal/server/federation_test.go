@@ -203,6 +203,23 @@ func TestDeliveryRouteCarriesTheProjectionAndValue(t *testing.T) {
 	if full.CredentialExpiresAt == nil || !full.CredentialExpiresAt.Equal(expires) {
 		t.Errorf("credential_expires_at = %v, want %v", full.CredentialExpiresAt, expires)
 	}
+	// The generated pointer types cannot tell an ABSENT member from a JSON
+	// `null` — both unmarshal to a nil pointer — but the contract distinguishes
+	// them: §0.1 requires presence-only to mean the `value` member is ABSENT,
+	// never null, and an indefinite credential to OMIT `credential_expires_at`.
+	// So inspect the raw bytes: reject the member being present at all on the
+	// presence-only secret, and require it on the delivered value and the finite
+	// credential.
+	top, rawKeys := rawDeliveryMembers(t, payload)
+	if _, present := rawKeys["DATABASE_URL"]["value"]; !present {
+		t.Error("the delivered config key omitted its `value` member on the wire")
+	}
+	if _, present := rawKeys["DATABASE_PASSWORD"]["value"]; present {
+		t.Error("the presence-only secret carried a `value` member on the wire; absence means absent, never null")
+	}
+	if _, present := top["credential_expires_at"]; !present {
+		t.Error("a finite credential omitted credential_expires_at on the wire")
+	}
 
 	// A default (cursor-only) request carries no projection or acknowledgement,
 	// and an indefinite credential (zero expiry) renders no member. A fresh
@@ -229,6 +246,40 @@ func TestDeliveryRouteCarriesTheProjectionAndValue(t *testing.T) {
 	if dflt.CredentialExpiresAt != nil {
 		t.Errorf("indefinite credential rendered credential_expires_at = %v, want absent", dflt.CredentialExpiresAt)
 	}
+	// Absent, not null — inspected on the raw bytes, because the pointer type
+	// cannot tell the two apart and the contract requires absence.
+	topDflt, _ := rawDeliveryMembers(t, payload)
+	if _, present := topDflt["credential_expires_at"]; present {
+		t.Error("an indefinite credential carried a credential_expires_at member on the wire; it must be absent")
+	}
+}
+
+// rawDeliveryMembers re-parses a delivery response preserving JSON member
+// PRESENCE, which the generated pointer types erase: an absent `value` and a
+// `value: null` both unmarshal to a nil *string, yet the contract keeps them
+// distinct — presence-only and indefinite mean the member is ABSENT. The wire
+// test has to see the bytes to assert that. It returns the top-level members and
+// the `keys` array indexed by name, each as a raw member set.
+func rawDeliveryMembers(t *testing.T, payload []byte) (top map[string]json.RawMessage, keysByName map[string]map[string]json.RawMessage) {
+	t.Helper()
+	if err := json.Unmarshal(payload, &top); err != nil {
+		t.Fatal(err)
+	}
+	keysByName = map[string]map[string]json.RawMessage{}
+	if rawKeys, ok := top["keys"]; ok {
+		var keys []map[string]json.RawMessage
+		if err := json.Unmarshal(rawKeys, &keys); err != nil {
+			t.Fatal(err)
+		}
+		for _, k := range keys {
+			var name string
+			if err := json.Unmarshal(k["name"], &name); err != nil {
+				t.Fatal(err)
+			}
+			keysByName[name] = k
+		}
+	}
+	return top, keysByName
 }
 
 // TestDeliveryRouteRefusesWithoutAnArtifact pins that the route reaches the

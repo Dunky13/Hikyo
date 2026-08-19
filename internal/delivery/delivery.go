@@ -16,6 +16,14 @@ import (
 	"strings"
 )
 
+// MaxAcknowledgedKeys bounds the loader-control acknowledgement list a machine
+// fetch may present (k8s ADR § 0.9). It is the single source of truth for that
+// bound: the service refuses a longer list as a caller error BEFORE any work,
+// and the audit registry caps the recorded list at the same number, so the two
+// can never drift into a state where a list the service accepts is one the
+// audit write then rejects loudly.
+const MaxAcknowledgedKeys = 64
+
 // ManifestVersion is the canonical encoding's version, carried INSIDE the
 // signed bytes as well as on the token string. Inside matters: without it, two
 // different encodings of the same content could produce the same token under a
@@ -137,6 +145,19 @@ func Manifest(rows []Row) []byte {
 //	                      moved. `config-only` delivers and covers a strictly
 //	                      smaller manifest, so a mode flip must invalidate the
 //	                      cursor even when nothing else changed.
+//	PinnedHistoricalRevision
+//	                      the delivered snapshot became a pinned NON-CURRENT
+//	                      revision (or which one it is). This closes a failure
+//	                      the other components cannot see: when a pin that WAS
+//	                      current is overtaken by a later publish, the pinned
+//	                      snapshot's content, the caller's grants, the
+//	                      authorization revision and the pin generation are all
+//	                      unchanged — yet the secret-value authority term flips
+//	                      from `reveal` to `reveal-history`, so a caller holding
+//	                      `reveal` but not `reveal-history` silently loses the
+//	                      secret's plaintext. Without this term the stale cursor
+//	                      still matches and the fetch answers "current" for a
+//	                      state that now discloses strictly less.
 type Cursor struct {
 	ChangeToken string
 	// Projection is the caller's authorized delivery projection: the sorted
@@ -151,6 +172,15 @@ type Cursor struct {
 	// in so every outstanding pre-projection cursor mismatches exactly once,
 	// which is the designed upgrade path — no cursor-versioning machinery.
 	Mode Mode
+	// PinnedHistoricalRevision is the pinned revision when the delivered
+	// snapshot is a pinned NON-CURRENT revision, and 0 otherwise (unpinned, or
+	// a pin still on the environment's latest). Revisions are >= 1, so 0 is an
+	// unambiguous "not pinned-historical". Binding the pinned revision rather
+	// than a bare bool is deliberate: it is the revision whose history the
+	// delivery discloses, which is exactly what the `reveal-history` term
+	// authorizes, so a cursor that names it re-binds every value re-pin without
+	// leaning on the pin generation alone.
+	PinnedHistoricalRevision int64
 }
 
 // CursorVersion is the tuple encoding's version, inside the signed bytes for
@@ -183,6 +213,11 @@ func EncodeCursor(c Cursor) []byte {
 	// large number instead of an obviously wrong one.
 	out = binary.AppendVarint(out, c.AuthorizationRevision)
 	out = binary.AppendVarint(out, c.PinGeneration)
+	// Encoded UNCONDITIONALLY, like the mode: the zero value (0, "not
+	// pinned-historical") always contributes a fixed field, so a
+	// pinned-current fetch and an unpinned fetch of the same content agree,
+	// and the transition to pinned-non-current moves the cursor exactly once.
+	out = binary.AppendVarint(out, c.PinnedHistoricalRevision)
 	return out
 }
 
