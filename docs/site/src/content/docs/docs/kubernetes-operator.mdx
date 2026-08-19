@@ -195,9 +195,15 @@ that omits secret keys; it is not a client-side filter. `creationPolicy` is
 3. Create the `HikyoSecret`. A fresh workload principal receives config values
    and secret presence only, so an all-or-nothing sync refuses with
    `Delivery=False`, reason `UndeliveredSecrets`, naming the secret keys.
-4. A Hikyo operator enables the per-project machine-`reveal` opt-in.
-5. Grant `reveal` to the workload principal. The next authenticated reconcile
-   can deliver the complete mapped Secret.
+4. A Hikyo operator enables the per-project machine-`reveal` opt-in. **This is
+   not yet available in the public API; it is tracked by #17 and #58.**
+5. Grant `reveal` to the workload principal. **This is also unavailable in the
+   public API until #17 and #58 ship.**
+
+Until steps 4–5 are available, a workload principal can deliver config values
+and secret presence only. A `HikyoSecret` mapping that names any secret key is
+therefore refused with `Delivery=False/UndeliveredSecrets`; it cannot deliver a
+complete mapped Secret through the public API today.
 
 ## Rollout triggering
 
@@ -238,6 +244,8 @@ The operator uses this closed reason set:
 
 | Condition | Reason | Meaning |
 | --- | --- | --- |
+| `Ready=True` | `Reconciled` | `Synced=True` and no refusal or failure is active. |
+| `Ready=False` | `Blocked` | A refusal or failure is active. |
 | `Synced=True` | `Delivered` | Full delivery was written. |
 | `Synced=True` | `Current` | The conditional cursor was current; nothing was written. |
 | `Synced=False` | `FetchFailed` | Network, 5xx, 429, 401, TokenRequest, or federation failure; retain and retry. |
@@ -251,7 +259,7 @@ The operator uses this closed reason set:
 | `Delivery=False` | `UndeliveredSecrets` | Mapped secret values were presence-only; all-or-nothing delivery refused. |
 | `Delivery=False` | `KeysMissing` | Mapped source keys left the manifest and are dropped from the target. |
 | `Delivery=False` | `LoaderControlUnacknowledged` | Loader-control destination keys lack exact acknowledgement. |
-| `Delivery=False` | `EnvFromSkip` | Warning: an invalid environment name may be skipped by `envFrom`; sync remains true. |
+| `Delivery=True` | `EnvFromSkip` | Warning: an invalid environment name may be skipped by `envFrom`; sync remains true. |
 | `Scrubbed=True` | `AuthorizationWithdrawn` | An authenticated 404 converged the managed Secret to empty. |
 | `Rollout=False` | `Stalled` | An opted-in workload did not progress after its stamp patch. |
 | `CredentialExpiry=True` | `ExpiresSoon` | The finite credential expires within seven days. |
@@ -286,23 +294,37 @@ The baseline is `LD_*`, `PATH`, `IFS`, `ENV`, `BASH_ENV`, `SHELLOPTS`,
 
 If mapped destination keys match that baseline,
 `acknowledgedLoaderKeys` must equal exactly the matching mapped set. Missing
-names and extra acknowledgements both refuse delivery. The list is sent on
-every fetch so Hikyo records which acknowledgement was active.
+names and extra acknowledgements both refuse delivery. When the list is
+non-empty, the operator sends it as `acknowledged_keys`. When it is empty, the
+operator omits the parameter; the server records an empty list on every fetch.
 
 This check is consumption-agnostic because the operator writes a Secret before
 it can know whether a later workload will use `envFrom` or a file mount.
 Inspecting current workloads would race with later changes. File-only consumers
 therefore still acknowledge a mapped key named `PATH`. Separately, Kubernetes
 `envFrom` silently skips Secret keys that are not valid environment names;
-Hikyo reports `Delivery=False/EnvFromSkip` as a warning while sync remains
+Hikyo reports `Delivery=True/EnvFromSkip` as a warning while sync remains
 successful.
 
 ## Beside the operator
 
-For CI, use render-and-apply: run `hikyo values export ...` and feed the
-rendered Secret directly to `kubectl apply -f -`. Never commit rendered values
-to the GitOps repository. This is a `values export` operation under the normal
-authorization formula; CI needs `reveal` explicitly to export secret values.
+For CI, the shipped export command is
+`hikyo values export --reveal --dangerously-print`. It writes revealed JSON to
+stdout; it does **not** render a Kubernetes Secret manifest, so direct
+render-and-apply is not shipped. A pipeline must supply its own reviewed
+JSON-to-Secret transformation (for example, `jq` plus
+`kubectl create secret generic ... --from-file=... --dry-run=client -o yaml`)
+before piping the manifest to `kubectl apply -f -`. Never commit the JSON,
+temporary value files, or rendered Secret to the GitOps repository. This is a
+`values export` operation under the normal authorization formula, so CI needs
+`reveal` explicitly to export secret values.
+
+> **K3s: encrypt render-and-apply Secrets at rest**
+>
+> This path also creates a native Kubernetes Secret. Enable K3s
+> `--secrets-encryption`. Select `secretbox` only on K3s ≥ v1.30.12+k3s1,
+> v1.31.8+k3s1, v1.32.4+k3s1, or v1.33.0+k3s1. Use the AES-CBC provider on
+> older releases.
 
 For an operator-free pod, a user-authored init container can run
 `hikyo values export ...` into a shared `emptyDir`, with the application
