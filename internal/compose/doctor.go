@@ -289,6 +289,10 @@ func parseComposeVersion(s string) ([3]int, bool) {
 	return out, true
 }
 
+func isVarNameChar(b byte) bool {
+	return b == '_' || (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z') || (b >= '0' && b <= '9')
+}
+
 func less(a, b [3]int) bool {
 	for i := 0; i < 3; i++ {
 		if a[i] != b[i] {
@@ -311,8 +315,14 @@ func stampVarUsage(raw, varName string) (present, requiredForm bool) {
 		if i < 0 {
 			break
 		}
-		present = true
 		after := rest[i+len(needle):]
+		// The var name must TERMINATE here: otherwise ${HIKYO_GEN_API} would
+		// match inside ${HIKYO_GEN_API_SERVER:?…} and mis-flag target `api`.
+		if len(after) > 0 && isVarNameChar(after[0]) {
+			rest = after
+			continue
+		}
+		present = true
 		// The next two chars must be ":?" for the required form. Anything else
 		// (":-", "}", ":+", …) is not the required form.
 		if !strings.HasPrefix(after, ":?") {

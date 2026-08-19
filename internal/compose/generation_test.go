@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -211,6 +212,54 @@ func TestCurrentStampsRejectsMalformed(t *testing.T) {
 	}
 	if _, err := CurrentStamps(projectDir); err == nil {
 		t.Fatal("expected hard error on a malformed stamp in the managed block")
+	}
+}
+
+func TestWriteGenerationDirModes(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX modes are the unix leg")
+	}
+	_, runtime := dirs(t)
+	w := NewWriter(t.TempDir(), nil)
+	keys := testKeys(t)
+	stamp := TargetStamp(keys, []byte("x"))
+	// A hostile umask (masks owner-execute) must not make the dir untraversable:
+	// without the explicit chmod, Mkdir(0700)&~0177 = 0600.
+	old := setUmask(0o177)
+	defer setUmask(old)
+	if err := w.WriteGeneration(runtime, stamp, map[string][]byte{"api": []byte("x")}); err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range []string{runtime, filepath.Join(runtime, stamp)} {
+		fi, err := os.Stat(d)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if fi.Mode().Perm() != 0o700 {
+			t.Errorf("%s mode = %04o, want 0700", d, fi.Mode().Perm())
+		}
+	}
+}
+
+func TestBeginRenderLockFileMode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX modes are the unix leg")
+	}
+	state, _ := dirs(t)
+	old := setUmask(0o022)
+	defer setUmask(old)
+	w := NewWriter(state, nil)
+	unlock, err := w.BeginRender()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+	fi, err := os.Stat(filepath.Join(state, lockName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode().Perm() != 0o600 {
+		t.Errorf("lock file mode = %04o, want 0600 (doctor state_dir_mode expects it)", fi.Mode().Perm())
 	}
 }
 

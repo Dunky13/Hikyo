@@ -70,6 +70,10 @@ func Append(stateDir string, records []OfflineRecord) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("compose: create offline-records dir: %w", err)
 	}
+	// Explicit 0700, not umask-dependent (client local-state protection model).
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return fmt.Errorf("compose: chmod offline-records dir: %w", err)
+	}
 
 	data, err := json.Marshal(records)
 	if err != nil {

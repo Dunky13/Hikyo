@@ -70,6 +70,45 @@ services:
 	if req {
 		t.Error("any non-required occurrence fails the check")
 	}
+	// Prefix-collision: HIKYO_GEN_API must NOT match inside HIKYO_GEN_API_SERVER.
+	yaml2 := "path: /p/${HIKYO_GEN_API_SERVER:?render}/x.env"
+	if present, _ := stampVarUsage(yaml2, "HIKYO_GEN_API"); present {
+		t.Error("HIKYO_GEN_API must not match inside HIKYO_GEN_API_SERVER")
+	}
+	if present, req := stampVarUsage(yaml2, "HIKYO_GEN_API_SERVER"); !present || !req {
+		t.Errorf("HIKYO_GEN_API_SERVER should match its own var: present=%v req=%v", present, req)
+	}
+}
+
+func TestDoctorPrefixCollisionTargets(t *testing.T) {
+	// A correct compose file for both `api` and `api-server` must produce no
+	// stamp-var findings for either.
+	runtime := filepath.Join(t.TempDir(), "runtime")
+	keys := testKeys(t)
+	sApi := TargetStamp(keys, []byte("a"))
+	sSrv := TargetStamp(keys, []byte("b"))
+	w := NewWriter(t.TempDir(), nil)
+	if err := w.WriteGeneration(runtime, sApi, map[string][]byte{"api": []byte("a")}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.WriteGeneration(runtime, sSrv, map[string][]byte{"api-server": []byte("b")}); err != nil {
+		t.Fatal(err)
+	}
+	in := DoctorInput{
+		ComposeVersion: "2.31.0",
+		RawComposeYAML: "a: ${HIKYO_GEN_API:?r}\nb: ${HIKYO_GEN_API_SERVER:?r}\n",
+		ManagedStamps:  map[string]string{"api": sApi, "api-server": sSrv},
+		RuntimeDir:     runtime,
+		ServerStamps:   map[string]string{"api": sApi, "api-server": sSrv},
+		ConfigTargets: map[string]Target{
+			"api":        {Keys: []string{"key_1"}, Services: []string{"api"}},
+			"api-server": {Keys: []string{"key_2"}, Services: []string{"api-server"}},
+		},
+		ExistingKeyIDs: map[string]bool{"key_1": true, "key_2": true},
+	}
+	if f := Doctor(in); len(f) != 0 {
+		t.Fatalf("prefix-collision pair produced findings: %+v", f)
+	}
 }
 
 // fullyHealthyInput builds a doctor input with no findings.

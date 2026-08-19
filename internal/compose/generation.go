@@ -111,6 +111,13 @@ func (w *Writer) BeginRender() (unlock func(), err error) {
 	if !locked {
 		return nil, errors.New("compose: another hikyo compose process holds the lock")
 	}
+	// gofrs/flock creates the lock file with its own default perm; force 0600
+	// so the file this code creates does not itself trip doctor's
+	// state_dir_mode check.
+	if err := os.Chmod(fl.Path(), 0o600); err != nil {
+		_ = fl.Unlock()
+		return nil, fmt.Errorf("compose: chmod lock file: %w", err)
+	}
 	return func() { _ = fl.Unlock() }, nil
 }
 
@@ -137,8 +144,15 @@ func (w *Writer) WriteGeneration(runtimeDir, stamp string, files map[string][]by
 	if err := os.MkdirAll(runtimeDir, 0o700); err != nil {
 		return fmt.Errorf("compose: create runtime dir: %w", err)
 	}
+	// Explicit 0700, not umask-dependent (ADR § Where plaintext lives).
+	if err := os.Chmod(runtimeDir, 0o700); err != nil {
+		return fmt.Errorf("compose: chmod runtime dir: %w", err)
+	}
 	if err := os.Mkdir(genDir, 0o700); err != nil {
 		return fmt.Errorf("compose: create generation dir: %w", err)
+	}
+	if err := os.Chmod(genDir, 0o700); err != nil {
+		return fmt.Errorf("compose: chmod generation dir: %w", err)
 	}
 
 	// Deterministic order so the directory fsync sees a stable set.
