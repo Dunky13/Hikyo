@@ -46,13 +46,15 @@ func (s stubDelivery) FetchMode(_ context.Context, presented string, scope domai
 	}
 	if cursor == s.cursor && cursor != "" {
 		return service.FetchResult{Current: true, Cursor: s.cursor, ChangeToken: "v1:token", SchemaRevision: 7,
-			IssuedAt: time.Unix(1_800_000_000, 0).UTC(), SnapshotExpiresAt: time.Unix(1_800_604_800, 0).UTC()}, nil
+			CredentialID: "mcr_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f16",
+			IssuedAt:     time.Unix(1_800_000_000, 0).UTC(), SnapshotExpiresAt: time.Unix(1_800_604_800, 0).UTC()}, nil
 	}
 	return service.FetchResult{
 		Cursor: s.cursor, ChangeToken: "v1:token", SchemaRevision: 7,
+		CredentialID: "mcr_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f16",
 		Keys: []service.DeliveredKey{
-			{Name: "DATABASE_URL", Classification: "config", Presence: delivery.PresenceRequired, Value: stringPtr("postgres://db")},
-			{Name: "DATABASE_PASSWORD", Classification: "secret", Presence: delivery.PresenceOptional},
+			{KeyID: "key_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f17", Name: "DATABASE_URL", Classification: "config", Presence: delivery.PresenceRequired, Value: stringPtr("postgres://db")},
+			{KeyID: "key_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f18", Name: "DATABASE_PASSWORD", Classification: "secret", Presence: delivery.PresenceOptional},
 		},
 		IssuedAt: time.Unix(1_800_000_000, 0).UTC(), SnapshotExpiresAt: time.Unix(1_800_604_800, 0).UTC(),
 	}, nil
@@ -141,6 +143,13 @@ func TestDeliveryRouteRendersBothDispositions(t *testing.T) {
 	if full.SchemaRevision != 7 {
 		t.Errorf("schema_revision = %d, want 7", full.SchemaRevision)
 	}
+	if full.CredentialId != "mcr_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f16" {
+		t.Errorf("credential_id = %q, want the authenticated credential", full.CredentialId)
+	}
+	if full.Keys[0].KeyId != "key_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f17" ||
+		full.Keys[1].KeyId != "key_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f18" {
+		t.Fatalf("key ids rendered %+v", full.Keys)
+	}
 	if full.Keys[0].Value == nil || *full.Keys[0].Value != "postgres://db" || full.Keys[1].Value != nil {
 		t.Fatalf("value projection rendered %+v", full.Keys)
 	}
@@ -158,6 +167,9 @@ func TestDeliveryRouteRendersBothDispositions(t *testing.T) {
 	}
 	if !current.Current {
 		t.Fatal("presenting the served cursor did not answer `current`")
+	}
+	if current.CredentialId != full.CredentialId {
+		t.Fatalf("current credential_id = %q, want %q", current.CredentialId, full.CredentialId)
 	}
 	if current.Keys == nil {
 		t.Fatal("`current` rendered keys as JSON null; it must be an empty array")

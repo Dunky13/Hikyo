@@ -11082,12 +11082,14 @@ components:
     DeliveredKey:
       type: object
       additionalProperties: false
-      required: [name, classification, presence]
+      required: [key_id, name, classification, presence]
       description: |
         One key as the machine surface delivers it. Config rows carry value;
         secret rows carry value only when the caller's projection admits the
         served revision, otherwise presence remains visible without plaintext.
       properties:
+        key_id:
+          $ref: "#/components/schemas/ID"
         name:
           type: string
           maxLength: 256
@@ -11110,12 +11112,19 @@ components:
     DeliveryResponse:
       type: object
       additionalProperties: false
-      required: [current, cursor, change_token, schema_revision, keys, pin_expired, issued_at, snapshot_expires_at]
+      required: [current, cursor, change_token, schema_revision, keys, pin_expired, issued_at, snapshot_expires_at, credential_id]
       description: |
         Either the authorized projection, or the statement that the presented
         cursor is current — in which case `keys` is empty and NOTHING was
         disclosed. Only a fetch that actually delivers values is a disclosure.
       properties:
+        credential_id:
+          allOf:
+            - $ref: "#/components/schemas/ID"
+          description: |
+            The authenticated caller's credential identifier, returned on both
+            dispositions so clients can bind snapshots and offline records to
+            the server-asserted identity rather than infer it locally.
         current:
           type: boolean
           description: |

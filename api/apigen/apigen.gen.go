@@ -2391,7 +2391,10 @@ type DeliveredKey struct {
 	// ceremony. Closed, deliberately: a third value would be a third
 	// disclosure regime.
 	Classification KeyClassification `json:"classification"`
-	Name           string            `json:"name"`
+
+	// KeyId A prefixed UUIDv7, e.g. `org_0198…`.
+	KeyId ID     `json:"key_id"`
+	Name  string `json:"name"`
 
 	// Presence What the fetch reports about this key in the addressed
 	// environment. `set` is a key the committed snapshot actually
@@ -2420,6 +2423,11 @@ type DeliveryResponse struct {
 	// server key and may flow into pod annotations, logs and
 	// change-detection caches as ordinary non-secret metadata.
 	ChangeToken string `json:"change_token"`
+
+	// CredentialId The authenticated caller's credential identifier, returned on both
+	// dispositions so clients can bind snapshots and offline records to
+	// the server-asserted identity rather than infer it locally.
+	CredentialId ID `json:"credential_id"`
 
 	// Current True when the presented cursor named the state the server was about
 	// to serve.

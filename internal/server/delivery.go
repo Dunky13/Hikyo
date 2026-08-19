@@ -51,6 +51,7 @@ func (a *API) FetchDelivery(ctx context.Context, req apigen.FetchDeliveryRequest
 	keys := make([]apigen.DeliveredKey, 0, len(res.Keys))
 	for _, k := range res.Keys {
 		keys = append(keys, apigen.DeliveredKey{
+			KeyId:          k.KeyID,
 			Name:           k.Name,
 			Classification: apigen.KeyClassification(k.Classification),
 			Presence:       apigen.DeliveredKeyPresence(k.Presence),
@@ -58,6 +59,7 @@ func (a *API) FetchDelivery(ctx context.Context, req apigen.FetchDeliveryRequest
 		})
 	}
 	out := apigen.FetchDelivery200JSONResponse{
+		CredentialId:      res.CredentialID,
 		Current:           res.Current,
 		Cursor:            res.Cursor,
 		ChangeToken:       res.ChangeToken,

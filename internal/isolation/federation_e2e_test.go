@@ -321,7 +321,7 @@ func runFederationPerIssuerType(t *testing.T, db *store.DB) {
 			}
 			r := newFedRig(t, caseDB)
 			r.configureIssuer(t, tc.typ, []string{tc.shape.DefaultAudience})
-			r.bindShape(t, "wl-"+tc.name, tc.shape, hikyoAudience)
+			_, binding := r.bindShape(t, "wl-"+tc.name, tc.shape, hikyoAudience)
 
 			bound, err := r.idp.MintShape(tc.shape, hikyoAudience, r.clk.Now(), 10*time.Minute)
 			if err != nil {
@@ -334,12 +334,18 @@ func runFederationPerIssuerType(t *testing.T, db *store.DB) {
 			if res.Current {
 				t.Fatal("a cursor-less federated fetch answered `current`")
 			}
+			if res.CredentialID != binding.CredentialID {
+				t.Fatalf("credential id = %q, want binding %q", res.CredentialID, binding.CredentialID)
+			}
 			// The delivered projection is the whole catalogue, and NO PLAINTEXT
 			// crosses it whatever the classification: the delivered members are a
 			// name, a classification and a presence, and there is no value member
 			// on the type at all.
 			presence := map[string]delivery.Presence{}
 			for _, k := range res.Keys {
+				if k.KeyID == "" {
+					t.Fatalf("delivered key %q has no immutable key id", k.Name)
+				}
 				presence[k.Name] = k.Presence
 			}
 			// Every delivered key is `set`: it is in the payload because the

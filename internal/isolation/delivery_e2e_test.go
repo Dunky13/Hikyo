@@ -190,7 +190,13 @@ func runDeliveryValueProjectionAndDisclosure(t *testing.T, db *store.DB) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if readOnly.CredentialID != minted.Credential.ID {
+		t.Fatalf("credential id = %q, want authenticated credential %q", readOnly.CredentialID, minted.Credential.ID)
+	}
 	for _, key := range readOnly.Keys {
+		if key.KeyID == "" {
+			t.Fatalf("delivered key %q has no immutable key id", key.Name)
+		}
 		switch key.Classification {
 		case string(schema.Config):
 			if key.Value == nil {
@@ -223,6 +229,9 @@ func runDeliveryValueProjectionAndDisclosure(t *testing.T, db *store.DB) {
 	current, err := del.Fetch(t.Context(), minted.Value, env, revealed.Cursor)
 	if err != nil || !current.Current {
 		t.Fatalf("revealed cursor round trip = (%+v, %v), want current", current, err)
+	}
+	if current.CredentialID != minted.Credential.ID {
+		t.Fatalf("current credential id = %q, want authenticated credential %q", current.CredentialID, minted.Credential.ID)
 	}
 	if got := queryInt(t, db, `SELECT COUNT(*) FROM audit_tenant_events
 		WHERE type = 'disclosure.value_revealed' AND payload LIKE '%"surface":"delivery"%'`); got != int64(secretCount) {

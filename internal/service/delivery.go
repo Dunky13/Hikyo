@@ -41,6 +41,10 @@ import (
 
 // FetchResult is one machine fetch.
 type FetchResult struct {
+	// CredentialID is the authenticated caller's immutable credential id. It is
+	// returned on BOTH dispositions because clients bind it into snapshot AAD
+	// and offline disclosure records rather than guessing their wire identity.
+	CredentialID string
 	// Current reports that the presented cursor named the state the server was
 	// about to serve. NO CONTENT accompanies it — that is the whole point: only
 	// a fetch that actually delivers is a disclosure.
@@ -73,7 +77,7 @@ type FetchResult struct {
 // DeliveredKey is one key as the machine surface delivers it. Value is absent
 // for an unrevealed secret and present for config or authorized secret material.
 type DeliveredKey struct {
-	ID             string
+	KeyID          string
 	Name           string
 	Classification string
 	Presence       delivery.Presence
@@ -318,7 +322,8 @@ func (s *Delivery) FetchAsMode(ctx context.Context, actor Actor, scope domain.Sc
 			subtle.ConstantTimeCompare([]byte(cursor), []byte(computed)) == 1
 
 		out = FetchResult{
-			Current: current, Cursor: computed, ChangeToken: changeToken,
+			CredentialID: caller.CredentialID,
+			Current:      current, Cursor: computed, ChangeToken: changeToken,
 			SchemaRevision: schemaRevision, PinnedRevision: out.PinnedRevision,
 			PinExpired: out.PinExpired, IssuedAt: issuedAt,
 			SnapshotExpiresAt: issuedAt.Add(delivery.SnapshotMaxAge),
@@ -330,8 +335,8 @@ func (s *Delivery) FetchAsMode(ctx context.Context, actor Actor, scope domain.Sc
 					continue
 				}
 				ev, err := domainEvent(ctx, audit.EventValueRevealed, caller.Principal,
-					audit.Object{Type: "key", ID: key.ID}, audit.Payload{
-						"key_id": key.ID, "name": audit.SanitizeFreeText(key.Name),
+					audit.Object{Type: "key", ID: key.KeyID}, audit.Payload{
+						"key_id": key.KeyID, "name": audit.SanitizeFreeText(key.Name),
 						"surface": "delivery", "revision": snapshotRevision,
 					})
 				if err != nil {
@@ -588,7 +593,7 @@ func deliveryRows(ctx context.Context, r store.Repos, p authz.Proof, sealer *cry
 			continue
 		}
 		key := DeliveredKey{
-			ID: entry.KeyID, Name: entry.KeyName, Classification: entry.Classification,
+			KeyID: entry.KeyID, Name: entry.KeyName, Classification: entry.Classification,
 			Presence: delivery.PresenceSet,
 		}
 		if entry.Classification == string(schema.Config) || canReveal {
