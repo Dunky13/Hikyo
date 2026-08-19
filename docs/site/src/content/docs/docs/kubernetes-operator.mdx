@@ -1,0 +1,315 @@
+---
+title: Kubernetes operator
+description: Deliver scoped Hikyo values into owned Kubernetes Secrets and control workload rollouts.
+editUrl: https://github.com/Hikyo-Org/hikyo/edit/main/docs/site/src/content/docs/docs/kubernetes-operator.mdx
+---
+
+An admin-created, cluster-scoped, immutable `HikyoInstance` pins a
+credential-free HTTPS endpoint and trust configuration. A namespaced
+`HikyoSecret` selects that instance, its own credential and a Hikyo scope, then
+the operator creates and owns a native Kubernetes `Secret`. Workloads consume
+the Secret through `envFrom`, `valueFrom`, or a volume. Environment variables
+change only after a pod restart. Normal Secret volumes update eventually through
+the kubelet; `subPath` mounts never update.
+
+> **K3s: encrypt native Secrets at rest**
+>
+> Synced values land in native Kubernetes Secrets. K3s stores them in plaintext
+> at rest by default. Enable K3s `--secrets-encryption`. Select `secretbox` only
+> on K3s ≥ v1.30.12+k3s1, v1.31.8+k3s1, v1.32.4+k3s1, or v1.33.0+k3s1. Use
+> the AES-CBC provider on older releases.
+
+## Install the operator
+
+Add the operator settings to the values file for the Hikyo Helm release:
+
+```yaml
+operator:
+  enabled: true
+  namespaces:
+    - payments
+  triggerRollouts: true
+  designatedServiceAccounts:
+    payments:
+      - payments-api
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+```
+
+Apply the chart:
+
+```bash
+helm upgrade --install hikyo ./chart/hikyo \
+  --namespace hikyo \
+  --create-namespace \
+  --values hikyo-values.yaml
+```
+
+An empty `operator.namespaces` watches cluster-wide. A non-empty list creates
+namespace-scoped bindings and the watch list from the same value. Effective
+reach is the intersection of those watches and RBAC. Add every federated
+ServiceAccount to `operator.designatedServiceAccounts` under its namespace;
+the chart restricts TokenRequest creation to those names.
+
+The operator runs as UID/GID 65532 with `runAsNonRoot`, a read-only root
+filesystem, all capabilities dropped, `RuntimeDefault` seccomp, and privilege
+escalation disabled. Its pod holds no Hikyo credential, Hikyo root key, or
+datastore. Each `HikyoSecret` supplies its own identity.
+
+Rollout triggering costs `get`, `list`, `watch`, and `patch` on Deployments,
+StatefulSets, and DaemonSets in every bound namespace. Kubernetes RBAC cannot
+limit those patch rights by label or annotation. "Only opted-in workloads" is
+an operator-code rule, not an RBAC boundary; the namespace binding is the only
+real boundary. Set `operator.triggerRollouts: false` if you will not grant
+workload patch access. Secret delivery still works, but you own restarts.
+
+## Create a HikyoInstance
+
+Only cluster admins should create instances. The complete `spec` is immutable.
+`url` must use HTTPS, `caBundle` is an optional base64-encoded PEM bundle, and
+`audience` is required when any `HikyoSecret` uses ServiceAccount federation.
+
+```yaml
+apiVersion: hikyo.dev/v1alpha1
+kind: HikyoInstance
+metadata:
+  name: primary
+spec:
+  url: https://hikyo.example.com
+  caBundle: <base64-encoded-PEM-bundle>
+  audience: https://hikyo.example.com/kubernetes/primary
+```
+
+There is no credential field and no insecure TLS option. Create a new
+`HikyoInstance` to change its endpoint, CA bundle, or audience.
+
+## Credentials and designation
+
+### Bootstrap Secret
+
+Create a workload service account in Hikyo, grant its required scope, then mint
+the bearer credential with the shipped CLI verb:
+
+```bash
+hikyo sa create --name payments-api --kind workload
+hikyo access grant add \
+  --principal <service-account-id> \
+  --capability <read-capability>
+hikyo sa credential mint \
+  --sa <service-account-id> \
+  --lifetime 720h \
+  --output-file ./hikyo-token
+
+kubectl --namespace payments create secret generic hikyo-payments-credential \
+  --from-file=hikyo-token=./hikyo-token
+kubectl --namespace payments label secret hikyo-payments-credential \
+  hikyo.dev/delivery="true" \
+  hikyo.dev/instance=primary
+```
+
+The bootstrap Secret must be in the same namespace as the `HikyoSecret`. Its
+data key is `hikyo-token` and both designation labels are required.
+
+### ServiceAccount federation
+
+Federation avoids a stored bearer credential. Designate the same-namespace
+ServiceAccount for one instance:
+
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: payments-api
+  namespace: payments
+  labels:
+    hikyo.dev/delivery: "true"
+    hikyo.dev/instance: primary
+```
+
+List that name under `operator.designatedServiceAccounts.payments`. The
+operator requests a short-lived token whose audience exactly equals
+`HikyoInstance.spec.audience`; it keeps that token in memory only. Configure a
+trusted issuer in Hikyo from the cluster's OIDC issuer and JWKS, then create an
+immutable byte-exact issuer/subject/audience binding. See
+[machine identities](/docs/machine-identities/#oidc-federation) for the issuer
+and binding workflow.
+
+Naming either credential in a `HikyoSecret` is not authority to use it. The
+referenced Secret or ServiceAccount must carry both designation labels, and its
+`hikyo.dev/instance` value must match `instanceRef.name`.
+
+## Create a HikyoSecret
+
+This example uses the bootstrap Secret above and includes every spec field:
+
+```yaml
+apiVersion: hikyo.dev/v1alpha1
+kind: HikyoSecret
+metadata:
+  name: payments-config
+  namespace: payments
+spec:
+  instanceRef:
+    name: primary
+  auth:
+    secretRef:
+      name: hikyo-payments-credential
+  scope:
+    org: org_01900000-0000-7000-8000-000000000001
+    project: proj_01900000-0000-7000-8000-000000000002
+    environment: env_01900000-0000-7000-8000-000000000003
+  mapping:
+    - key: DATABASE_URL
+      secretKey: DATABASE_URL
+    - key: LOG_LEVEL
+      secretKey: LOG_LEVEL
+  target:
+    name: payments-env
+    creationPolicy: Owner
+  projection: full
+  acknowledgedLoaderKeys: []
+  resyncInterval: 5m
+```
+
+Use `auth.serviceAccountRef.name` instead of `auth.secretRef.name` for
+federation. `projection: config-only` requests a server-authorized manifest
+that omits secret keys; it is not a client-side filter. `creationPolicy` is
+`Owner` or `Orphan`.
+
+> **K3s: encrypt the managed Secret at rest**
+>
+> This sync writes `payments-env` as a native Kubernetes Secret. K3s stores it
+> in plaintext at rest by default. Enable K3s `--secrets-encryption`. Select
+> `secretbox` only on K3s ≥ v1.30.12+k3s1, v1.31.8+k3s1, v1.32.4+k3s1, or
+> v1.33.0+k3s1. Use the AES-CBC provider on older releases.
+
+## The five-step journey
+
+1. Mint a workload service-account credential or configure federation.
+2. Grant that principal `read` on the target environment.
+3. Create the `HikyoSecret`. A fresh workload principal receives config values
+   and secret presence only, so an all-or-nothing sync refuses with
+   `Delivery=False`, reason `UndeliveredSecrets`, naming the secret keys.
+4. A Hikyo operator enables the per-project machine-`reveal` opt-in.
+5. Grant `reveal` to the workload principal. The next authenticated reconcile
+   can deliver the complete mapped Secret.
+
+## Rollout triggering
+
+Consent lives on each workload. Add the managed Secret name to the workload's
+metadata annotation:
+
+```yaml
+metadata:
+  annotations:
+    hikyo.dev/secrets: "payments-env,shared-env"
+```
+
+After a changed delivery, the operator patches that workload's pod template:
+
+```yaml
+spec:
+  template:
+    metadata:
+      annotations:
+        stamp.hikyo.dev/payments-env: v1:<32-hex-characters>
+```
+
+The patch requests a rollout; it does not force one. A paused Deployment, an
+`OnDelete` StatefulSet, or stalled readiness can leave
+`Rollout=False/Stalled`. Each stamp covers one target, so the restart blast
+radius follows Secret consumption. It is a keyed, per-target stamp, never a
+bare content digest or the server change token.
+
+Reloader is prior art, not part of this contract. Its default strategy injects
+a resource hash through an environment variable, exposing a bare digest of
+secret material in a workload-readable field. Its non-default annotations
+strategy avoids that shape but still needs the same workload patch authority.
+
+## Lifecycle and conditions
+
+`Ready=True` is the summary: `Synced=True` with no active refusal condition.
+The operator uses this closed reason set:
+
+| Condition | Reason | Meaning |
+| --- | --- | --- |
+| `Synced=True` | `Delivered` | Full delivery was written. |
+| `Synced=True` | `Current` | The conditional cursor was current; nothing was written. |
+| `Synced=False` | `FetchFailed` | Network, 5xx, 429, 401, TokenRequest, or federation failure; retain and retry. |
+| `Synced=False` | `NotMaterialized` | No published revision exists; retain or remain empty and retry. |
+| `Designation=False` | `SecretNotDesignated` | Bootstrap Secret lacks the required designation. |
+| `Designation=False` | `ServiceAccountNotDesignated` | ServiceAccount lacks the required designation. |
+| `Designation=False` | `InstanceMismatch` | Credential designation names another instance. |
+| `Designation=False` | `AudienceMissing` | Federation was selected but the instance has no audience. |
+| `Conflict=True` | `ManagedSecretNotOwned` | Target exists without this CR's controller owner reference; adoption is refused. |
+| `Conflict=True` | `TargetClaimed` | An earlier `HikyoSecret` claims the same target. |
+| `Delivery=False` | `UndeliveredSecrets` | Mapped secret values were presence-only; all-or-nothing delivery refused. |
+| `Delivery=False` | `KeysMissing` | Mapped source keys left the manifest and are dropped from the target. |
+| `Delivery=False` | `LoaderControlUnacknowledged` | Loader-control destination keys lack exact acknowledgement. |
+| `Delivery=False` | `EnvFromSkip` | Warning: an invalid environment name may be skipped by `envFrom`; sync remains true. |
+| `Scrubbed=True` | `AuthorizationWithdrawn` | An authenticated 404 converged the managed Secret to empty. |
+| `Rollout=False` | `Stalled` | An opted-in workload did not progress after its stamp patch. |
+| `CredentialExpiry=True` | `ExpiresSoon` | The finite credential expires within seven days. |
+| `CredentialExpiry=True` | `Expired` | The finite credential expiry has passed. |
+| `Unreconciled=True` | `NamespaceNotBound` | A cluster-wide watcher saw a CR outside its RBAC authority. |
+
+The managed Secret has three distinct lifecycle outcomes:
+
+1. Deleting the CR with `creationPolicy: Owner` lets Kubernetes garbage-collect
+   the Secret. `Orphan` removes the owner reference during deletion and leaves
+   the Secret standing unowned.
+2. An unreachable server, 5xx, 429, or 401 retains the last-synced Secret and
+   reports `Synced=False/FetchFailed`. Retry backoff is jittered from 1 second
+   to 5 minutes. There is no staleness bound and no timeout scrub.
+3. An authoritative refusal under a still-working credential converges the
+   Secret to current authority. Lost environment access scrubs it; mapped keys
+   missing from an authenticated manifest are removed.
+
+Operational rule: revoke-the-token-and-done leaves delivered values standing.
+If the cluster must converge, remove grants while the credential still
+authenticates, or replace it and let the replacement identity reconcile. A
+scrub cannot remove values already copied into a running process environment;
+restart those pods.
+
+## Loader-control keys
+
+The baseline is `LD_*`, `PATH`, `IFS`, `ENV`, `BASH_ENV`, `SHELLOPTS`,
+`NODE_OPTIONS`, `PYTHONSTARTUP`, `PYTHONPATH`, `PERL5OPT`, `PERL5LIB`,
+`RUBYOPT`, `RUBYLIB`, `JAVA_TOOL_OPTIONS`, `_JAVA_OPTIONS`,
+`JDK_JAVA_OPTIONS`, `CLASSPATH`, `GIT_*`, `SSL_CERT_FILE`, `SSL_CERT_DIR`,
+`CURL_CA_BUNDLE`, `REQUESTS_CA_BUNDLE`, and `NODE_EXTRA_CA_CERTS`.
+
+If mapped destination keys match that baseline,
+`acknowledgedLoaderKeys` must equal exactly the matching mapped set. Missing
+names and extra acknowledgements both refuse delivery. The list is sent on
+every fetch so Hikyo records which acknowledgement was active.
+
+This check is consumption-agnostic because the operator writes a Secret before
+it can know whether a later workload will use `envFrom` or a file mount.
+Inspecting current workloads would race with later changes. File-only consumers
+therefore still acknowledge a mapped key named `PATH`. Separately, Kubernetes
+`envFrom` silently skips Secret keys that are not valid environment names;
+Hikyo reports `Delivery=False/EnvFromSkip` as a warning while sync remains
+successful.
+
+## Beside the operator
+
+For CI, use render-and-apply: run `hikyo values export ...` and feed the
+rendered Secret directly to `kubectl apply -f -`. Never commit rendered values
+to the GitOps repository. This is a `values export` operation under the normal
+authorization formula; CI needs `reveal` explicitly to export secret values.
+
+For an operator-free pod, a user-authored init container can run
+`hikyo values export ...` into a shared `emptyDir`, with the application
+mounting that volume read-only. This reverses the operator's availability
+trade-off: if Hikyo is unreachable at pod start, the init container fails and
+the application pod remains blocked.
+
+An upstream External Secrets Operator provider is the named future direction
+after the Hikyo API freezes. It is not a v1 integration; ESO's latest-minor
+support policy brings an ongoing monthly upstream release cost.
