@@ -37,10 +37,6 @@ import (
 // true-positive for the aws-access-token rule, used everywhere as the canary.
 const plantedCredential = "AKIAIOSFODNN7EXAMPLE"
 
-func stringDeclaration() schema.Declaration {
-	return schema.Declaration{Rule: &schema.Rule{Type: schema.TypeString}}
-}
-
 func nonePresence() schema.PresenceRules {
 	return schema.PresenceRules{
 		Required:  schema.Presence{Mode: schema.PresenceNone},

@@ -59,7 +59,7 @@ func runDefinitionsAuditLifecycle(t *testing.T, db *store.DB) {
 	}
 
 	stale := planDefinitions(t, svc, f, exportDefinitions(t, svc, f))
-	if _, err := keySvc(t, db).Rename(t.Context(), service.LocalPrincipal(alice), f.scope(), f.key, "AUDIT_KEY"); err != nil {
+	if _, err := keySvc(t, db).Rename(t.Context(), service.LocalPrincipal(alice), f.scope(), f.key, "AUDIT_KEY", nil); err != nil {
 		t.Fatalf("move definitions revision: %v", err)
 	}
 	if _, err := svc.Apply(t.Context(), service.LocalPrincipal(alice), f.scope(), stale.ID, service.ApplyOptions{}); err == nil || !strings.Contains(safeError(err), "definitions revision") {
@@ -135,7 +135,7 @@ func definitionsPins(t *testing.T, db *store.DB) {
 		f := seedDefinitionsProject(t, db, "pinschema", true)
 		svc := definitionsService(t, db)
 		plan := planDefinitions(t, svc, f, exportDefinitions(t, svc, f))
-		if _, err := keySvc(t, db).Rename(t.Context(), service.LocalPrincipal(alice), f.scope(), f.key, "MOVED_KEY"); err != nil {
+		if _, err := keySvc(t, db).Rename(t.Context(), service.LocalPrincipal(alice), f.scope(), f.key, "MOVED_KEY", nil); err != nil {
 			t.Fatal(err)
 		}
 		before := captureDefinitionsState(t, db, f.project)
@@ -154,7 +154,7 @@ func definitionsPins(t *testing.T, db *store.DB) {
 		f := seedDefinitionsProject(t, db, "pintopology", true)
 		svc := definitionsService(t, db)
 		plan := planDefinitions(t, svc, f, exportDefinitions(t, svc, f))
-		if _, err := cloneSvc(t, db).Create(t.Context(), service.LocalPrincipal(alice), f.scope(), "created-later"); err != nil {
+		if _, err := cloneSvc(t, db).Create(t.Context(), service.LocalPrincipal(alice), f.scope(), "created-later", nil); err != nil {
 			t.Fatal(err)
 		}
 		before := captureDefinitionsState(t, db, f.project)
@@ -227,23 +227,23 @@ func definitionsGitMode(t *testing.T, db *store.DB) {
 		call func() error
 	}{
 		{"key create", func() error {
-			_, err := keys.Create(t.Context(), service.LocalPrincipal(alice), f.scope(), keySpec("NEW_KEY", "config"))
+			_, err := keys.Create(t.Context(), service.LocalPrincipal(alice), f.scope(), keySpec("NEW_KEY", "config"), nil)
 			return err
 		}},
 		{"key rename", func() error {
-			_, err := keys.Rename(t.Context(), service.LocalPrincipal(alice), f.scope(), f.key, "RENAMED_KEY")
+			_, err := keys.Rename(t.Context(), service.LocalPrincipal(alice), f.scope(), f.key, "RENAMED_KEY", nil)
 			return err
 		}},
 		{"key metadata", func() error {
-			_, err := keys.UpdateMetadata(t.Context(), service.LocalPrincipal(alice), f.scope(), f.key, service.KeyMetadataUpdate{Description: &description})
+			_, err := keys.UpdateMetadata(t.Context(), service.LocalPrincipal(alice), f.scope(), f.key, service.KeyMetadataUpdate{Description: &description}, nil)
 			return err
 		}},
 		{"key declaration", func() error {
-			_, err := keys.UpdateDeclaration(t.Context(), service.LocalPrincipal(alice), f.scope(), f.key, service.KeyDeclarationUpdate{Declaration: decl, Presence: schema.DefaultPresenceRules()})
+			_, err := keys.UpdateDeclaration(t.Context(), service.LocalPrincipal(alice), f.scope(), f.key, service.KeyDeclarationUpdate{Declaration: decl, Presence: schema.DefaultPresenceRules()}, nil)
 			return err
 		}},
 		{"key reclassify", func() error {
-			_, err := keys.Reclassify(t.Context(), service.LocalPrincipal(alice), f.scope(), f.key, "secret")
+			_, _, err := keys.Reclassify(t.Context(), service.LocalPrincipal(alice), f.scope(), f.key, "secret")
 			return err
 		}},
 		{"key set group", func() error {
@@ -252,24 +252,24 @@ func definitionsGitMode(t *testing.T, db *store.DB) {
 		}},
 		{"key delete", func() error { return keys.Delete(t.Context(), service.LocalPrincipal(alice), f.scope(), f.key) }},
 		{"group create", func() error {
-			_, err := groups.Create(t.Context(), service.LocalPrincipal(alice), f.scope(), "new-group")
+			_, err := groups.Create(t.Context(), service.LocalPrincipal(alice), f.scope(), "new-group", nil)
 			return err
 		}},
 		{"group rename", func() error {
-			_, err := groups.Rename(t.Context(), service.LocalPrincipal(alice), f.scope(), f.group, "renamed-group")
+			_, err := groups.Rename(t.Context(), service.LocalPrincipal(alice), f.scope(), f.group, "renamed-group", nil)
 			return err
 		}},
 		{"group delete", func() error { return groups.Delete(t.Context(), service.LocalPrincipal(alice), f.scope(), f.group) }},
 		{"environment create", func() error {
-			_, err := envs.Create(t.Context(), service.LocalPrincipal(alice), f.scope(), "new-env")
+			_, err := envs.Create(t.Context(), service.LocalPrincipal(alice), f.scope(), "new-env", nil)
 			return err
 		}},
 		{"environment clone", func() error {
-			_, _, err := envs.Clone(t.Context(), service.LocalPrincipal(alice), f.scope(), "clone-env", f.env)
+			_, _, err := envs.Clone(t.Context(), service.LocalPrincipal(alice), f.scope(), "clone-env", f.env, nil)
 			return err
 		}},
 		{"environment rename", func() error {
-			_, err := envs.Rename(t.Context(), service.LocalPrincipal(alice), f.envScope(), "renamed-env")
+			_, err := envs.Rename(t.Context(), service.LocalPrincipal(alice), f.envScope(), "renamed-env", nil)
 			return err
 		}},
 		{"environment reorder", func() error {
@@ -278,11 +278,11 @@ func definitionsGitMode(t *testing.T, db *store.DB) {
 		}},
 		{"environment delete", func() error { return envs.Delete(t.Context(), service.LocalPrincipal(alice), f.envScope()) }},
 		{"folder create", func() error {
-			_, err := folders.Create(t.Context(), service.LocalPrincipal(alice), f.scope(), "new/path")
+			_, err := folders.Create(t.Context(), service.LocalPrincipal(alice), f.scope(), "new/path", nil)
 			return err
 		}},
 		{"folder rename", func() error {
-			_, err := folders.Rename(t.Context(), service.LocalPrincipal(alice), f.scope(), f.folder, "renamed/path")
+			_, err := folders.Rename(t.Context(), service.LocalPrincipal(alice), f.scope(), f.folder, "renamed/path", nil)
 			return err
 		}},
 		{"folder delete", func() error { return folders.Delete(t.Context(), service.LocalPrincipal(alice), f.scope(), f.folder) }},
@@ -416,11 +416,11 @@ func definitionsStaleBase(t *testing.T, db *store.DB) {
 	old := exportDefinitions(t, svc, f)
 	temporary, restored := "temporary", ""
 	if _, err := keySvc(t, db).UpdateMetadata(t.Context(), service.LocalPrincipal(alice), f.scope(), f.key,
-		service.KeyMetadataUpdate{Description: &temporary}); err != nil {
+		service.KeyMetadataUpdate{Description: &temporary}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := keySvc(t, db).UpdateMetadata(t.Context(), service.LocalPrincipal(alice), f.scope(), f.key,
-		service.KeyMetadataUpdate{Description: &restored}); err != nil {
+		service.KeyMetadataUpdate{Description: &restored}, nil); err != nil {
 		t.Fatal(err)
 	}
 	before := captureDefinitionsState(t, db, f.project)
@@ -430,7 +430,7 @@ func definitionsStaleBase(t *testing.T, db *store.DB) {
 	if err != nil || check.State != string(definitions.DriftDBAhead) {
 		t.Fatalf("stale equal-content check = %+v, %v", check, err)
 	}
-	if _, err := keySvc(t, db).Rename(t.Context(), service.LocalPrincipal(alice), f.scope(), f.key, "DIVERGED_KEY"); err != nil {
+	if _, err := keySvc(t, db).Rename(t.Context(), service.LocalPrincipal(alice), f.scope(), f.key, "DIVERGED_KEY", nil); err != nil {
 		t.Fatal(err)
 	}
 	check, err = svc.Check(t.Context(), service.LocalPrincipal(alice), f.scope(), old)
@@ -446,7 +446,7 @@ func definitionsSecretDeclarationBoundary(t *testing.T, db *store.DB) {
 		f := seedDefinitionsProject(t, db, "literalcreate", false)
 		spec := keySpec("SECRET_ENUM", "secret")
 		spec.Declaration = literal
-		_, err := keySvc(t, db).Create(t.Context(), service.LocalPrincipal(alice), f.scope(), spec)
+		_, err := keySvc(t, db).Create(t.Context(), service.LocalPrincipal(alice), f.scope(), spec, nil)
 		assertSafeContains(t, err, "use `pattern`, or declassify the key")
 	})
 
@@ -454,17 +454,17 @@ func definitionsSecretDeclarationBoundary(t *testing.T, db *store.DB) {
 		f := seedDefinitionsProject(t, db, "literalupdate", true)
 		execRaw(t, db, "UPDATE keys SET classification = 'secret' WHERE id = '"+f.key+"'")
 		_, err := keySvc(t, db).UpdateDeclaration(t.Context(), service.LocalPrincipal(custodian), f.scope(), f.key,
-			service.KeyDeclarationUpdate{Declaration: literal, Presence: schema.DefaultPresenceRules()})
+			service.KeyDeclarationUpdate{Declaration: literal, Presence: schema.DefaultPresenceRules()}, nil)
 		assertSafeContains(t, err, "use `pattern`, or declassify the key")
 	})
 
 	t.Run("reclassify", func(t *testing.T) {
 		f := seedDefinitionsProject(t, db, "literalreclassify", true)
 		if _, err := keySvc(t, db).UpdateDeclaration(t.Context(), service.LocalPrincipal(alice), f.scope(), f.key,
-			service.KeyDeclarationUpdate{Declaration: literal, Presence: schema.DefaultPresenceRules()}); err != nil {
+			service.KeyDeclarationUpdate{Declaration: literal, Presence: schema.DefaultPresenceRules()}, nil); err != nil {
 			t.Fatal(err)
 		}
-		_, err := keySvc(t, db).Reclassify(t.Context(), service.LocalPrincipal(alice), f.scope(), f.key, "secret")
+		_, _, err := keySvc(t, db).Reclassify(t.Context(), service.LocalPrincipal(alice), f.scope(), f.key, "secret")
 		assertSafeContains(t, err, "use `pattern`, or declassify the key")
 	})
 
@@ -500,7 +500,7 @@ func definitionsStoredDigestTamper(t *testing.T, db *store.DB) {
 func definitionsPendingDraftDeletion(t *testing.T, db *store.DB) {
 	f := seedDefinitionsProject(t, db, "pendingdelete", true)
 	svc := definitionsService(t, db)
-	if _, err := valueSvc(t, db).Set(t.Context(), service.LocalPrincipal(custodian), f.envScope(), "BASE_KEY", "draft"); err != nil {
+	if _, err := valueSvc(t, db).Set(t.Context(), service.LocalPrincipal(custodian), f.envScope(), "BASE_KEY", "draft", nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := queryInt(t, db, "SELECT COUNT(*) FROM pending_changes WHERE project_id = '"+string(f.project)+"'"); got != 1 {
@@ -721,7 +721,7 @@ func publishDefinitionValue(t *testing.T, db *store.DB, f definitionsFixture, na
 	if value == nil {
 		staged, err = values.Unset(t.Context(), service.LocalPrincipal(custodian), f.envScope(), name)
 	} else {
-		staged, err = values.Set(t.Context(), service.LocalPrincipal(custodian), f.envScope(), name, *value)
+		staged, err = values.Set(t.Context(), service.LocalPrincipal(custodian), f.envScope(), name, *value, nil)
 	}
 	if err != nil {
 		t.Fatal(err)
