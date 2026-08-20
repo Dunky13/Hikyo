@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/Hikyo-Org/hikyo/internal/definitions"
 	"github.com/Hikyo-Org/hikyo/internal/schema"
 )
 
@@ -144,6 +145,92 @@ func TestSurface2FieldCoverageMatrix(t *testing.T) {
 	for _, loc := range []string{locEnvironmentName, locEnvironmentNote, locFolderPath, locGroupName} {
 		if loc == "" {
 			t.Error("a hierarchy locator constant is empty")
+		}
+	}
+}
+
+// excludedBundleFields is the closed exclusion list for the definitions-bundle
+// leaf walk (#74 SS3): fixed schema keywords + server-generated ids + name
+// references that definitions.Resolve refuses before a plan persists. Named
+// field-by-field so a reviewer sees exactly what bundleLeaves does not scan.
+var excludedBundleFields = map[string]string{
+	"Key.ID":             "server-generated key identifier, not composed content",
+	"Key.Classification": "closed enum secret|config, not author free-text",
+	"Key.Deprecated":     "boolean flag, not content",
+	"Key.Group":          "key-group NAME reference; a dangling one is refused by definitions.Resolve (validateKeyReferences) before persist, and a real group's name is itself scanned via key_groups",
+	"Key.RequiredIn":     "presence env-NAME references; dangling ones refused by Resolve, real env names scanned via environments",
+	"Key.ForbiddenIn":    "presence env-NAME references; dangling ones refused by Resolve, real env names scanned via environments",
+	"Key.Declaration":    "walked via declarationLeaves below (same helper the direct-edit path uses)",
+	"Environment.ID":     "server-generated environment identifier, not composed content",
+	"KeyGroup.ID":        "server-generated group identifier, not composed content",
+}
+
+// TestBundleLeafCoverageMatrix is SS3.e extended to the definitions bundle model
+// (#74 SS3): definitions.Key/Environment/KeyGroup are distinct structs from the
+// service KeySpec, with their own leaf walk (bundleLeaves) that plan/apply/check
+// scan. It reflection-walks each, sets one content leaf at a time to a sentinel,
+// and asserts bundleLeaves surfaces it — OR that the field is on the closed
+// exclusion list. A newly added bundle string field that is neither covered nor
+// excluded fails here, so it cannot ship unscanned through the Git flow.
+func TestBundleLeafCoverageMatrix(t *testing.T) {
+	surfaced := func(b definitions.Bundle) bool {
+		return leafSetContains(bundleLeaves(b), coverageSentinel)
+	}
+
+	// definitions.Key: each top-level content leaf, in isolation.
+	keyType := reflect.TypeOf(definitions.Key{})
+	for i := 0; i < keyType.NumField(); i++ {
+		field := keyType.Field(i)
+		name := "Key." + field.Name
+		if _, excluded := excludedBundleFields[name]; excluded {
+			continue
+		}
+		if field.Type.Kind() == reflect.Struct {
+			t.Errorf("definitions.Key.%s is a nested struct with no coverage walk; add it to the matrix or exclude it by name", field.Name)
+			continue
+		}
+		if !isContentLeaf(field) {
+			continue
+		}
+		k := definitions.Key{}
+		setSentinel(reflect.ValueOf(&k).Elem().Field(i))
+		if !surfaced(definitions.Bundle{Keys: []definitions.Key{k}}) {
+			t.Errorf("author-controlled bundle field %s is not scan-covered and is not on the exclusion list", name)
+		}
+	}
+
+	// The declaration's own leaves reach bundleLeaves through declarationLeaves —
+	// assert one flows through the bundle path, so Key.Declaration's exclusion is
+	// "walked elsewhere", not "unscanned".
+	declKey := definitions.Key{Declaration: schema.Declaration{Rule: &schema.Rule{Type: schema.TypeString, Pattern: coverageSentinel}}}
+	if !surfaced(definitions.Bundle{Keys: []definitions.Key{declKey}}) {
+		t.Error("a declaration leaf (pattern) does not flow through bundleLeaves")
+	}
+
+	// Environment and KeyGroup: the portable name is the only author content; the
+	// id is server-issued.
+	envType := reflect.TypeOf(definitions.Environment{})
+	for i := 0; i < envType.NumField(); i++ {
+		field := envType.Field(i)
+		if _, excluded := excludedBundleFields["Environment."+field.Name]; excluded || !isContentLeaf(field) {
+			continue
+		}
+		e := definitions.Environment{}
+		setSentinel(reflect.ValueOf(&e).Elem().Field(i))
+		if !surfaced(definitions.Bundle{Environments: []definitions.Environment{e}}) {
+			t.Errorf("author-controlled bundle field Environment.%s is not scan-covered", field.Name)
+		}
+	}
+	groupType := reflect.TypeOf(definitions.KeyGroup{})
+	for i := 0; i < groupType.NumField(); i++ {
+		field := groupType.Field(i)
+		if _, excluded := excludedBundleFields["KeyGroup."+field.Name]; excluded || !isContentLeaf(field) {
+			continue
+		}
+		g := definitions.KeyGroup{}
+		setSentinel(reflect.ValueOf(&g).Elem().Field(i))
+		if !surfaced(definitions.Bundle{KeyGroups: []definitions.KeyGroup{g}}) {
+			t.Errorf("author-controlled bundle field KeyGroup.%s is not scan-covered", field.Name)
 		}
 	}
 }

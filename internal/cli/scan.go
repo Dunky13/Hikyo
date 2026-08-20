@@ -54,6 +54,21 @@ func acksPtr(raw string) *apigen.Acknowledgements {
 	return &acks
 }
 
+// checkFindings prints the non-blocking secret-scanning results of a
+// `definitions check` dry-run to stderr (#74 SS3), so they never pollute the
+// table/JSON drift output on stdout. Check mints no token, so — unlike a plan
+// refusal — there is nothing to `--acknowledge` here; the operator's move is to
+// run `definitions plan`, which refuses and hands back the content-bound tokens.
+func checkFindings(ios IO, findings *[]apigen.ScanFinding) {
+	if findings == nil || len(*findings) == 0 {
+		return
+	}
+	fmt.Fprintf(ios.Stderr,
+		"secret-scanning: %d bundle leaf(s) look like credentials:\n%s\n"+
+			"`definitions plan` will refuse until they are removed or acknowledged.\n",
+		len(*findings), formatFindings(*findings))
+}
+
 // warnFindings prints the Surface-1 warnings a successful write returned, to
 // stderr so they never pollute the table/JSON on stdout. The save SUCCEEDED; the
 // warnings are advisory. Empty findings print nothing.

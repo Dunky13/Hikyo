@@ -480,12 +480,16 @@ type DefinitionsPlan struct {
 	ProtectedEnvs      string
 	Diff               string
 	Additive           bool
-	Applied            bool
-	AppliedAt          time.Time
-	AppliedBy          string
-	ProvenanceCommit   string
-	ProvenanceRef      string
-	ProvenanceActor    string
+	// ScanSnapshot is the secret-scanning ruleset SnapshotVersion the plan was
+	// scanned under (#74 SS3). Apply re-scans iff it differs from the running
+	// ruleset's; empty means scanning was off at plan time.
+	ScanSnapshot     string
+	Applied          bool
+	AppliedAt        time.Time
+	AppliedBy        string
+	ProvenanceCommit string
+	ProvenanceRef    string
+	ProvenanceActor  string
 }
 
 // NewDefinitionsPlan carries the caller-suppliable fields of a plan insert;
@@ -502,6 +506,7 @@ type NewDefinitionsPlan struct {
 	ProtectedEnvs      string
 	Diff               string
 	Additive           bool
+	ScanSnapshot       string
 }
 
 // PlanApplyStamp is the one-shot apply record. Commit/Ref/Actor are the

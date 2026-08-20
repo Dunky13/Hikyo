@@ -312,7 +312,10 @@ export const zScanFinding = z.object({
         'value_write',
         'declassification',
         'import_value',
-        'edit'
+        'edit',
+        'plan',
+        'apply',
+        'check'
     ]),
     locator: z.string(),
     acknowledgement: z.string().optional()
@@ -736,7 +739,8 @@ export const zDefinitionsCheckResult = z.object({
     ]),
     base_revision: z.coerce.bigint().gte(BigInt(0)).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }).optional(),
     current_revision: z.coerce.bigint().gte(BigInt(0)).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }),
-    differences: zDefinitionsDiff
+    differences: zDefinitionsDiff,
+    findings: z.array(zScanFinding).optional()
 });
 
 export const zDefinitionsKeyDeletion = z.object({
@@ -780,7 +784,8 @@ export const zApplyDefinitionsPlanRequest = z.object({
     digest: z.string().max(64).optional(),
     commit: z.string().max(256).optional(),
     ref: z.string().max(256).optional(),
-    actor: z.string().max(256).optional()
+    actor: z.string().max(256).optional(),
+    acknowledgements: zAcknowledgements.optional()
 });
 
 export const zApplyDefinitionsPlanResult = z.object({
@@ -2633,6 +2638,18 @@ export const zDeliveryCursor = z.string().max(128);
 export const zDeliveryProjection = z.enum(['full', 'config-only']).default('full');
 
 /**
+ * Secret-scanning override token(s) from a prior `definitions plan` refusal
+ * (#74 SS3). One content-bound token per finding, re-scanned against the
+ * bundle's leaves; a stale, version-skewed, or surplus token is rejected by
+ * name. The plan request body is the canonical bundle bytes, so the tokens
+ * ride the query rather than the body — the same exposure surface as the CLI
+ * `--acknowledge` flag that carries them. Comma-separated. There is no
+ * blanket ignore-all input.
+ *
+ */
+export const zDefinitionsAcknowledgements = z.array(z.string()).max(100);
+
+/**
  * The loader-control keys the consumer explicitly acknowledges, so the
  * server's fetch audit record carries which acknowledgement was in force
  * for this delivery (k8s ADR § Loader-control). The server RECORDS it and
@@ -3329,6 +3346,10 @@ export const zCreateDefinitionsPlanBody = zDefinitionsBundle;
 export const zCreateDefinitionsPlanPath = z.object({
     org: zId,
     project: zId
+});
+
+export const zCreateDefinitionsPlanQuery = z.object({
+    acknowledge: z.array(z.string()).max(100).optional()
 });
 
 /**

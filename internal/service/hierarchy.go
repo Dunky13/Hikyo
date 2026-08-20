@@ -677,7 +677,7 @@ func (s *Environments) create(ctx context.Context, actor Actor, scope domain.Sco
 	// mint, and returns the acknowledged overrides to emit with the write (ADR
 	// §7; see scanSurface2Preflight).
 	overrides, err := scanSurface2Preflight(ctx, s.DB, s.Keyring, s.Scan, actor, authz.OpEnvCreate, scope,
-		nonEmptyLeaf(locEnvironmentName, name), acks)
+		nonEmptyLeaf(locEnvironmentName, name), acks, ingressEdit)
 	if err != nil {
 		return Environment{}, CloneResult{}, err
 	}
@@ -872,7 +872,7 @@ func (s *Environments) Rename(ctx context.Context, actor Actor, scope domain.Sco
 		}
 		// Surface-2 block (#74): the new environment name is scanned before it persists.
 		if err := applyDeclarationScan(ctx, r, p, az, s.Keyring, s.Scan, caller.Principal,
-			scope, nonEmptyLeaf(locEnvironmentName, name), newAckSet(acks)); err != nil {
+			scope, nonEmptyLeaf(locEnvironmentName, name), newAckSet(acks), ingressEdit); err != nil {
 			return err
 		}
 		if err := r.Environments().Rename(ctx, p, name); err != nil {
@@ -1084,7 +1084,7 @@ func (s *Environments) UpdateNote(ctx context.Context, actor Actor, scope domain
 		}
 		// Surface-2 block (#74): the note is scanned before it persists.
 		if err := applyDeclarationScan(ctx, r, p, az, s.Keyring, s.Scan, caller.Principal,
-			scope, nonEmptyLeaf(locEnvironmentNote, note), newAckSet(acks)); err != nil {
+			scope, nonEmptyLeaf(locEnvironmentNote, note), newAckSet(acks), ingressEdit); err != nil {
 			return err
 		}
 		if err := r.Environments().UpdateNote(ctx, p, note); err != nil {
@@ -1152,7 +1152,7 @@ func (s *Folders) Create(ctx context.Context, actor Actor, scope domain.Scope, p
 		}
 		// Surface-2 block (#74): the folder path is scanned before it persists.
 		if err := applyDeclarationScan(ctx, r, p, az, s.Keyring, s.Scan, caller.Principal,
-			scope, nonEmptyLeaf(locFolderPath, path), newAckSet(acks)); err != nil {
+			scope, nonEmptyLeaf(locFolderPath, path), newAckSet(acks), ingressEdit); err != nil {
 			return err
 		}
 		if err := r.Folders().Create(ctx, p, folder); err != nil {
@@ -1245,7 +1245,7 @@ func (s *Folders) Rename(ctx context.Context, actor Actor, scope domain.Scope, i
 		}
 		// Surface-2 block (#74): the new folder path is scanned before it persists.
 		if err := applyDeclarationScan(ctx, r, p, az, s.Keyring, s.Scan, caller.Principal,
-			scope, nonEmptyLeaf(locFolderPath, path), newAckSet(acks)); err != nil {
+			scope, nonEmptyLeaf(locFolderPath, path), newAckSet(acks), ingressEdit); err != nil {
 			return err
 		}
 		if err := r.Folders().Rename(ctx, p, id, path); err != nil {

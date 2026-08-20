@@ -1307,20 +1307,29 @@ func (e SamlStartRequestPurpose) Valid() bool {
 
 // Defines values for ScanFindingSurface.
 const (
+	Apply            ScanFindingSurface = "apply"
+	Check            ScanFindingSurface = "check"
 	Declassification ScanFindingSurface = "declassification"
 	Edit             ScanFindingSurface = "edit"
 	ImportValue      ScanFindingSurface = "import_value"
+	Plan             ScanFindingSurface = "plan"
 	ValueWrite       ScanFindingSurface = "value_write"
 )
 
 // Valid indicates whether the value is a known member of the ScanFindingSurface enum.
 func (e ScanFindingSurface) Valid() bool {
 	switch e {
+	case Apply:
+		return true
+	case Check:
+		return true
 	case Declassification:
 		return true
 	case Edit:
 		return true
 	case ImportValue:
+		return true
+	case Plan:
 		return true
 	case ValueWrite:
 		return true
@@ -1965,11 +1974,17 @@ type AffectedCredentialReason string
 
 // ApplyDefinitionsPlanRequest defines model for ApplyDefinitionsPlanRequest.
 type ApplyDefinitionsPlanRequest struct {
-	Actor       *string `json:"actor,omitempty"`
-	AllowDelete bool    `json:"allow_delete"`
-	Commit      *string `json:"commit,omitempty"`
-	Digest      *string `json:"digest,omitempty"`
-	Ref         *string `json:"ref,omitempty"`
+	// Acknowledgements Secret-scanning acknowledgement tokens (#74). On a value write, a
+	// keep-as-config token dismisses a Surface-1 warning for exactly that
+	// value. On a declaration write, one override token per finding is
+	// re-scanned against the current content; a stale, version-skewed, or
+	// surplus token is rejected by name. There is no blanket ignore-all input.
+	Acknowledgements *Acknowledgements `json:"acknowledgements,omitempty"`
+	Actor            *string           `json:"actor,omitempty"`
+	AllowDelete      bool              `json:"allow_delete"`
+	Commit           *string           `json:"commit,omitempty"`
+	Digest           *string           `json:"digest,omitempty"`
+	Ref              *string           `json:"ref,omitempty"`
 }
 
 // ApplyDefinitionsPlanResult defines model for ApplyDefinitionsPlanResult.
@@ -2643,10 +2658,17 @@ type DefinitionsBundlePresenceMode string
 
 // DefinitionsCheckResult defines model for DefinitionsCheckResult.
 type DefinitionsCheckResult struct {
-	BaseRevision    *int64                      `json:"base_revision,omitempty"`
-	CurrentRevision int64                       `json:"current_revision"`
-	Differences     DefinitionsDiff             `json:"differences"`
-	State           DefinitionsCheckResultState `json:"state"`
+	BaseRevision    *int64          `json:"base_revision,omitempty"`
+	CurrentRevision int64           `json:"current_revision"`
+	Differences     DefinitionsDiff `json:"differences"`
+
+	// Findings Non-blocking secret-scanning results (#74 SS3): the credential-shaped
+	// author-controlled leaves of the submitted bundle. Check is a read-only
+	// dry-run, so these carry no acknowledgement token and persist nothing —
+	// they warn an operator that a `plan` would be refused. Omitted when the
+	// bundle is clean.
+	Findings *[]ScanFinding              `json:"findings,omitempty"`
+	State    DefinitionsCheckResultState `json:"state"`
 }
 
 // DefinitionsCheckResultState defines model for DefinitionsCheckResult.State.
@@ -4881,12 +4903,16 @@ type ScanFinding struct {
 	RuleId string `json:"rule_id"`
 
 	// Surface Which ingress produced the finding. Surface-1 warns carry the value
-	// write surface; Surface-2 blocks carry the declaration ingress.
+	// write surface; Surface-2 blocks carry the declaration ingress (`edit`
+	// for direct edits, `plan`/`apply` for the definitions Git flow); `check`
+	// is the read-only `definitions check` dry-run.
 	Surface ScanFindingSurface `json:"surface"`
 }
 
 // ScanFindingSurface Which ingress produced the finding. Surface-1 warns carry the value
-// write surface; Surface-2 blocks carry the declaration ingress.
+// write surface; Surface-2 blocks carry the declaration ingress (`edit`
+// for direct edits, `plan`/`apply` for the definitions Git flow); `check`
+// is the read-only `definitions check` dry-run.
 type ScanFindingSurface string
 
 // ScanningKeyRotation defines model for ScanningKeyRotation.
@@ -5819,6 +5845,9 @@ type ConnectionID = ID
 // CredentialID A prefixed UUIDv7, e.g. `org_0198…`.
 type CredentialID = ID
 
+// DefinitionsAcknowledgements defines model for DefinitionsAcknowledgements.
+type DefinitionsAcknowledgements = []string
+
 // DefinitionsPlanID A prefixed UUIDv7, e.g. `org_0198…`.
 type DefinitionsPlanID = ID
 
@@ -5995,6 +6024,18 @@ type DeleteAdapterParams struct {
 // ExportDefinitionsParams defines parameters for ExportDefinitions.
 type ExportDefinitionsParams struct {
 	Portable *bool `form:"portable,omitempty" json:"portable,omitempty"`
+}
+
+// CreateDefinitionsPlanParams defines parameters for CreateDefinitionsPlan.
+type CreateDefinitionsPlanParams struct {
+	// Acknowledge Secret-scanning override token(s) from a prior `definitions plan` refusal
+	// (#74 SS3). One content-bound token per finding, re-scanned against the
+	// bundle's leaves; a stale, version-skewed, or surplus token is rejected by
+	// name. The plan request body is the canonical bundle bytes, so the tokens
+	// ride the query rather than the body — the same exposure surface as the CLI
+	// `--acknowledge` flag that carries them. Comma-separated. There is no
+	// blanket ignore-all input.
+	Acknowledge *DefinitionsAcknowledgements `form:"acknowledge,omitempty" json:"acknowledge,omitempty"`
 }
 
 // FetchDeliveryParams defines parameters for FetchDelivery.
@@ -6888,7 +6929,7 @@ type ServerInterface interface {
 	ExportDefinitions(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, params ExportDefinitionsParams)
 	// CreateDefinitionsPlan Persist an immutable definitions impact plan.
 	// (POST /api/v1/orgs/{org}/projects/{project}/definitions/plans)
-	CreateDefinitionsPlan(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID)
+	CreateDefinitionsPlan(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, params CreateDefinitionsPlanParams)
 	// GetDefinitionsPlan Read an immutable definitions impact plan.
 	// (GET /api/v1/orgs/{org}/projects/{project}/definitions/plans/{plan})
 	GetDefinitionsPlan(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, plan DefinitionsPlanID)
@@ -7926,7 +7967,7 @@ func (_ Unimplemented) ExportDefinitions(w http.ResponseWriter, r *http.Request,
 
 // CreateDefinitionsPlan Persist an immutable definitions impact plan.
 // (POST /api/v1/orgs/{org}/projects/{project}/definitions/plans)
-func (_ Unimplemented) CreateDefinitionsPlan(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
+func (_ Unimplemented) CreateDefinitionsPlan(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, params CreateDefinitionsPlanParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -11524,8 +11565,24 @@ func (siw *ServerInterfaceWrapper) CreateDefinitionsPlan(w http.ResponseWriter, 
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params CreateDefinitionsPlanParams
+
+	// ------------- Optional query parameter "acknowledge" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", false, false, "acknowledge", r.URL.Query(), &params.Acknowledge, runtime.BindQueryParameterOptions{Type: "array", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "acknowledge"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "acknowledge", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.CreateDefinitionsPlan(w, r, org, project)
+		siw.Handler.CreateDefinitionsPlan(w, r, org, project, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -27892,6 +27949,7 @@ func (response ExportDefinitions500JSONResponse) VisitExportDefinitionsResponse(
 type CreateDefinitionsPlanRequestObject struct {
 	Org     OrgID     `json:"org"`
 	Project ProjectID `json:"project"`
+	Params  CreateDefinitionsPlanParams
 	Body    *CreateDefinitionsPlanJSONRequestBody
 }
 
@@ -42731,11 +42789,12 @@ func (sh *strictHandler) ExportDefinitions(w http.ResponseWriter, r *http.Reques
 }
 
 // CreateDefinitionsPlan operation middleware
-func (sh *strictHandler) CreateDefinitionsPlan(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
+func (sh *strictHandler) CreateDefinitionsPlan(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, params CreateDefinitionsPlanParams) {
 	var request CreateDefinitionsPlanRequestObject
 
 	request.Org = org
 	request.Project = project
+	request.Params = params
 
 	var body CreateDefinitionsPlanJSONRequestBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {

@@ -1,6 +1,7 @@
 # #74 Secret scanning — implementation handoff
 
-Status: FEATURE-COMPLETE for 1.0 minus three named residuals (below). Spec:
+Status: FEATURE-COMPLETE for 1.0 minus one named residual (below; the SPA
+Surface-2 block dialog). Spec:
 `docs/adr/secret-scanning.md` (locked; every `ew_` there reads `hik_` post-rebrand, see
 `docs/handoff/rebrand-hikyo.md`). Gate: SS1–SS4 (ADR §9). Dual-engine `go test ./...` green;
 the SS-row criteria matrix (`internal/isolation/scanning_criteria_test.go`) maps every §9 clause
@@ -132,43 +133,58 @@ publish). "SAVING IS FREE" is preserved — warn never blocks a save.
 
 Surface 2 (block): every existing declaration ingress — key Create/Rename/UpdateMetadata/
 UpdateDeclaration/SetGroup (`internal/service/keys.go`), key-group naming, folder/env/
-project/org naming (`internal/service/hierarchy.go`) — refused **before any pending state
+project/org naming (`internal/service/hierarchy.go`), and the definitions Git-flow chokepoints
+`definitions plan` (before the immutable plan persists) and `definitions apply` (re-scan on ruleset
+snapshot skew) (`internal/service/definitions_apply*.go`) — refused **before any pending/plan state
 persists**, per-finding locator + rule ID + short-lived content-bound ack token;
 resubmission re-scans and rejects stale/surplus tokens by name (ADR §4).
 
-## Scope residuals (three, named — not silently skipped)
+## Scope residuals (one, named — not silently skipped)
 
-These are the only §9 legs not closed; the criteria matrix marks them `Blocked`, pinned at 3.
+This is the only §9 leg not closed; the criteria matrix marks it `Blocked`, pinned at 1.
 
-1. **`definitions plan` ingress (SS3.plan)** — the `definitions plan` verb does not exist yet
-   (#70, `internal/importer/artifacts.go:209`). The scanner + ack machinery here is verb-agnostic;
-   #70 must call `Scan` **before the immutable plan persists** — a plan artifact is stored
-   declaration text and must not be born carrying a credential.
-2. **`definitions apply` re-scan (SS3.apply)** — same #70. `apply` **re-scans iff** the running
-   ruleset snapshot differs from the one the plan recorded (`SnapshotVersion()` skew); a same-version
-   apply adds no second scan. The audit ingress enum already reserves `plan` and `apply`
-   (`scanning.finding_blocked|overridden` payloads), so #70 wires the verbs, not the schema.
-3. **Surface-2 block dialog in the SPA (SS3.ui)** — the SPA has no declaration-editing surface
+1. **Surface-2 block dialog in the SPA (SS3.ui)** — the SPA has no declaration-editing surface
    (verified; `docs/handoff/60-chrome-surfaces.md:201`). Block presentation ships CLI/API; the
    dialog lands with the declaration-editing surface. Only the Surface-1 **warn** dialog ships here.
+
+### Closed by Stream E (#74 SS3 plan/apply, on #70's Git flow)
+
+- **`definitions plan` ingress (SS3.plan)** — `Definitions.Plan` scans every author-controlled
+  bundle leaf (`bundleLeaves`, the same locator classes as direct edits) **before `persistPlan`
+  writes the immutable plan**. A finding refuses the plan (`scanning.finding_blocked`, ingress
+  `plan`) with nothing else persisted; acknowledged resubmission (tokens on the plan request)
+  commits the plan and emits `finding_overridden`. The plan records the ruleset `SnapshotVersion`
+  it was scanned under in the new `definitions_plans.scan_snapshot` column (migration `00029`, both
+  engines). Fixture: `runScanningDefinitionsPlanBlock` (dual-engine, via `TestDefinitions*`).
+- **`definitions apply` re-scan (SS3.apply)** — `Definitions.Apply` re-scans **iff** the running
+  `Scan.SnapshotVersion()` differs from the plan's recorded one; a same-version apply adds no
+  second scan (proven token-free). The re-scan runs in a read pre-flight **before**
+  `prepareSchemaPublish` so a refusal mints no project DEK (the F2a orphan-key rule). Skew refusal
+  is ingress `apply`; acknowledged apply commits with `finding_overridden`. Fixture:
+  `runScanningDefinitionsApplySkew`.
+- **`definitions check` (read-only)** — surfaces the same leaf findings on `CheckResult` (wire
+  surface `check`), non-persisting, no token, no event; the CLI prints them to stderr and the drift
+  exit contract is untouched. A dry-run warning that a `plan` would be refused.
+
+Wire decisions: findings ride the existing refusal shape (`scanRefusalErr` → `error.findings`);
+`--acknowledge` works on `hikyo definitions plan` and `apply`. Plan carries tokens as the
+`acknowledge` **query parameter** (the plan request body is the canonical bundle bytes, so tokens
+cannot ride the body; same exposure surface as the CLI flag that holds them). Apply carries them in
+the request body (`acknowledgements`). `ScanFinding.surface` gained `plan|apply|check`; the audit
+ingress enum already reserved `plan|apply`.
 
 Nothing else is deferred. The Pi-class `bench-scan` artifact (SS1) is committed and CI-validated
 (`TestPiBenchArtifact`): produced on **pi4-8gb `sapporo`** after the keyword-anchored suffix-window
 fix (commit `b071d4a`), it parses, matches the pinned harness + ruleset snapshot versions, and
 reports p99 ≤ 5 ms per item at the size cap with boot compile ≤ 2 s / ≤ 32 MiB.
 
-## What #70 (definitions plan/apply) must wire
+## What #70 (definitions plan/apply) had to wire — DONE (Stream E)
 
-- **plan**: scan every author-controlled string leaf of the plan **before it persists**; on a
-  finding, refuse with `error.findings` and emit `scanning.finding_blocked` (ingress `plan`), nothing
-  else persisted. Honor override tokens (ingress `plan`) under the same content-binding rules.
-- **apply**: compare the plan's recorded `SnapshotVersion()` to the running one; **only on skew**,
-  re-scan the snapshot and refuse on a finding (ingress `apply`); acknowledged resubmission emits
-  `scanning.finding_overridden`. Same-version apply is a no-op for the scanner.
-- The service seam is already there and verb-agnostic — `internal/service/scan.go` +
-  `scan_ack_test.go`; the audit enum values `plan|apply` are reserved. #70 adds the call sites and
-  the two SS3 [E2E] fixture legs; then flip `SS3.plan`/`SS3.apply` off `Blocked` in the criteria
-  matrix and move the pin from 3 to 1.
+Delivered on #70's Git flow; see "Closed by Stream E" above for the shipped shape. The service seam
+(`internal/service/scan.go`) was verb-agnostic as designed — `scanDeclaration` gained an `ingress`
+parameter and a `bundleLeaves` walk, and the plan/apply call sites and the two SS3 [E2E] fixtures
+(`runScanningDefinitionsPlanBlock`, `runScanningDefinitionsApplySkew`) landed; the criteria pin
+moved from 3 to 1.
 
 ## File ownership (parallel streams)
 

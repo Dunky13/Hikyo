@@ -584,7 +584,7 @@ func (s *Keys) Create(ctx context.Context, actor Actor, scope domain.Scope, spec
 	// would leave the wrapped-key row behind on a block. The pre-flight refuses
 	// before any mint and returns the acknowledged overrides to emit with the
 	// write (ADR §7; see scanSurface2Preflight).
-	overrides, err := scanSurface2Preflight(ctx, s.DB, s.Keyring, s.Scan, actor, authz.OpKeyCreate, scope, leaves, acks)
+	overrides, err := scanSurface2Preflight(ctx, s.DB, s.Keyring, s.Scan, actor, authz.OpKeyCreate, scope, leaves, acks, ingressEdit)
 	if err != nil {
 		return Key{}, err
 	}
@@ -799,7 +799,7 @@ func (s *Keys) Rename(ctx context.Context, actor Actor, scope domain.Scope, id, 
 		}
 		// Surface-2 block (#74): the new name is scanned before it persists.
 		if err := applyDeclarationScan(ctx, r, p, az, s.Keyring, s.Scan, caller.Principal, scope,
-			nonEmptyLeaf(locKeyName, name), newAckSet(acks)); err != nil {
+			nonEmptyLeaf(locKeyName, name), newAckSet(acks), ingressEdit); err != nil {
 			return err
 		}
 		if err := r.Catalogue().Rename(ctx, p, id, name); err != nil {
@@ -877,7 +877,7 @@ func (s *Keys) UpdateMetadata(ctx context.Context, actor Actor, scope domain.Sco
 		}
 		// Surface-2 block (#74): scan the members actually being written before
 		// the metadata persists.
-		if err := applyDeclarationScan(ctx, r, p, az, s.Keyring, s.Scan, caller.Principal, scope, keyMetadataLeaves(m), newAckSet(acks)); err != nil {
+		if err := applyDeclarationScan(ctx, r, p, az, s.Keyring, s.Scan, caller.Principal, scope, keyMetadataLeaves(m), newAckSet(acks), ingressEdit); err != nil {
 			return err
 		}
 		// Merge over the stored row: an absent member leaves its column alone.
@@ -1069,7 +1069,7 @@ func (s *Keys) UpdateDeclaration(ctx context.Context, actor Actor, scope domain.
 		// abort/success channel, and an unchanged declaration is never re-scanned
 		// (no retro-scan, ADR §6.1).
 		if stored, perr := schema.ParseDeclaration(canonical); perr == nil {
-			if err := applyDeclarationScan(ctx, r, p, az, s.Keyring, s.Scan, caller.Principal, scope, declarationLeaves(stored), newAckSet(acks)); err != nil {
+			if err := applyDeclarationScan(ctx, r, p, az, s.Keyring, s.Scan, caller.Principal, scope, declarationLeaves(stored), newAckSet(acks), ingressEdit); err != nil {
 				return err
 			}
 		}
@@ -1518,7 +1518,7 @@ func (s *KeyGroups) Create(ctx context.Context, actor Actor, scope domain.Scope,
 		}
 		// Surface-2 block (#74): the group name is scanned before it persists.
 		if err := applyDeclarationScan(ctx, r, p, az, s.Keyring, s.Scan, caller.Principal, scope,
-			nonEmptyLeaf(locGroupName, name), newAckSet(acks)); err != nil {
+			nonEmptyLeaf(locGroupName, name), newAckSet(acks), ingressEdit); err != nil {
 			return err
 		}
 		if err := r.Catalogue().CreateGroup(ctx, p, store.NewCatalogueGroup{
@@ -1647,7 +1647,7 @@ func (s *KeyGroups) Rename(ctx context.Context, actor Actor, scope domain.Scope,
 		}
 		// Surface-2 block (#74): the new group name is scanned before it persists.
 		if err := applyDeclarationScan(ctx, r, p, az, s.Keyring, s.Scan, caller.Principal, scope,
-			nonEmptyLeaf(locGroupName, name), newAckSet(acks)); err != nil {
+			nonEmptyLeaf(locGroupName, name), newAckSet(acks), ingressEdit); err != nil {
 			return err
 		}
 		if err := r.Catalogue().RenameGroup(ctx, p, id, name); err != nil {

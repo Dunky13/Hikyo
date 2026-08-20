@@ -1018,6 +1018,7 @@ export const checkDefinitions = <ThrowOnError extends boolean = false>(options: 
  * Persist an immutable definitions impact plan.
  */
 export const createDefinitionsPlan = <ThrowOnError extends boolean = false>(options: Options<CreateDefinitionsPlanData, ThrowOnError>) => (options.client ?? client).post<CreateDefinitionsPlanResponses, CreateDefinitionsPlanErrors, ThrowOnError>({
+    querySerializer: { parameters: { acknowledge: { array: { explode: false } } } },
     security: [{ scheme: 'bearer', type: 'http' }],
     url: '/api/v1/orgs/{org}/projects/{project}/definitions/plans',
     ...options,

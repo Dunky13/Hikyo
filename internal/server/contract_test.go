@@ -818,7 +818,7 @@ func (s stubDefinitions) Check(_ context.Context, _ service.Actor, _ domain.Scop
 	return service.CheckResult{State: "equal", CurrentRevision: 7, Differences: emptyDefinitionsDiff()}, s.err
 }
 
-func (s stubDefinitions) Plan(_ context.Context, _ service.Actor, _ domain.Scope, raw []byte) (service.PlanView, error) {
+func (s stubDefinitions) Plan(_ context.Context, _ service.Actor, _ domain.Scope, raw []byte, _ []string) (service.PlanView, error) {
 	if s.seenBody != nil {
 		*s.seenBody = append((*s.seenBody)[:0], raw...)
 	}

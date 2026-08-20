@@ -330,6 +330,7 @@ type DefinitionsPlan struct {
 	ProvenanceCommit   sql.NullString
 	ProvenanceRef      sql.NullString
 	ProvenanceActor    sql.NullString
+	ScanSnapshot       string
 }
 
 type Environment struct {

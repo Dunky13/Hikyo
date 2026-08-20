@@ -294,7 +294,7 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 	adapterService := &service.Adapters{DB: db, Auth: authSvc, Keyring: kr, ProviderModule: func(provider, origin, credential string) (adapter.Module, func(), error) {
 		return deploymentModule(provider, origin, credential, cfg.AdapterEgressPolicy[origin])
 	}}
-	definitionsService := &service.Definitions{DB: db, Keyring: kr, Advisory: advisory}
+	definitionsService := &service.Definitions{DB: db, Keyring: kr, Advisory: advisory, Scan: ruleset}
 
 	api := &server.API{
 		Auth:     authSvc,

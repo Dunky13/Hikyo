@@ -13,6 +13,7 @@ import (
 	"github.com/Hikyo-Org/hikyo/internal/audit"
 	"github.com/Hikyo-Org/hikyo/internal/authz"
 	"github.com/Hikyo-Org/hikyo/internal/crypto"
+	"github.com/Hikyo-Org/hikyo/internal/definitions"
 	"github.com/Hikyo-Org/hikyo/internal/domain"
 	"github.com/Hikyo-Org/hikyo/internal/scanning"
 	"github.com/Hikyo-Org/hikyo/internal/schema"
@@ -59,9 +60,18 @@ const (
 	surfaceDeclassification = "declassification"
 	surfaceImportValue      = "import_value"
 
-	// Surface-2 audit ingress (ADR §5 finding_blocked/overridden enum). plan and
-	// apply belong to #70; only edit exists at this ingress today.
-	ingressEdit = "edit"
+	// Surface-2 audit ingress (ADR §5 finding_blocked/overridden enum). edit is
+	// the direct declaration ingress; plan and apply are the definitions Git-flow
+	// chokepoints (#74 SS3, ADR §7 (b)/(c)). The wire ScanFinding.surface enum and
+	// the audit ingress enum both carry all three.
+	ingressEdit  = "edit"
+	ingressPlan  = "plan"
+	ingressApply = "apply"
+
+	// surfaceCheck labels a finding surfaced by the read-only `definitions check`
+	// dry-run (ADR §7). Check never persists and never mints a token, so this is a
+	// wire surface only — it appears in no audit ingress enum.
+	surfaceCheck = "check"
 )
 
 // errFindingCap is the fail-closed refusal when one request produces more than
@@ -515,6 +525,72 @@ func keyMetadataLeaves(m KeyMetadataUpdate) []scanLeaf {
 	return out
 }
 
+// bundleLeaves extracts every author-controlled string leaf of an incoming
+// definitions bundle (#74 SS3, ADR §7 (b)/(c)) — the same leaf set Surface 2
+// enumerates for direct edits, mapped onto the same locator classes. The whole
+// bundle is walked (not the diff): a plan artifact is stored declaration text and
+// must not be born carrying a credential in any entry, even one copied verbatim
+// from current state.
+//
+// Closed exclusion list, mirroring the direct-edit discipline (fixed schema
+// keywords + server-generated ids are NOT scanned):
+//   - Bundle.FormatVersion / Key.Deprecated: not strings.
+//   - Key.ID / KeyGroup.ID / Environment.ID: server-generated identifiers.
+//   - Key.Classification: closed secret|config enum.
+//   - Key.Group and Presence.Environments (required_in/forbidden_in): NAME
+//     references, not composed content. definitions.Resolve (validateKeyReferences,
+//     run before persistPlan) refuses a reference to an entity the bundle does not
+//     declare, so a credential there either matches a declared group/environment
+//     NAME — itself scanned here via locGroupName/locEnvironmentName — or fails
+//     resolution before the plan persists. Scanning the reference in addition would
+//     double-report the one leaf that already blocks.
+//   - The declaration's type keywords / numeric bounds: schema.declarationLeaves'
+//     own closed exclusion (reused verbatim).
+func bundleLeaves(b definitions.Bundle) []scanLeaf {
+	var out []scanLeaf
+	for _, e := range b.Environments {
+		out = append(out, nonEmptyLeaf(locEnvironmentName, e.Name)...)
+	}
+	for _, g := range b.KeyGroups {
+		out = append(out, nonEmptyLeaf(locGroupName, g.Name)...)
+	}
+	for _, k := range b.Keys {
+		out = append(out, nonEmptyLeaf(locKeyName, k.Name)...)
+		out = append(out, nonEmptyLeaf(locKeyDescription, k.Description)...)
+		out = append(out, nonEmptyLeaf(locKeyDeprecationNote, k.DeprecationNote)...)
+		out = append(out, nonEmptyLeaf(locKeyFolderPath, k.FolderPath)...)
+		out = append(out, declarationLeaves(k.Declaration)...)
+	}
+	return out
+}
+
+// scanBundleForCheck is the read-only `definitions check` scan (ADR §7): it
+// surfaces a finding per credential-shaped leaf without persisting anything and
+// without minting a token — Check is a non-blocking diagnostic, so an override
+// capability there would be a refusal ceremony that never happened. Findings ride
+// the CheckResult; no scanning.* event is emitted.
+func scanBundleForCheck(ctx context.Context, rs *scanning.Ruleset, b definitions.Bundle) ([]Finding, error) {
+	if rs == nil {
+		return nil, nil // scanning off (pre-#74 test); a booted server always wires it
+	}
+	var out []Finding
+	total := 0
+	for _, leaf := range bundleLeaves(b) {
+		matches, err := rs.Scan(ctx, leaf.Content)
+		if err != nil {
+			return nil, err
+		}
+		for _, m := range matches {
+			total++
+			if total > maxRequestFindings {
+				return nil, errFindingCap
+			}
+			out = append(out, Finding{RuleID: m.RuleID, Surface: surfaceCheck, Locator: leaf.Locator})
+		}
+	}
+	return out, nil
+}
+
 // declScanResult is what scanDeclaration reports. blocked findings refuse the
 // write (finding_blocked committed alone); overridden findings ride the write's
 // own transaction (finding_overridden). rejections name every presented token
@@ -530,6 +606,7 @@ type overrideAck struct {
 	ruleID  string
 	locator string
 	ackRef  string
+	ingress string
 }
 
 // declFinding is one current scan finding, retained so an unconsumed
@@ -609,8 +686,11 @@ func (d declScanResult) refuses() bool { return len(d.blocked) > 0 || len(d.reje
 // shapes the outcome into the §7 transaction (refuse: block events alone;
 // accept: override events with the write). Exceeding maxRequestFindings fails
 // closed (ADR §7).
+// ingress is the audit ingress class (edit / plan / apply) this scan runs at; it
+// stamps each blocked finding's Surface and each override's ingress so the events
+// carry the door that fired (ADR §5).
 func scanDeclaration(ctx context.Context, kr *crypto.Keyring, rs *scanning.Ruleset,
-	leaves []scanLeaf, acks *ackSet, now time.Time) (declScanResult, error) {
+	leaves []scanLeaf, acks *ackSet, now time.Time, ingress string) (declScanResult, error) {
 	if rs == nil {
 		// Scanning off (pre-#74 test); a booted server always wires the ruleset.
 		return declScanResult{}, nil
@@ -640,7 +720,7 @@ func scanDeclaration(ctx context.Context, kr *crypto.Keyring, rs *scanning.Rules
 			findings = append(findings, declFinding{locator: leaf.Locator, ruleID: m.RuleID, ruleDigest: digest, cSHA: cSHA})
 			if acks != nil {
 				if tok, matched := acks.match(kr, ackKindDecl, leaf.Locator, digest, rs.SnapshotVersion(), cSHA, now); matched {
-					res.overridden = append(res.overridden, overrideAck{ruleID: m.RuleID, locator: leaf.Locator, ackRef: ackRef(tok)})
+					res.overridden = append(res.overridden, overrideAck{ruleID: m.RuleID, locator: leaf.Locator, ackRef: ackRef(tok), ingress: ingress})
 					continue
 				}
 			}
@@ -652,7 +732,7 @@ func scanDeclaration(ctx context.Context, kr *crypto.Keyring, rs *scanning.Rules
 				return declScanResult{}, err
 			}
 			res.blocked = append(res.blocked, Finding{
-				RuleID: m.RuleID, Surface: ingressEdit, Locator: leaf.Locator, Acknowledgement: tok,
+				RuleID: m.RuleID, Surface: ingress, Locator: leaf.Locator, Acknowledgement: tok,
 			})
 		}
 	}
@@ -728,7 +808,9 @@ func (e *scanRefusalErr) SafeDetail() string {
 func blockedEvent(ctx context.Context, principal domain.PrincipalID, f Finding) (audit.Event, error) {
 	return domainEvent(ctx, audit.EventScanningFindingBlocked, principal, declFieldObject(f.Locator), audit.Payload{
 		"rule_id": f.RuleID,
-		"ingress": ingressEdit,
+		// A blocked finding's Surface IS its ingress class (edit / plan / apply),
+		// stamped by scanDeclaration — one source of truth for door identity.
+		"ingress": f.Surface,
 	})
 }
 
@@ -738,7 +820,7 @@ func emitFindingOverridden(ctx context.Context, r store.Repos, p authz.Proof, pr
 	o overrideAck) error {
 	ev, err := domainEvent(ctx, audit.EventScanningFindingOverridden, principal, declFieldObject(o.locator), audit.Payload{
 		"rule_id":             o.ruleID,
-		"ingress":             ingressEdit,
+		"ingress":             o.ingress,
 		"acknowledgement_ref": o.ackRef,
 	})
 	if err != nil {
@@ -765,8 +847,8 @@ func emitFindingOverridden(ctx context.Context, r store.Repos, p authz.Proof, pr
 // explicitly because CaptureAudit binds no chain from the proof.
 func applyDeclarationScan(ctx context.Context, r store.Repos, p authz.Proof, az *authz.TxAuthorizer,
 	kr *crypto.Keyring, rs *scanning.Ruleset, principal domain.PrincipalID, scope domain.Scope,
-	leaves []scanLeaf, acks *ackSet) error {
-	res, err := scanDeclaration(ctx, kr, rs, leaves, acks, time.Now())
+	leaves []scanLeaf, acks *ackSet, ingress string) error {
+	res, err := scanDeclaration(ctx, kr, rs, leaves, acks, time.Now(), ingress)
 	if err != nil {
 		return err
 	}
@@ -817,7 +899,7 @@ func applyDeclarationScan(ctx context.Context, r store.Repos, p authz.Proof, az 
 // the key's create already minted the DEK — and so keep the in-transaction
 // applyDeclarationScan; nothing they can block mints a new row.
 func scanSurface2Preflight(ctx context.Context, db *store.DB, kr *crypto.Keyring, rs *scanning.Ruleset,
-	actor Actor, op authz.Operation, scope domain.Scope, leaves []scanLeaf, acks []string) ([]overrideAck, error) {
+	actor Actor, op authz.Operation, scope domain.Scope, leaves []scanLeaf, acks []string, ingress string) ([]overrideAck, error) {
 	if rs == nil {
 		// Scanning off (pre-#74 test); a booted server always wires the ruleset.
 		return nil, nil
@@ -831,7 +913,7 @@ func scanSurface2Preflight(ctx context.Context, db *store.DB, kr *crypto.Keyring
 		if _, err := az.Authorize(ctx, caller, op, scope); err != nil {
 			return err
 		}
-		res, err := scanDeclaration(ctx, kr, rs, leaves, newAckSet(acks), time.Now())
+		res, err := scanDeclaration(ctx, kr, rs, leaves, newAckSet(acks), time.Now(), ingress)
 		if err != nil {
 			return err
 		}

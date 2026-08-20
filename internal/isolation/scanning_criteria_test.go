@@ -95,14 +95,14 @@ var scanningCriteria = map[string]scanClause{
 		Fixtures: []string{"runScanningLifecycle"}},
 	"SS3.d": {Text: "per-request finding-count cap fails closed naming the cap (no silent truncation)",
 		Fixtures: []string{"TestFindingCapFailsClosed"}},
-	"SS3.e": {Text: "[CI] generated field-coverage matrix: every author-controlled string leaf has a scan-coverage fixture; a new public field without one fails",
-		Fixtures: []string{"TestSurface2FieldCoverageMatrix"}},
+	"SS3.e": {Text: "[CI] generated field-coverage matrix: every author-controlled string leaf has a scan-coverage fixture; a new public field without one fails (direct-edit model and the definitions bundle model)",
+		Fixtures: []string{"TestSurface2FieldCoverageMatrix", "TestBundleLeafCoverageMatrix"}},
 	"SS3.f": {Text: "[CI] API schema + CLI flag-namespace sweep proves no blanket ignore-all input exists",
 		Fixtures: []string{"TestNoBlanketScanOverrideFlag"}},
-	"SS3.plan": {Text: "[E2E] `definitions plan` refused before a plan persists",
-		Blocked: "#70 (the definitions plan verb does not exist yet; the scanner + ack machinery is verb-agnostic and #70 calls it before plan persistence)"},
-	"SS3.apply": {Text: "[E2E] ruleset-skewed `definitions apply` re-scan refused",
-		Blocked: "#70 (the definitions apply verb does not exist yet; #70 re-scans on snapshot-version skew)"},
+	"SS3.plan": {Text: "[E2E] `definitions plan` refused before a plan persists; acknowledged resubmission commits with finding_overridden",
+		Fixtures: []string{"runScanningDefinitionsPlanBlock"}},
+	"SS3.apply": {Text: "[E2E] same-version `definitions apply` adds no second scan; ruleset-skewed apply re-scans and refuses, then commits on acknowledgement",
+		Fixtures: []string{"runScanningDefinitionsApplySkew"}},
 	"SS3.ui": {Text: "[UI] block dialog stating the exported-as-public consequence",
 		Blocked: "no SPA declaration-editing surface (docs/handoff/60-chrome-surfaces.md); block presentation ships CLI/API and the dialog lands with that surface"},
 
@@ -152,6 +152,7 @@ var scanningCrossPackageFixtures = map[string]bool{
 	"scenarioScanningKeyRotation": true,
 	// internal/service
 	"TestSurface2FieldCoverageMatrix":          true,
+	"TestBundleLeafCoverageMatrix":             true,
 	"TestAckSetStaleContentAndVersionRejected": true,
 	"TestAckSetSurplusReported":                true,
 	"TestFindingCapFailsClosed":                true,
@@ -185,11 +186,12 @@ func TestScanningCriteriaMatrixIsComplete(t *testing.T) {
 		}
 	}
 
-	// The blocked set is pinned: the three residual legs named in the ADR §9
-	// table that this PR does not close. A clause that becomes provable must
-	// lose its Blocked marker rather than keep it as cover; a new deferral must
-	// move this pin deliberately.
-	const blockedClauses = 3
+	// The blocked set is pinned: the residual leg named in the ADR §9 table that
+	// this PR does not close (only SS3.ui — no SPA declaration-editing surface).
+	// #74 SS3's plan/apply legs are now proven (definitions plan/apply exist and
+	// scan). A clause that becomes provable must lose its Blocked marker rather
+	// than keep it as cover; a new deferral must move this pin deliberately.
+	const blockedClauses = 1
 	if blocked != blockedClauses {
 		t.Errorf("%d clauses are declared not-covered, pinned at %d — a clause was blocked or unblocked without updating the pin", blocked, blockedClauses)
 	}

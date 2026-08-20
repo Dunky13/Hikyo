@@ -225,7 +225,7 @@ func TestScanRejectionsNamedByClass(t *testing.T) {
 	const cred2 = "AKIAI44QH8DHBEXAMPLE" // a different one — same rule, different content
 
 	// Baseline scan yields the valid token and the matched rule id/digest.
-	base, err := scanDeclaration(ctx, kr, rs, []scanLeaf{{Locator: locDeclPattern, Content: []byte(cred)}}, nil, now)
+	base, err := scanDeclaration(ctx, kr, rs, []scanLeaf{{Locator: locDeclPattern, Content: []byte(cred)}}, nil, now, ingressEdit)
 	if err != nil || len(base.blocked) != 1 {
 		t.Fatalf("baseline scan: err=%v blocked=%d, want 1 finding", err, len(base.blocked))
 	}
@@ -267,7 +267,7 @@ func TestScanRejectionsNamedByClass(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			res, err := scanDeclaration(ctx, kr, rs, []scanLeaf{{Locator: locDeclPattern, Content: []byte(tc.leaf)}},
-				newAckSet([]string{tc.token}), now)
+				newAckSet([]string{tc.token}), now, ingressEdit)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -313,7 +313,7 @@ func TestFindingCapFailsClosed(t *testing.T) {
 	for i := range leaves {
 		leaves[i] = scanLeaf{Locator: locDeclPattern, Content: []byte("AKIAIOSFODNN7EXAMPLE")}
 	}
-	_, err = scanDeclaration(t.Context(), kr, rs, leaves, nil, time.Now())
+	_, err = scanDeclaration(t.Context(), kr, rs, leaves, nil, time.Now(), ingressEdit)
 	if !errors.Is(err, errFindingCap) {
 		t.Fatalf("scanDeclaration over %d findings = %v, want the fail-closed cap error", len(leaves), err)
 	}

@@ -332,6 +332,7 @@ type DefinitionsPlan struct {
 	ProvenanceCommit   pgtype.Text
 	ProvenanceRef      pgtype.Text
 	ProvenanceActor    pgtype.Text
+	ScanSnapshot       string
 }
 
 type Environment struct {

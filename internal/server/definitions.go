@@ -35,14 +35,22 @@ func (a *API) CheckDefinitions(ctx context.Context, req apigen.CheckDefinitionsR
 	if err != nil {
 		return nil, err
 	}
-	return apigen.CheckDefinitions200JSONResponse{
+	resp := apigen.CheckDefinitions200JSONResponse{
 		State: apigen.DefinitionsCheckResultState(got.State), BaseRevision: got.BaseRevision,
 		CurrentRevision: got.CurrentRevision, Differences: wireDefinitionsDiff(got.Differences),
-	}, nil
+	}
+	if fs := wireScanFindings(got.Findings); len(fs) > 0 {
+		resp.Findings = &fs
+	}
+	return resp, nil
 }
 
 func (a *API) CreateDefinitionsPlan(ctx context.Context, req apigen.CreateDefinitionsPlanRequestObject) (apigen.CreateDefinitionsPlanResponseObject, error) {
-	got, err := a.Definitions.Plan(ctx, service.Bearer(bearer(ctx)), projectScope(req.Org, req.Project), []byte(*req.Body))
+	var acks []string
+	if req.Params.Acknowledge != nil {
+		acks = []string(*req.Params.Acknowledge)
+	}
+	got, err := a.Definitions.Plan(ctx, service.Bearer(bearer(ctx)), projectScope(req.Org, req.Project), []byte(*req.Body), acks)
 	if err != nil {
 		return nil, err
 	}
@@ -58,12 +66,17 @@ func (a *API) GetDefinitionsPlan(ctx context.Context, req apigen.GetDefinitionsP
 }
 
 func (a *API) ApplyDefinitionsPlan(ctx context.Context, req apigen.ApplyDefinitionsPlanRequestObject) (apigen.ApplyDefinitionsPlanResponseObject, error) {
+	var acks []string
+	if req.Body.Acknowledgements != nil {
+		acks = []string(*req.Body.Acknowledgements)
+	}
 	got, err := a.Definitions.Apply(ctx, service.Bearer(bearer(ctx)), projectScope(req.Org, req.Project), req.Plan, service.ApplyOptions{
-		AllowDelete: req.Body.AllowDelete,
-		Digest:      deref(req.Body.Digest),
-		Commit:      deref(req.Body.Commit),
-		Ref:         deref(req.Body.Ref),
-		Actor:       deref(req.Body.Actor),
+		AllowDelete:      req.Body.AllowDelete,
+		Digest:           deref(req.Body.Digest),
+		Commit:           deref(req.Body.Commit),
+		Ref:              deref(req.Body.Ref),
+		Actor:            deref(req.Body.Actor),
+		Acknowledgements: acks,
 	})
 	if err != nil {
 		return nil, err

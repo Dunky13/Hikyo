@@ -1558,6 +1558,9 @@ var operations = map[Operation]opSpec{
 		events: []audit.EventType{
 			audit.EventDefinitionsPlanCreated,
 			audit.EventDefinitionsAdditiveModificationRefused,
+			// Surface-2 block/override at the plan chokepoint (#74 SS3, ADR §7 (b)).
+			audit.EventScanningFindingBlocked,
+			audit.EventScanningFindingOverridden,
 		},
 	},
 	// A plan read is authorized under `definitions-edit` (the diff is edit-class
@@ -1614,6 +1617,9 @@ var operations = map[Operation]opSpec{
 			audit.EventKeyCreated, audit.EventKeyRenamed, audit.EventKeyDeleted,
 			audit.EventKeyMetadataChanged, audit.EventKeyDeclarationChanged,
 			audit.EventKeyReclassified, audit.EventKeyGroupMembershipChanged,
+			// Surface-2 re-scan on ruleset skew (#74 SS3, ADR §7 (c)).
+			audit.EventScanningFindingBlocked,
+			audit.EventScanningFindingOverridden,
 		},
 	},
 	OpDefinitionsSettingsGet: {

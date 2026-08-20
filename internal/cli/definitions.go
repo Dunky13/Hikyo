@@ -45,7 +45,7 @@ func asSilentExit(err error, out **silentExit) bool {
 }
 
 func runDefinitionsVerb(ctx context.Context, ios IO, sub string, args []string) error {
-	var format, file, outputFile, planID, commit, ref, actor string
+	var format, file, outputFile, planID, commit, ref, actor, acknowledge string
 	var portable, allowDelete bool
 	st, flags, err := parseCommon("definitions "+sub, ios, args, func(fs *flag.FlagSet) {
 		if sub == "check" || sub == "plan" || sub == "apply" {
@@ -57,6 +57,11 @@ func runDefinitionsVerb(ctx context.Context, ios IO, sub string, args []string) 
 		if sub == "export" {
 			fs.BoolVar(&portable, "portable", false, "strip server-owned ids and the base revision")
 			fs.StringVar(&outputFile, "output-file", "", "create this file with the canonical bundle bytes")
+		}
+		// Surface-2 override tokens: `plan` scans the bundle before it persists,
+		// `apply` re-scans on ruleset-snapshot skew (#74 SS3).
+		if sub == "plan" || sub == "apply" {
+			ackFlag(fs, &acknowledge)
 		}
 		if sub == "apply" {
 			fs.StringVar(&planID, "plan", "", "immutable definitions plan id")
@@ -144,14 +149,22 @@ func runDefinitionsVerb(ctx context.Context, ios IO, sub string, args []string) 
 		if err := Render(ios.Stdout, f, definitionsCheckTable(result)); err != nil {
 			return err
 		}
+		// Non-blocking secret-scanning warnings (#74 SS3): check is a dry-run, so
+		// findings ride the success response to stderr and never change the drift
+		// exit contract. They warn that a `plan` would be refused.
+		checkFindings(ios, result.Findings)
 		if result.State != apigen.Equal {
 			return &silentExit{Code: 1}
 		}
 		return nil
 
 	case "plan":
+		path := base + "/plans"
+		if acks := splitList(acknowledge); len(acks) > 0 {
+			path += "?acknowledge=" + url.QueryEscape(strings.Join(acks, ","))
+		}
 		var result apigen.DefinitionsPlanResponse
-		if err := client.Do(ctx, http.MethodPost, base+"/plans", json.RawMessage(canonical), &result); err != nil {
+		if err := client.Do(ctx, http.MethodPost, path, json.RawMessage(canonical), &result); err != nil {
 			return err
 		}
 		return Render(ios.Stdout, f, definitionsPlanTable(result))
@@ -159,6 +172,7 @@ func runDefinitionsVerb(ctx context.Context, ios IO, sub string, args []string) 
 	case "apply":
 		body := apigen.ApplyDefinitionsPlanRequest{AllowDelete: allowDelete}
 		body.Commit, body.Ref, body.Actor = optional(commit), optional(ref), optional(actor)
+		body.Acknowledgements = acksPtr(acknowledge)
 		if file != "" {
 			_, digest, err := readDefinitionsBundle(file)
 			if err != nil {

@@ -40,8 +40,8 @@ const createPlan = `-- name: CreatePlan :exec
 
 INSERT INTO definitions_plans (
     id, org_id, project_id, created_by, created_at, expires_at,
-    bundle, digest, base_schema_revision, env_revisions, protected_envs, diff, additive
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    bundle, digest, base_schema_revision, env_revisions, protected_envs, diff, additive, scan_snapshot
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreatePlanParams struct {
@@ -58,6 +58,7 @@ type CreatePlanParams struct {
 	ProtectedEnvs      string
 	Diff               string
 	Additive           int64
+	ScanSnapshot       string
 }
 
 // Definitions plan ledger (#70). Tenant-scoped statements: the chain conjunct
@@ -78,6 +79,7 @@ func (q *Queries) CreatePlan(ctx context.Context, arg CreatePlanParams) error {
 		arg.ProtectedEnvs,
 		arg.Diff,
 		arg.Additive,
+		arg.ScanSnapshot,
 	)
 	return err
 }
@@ -85,7 +87,7 @@ func (q *Queries) CreatePlan(ctx context.Context, arg CreatePlanParams) error {
 const getLatestAppliedPlan = `-- name: GetLatestAppliedPlan :one
 SELECT id, org_id, project_id, created_by, created_at, expires_at,
        bundle, digest, base_schema_revision, env_revisions, protected_envs, diff, additive, applied,
-       applied_at, applied_by, provenance_commit, provenance_ref, provenance_actor
+       applied_at, applied_by, provenance_commit, provenance_ref, provenance_actor, scan_snapshot
 FROM definitions_plans
 WHERE org_id = ? AND project_id = ? AND applied = ?
 ORDER BY applied_at DESC
@@ -124,6 +126,7 @@ func (q *Queries) GetLatestAppliedPlan(ctx context.Context, arg GetLatestApplied
 		&i.ProvenanceCommit,
 		&i.ProvenanceRef,
 		&i.ProvenanceActor,
+		&i.ScanSnapshot,
 	)
 	return i, err
 }
@@ -131,7 +134,7 @@ func (q *Queries) GetLatestAppliedPlan(ctx context.Context, arg GetLatestApplied
 const getPlan = `-- name: GetPlan :one
 SELECT id, org_id, project_id, created_by, created_at, expires_at,
        bundle, digest, base_schema_revision, env_revisions, protected_envs, diff, additive, applied,
-       applied_at, applied_by, provenance_commit, provenance_ref, provenance_actor
+       applied_at, applied_by, provenance_commit, provenance_ref, provenance_actor, scan_snapshot
 FROM definitions_plans
 WHERE org_id = ? AND project_id = ? AND id = ?
 `
@@ -165,6 +168,7 @@ func (q *Queries) GetPlan(ctx context.Context, arg GetPlanParams) (DefinitionsPl
 		&i.ProvenanceCommit,
 		&i.ProvenanceRef,
 		&i.ProvenanceActor,
+		&i.ScanSnapshot,
 	)
 	return i, err
 }

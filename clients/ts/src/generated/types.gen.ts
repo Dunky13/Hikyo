@@ -293,10 +293,12 @@ export type ScanFinding = {
     rule_id: string;
     /**
      * Which ingress produced the finding. Surface-1 warns carry the value
-     * write surface; Surface-2 blocks carry the declaration ingress.
+     * write surface; Surface-2 blocks carry the declaration ingress (`edit`
+     * for direct edits, `plan`/`apply` for the definitions Git flow); `check`
+     * is the read-only `definitions check` dry-run.
      *
      */
-    surface: 'value_write' | 'declassification' | 'import_value' | 'edit';
+    surface: 'value_write' | 'declassification' | 'import_value' | 'edit' | 'plan' | 'apply' | 'check';
     /**
      * The immutable locator. Surface 1: the key identity. Surface 2: the
      * schema-location class of the offending field (e.g.
@@ -1401,6 +1403,15 @@ export type DefinitionsCheckResult = {
     base_revision?: number;
     current_revision: number;
     differences: DefinitionsDiff;
+    /**
+     * Non-blocking secret-scanning results (#74 SS3): the credential-shaped
+     * author-controlled leaves of the submitted bundle. Check is a read-only
+     * dry-run, so these carry no acknowledgement token and persist nothing —
+     * they warn an operator that a `plan` would be refused. Omitted when the
+     * bundle is clean.
+     *
+     */
+    findings?: Array<ScanFinding>;
 };
 
 export type DefinitionsKeyDeletion = {
@@ -1445,6 +1456,7 @@ export type ApplyDefinitionsPlanRequest = {
     commit?: string;
     ref?: string;
     actor?: string;
+    acknowledgements?: Acknowledgements;
 };
 
 export type ApplyDefinitionsPlanResult = {
@@ -3572,6 +3584,18 @@ export type DeliveryCursor = string;
  *
  */
 export type DeliveryProjection = 'full' | 'config-only';
+
+/**
+ * Secret-scanning override token(s) from a prior `definitions plan` refusal
+ * (#74 SS3). One content-bound token per finding, re-scanned against the
+ * bundle's leaves; a stale, version-skewed, or surplus token is rejected by
+ * name. The plan request body is the canonical bundle bytes, so the tokens
+ * ride the query rather than the body — the same exposure surface as the CLI
+ * `--acknowledge` flag that carries them. Comma-separated. There is no
+ * blanket ignore-all input.
+ *
+ */
+export type DefinitionsAcknowledgements = Array<string>;
 
 /**
  * The loader-control keys the consumer explicitly acknowledges, so the
@@ -7470,7 +7494,19 @@ export type CreateDefinitionsPlanData = {
          */
         project: Id;
     };
-    query?: never;
+    query?: {
+        /**
+         * Secret-scanning override token(s) from a prior `definitions plan` refusal
+         * (#74 SS3). One content-bound token per finding, re-scanned against the
+         * bundle's leaves; a stale, version-skewed, or surplus token is rejected by
+         * name. The plan request body is the canonical bundle bytes, so the tokens
+         * ride the query rather than the body — the same exposure surface as the CLI
+         * `--acknowledge` flag that carries them. Comma-separated. There is no
+         * blanket ignore-all input.
+         *
+         */
+        acknowledge?: Array<string>;
+    };
     url: '/api/v1/orgs/{org}/projects/{project}/definitions/plans';
 };
 

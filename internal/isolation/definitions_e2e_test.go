@@ -34,6 +34,8 @@ func runDefinitions(t *testing.T, db *store.DB) {
 	t.Run("stored digest tamper", func(t *testing.T) { definitionsStoredDigestTamper(t, db) })
 	t.Run("key deletion discards pending drafts", func(t *testing.T) { definitionsPendingDraftDeletion(t, db) })
 	t.Run("apply emits constituent audit events", func(t *testing.T) { definitionsConstituentAudit(t, db) })
+	t.Run("scanning blocks plan before persist", func(t *testing.T) { runScanningDefinitionsPlanBlock(t, db) })
+	t.Run("scanning re-scans apply on ruleset skew", func(t *testing.T) { runScanningDefinitionsApplySkew(t, db) })
 }
 
 // runDefinitionsAuditLifecycle drives every #70 audit type through its real
@@ -75,7 +77,7 @@ func runDefinitionsAuditLifecycle(t *testing.T, db *store.DB) {
 
 	additive := parseDefinitions(t, exportPortableDefinitions(t, svc, f))
 	additive.Keys[0].Description = "changed"
-	if _, err := svc.Plan(t.Context(), service.LocalPrincipal(alice), f.scope(), encodeDefinitions(t, additive)); err == nil || !strings.Contains(safeError(err), "additive bundle may not modify") {
+	if _, err := svc.Plan(t.Context(), service.LocalPrincipal(alice), f.scope(), encodeDefinitions(t, additive), nil); err == nil || !strings.Contains(safeError(err), "additive bundle may not modify") {
 		t.Fatalf("emit additive modification refusal: %v", err)
 	}
 }
@@ -89,7 +91,7 @@ func definitionsRoundTrip(t *testing.T, db *store.DB) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan, err := svc.Plan(t.Context(), service.LocalPrincipal(alice), f.scope(), raw)
+	plan, err := svc.Plan(t.Context(), service.LocalPrincipal(alice), f.scope(), raw, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -335,7 +337,7 @@ func definitionsAdditive(t *testing.T, db *store.DB) {
 		portable := parseDefinitions(t, exportPortableDefinitions(t, svc, f))
 		portable.Keys[0].Description = "modified"
 		before := captureDefinitionsState(t, db, f.project)
-		_, err := svc.Plan(t.Context(), service.LocalPrincipal(alice), f.scope(), encodeDefinitions(t, portable))
+		_, err := svc.Plan(t.Context(), service.LocalPrincipal(alice), f.scope(), encodeDefinitions(t, portable), nil)
 		assertRefusalUnchanged(t, db, f, before, err, "additive bundle may not modify existing key")
 	})
 	t.Run("allow delete meaningless", func(t *testing.T) {
@@ -388,14 +390,14 @@ func definitionsMatching(t *testing.T, db *store.DB) {
 		bad := parseDefinitions(t, exportDefinitions(t, svc, f))
 		bad.Keys[0].ID = "key_stale"
 		before := captureDefinitionsState(t, db, f.project)
-		_, err := svc.Plan(t.Context(), service.LocalPrincipal(alice), f.scope(), encodeDefinitions(t, bad))
+		_, err := svc.Plan(t.Context(), service.LocalPrincipal(alice), f.scope(), encodeDefinitions(t, bad), nil)
 		assertRefusalUnchanged(t, db, f, before, err, "stale")
 	})
 	t.Run("duplicate final name", func(t *testing.T) {
 		bad := parseDefinitions(t, exportDefinitions(t, svc, f))
 		bad.Keys[0].Name, bad.Keys[1].Name = "DUPLICATE", "DUPLICATE"
 		before := captureDefinitionsState(t, db, f.project)
-		_, err := svc.Plan(t.Context(), service.LocalPrincipal(alice), f.scope(), encodeDefinitions(t, bad))
+		_, err := svc.Plan(t.Context(), service.LocalPrincipal(alice), f.scope(), encodeDefinitions(t, bad), nil)
 		assertRefusalUnchanged(t, db, f, before, err, "DUPLICATE")
 	})
 
@@ -424,7 +426,7 @@ func definitionsStaleBase(t *testing.T, db *store.DB) {
 		t.Fatal(err)
 	}
 	before := captureDefinitionsState(t, db, f.project)
-	_, err := svc.Plan(t.Context(), service.LocalPrincipal(alice), f.scope(), old)
+	_, err := svc.Plan(t.Context(), service.LocalPrincipal(alice), f.scope(), old, nil)
 	assertRefusalUnchanged(t, db, f, before, err, "re-export and rebase")
 	check, err := svc.Check(t.Context(), service.LocalPrincipal(alice), f.scope(), old)
 	if err != nil || check.State != string(definitions.DriftDBAhead) {
@@ -479,7 +481,7 @@ func definitionsSecretDeclarationBoundary(t *testing.T, db *store.DB) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = svc.Plan(t.Context(), service.LocalPrincipal(alice), f.scope(), raw)
+		_, err = svc.Plan(t.Context(), service.LocalPrincipal(alice), f.scope(), raw, nil)
 		assertSafeContains(t, err, "BASE_KEY")
 		assertSafeContains(t, err, "use `pattern`, or declassify the key")
 	})
@@ -597,7 +599,7 @@ func definitionsPlanLifecycle(t *testing.T, db *store.DB) {
 		plans = append(plans, planDefinitions(t, svc, f, raw))
 	}
 	before := captureDefinitionsState(t, db, f.project)
-	_, err := svc.Plan(t.Context(), service.LocalPrincipal(alice), f.scope(), raw)
+	_, err := svc.Plan(t.Context(), service.LocalPrincipal(alice), f.scope(), raw, nil)
 	assertRefusalUnchanged(t, db, f, before, err, "max 20")
 	now = now.Add(service.PlanTTL)
 	before = captureDefinitionsState(t, db, f.project)
@@ -668,7 +670,7 @@ func exportPortableDefinitions(t *testing.T, svc *service.Definitions, f definit
 
 func planDefinitions(t *testing.T, svc *service.Definitions, f definitionsFixture, raw []byte) service.PlanView {
 	t.Helper()
-	plan, err := svc.Plan(t.Context(), service.LocalPrincipal(alice), f.scope(), raw)
+	plan, err := svc.Plan(t.Context(), service.LocalPrincipal(alice), f.scope(), raw, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

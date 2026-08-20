@@ -34,6 +34,19 @@ func (s *Definitions) Apply(ctx context.Context, actor Actor, scope domain.Scope
 		return ApplyResult{}, err
 	}
 
+	// Surface-2 re-scan on ruleset-snapshot skew (#74 SS3, ADR §7 (c)), BEFORE
+	// prepareSchemaPublish. The publish preparation mints the project DEK on first
+	// use, in its OWN transaction outside the apply write — so a scan that refused
+	// only inside the write transaction would roll the write back but leave that
+	// minted DEK row behind (the F2a orphan-key bug scanSurface2Preflight closes).
+	// This pre-flight reaches the verdict in a read transaction before the mint, so
+	// a skew-blocked apply persists NOTHING but the finding_blocked events. A
+	// same-version apply runs no scan here and returns no overrides.
+	overrides, err := s.scanApplySkew(ctx, actor, scope, planID, opts.Acknowledgements)
+	if err != nil {
+		return ApplyResult{}, err
+	}
+
 	publisher, err := prepareSchemaPublish(ctx, s.DB, s.Keyring, s.Advisory, actor, authz.OpDefinitionsApply, scope)
 	if err != nil {
 		return ApplyResult{}, err
@@ -134,6 +147,12 @@ func (s *Definitions) Apply(ctx context.Context, actor Actor, scope domain.Scope
 		if err := r.Audit().InsertTenant(ctx, p, ev); err != nil {
 			return err
 		}
+		// finding_overridden for each skew re-scan finding the caller acknowledged,
+		// committed in the apply's own transaction (ADR §5,§7). Empty on a
+		// same-version apply, which ran no scan.
+		if err := emitOverrides(ctx, r, p, caller.Principal, overrides); err != nil {
+			return err
+		}
 
 		if err := publisher.fanOut(ctx, r, az, caller, p, scope, "definitions-apply"); err != nil {
 			return err
@@ -153,6 +172,70 @@ func (s *Definitions) Apply(ctx context.Context, actor Actor, scope domain.Scope
 		publisher.announce(scope)
 	}
 	return result, err
+}
+
+// scanApplySkew is the apply-time Surface-2 re-scan (#74 SS3, ADR §7 (c)),
+// reached in a READ-only transaction before prepareSchemaPublish so a refusal
+// mints no project DEK (see Apply's call site). It re-scans the plan's pinned
+// bundle ONLY when the running ruleset snapshot differs from the one the plan
+// recorded — a same-version apply is a scanner no-op (identical bytes, identical
+// ruleset). On a finding it CAPTURES the finding_blocked events (ingress `apply`)
+// and returns *scanRefusalErr; the read wrote nothing else, so settleDenials
+// flushes the blocks while nothing else persists. On acceptance it returns the
+// overridden acks for the caller to emit with the apply's write transaction.
+//
+// An already-applied or expired plan re-scans nothing: the write transaction
+// yields the proper conflict, and blocking a plan that cannot apply would emit
+// spurious events.
+func (s *Definitions) scanApplySkew(ctx context.Context, actor Actor, scope domain.Scope, planID string, acks []string) ([]overrideAck, error) {
+	if s.Scan == nil {
+		return nil, nil // scanning off (pre-#74 test); a booted server always wires it
+	}
+	var overrides []overrideAck
+	err := tx.Read(ctx, s.DB, func(ctx context.Context, r store.ReadRepos, az *authz.TxAuthorizer) error {
+		caller, err := actor.resolve(ctx, az, s.now())
+		if err != nil {
+			return err
+		}
+		p, err := az.Authorize(ctx, caller, authz.OpDefinitionsApply, scope)
+		if err != nil {
+			return err
+		}
+		plan, err := r.Definitions().GetPlan(ctx, p, planID)
+		if err != nil {
+			return err
+		}
+		if plan.Applied || !s.now().Before(plan.ExpiresAt) {
+			return nil // the write transaction produces the applied/expired conflict
+		}
+		if plan.ScanSnapshot == s.Scan.SnapshotVersion() {
+			return nil // no skew: a same-version apply adds no second scan
+		}
+		bundle, err := definitions.Parse([]byte(plan.Bundle))
+		if err != nil {
+			return fmt.Errorf("service: plan %s: stored bundle unreadable: %w", planID, err)
+		}
+		res, err := scanDeclaration(ctx, s.Keyring, s.Scan, bundleLeaves(bundle), newAckSet(acks), s.now(), ingressApply)
+		if err != nil {
+			return err
+		}
+		if res.refuses() {
+			for _, f := range res.blocked {
+				ev, evErr := blockedEvent(ctx, caller.Principal, f)
+				if evErr != nil {
+					return evErr
+				}
+				az.CaptureAudit(audit.TrailTenant, domain.Scope{Org: scope.Org, Project: scope.Project}, ev)
+			}
+			return &scanRefusalErr{blocked: res.blocked, rejections: res.rejections}
+		}
+		overrides = res.overridden
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return overrides, nil
 }
 
 // recheckPins refuses the apply if the file digest or any pinned revision moved

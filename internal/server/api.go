@@ -125,7 +125,7 @@ type OrgService interface {
 type DefinitionsService interface {
 	Export(ctx context.Context, actor service.Actor, scope domain.Scope, portable bool) ([]byte, error)
 	Check(ctx context.Context, actor service.Actor, scope domain.Scope, raw []byte) (service.CheckResult, error)
-	Plan(ctx context.Context, actor service.Actor, scope domain.Scope, raw []byte) (service.PlanView, error)
+	Plan(ctx context.Context, actor service.Actor, scope domain.Scope, raw []byte, acks []string) (service.PlanView, error)
 	GetPlan(ctx context.Context, actor service.Actor, scope domain.Scope, planID string) (service.PlanView, error)
 	Apply(ctx context.Context, actor service.Actor, scope domain.Scope, planID string, opts service.ApplyOptions) (service.ApplyResult, error)
 	GetSettings(ctx context.Context, actor service.Actor, scope domain.Scope) (service.DefinitionsSettings, error)
