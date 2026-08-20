@@ -39,19 +39,35 @@ type compiledRule struct {
 	hik      bool
 }
 
-// prefilter reports whether the (already-lowercased) content could contain a
-// match. Keywords are an optimisation only: a rule with no keywords always runs
-// its regex.
-func (c *compiledRule) prefilter(lowerContent []byte) bool {
+// scanStart returns the earliest safe offset at which to start scanning the
+// (already-lowercased) content. A rule with no keywords scans from the start.
+//
+// The existing prefilter already assumes every detectable match contains a
+// keyword occurrence, matching upstream gitleaks' keyword semantics. For every
+// allowlisted rule, that occurrence starts at the match start (the regexes are
+// literal-prefix token grammars, with at most a word boundary before it).
+// Therefore no match can begin more than 64 bytes before the earliest keyword;
+// retaining that lead also preserves the context byte used by a word boundary
+// at the cut. The suffix can neither miss a match nor mint a spurious boundary,
+// so keywords remain an optimisation and do not change committed verdicts.
+func (c *compiledRule) scanStart(lowerContent []byte) (int, bool) {
 	if len(c.keywords) == 0 {
-		return true
+		return 0, true
 	}
+	earliest := -1
 	for _, kw := range c.keywords {
-		if bytes.Contains(lowerContent, []byte(kw)) {
-			return true
+		if i := bytes.Index(lowerContent, []byte(kw)); i >= 0 && (earliest < 0 || i < earliest) {
+			earliest = i
 		}
 	}
-	return false
+	if earliest < 0 {
+		return 0, false
+	}
+	const contextLead = 64
+	if earliest <= contextLead {
+		return 0, true
+	}
+	return earliest - contextLead, true
 }
 
 // Finding is the redacted result: a rule id and nothing else. No match text,
@@ -152,16 +168,18 @@ func (r *Ruleset) Scan(ctx context.Context, content []byte) ([]Finding, error) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if !cr.prefilter(lower) {
+		start, ok := cr.scanStart(lower)
+		if !ok {
 			continue
 		}
+		window := content[start:]
 		if cr.hik {
-			if matchHik(cr.re, content) {
+			if matchHik(cr.re, window) {
 				findings = append(findings, Finding{RuleID: cr.id})
 			}
 			continue
 		}
-		if cr.re.Match(content) {
+		if cr.re.Match(window) {
 			findings = append(findings, Finding{RuleID: cr.id})
 		}
 	}

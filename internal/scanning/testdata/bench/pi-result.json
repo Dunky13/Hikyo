@@ -1,0 +1,12 @@
+{
+  "harness_version": "1",
+  "snapshot_version": "gitleaks/v8.19.0+23f3bf389bd0",
+  "host": "pi4-8gb",
+  "items": 38,
+  "item_bytes": 65536,
+  "boot_compile_millis": 1.44,
+  "boot_peak_rss_bytes": 3723264,
+  "p50_millis": 2.054,
+  "p99_millis": 2.963,
+  "peak_rss_bytes": 8310784
+}

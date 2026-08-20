@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/Hikyo-Org/hikyo/internal/scanning/corpus"
 )
 
 func mustLoad(t *testing.T) *Ruleset {
@@ -134,8 +136,8 @@ func TestSemanticDigest(t *testing.T) {
 // keywords still runs its regex (prefilter is optimisation only).
 func TestScanEmptyKeywordRuleRunsRegex(t *testing.T) {
 	cr := &compiledRule{id: "kwless", re: regexp.MustCompile("SECRETVALUE"), keywords: nil}
-	if !cr.prefilter([]byte("nothing here")) {
-		t.Fatal("keyword-less rule must always pass the prefilter")
+	if start, ok := cr.scanStart([]byte("nothing here")); !ok || start != 0 {
+		t.Fatalf("keyword-less rule scanStart = (%d, %v); want (0, true)", start, ok)
 	}
 	rs := &Ruleset{rules: []*compiledRule{cr}}
 	got, err := rs.Scan(context.Background(), []byte("a SECRETVALUE b"))
@@ -144,6 +146,54 @@ func TestScanEmptyKeywordRuleRunsRegex(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].RuleID != "kwless" {
 		t.Fatalf("Scan = %v; want one kwless finding", got)
+	}
+}
+
+const plantedStripeCredential = "sk_live_0a1b2c0a1b2c"
+
+func TestScanFindsStripeCredentialInMiddleOfSizeCap(t *testing.T) {
+	content := bytes.Repeat([]byte(" "), 64*1024)
+	copy(content[len(content)/2:], plantedStripeCredential)
+	assertScanFindsRule(t, content, "stripe-access-token")
+}
+
+func TestScanFindsStripeCredentialAtOffsetZero(t *testing.T) {
+	content := bytes.Repeat([]byte(" "), 64*1024)
+	copy(content, plantedStripeCredential)
+	assertScanFindsRule(t, content, "stripe-access-token")
+}
+
+func TestScanFindsStripeCredentialWithKeywordInFirst64Bytes(t *testing.T) {
+	content := bytes.Repeat([]byte(" "), 64*1024)
+	copy(content[32:], plantedStripeCredential)
+	assertScanFindsRule(t, content, "stripe-access-token")
+}
+
+func TestScanFindsLaterStripeCredentialAfterFalseKeyword(t *testing.T) {
+	content := bytes.Repeat([]byte(" "), 64*1024)
+	copy(content[128:], "sk_test_junk")
+	copy(content[48*1024:], plantedStripeCredential)
+	assertScanFindsRule(t, content, "stripe-access-token")
+}
+
+func TestScanFindsHikCredentialInMiddleOfSizeCap(t *testing.T) {
+	fixture, err := corpus.Hik()
+	if err != nil {
+		t.Fatalf("mint hik fixture: %v", err)
+	}
+	content := bytes.Repeat([]byte(" "), 64*1024)
+	copy(content[len(content)/2:], fixture.TP[0])
+	assertScanFindsRule(t, content, corpus.HikRuleID)
+}
+
+func assertScanFindsRule(t *testing.T, content []byte, ruleID string) {
+	t.Helper()
+	got, err := mustLoad(t).Scan(context.Background(), content)
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	if !containsRule(got, ruleID) {
+		t.Fatalf("rule %q not found: %v", ruleID, got)
 	}
 }
 
