@@ -641,11 +641,19 @@ func runValuesImport(ctx context.Context, ios IO, args []string) error {
 			if err != nil {
 				return failf(ExitRefused, "%v", err)
 			}
+			// The precondition is sliced to THIS environment. A run manifest spans
+			// every environment a session touched, but `values import` is per
+			// environment, and importing environment B must not present
+			// environment A's occurrences — importing A first advances them, so a
+			// whole-manifest precondition would reject B on A's now-stale tokens.
 			pre := apigen.ImportPrecondition{
 				DefinitionsRevision: manifest.DefinitionsRevision,
-				EnvironmentIds:      manifest.Target.Environments,
+				EnvironmentIds:      []string{env},
 			}
 			for _, o := range manifest.Occurrences {
+				if o.Environment != env {
+					continue
+				}
 				pre.Occurrences = append(pre.Occurrences, struct {
 					EnvironmentId apigen.ID      `json:"environment_id"`
 					Key           apigen.KeyName `json:"key"`

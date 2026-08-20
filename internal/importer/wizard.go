@@ -108,9 +108,28 @@ func Wizard(host WizardHost, project string) (*ProjectPlan, error) {
 	}
 
 	tmpl := &Template{}
-	if err := wizardKeyReview(host, source, envs, tmpl); err != nil {
+	// Renames and folders are structural — no server contact.
+	valuesByKey, manual, err := wizardRenames(host, source, envs, tmpl)
+	if err != nil {
 		return nil, err
 	}
+	if err := wizardFolders(host, source, envs, manual, tmpl); err != nil {
+		return nil, err
+	}
+	// A first presence read (with the default classification/type intent) learns
+	// which keys the project already declares, so classification and type review
+	// can skip them — an existing declaration governs and is not re-offered.
+	declared, err := wizardDeclaredSet(host, source, envs, tmpl)
+	if err != nil {
+		return nil, err
+	}
+	if err := wizardClassType(host, valuesByKey, declared, tmpl); err != nil {
+		return nil, err
+	}
+	// The second presence read carries the FINAL classification/type intent, so
+	// each undeclared key's occurrence token binds the declaration the bundle
+	// will actually apply — a first-read token minted before a downgrade or an
+	// accepted type suggestion would be stale the moment phase 2 checked it.
 	definitionsRevision, err := wizardPresence(host, source, envs, tmpl)
 	if err != nil {
 		return nil, err
@@ -295,15 +314,13 @@ func wizardSelector(host WizardHost, source string) (Selector, error) {
 	return sel, nil
 }
 
-// wizardKeyReview is states 4, 5 and 6: renames (surfaced per key, hard-stop
-// names require an explicit rename), folder reconciliation across environments,
-// classification (secret default, explicit per-key downgrades), and type
-// suggestions (deterministic, across all environments' values, applied only on
-// accept). It writes its decisions into the template.
-func wizardKeyReview(host WizardHost, source string, envs []wizardEnv, tmpl *Template) error {
-	// Renames first: every source name is surfaced, an unmappable one is prompted
-	// for an explicit rename. Renames are project-wide (a source name maps to one
-	// target across the session).
+// wizardRenames is states 4/5's rename half: every source name is surfaced, an
+// unmappable one is prompted for an explicit rename, and the choices are written
+// into the template. Renames are project-wide — a source name maps to one target
+// across the session. It returns each target key's values (across environments,
+// for the type suggestion) and the manual-rename map (for folder computation).
+func wizardRenames(host WizardHost, source string, envs []wizardEnv, tmpl *Template) (
+	map[string][]string, map[string]string, error) {
 	renames := map[string]TransformKind{} // source name -> transform, for template rows
 	manual := map[string]string{}
 	targetOf := map[string]string{} // source name -> target
@@ -321,11 +338,11 @@ func wizardKeyReview(host WizardHost, source string, envs []wizardEnv, tmpl *Tem
 				host.Notice(fmt.Sprintf("%s cannot be mapped automatically.", quoteName(rec.SourceName)))
 				entered, lerr := host.Line("Rename it to:", "")
 				if lerr != nil {
-					return lerr
+					return nil, nil, lerr
 				}
 				entered = strings.TrimSpace(entered)
 				if err := schema.CheckKeyName(entered); err != nil {
-					return failure(source, CodeUnmappableName, quoteName(rec.SourceName),
+					return nil, nil, failure(source, CodeUnmappableName, quoteName(rec.SourceName),
 						"the entered name %s is not a canonical key", quoteName(entered))
 				}
 				target = entered
@@ -335,16 +352,16 @@ func wizardKeyReview(host WizardHost, source string, envs []wizardEnv, tmpl *Tem
 				host.Notice(fmt.Sprintf("rename: %s -> %s", quoteName(rec.SourceName), quoteName(target)))
 				edit, err := host.Confirm("Edit this rename?", false)
 				if err != nil {
-					return err
+					return nil, nil, err
 				}
 				if edit {
 					entered, err := host.Line("Rename it to:", target)
 					if err != nil {
-						return err
+						return nil, nil, err
 					}
 					entered = strings.TrimSpace(entered)
 					if err := schema.CheckKeyName(entered); err != nil {
-						return failure(source, CodeUnmappableName, quoteName(rec.SourceName),
+						return nil, nil, failure(source, CodeUnmappableName, quoteName(rec.SourceName),
 							"the entered name %s is not a canonical key", quoteName(entered))
 					}
 					target = entered
@@ -366,22 +383,44 @@ func wizardKeyReview(host WizardHost, source string, envs []wizardEnv, tmpl *Tem
 		}
 	}
 	sort.Slice(tmpl.Renames, func(i, j int) bool { return tmpl.Renames[i].From < tmpl.Renames[j].From })
+	return valuesByKey, manual, nil
+}
 
-	// Folder reconciliation (state 6): a key's folder must be one project-wide.
-	if err := wizardFolders(host, source, envs, manual, tmpl); err != nil {
-		return err
-	}
-
-	// Classification and type (states 5): only for keys the project does not
-	// already declare — an existing declaration governs and is not re-offered.
+// wizardDeclaredSet performs the first presence read (default declaration
+// intent) purely to learn which keys the project already declares, so
+// classification and type review can skip them. Its tokens are not kept — the
+// second read carries the final intent.
+func wizardDeclaredSet(host WizardHost, source string, envs []wizardEnv, tmpl *Template) (map[string]bool, error) {
 	declared := map[string]bool{}
 	for i := range envs {
-		for _, k := range envs[i].state.Keys {
+		if envs[i].create {
+			continue
+		}
+		candidates, err := PlannedCandidates(PlanInput{
+			Source: source, Records: envs[i].read.Result.Records, Template: tmpl,
+		})
+		if err != nil {
+			return nil, err
+		}
+		state, err := host.Presence(envs[i].ref, candidates)
+		if err != nil {
+			return nil, err
+		}
+		for _, k := range state.Keys {
 			if k.Declared {
 				declared[k.Name] = true
 			}
 		}
 	}
+	return declared, nil
+}
+
+// wizardClassType is state 5's classification and typing half, for keys the
+// project does not already declare: classification (secret default, explicit
+// per-key downgrades) and a deterministic type suggestion (across all
+// environments' values, applied only on accept).
+func wizardClassType(host WizardHost, valuesByKey map[string][]string, declared map[string]bool,
+	tmpl *Template) error {
 	keys := make([]string, 0, len(valuesByKey))
 	for k := range valuesByKey {
 		keys = append(keys, k)

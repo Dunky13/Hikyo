@@ -274,6 +274,58 @@ func TestWizardCreatesEnvironment(t *testing.T) {
 	}
 }
 
+// TestWizardSkipsAlreadyDeclaredKeys: a key the project already declares is
+// discovered by the first presence read and skipped in classification/type
+// review, so accepting a type suggestion cannot propose a declaration that
+// conflicts with the existing one. DB_PORT is declared `string`; its value
+// "5432" would suggest `integer`, and accepting that against the existing
+// `string` used to be a spurious incompatible refusal.
+func TestWizardSkipsAlreadyDeclaredKeys(t *testing.T) {
+	res, err := run(t, k8sSource, "k8s-multi.yaml", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	host := &scriptHost{
+		t: t, source: k8sSource,
+		reads: []SourceRead{{Result: res, FileDigest: "sha256:a"}},
+		envs:  []NamedEnv{{ID: "env_prod", Name: "prod"}},
+		presence: func(envID string, c []PlannedCandidate) ServerState {
+			st := undeclaredState(envID, c)
+			for i := range st.Keys {
+				if st.Keys[i].Name == "DB_PORT" {
+					st.Keys[i] = declaredKey("DB_PORT", "secret", false, "v1:tok-port")
+				}
+			}
+			return st
+		},
+		confirm: map[string]bool{
+			"Read live": false, "Map another": false, "Edit this": false,
+			"Downgrade": false, "overwrite": false, "import the trim": false,
+			"Declare": true, // accept every type suggestion
+		},
+		choose: map[string]int{"source": 1, "Target environment": 0},
+		line:   map[string]string{"Export file path": "export.yaml"},
+	}
+	wiz, err := Wizard(host, "prj_1")
+	if err != nil {
+		t.Fatalf("wizard refused an already-declared key with a divergent suggestion: %v", err)
+	}
+	for _, ty := range wiz.Template.Types {
+		if ty.Key == "DB_PORT" {
+			t.Errorf("recorded a type row for the already-declared DB_PORT: %+v", ty)
+		}
+	}
+	found := false
+	for _, k := range wiz.AlreadyDeclared {
+		if k == "DB_PORT" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("DB_PORT not reported already declared: %v", wiz.AlreadyDeclared)
+	}
+}
+
 // mapAnotherOnce answers the "Map another?" confirm true exactly once, so the
 // fan-out loop adds a second environment and then terminates, and picks a fresh
 // existing environment on each "Target environment" choice.
