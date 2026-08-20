@@ -111,7 +111,7 @@ var Registry = []Bound{
 	// §9 encryption.
 	{"Reencrypt CAS (no-resurrect)", "ops-spec §9", "row_version CAS conflict", "store authn CAS", StatusEnforced},
 	{"DEK LRU cache", "ops-spec §9", "declared bound, eviction re-unwraps (not a refusal)", "crypto keyring_test (dekCacheSize eviction)", StatusByConstruction},
-	{"Reencrypt chunk 100 rows / 100 ms", "ops-spec §9 (§167)", "chunked background rewrap", "ENFORCEMENT-PENDING: the reencrypt-after-rotation walk is not yet implemented (no reencrypt verb/job); the bound belongs to that feature. HUMAN-DISPOSITION -> issue #187 (encryption rotation).", StatusPending},
+	{"Reencrypt chunk 100 rows / 100 ms", "ops-spec §9 (§167)", "chunked background rewrap (service.Reencrypt paginates by ReencryptChunkSize, pauses ReencryptChunkPause between chunks)", "conformance boundregistry_test value-pins + isolation reencrypt_e2e (chunked resumable walk)", StatusEnforced},
 
 	// §11 / §12 adapter & backup ops.
 	{"Import per-file / decoded / records / pages", "ops-catalogue §Import", "importer bound errors", "importer connector_test / live_test", StatusEnforced},
@@ -198,6 +198,8 @@ func TestReconciledBoundsMatchOpsSpecValues(t *testing.T) {
 		{"service.MaxRenderBytesPerTarget", service.MaxRenderBytesPerTarget, 1 << 20},
 		{"service.MaxResolvedCells", service.MaxResolvedCells, 100000},
 		{"store.AuditMaxPageSize", store.AuditMaxPageSize, 1000},
+		// §9 reencrypt chunk bound, enforced once the walk shipped (#187 / #192).
+		{"service.ReencryptChunkSize", service.ReencryptChunkSize, 100},
 		// Already-conformant bounds, pinned so they cannot drift unnoticed.
 		{"schema.MaxKeysPerProject", schema.MaxKeysPerProject, 1000},
 		{"schema.MaxKeyGroupsPerProject", schema.MaxKeyGroupsPerProject, 100},
@@ -229,6 +231,7 @@ func TestReconciledBoundsMatchOpsSpecValues(t *testing.T) {
 	}
 	dpins := []dpin{
 		{"schema.EvaluationDeadline", schema.EvaluationDeadline, 100 * time.Millisecond},
+		{"service.ReencryptChunkPause", service.ReencryptChunkPause, 100 * time.Millisecond},
 		{"service.PlanTTL", service.PlanTTL, 24 * time.Hour},
 		{"service.BootstrapLifetime", service.BootstrapLifetime, 24 * time.Hour},
 		{"service.BrowserSessionIdle", service.BrowserSessionIdle, 7 * 24 * time.Hour},

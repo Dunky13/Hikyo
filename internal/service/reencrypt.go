@@ -42,23 +42,28 @@ type Reencrypt struct {
 	BeforeRetire func(context.Context) error
 }
 
+// ReencryptChunkSize and ReencryptChunkPause are the ops-spec §9 (§167) bounds
+// on the background rewrap walk: at most 100 rows per chunk transaction, a fixed
+// 100 ms pause between chunks. They are the enforced defaults (a caller may set
+// a smaller chunk or no pause for tests, never a larger chunk); the conformance
+// bound-registry pins these values against drift.
 const (
-	defaultReencryptChunkSize  = 100
-	defaultReencryptChunkPause = 100 * time.Millisecond
+	ReencryptChunkSize  = 100
+	ReencryptChunkPause = 100 * time.Millisecond
 )
 
 func (s *Reencrypt) chunkSize() int {
 	if s.ChunkSize > 0 {
 		return s.ChunkSize
 	}
-	return defaultReencryptChunkSize
+	return ReencryptChunkSize
 }
 
 func (s *Reencrypt) chunkPause() time.Duration {
 	if s.ChunkPause != 0 {
 		return s.ChunkPause
 	}
-	return defaultReencryptChunkPause
+	return ReencryptChunkPause
 }
 
 func (s *Reencrypt) now() time.Time {
