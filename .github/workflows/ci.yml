@@ -834,31 +834,10 @@ jobs:
           path: ~/.cache/go-build
           key: ${{ steps.fuzz-go-cache.outputs.cache-primary-key }}
 
-  # Main executes this workflow directly. Keep issue write authority out of the
-  # fuzz job, then consume its untrusted artifact through the validating
-  # reporter script in a separate trusted job.
-  report-main-fuzz-failure:
-    needs: fuzz
-    if: >-
-      ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' &&
-      needs.fuzz.result == 'failure' }}
-    runs-on: ubuntu-latest
-    permissions:
-      actions: read
-      contents: read
-      issues: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Create or update fuzz finding issue
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: >-
-          ./scripts/ci/report-fuzz-finding.sh main "${{ github.sha }}" "$RUN_URL"
-          "${{ github.run_id }}" "${{ github.run_attempt }}"
+  # Fuzz findings are reported out-of-band by fuzz-report.yml (workflow_run), so
+  # no job here requests issue/PR write. That keeps this reusable workflow's
+  # permission surface at contents:read, which is all its caller (trusted-ci)
+  # grants — a write request here would startup-fail every PR's trusted-ci run.
 
   # The headline guarantee, as its own named context (#76, mvp-boundary K3):
   # a stolen database and a stolen backup, without the root key, yield no

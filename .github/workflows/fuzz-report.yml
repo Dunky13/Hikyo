@@ -1,0 +1,184 @@
+# Out-of-band fuzz reporting (#189). The validation graphs (ci.yml, ci-control.yml)
+# execute untrusted PR code and therefore hold no issue/PR write authority — a
+# write request inside the reusable ci.yml is capped by trusted-ci's contents:read
+# grant and startup-fails every PR run. This workflow runs in the trusted base
+# context on workflow_run completion, where write can be granted safely.
+#
+# Trust model: the fuzz-reproducers artifact is produced by untrusted PR jobs, so
+# its contents are re-validated (corpus-path shape and count) by both the classify
+# and report scripts. PR identity (number, base SHA, head SHA) is taken ONLY from
+# GitHub-owned workflow_run metadata, never from an artifact a PR job could forge.
+# Classification runs in a read-only job; only the posting job holds write.
+name: fuzz-report
+
+on:
+  workflow_run:
+    workflows: [trusted-ci, ci]
+    types: [completed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fuzz-report-${{ github.event.workflow_run.id }}
+  cancel-in-progress: false
+
+jobs:
+  # Read-only: replay the untrusted reproducers against the PR's trusted base to
+  # decide PR-related vs pre-existing. No write authority, so executing base test
+  # code against attacker-influenced corpus input cannot reach the issue/PR token.
+  classify:
+    if: >-
+      ${{ github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.event == 'pull_request_target' }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      found: ${{ steps.classify.outputs.found }}
+      pr_number: ${{ steps.pr.outputs.pr_number }}
+      head_sha: ${{ steps.pr.outputs.head_sha }}
+      classification: ${{ steps.classify.outputs.classification }}
+    steps:
+      - name: Resolve PR identity from trigger metadata
+        id: pr
+        env:
+          TRIGGER_PRS: ${{ toJSON(github.event.workflow_run.pull_requests) }}
+        run: |
+          set -eu
+          if [ "$(printf '%s' "$TRIGGER_PRS" | jq 'length')" -eq 0 ]; then
+            # No GitHub-attributed PR (e.g. a fork); we cannot safely bind the
+            # findings to a PR, so skip. The base-branch author still sees the
+            # failing validation run.
+            echo 'attributed=false' >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          pr_number=$(printf '%s' "$TRIGGER_PRS" | jq -r '.[0].number')
+          base_sha=$(printf '%s' "$TRIGGER_PRS" | jq -r '.[0].base.sha')
+          head_sha=$(printf '%s' "$TRIGGER_PRS" | jq -r '.[0].head.sha')
+          {
+            echo 'attributed=true'
+            echo "pr_number=$pr_number"
+            echo "base_sha=$base_sha"
+            echo "head_sha=$head_sha"
+          } >>"$GITHUB_OUTPUT"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.pr.outputs.attributed == 'true'
+        with:
+          ref: ${{ steps.pr.outputs.base_sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        if: steps.pr.outputs.attributed == 'true'
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Restore shared Go module cache
+        if: steps.pr.outputs.attributed == 'true'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+      - name: Download minimized fuzz reproducers
+        id: artifact
+        if: steps.pr.outputs.attributed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          ARTIFACT_NAME: fuzz-reproducers-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.run_attempt }}
+        run: |
+          set -eu
+          artifact_id=
+          attempt=1
+          while [ "$attempt" -le 5 ]; do
+            artifact_id=$(gh api \
+              "repos/$GH_REPO/actions/runs/$RUN_ID/artifacts?per_page=100" \
+              --jq ".artifacts | map(select(.name == \"$ARTIFACT_NAME\" and .expired == false))[0].id // empty")
+            [ -z "$artifact_id" ] || break
+            [ "$attempt" -eq 5 ] || sleep 2
+            attempt=$((attempt + 1))
+          done
+          if [ -z "$artifact_id" ]; then
+            echo 'found=false' >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          archive="$RUNNER_TEMP/fuzz-reproducers.zip"
+          gh api "repos/$GH_REPO/actions/artifacts/$artifact_id/zip" >"$archive"
+          echo 'found=true' >>"$GITHUB_OUTPUT"
+          echo "archive=$archive" >>"$GITHUB_OUTPUT"
+      - name: Classify findings against trusted base
+        id: classify
+        if: steps.artifact.outputs.found == 'true'
+        env:
+          ARCHIVE: ${{ steps.artifact.outputs.archive }}
+          BASE_SHA: ${{ steps.pr.outputs.base_sha }}
+        run: |
+          set -eu
+          # Attribution failure must not drop the finding: report-fuzz-finding.sh
+          # treats an empty classification as PR-related, keeping it off any
+          # repository-wide issue until a clean base replay can classify it.
+          if classification=$(./scripts/ci/classify-fuzz-findings.sh \
+            "$ARCHIVE" "$BASE_SHA" "$GITHUB_WORKSPACE"); then
+            echo "classification=$classification" >>"$GITHUB_OUTPUT"
+          else
+            echo 'fuzz report: base replay failed; findings will post as PR-related' >&2
+            echo 'classification=' >>"$GITHUB_OUTPUT"
+          fi
+          echo 'found=true' >>"$GITHUB_OUTPUT"
+
+  # Only this job holds issue/PR write. It re-validates the classification schema,
+  # the PR-number shape, and every corpus path before publishing.
+  report-pr:
+    needs: classify
+    if: ${{ needs.classify.outputs.found == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Route fuzz findings to PR or issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}
+          PR_NUMBER: ${{ needs.classify.outputs.pr_number }}
+          HEAD_SHA: ${{ needs.classify.outputs.head_sha }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          FUZZ_CLASSIFICATION: ${{ needs.classify.outputs.classification }}
+        run: >-
+          ./scripts/ci/report-fuzz-finding.sh "PR #$PR_NUMBER" "$HEAD_SHA"
+          "$RUN_URL" "$RUN_ID" "$RUN_ATTEMPT"
+
+  # Main push runs ci.yml directly. Its fuzz findings are independently actionable
+  # (no PR base to replay against), so they go straight to a repository issue.
+  report-main:
+    if: >-
+      ${{ github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.event == 'push' }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Create or update fuzz finding issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+        run: >-
+          ./scripts/ci/report-fuzz-finding.sh main "$HEAD_SHA"
+          "$RUN_URL" "$RUN_ID" "$RUN_ATTEMPT"
