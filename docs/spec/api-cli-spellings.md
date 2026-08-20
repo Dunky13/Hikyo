@@ -129,12 +129,18 @@ Phase 2 is the existing pipeline, no new grammar: `definitions plan --file` → 
   "source_versions": [ { "key": "<KEY>", "environment": "<environment-id>",
                          "version": "<resourceVersion | secret_version>" } ],
   "target": { "project": "<project-id>", "environments": ["<environment-id>"],
+              "created_environments": ["<environment-name>"],
               "keys": [ { "name": "<KEY>", "id": "<key-id-or-null>" } ] },
   "definitions_revision": 0,
   "occurrences": [ { "key": "<KEY>", "environment": "<environment-id>", "token": "<server-minted opaque>" } ],
-  "phase_completion": { "authored": true, "applied": false, "imported": { "<environment-id>": false } }
+  "values_digests": [ { "environment": "<environment-id-or-name>", "digest": "sha256:…" } ],
+  "phase_completion": { "authored": true, "applied": false, "imported": { "<environment-id-or-name>": false } }
 }
 ```
+
+**`values_digests` binds each environment's values file to this run by content.** The occurrence tokens bind the reviewed STATE (that it has not moved), not the plaintext an operator is about to write — and a created environment has no token at all. Without a content binding, two runs targeting the same `(project, environment)` could be mispaired: run B's values imported under run A's manifest, or run A's completion marker stamped for run B. So the manifest records the digest of each writing environment's canonical values file (id for existing environments, name for created ones), and `values import` refuses a values file whose recomputed digest does not match. The digest is deterministic, so a wizard session and a flag run with coinciding choices record the same one.
+
+**Created environments are tokenless.** A wizard session may fan out across target environments including ones it will create (state 3), declared up front as `create environment` lines in the definitions bundle and named — not id'd — in `target.created_environments` (`omitempty`; absent when the session creates nothing). A created environment has no id at phase 1 (phase 1 never writes), so it carries **no occurrence row** and sits **outside the phase-2 precondition**: its per-environment values file carries `environment_name` in place of `environment`, and `values import` resolves the name to its id after `definitions apply`, binds by name, and attaches no precondition — a precondition that reviewed no occurrence for it would reject every key. Its safety rests on the locked manifest-less strict-import path (closed schema + skip-by-default); the accepted residual is that movement in the apply→import window is skipped-and-listed, not rejected-by-name. `phase_completion.imported` keys created environments by name and existing ones by id. Detail: [import-paths.md](../adr/import-paths.md), `docs/handoff/112-import-wizard.md`.
 
 **Connector fixture contracts** (fixed here; byte content pinned when each connector is built): per connector, (a) true-positive mapping fixtures for its named capture format, (b) adversarial-parser fixtures (malformed/oversized/decompression-bomb inputs failing loudly at the named bound), (c) hostile-provider-error fixtures (errors sanitized structurally: keys/paths/bounds/codes, never content). Recorded in [open-items.md](./open-items.md) as an implementation-pinned moment.
 

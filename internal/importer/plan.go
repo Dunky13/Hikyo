@@ -150,7 +150,7 @@ func PlannedNames(in PlanInput) ([]string, error) {
 // declaration choice here and in BuildPlan behind desiredDeclaration prevents
 // the token intent from drifting from the bundle it binds.
 func PlannedCandidates(in PlanInput) ([]PlannedCandidate, error) {
-	rows, _, err := mapRecords(in)
+	rows, _, err := mapRecords(in.Source, in.Records, in.Template)
 	if err != nil {
 		return nil, err
 	}
@@ -182,10 +182,10 @@ type mappedRecord struct {
 // per-import" is not satisfied by a message that happens to name one key: a
 // two-hundred-key migration with four unmappable names must be four fixes in
 // one edit, not four runs.
-func mapRecords(in PlanInput) ([]mappedRecord, []Rename, error) {
+func mapRecords(source string, records []Record, template *Template) ([]mappedRecord, []Rename, error) {
 	manual := map[string]string{}
-	if in.Template != nil {
-		for _, r := range in.Template.Renames {
+	if template != nil {
+		for _, r := range template.Renames {
 			if r.Transform == TransformManual {
 				manual[r.From] = r.To
 			}
@@ -198,7 +198,7 @@ func mapRecords(in PlanInput) ([]mappedRecord, []Rename, error) {
 		collisions []string
 	)
 	origin := map[string]string{} // target name -> source path that claimed it
-	for _, rec := range in.Records {
+	for _, rec := range records {
 		sourcePath := recordPath(rec)
 		target, transform, err := targetName(rec.SourceName, manual)
 		if err != nil {
@@ -221,13 +221,13 @@ func mapRecords(in PlanInput) ([]mappedRecord, []Rename, error) {
 	}
 	if len(unmappable) > 0 {
 		slices.Sort(unmappable)
-		return nil, nil, failure(in.Source, CodeUnmappableName, "",
+		return nil, nil, failure(source, CodeUnmappableName, "",
 			"%d source name(s) fall outside the documented transform; name each one explicitly in the "+
 				"mapping template's `renames`: %s", len(unmappable), strings.Join(unmappable, ", "))
 	}
 	if len(collisions) > 0 {
 		slices.Sort(collisions)
-		return nil, nil, failure(in.Source, CodeNameCollision, "",
+		return nil, nil, failure(source, CodeNameCollision, "",
 			"%d post-transform collision(s); resolve each with an explicit rename in the mapping template: %s",
 			len(collisions), strings.Join(collisions, "; "))
 	}
@@ -236,38 +236,164 @@ func mapRecords(in PlanInput) ([]mappedRecord, []Rename, error) {
 	return rows, renames, nil
 }
 
-// BuildPlan runs the whole phase-1 decision surface.
+// BuildPlan runs the phase-1 decision surface for a single (project,
+// environment) — flag mode and single-environment replay. It is a thin wrapper
+// over BuildProjectPlan with exactly one target environment, so a flag/replay
+// run and a single-environment wizard session author byte-identical artifacts:
+// there is one planner, reached two ways.
 func BuildPlan(in PlanInput) (*Plan, error) {
 	if in.State.Project == "" || in.State.Environment == "" {
 		return nil, failure("import", CodeMalformed, "",
 			"a phase-1 plan targets exactly one (project, environment)")
 	}
-	state := make(map[string]KeyState, len(in.State.Keys))
-	declaredNames := make([]string, 0, len(in.State.Keys))
-	for _, k := range in.State.Keys {
-		state[k.Name] = k
-		if k.Declared {
-			declaredNames = append(declaredNames, k.Name)
-		}
-	}
-	slices.Sort(declaredNames)
-
-	rows, renames, err := mapRecords(in)
+	project, err := BuildProjectPlan(ProjectPlanInput{
+		Source:              in.Source,
+		Project:             in.State.Project,
+		DefinitionsRevision: in.State.DefinitionsRevision,
+		Template:            in.Template,
+		Envs: []EnvInput{{
+			Records: in.Records, Skipped: in.Skipped, Scope: in.Scope,
+			FileDigest: in.FileDigest, EnvSlug: in.EnvSlug, SourceIdentity: in.SourceIdentity,
+			EnvID: in.State.Environment, Keys: in.State.Keys,
+		}},
+	})
 	if err != nil {
 		return nil, err
 	}
-	plan := &Plan{SkippedBySource: append([]string{}, in.Skipped...), Renames: renames}
+	return project.single(), nil
+}
 
-	// One Secret -> one folder named after the Secret; a SINGLE-Secret import
-	// may target the environment root. That provision is the K8S ROW's and no
-	// other: a SOPS file's top-level map and an Infisical `secretPath` are
-	// folder structure the source states outright, and collapsing them because
-	// this particular export happened to have one branch would silently flatten
-	// a tree the operator will grow tomorrow.
-	rootCollapse := in.Source == k8sSource && singleSourceFolder(in.Records)
+// EnvInput is one target environment's phase-1 material inside a session. A
+// created environment carries no server-read Keys (it does not exist yet) and
+// is addressed by EnvName; an existing environment is addressed by EnvID and
+// carries the presence read the server returned for it.
+type EnvInput struct {
+	Records        []Record
+	Skipped        []string
+	Scope          Scope
+	FileDigest     string
+	EnvSlug        string
+	SourceIdentity string
+	// EnvID is the server-owned id of an existing target environment. Empty for
+	// a created environment.
+	EnvID string
+	// EnvName is the environment's portable name. Required for a created
+	// environment (which has no id yet); optional otherwise.
+	EnvName string
+	// Create marks an environment the session will create at phase 2 through the
+	// bundle's `create environment` line. Created environments are tokenless by
+	// construction: no presence read happened, so no occurrence is bound and the
+	// manifest names them without an id (docs/handoff/112-import-wizard.md).
+	Create bool
+	// Keys is the per-environment presence read. Empty for a created environment.
+	Keys []KeyState
+}
 
-	overwrite := templateOverwrites(in.Template, in.State.Environment)
-	trimAck := templateTrimAcks(in.Template, in.State.Environment)
+// ProjectPlanInput is one phase-1 session's whole material: one source, one
+// project, and one or more target environments. Keys, types and classifications
+// are project-scoped and reconciled to one canonical identity per key across the
+// fan-out; only presence — the buckets and the values written — varies by
+// environment (import-paths ADR § The two-phase invariant).
+type ProjectPlanInput struct {
+	Source              string
+	Project             string
+	DefinitionsRevision int64
+	Template            *Template
+	Envs                []EnvInput
+}
+
+// EnvPlan is one environment's slice of a project plan: its buckets and its
+// values file.
+type EnvPlan struct {
+	EnvID   string
+	EnvName string
+	Create  bool
+	// New and Set are the two collision buckets the flat-model ADR leaves, for
+	// this environment. Set is skipped by default and listed by name.
+	New []string
+	Set []string
+	// Overwritten names the `set` keys an enumerated overwrite selection admitted
+	// in this environment.
+	Overwritten []string
+	Values      ValuesFile
+	// HasValues reports whether this environment's values file carries anything.
+	HasValues bool
+}
+
+// ProjectPlan is a whole session's result: the four artifact families, with one
+// project-wide bundle and manifest and one values file per environment that
+// writes anything.
+type ProjectPlan struct {
+	Template Template
+	Manifest Manifest
+	Bundle   definitions.Bundle
+	Envs     []EnvPlan
+
+	Renames         []Rename
+	NearMisses      []NearMiss
+	SkippedBySource []string
+	PlaintextHints  []string
+	AlreadyDeclared []string
+}
+
+// single collapses a one-environment project plan into the legacy single-env
+// Plan the flag/replay CLI and the conformance harness consume. The artifact
+// bytes are the project plan's own, so a single-environment wizard session and
+// a flag run produce identical Template, Bundle and Manifest.
+func (p *ProjectPlan) single() *Plan {
+	env := p.Envs[0]
+	return &Plan{
+		Template: p.Template, Manifest: p.Manifest, Bundle: p.Bundle,
+		Values: env.Values, HasValues: env.HasValues,
+		Renames: p.Renames, NearMisses: p.NearMisses,
+		New: env.New, Set: env.Set, Overwritten: env.Overwritten,
+		SkippedBySource: p.SkippedBySource, PlaintextHints: p.PlaintextHints,
+		AlreadyDeclared: p.AlreadyDeclared,
+	}
+}
+
+// keyDecision is the project-scoped, per-key reconciled decision: one identity,
+// classification, type and folder, canonical across every environment the key
+// appears in.
+type keyDecision struct {
+	target       string
+	class        string
+	declType     schema.Type
+	typeSupplied bool
+	downgraded   bool
+	folder       string
+	declared     bool // an existing compatible declaration governs; not re-declared
+}
+
+// BuildProjectPlan runs the whole phase-1 decision surface across one or more
+// target environments. Keys, classifications and types are decided once,
+// project-wide, and reconciled to one canonical identity per key; each key's
+// folder must agree across every environment it appears in. Buckets, values,
+// occurrences and source versions are then decided per environment.
+func BuildProjectPlan(in ProjectPlanInput) (*ProjectPlan, error) {
+	if in.Source == "" {
+		return nil, failure("import", CodeMalformed, "", "a phase-1 plan names no source")
+	}
+	if in.Project == "" {
+		return nil, failure("import", CodeMalformed, "",
+			"a phase-1 plan targets exactly one (project, environment)")
+	}
+	if len(in.Envs) == 0 {
+		return nil, failure(in.Source, CodeMalformed, "",
+			"a phase-1 plan targets at least one environment")
+	}
+	for i := range in.Envs {
+		e := &in.Envs[i]
+		if e.Create && e.EnvName == "" {
+			return nil, failure(in.Source, CodeMalformed, "",
+				"a created environment is named, not id'd")
+		}
+		if !e.Create && e.EnvID == "" {
+			return nil, failure(in.Source, CodeMalformed, "",
+				"a phase-1 plan targets exactly one (project, environment)")
+		}
+	}
+
 	classChoice, downgraded := templateClassifications(in.Template)
 	typeChoice, err := templateTypes(in.Template)
 	if err != nil {
@@ -278,16 +404,48 @@ func BuildPlan(in PlanInput) (*Plan, error) {
 		return nil, err
 	}
 
-	var (
-		importedNames []string
-		folders       = map[string]string{}
-		trimOffenders []string
-		incompatible  []string
-	)
-	plan.Values = ValuesFile{
-		FormatVersion: FormatVersion,
-		Project:       in.State.Project,
-		Environment:   in.State.Environment,
+	// Per-environment name mapping, and the project-wide declared-key set. A key
+	// is declared for the project if any environment's read reports it declared;
+	// the declaration is project-scoped, so the fields agree across environments.
+	declaredNames := map[string]bool{}
+	declaredState := map[string]KeyState{}
+	envRows := make([][]mappedRecord, len(in.Envs))
+	var renames []Rename
+	renameSeen := map[string]bool{}
+	for i, e := range in.Envs {
+		rows, envRenames, err := mapRecords(in.Source, e.Records, in.Template)
+		if err != nil {
+			return nil, err
+		}
+		envRows[i] = rows
+		for _, r := range envRenames {
+			if !renameSeen[r.From] {
+				renameSeen[r.From] = true
+				renames = append(renames, r)
+			}
+		}
+		for _, k := range e.Keys {
+			if k.Declared {
+				declaredNames[k.Name] = true
+				declaredState[k.Name] = k
+			}
+		}
+	}
+	sort.SliceStable(renames, func(i, j int) bool { return renames[i].From < renames[j].From })
+
+	// The project pass: one reconciled decision per key, in sorted target order.
+	// Folder is computed per environment (root-collapse is a per-source fact) and
+	// must reconcile to one value — the bundle carries one folder_path per key.
+	decisions, order, folders, plaintextHints, err := reconcileKeys(in, envRows, recordedFolders,
+		classChoice, downgraded, typeChoice, declaredState)
+	if err != nil {
+		return nil, err
+	}
+
+	plan := &ProjectPlan{
+		SkippedBySource: mergeSkipped(in.Envs),
+		Renames:         renames,
+		PlaintextHints:  plaintextHints,
 	}
 	plan.Bundle = definitions.Bundle{
 		FormatVersion: definitions.FormatVersion,
@@ -296,119 +454,52 @@ func BuildPlan(in PlanInput) (*Plan, error) {
 		Keys:          []definitions.Key{},
 	}
 
-	for _, row := range rows {
-		rec, target := row.record, row.target
-		sourcePath := recordPath(rec)
+	var importedNames []string
+	for _, target := range order {
+		d := decisions[target]
 		importedNames = append(importedNames, target)
-		if rec.PlaintextHint {
-			plan.PlaintextHints = append(plan.PlaintextHints, target)
-		}
-
-		// Write-time trim preflight. The schema layer trims edge whitespace on
-		// write, so a certificate with a trailing newline or a padded token
-		// would import CHANGED, silently. Every offender is collected; the
-		// refusal names them all, so one template edit acknowledges the lot.
-		if schema.Normalize(rec.Value) != rec.Value && !trimAck[target] {
-			trimOffenders = append(trimOffenders, quoteName(target))
-			continue
-		}
-
-		// Folder mapping. A source path maps onto a folder chain; the k8s
-		// single-container case takes the environment root. A replayed template
-		// that RECORDED a folder choice wins — the template is the record of
-		// every choice, and silently recomputing one makes it a suggestion.
-		sourceFolder := strings.Join(rec.Folder, "/")
-		targetFolder, ok := recordedFolders[sourceFolder]
-		if !ok {
-			if len(recordedFolders) > 0 {
-				return nil, failure(in.Source, CodeMalformed, sourcePath,
-					"the mapping template records no folder for source path %s; a replay against a source with "+
-						"folders the template never saw is a different mapping, not the same one",
-					quoteName(sourceFolder))
-			}
-			if targetFolder, err = targetFolderPath(rec.Folder, rootCollapse); err != nil {
-				return nil, err
-			}
-		}
-		folders[sourceFolder] = targetFolder
-
-		// Classification and type.
-		//
-		// EVERY IMPORTED KEY DEFAULTS `secret`, from every source. The only
-		// thing that can move it is an explicit per-key template downgrade.
-		class, declType, typeSupplied := desiredDeclaration(target, classChoice, typeChoice)
-		wasDowngraded := downgraded[target]
-
-		// An EXISTING declaration is not modified — an additive bundle may not —
-		// so a declaration that disagrees with what this import would declare is
-		// a conflict the human resolves, not one the importer absorbs. Refusing
-		// here rather than at phase 2 is the same refusal one command earlier,
-		// and it closes the case where a secret-store value lands quietly under
-		// a `config` declaration that every plain-`read` holder can see.
-		//
-		// The escape hatch is the template line itself: a template that declares
-		// `config` for this key IS the reviewed, recorded, committable consent
-		// the ADR means by "resolved by hand".
-		existing, isDeclared := state[target]
-		if isDeclared && existing.Declared {
-			switch {
-			case existing.Classification != class:
-				incompatible = append(incompatible, fmt.Sprintf(
-					"%s is declared `%s` but this import would declare `%s`",
-					quoteName(target), existing.Classification, class))
-				continue
-			case !compatibleImportedType(existing.Type, declType):
-				incompatible = append(incompatible, fmt.Sprintf(
-					"%s is declared type `%s` but this import would declare `%s`",
-					quoteName(target), existing.Type, declType))
-				continue
-			}
+		if d.declared {
 			plan.AlreadyDeclared = append(plan.AlreadyDeclared, target)
 		} else {
-			rule := schema.Rule{Type: declType}
+			rule := schema.Rule{Type: d.declType}
 			plan.Bundle.Keys = append(plan.Bundle.Keys, definitions.Key{
 				Name:           target,
-				FolderPath:     targetFolder,
-				Classification: class,
+				FolderPath:     d.folder,
+				Classification: d.class,
 				Declaration:    schema.Declaration{Rule: &rule},
-				RequiredIn: definitions.Presence{
-					Mode:         string(schema.PresenceNone),
-					Environments: []string{},
-				},
-				ForbiddenIn: definitions.Presence{
-					Mode:         string(schema.PresenceNone),
-					Environments: []string{},
-				},
+				RequiredIn:     definitions.Presence{Mode: string(schema.PresenceNone), Environments: []string{}},
+				ForbiddenIn:    definitions.Presence{Mode: string(schema.PresenceNone), Environments: []string{}},
 			})
 		}
-
 		plan.Template.Classifications = append(plan.Template.Classifications,
-			ClassificationChoice{Key: target, Class: class, Downgraded: wasDowngraded})
+			ClassificationChoice{Key: target, Class: d.class, Downgraded: d.downgraded})
 		// For an already-declared key, absence of a template type row means the
-		// existing declaration governs. Recording the default `string` here
-		// would fabricate consent the template author never supplied.
-		if !isDeclared || !existing.Declared || typeSupplied {
+		// existing declaration governs; recording the default `string` would
+		// fabricate consent the template author never supplied.
+		if !d.declared || d.typeSupplied {
 			plan.Template.Types = append(plan.Template.Types,
-				TypeChoice{Key: target, Type: string(declType), Accepted: true})
+				TypeChoice{Key: target, Type: string(d.declType), Accepted: true})
 		}
-
-		// Bucketing on the target environment's state. Two buckets, because
-		// local state IS resolved state once inheritance is gone.
-		switch {
-		case existing.Set && !overwrite[target]:
-			// `set`: skipped by default, listed by name. Skip-by-default is
-			// what makes a re-run naturally idempotent.
-			plan.Set = append(plan.Set, target)
-			continue
-		case existing.Set:
-			plan.Set = append(plan.Set, target)
-			plan.Overwritten = append(plan.Overwritten, target)
-		default:
-			plan.New = append(plan.New, target)
-		}
-		plan.Values.Entries = append(plan.Values.Entries, ValuesEntry{Key: target, Value: rec.Value})
 	}
 
+	sortedDeclared := make([]string, 0, len(declaredNames))
+	for name := range declaredNames {
+		sortedDeclared = append(sortedDeclared, name)
+	}
+	slices.Sort(sortedDeclared)
+	plan.NearMisses = NearMisses(importedNames, sortedDeclared)
+
+	// The per-environment pass: buckets, values, occurrences and trim preflight.
+	var trimOffenders []string
+	trimSeen := map[string]bool{}
+	for i := range in.Envs {
+		e := in.Envs[i]
+		envPlan, err := planEnvironment(in, e, envRows[i], decisions, &trimOffenders, trimSeen)
+		if err != nil {
+			return nil, err
+		}
+		plan.Envs = append(plan.Envs, envPlan)
+	}
 	if len(trimOffenders) > 0 {
 		slices.Sort(trimOffenders)
 		return nil, failure(in.Source, CodeTrim, "",
@@ -416,135 +507,393 @@ func BuildPlan(in PlanInput) (*Plan, error) {
 				"`trim_acknowledgements`, or fix the values at the source: %s",
 			len(trimOffenders), strings.Join(trimOffenders, ", "))
 	}
-	if len(incompatible) > 0 {
-		slices.Sort(incompatible)
-		return nil, failure(in.Source, CodeIncompatible, "",
-			"%d key(s) already carry a declaration this import disagrees with; import never modifies a "+
-				"declaration, so resolve each by declaring the existing classification and type for that key "+
-				"in the mapping template, or by reclassifying the key first: %s",
-			len(incompatible), strings.Join(incompatible, "; "))
-	}
 
-	plan.NearMisses = NearMisses(importedNames, declaredNames)
-
-	// The template: flag mode records its effective template identically to a
-	// wizard session, so a flag-mode run is replayable without ceremony.
-	plan.Template.FormatVersion = FormatVersion
-	plan.Template.ConnectorContractVersion = ConnectorContractVersion
-	plan.Template.Source = in.Source
-	plan.Template.Project = in.State.Project
-	// The connector states its own scope shape (k8s reports the namespace and
-	// the Secret names it parsed); the framework stamps the file digest and the
-	// slice slug, which are its facts and not the connector's.
-	plan.Template.Scope = in.Scope
-	plan.Template.Scope.FileDigest = in.FileDigest
-	if in.EnvSlug != "" {
-		plan.Template.Scope.EnvSlug = in.EnvSlug
-	}
-	plan.Template.Environments = []EnvironmentMapping{{
-		Source: sourceEnvironment(in.EnvSlug),
-		Target: in.State.Environment,
-		// Import never creates the environment in flag mode: the target is
-		// addressed by id and must already resolve for the presence read to
-		// have happened at all.
-		Create: false,
-	}}
-	plan.Template.Folders = folderRows(folders)
-	if plan.Template.Renames == nil {
-		plan.Template.Renames = plan.Renames
-	}
-	for _, name := range plan.Overwritten {
-		plan.Template.Overwrites = append(plan.Template.Overwrites,
-			KeyEnvironment{Key: name, Environment: in.State.Environment})
-	}
-	for name := range trimAck {
-		plan.Template.TrimAcknowledgements = append(plan.Template.TrimAcknowledgements,
-			KeyEnvironment{Key: name, Environment: in.State.Environment})
-	}
-	sort.Slice(plan.Template.TrimAcknowledgements, func(i, j int) bool {
-		return plan.Template.TrimAcknowledgements[i].Key < plan.Template.TrimAcknowledgements[j].Key
-	})
-	emptySlices(&plan.Template)
+	plan.Template = buildTemplate(in, plan.Template, plan.Renames, folders, plan.Envs)
 
 	encoded, err := Encode(plan.Template)
 	if err != nil {
 		return nil, err
 	}
-
-	// The manifest: the bound record of THIS run, and the phase-2 precondition.
-	// It carries the occurrence token for every key the run touches — including
-	// the ones it skipped, so a later `--overwrite` re-run reviews the same
-	// occurrences it was shown.
-	plan.Manifest = Manifest{
-		FormatVersion:            FormatVersion,
-		ConnectorContractVersion: ConnectorContractVersion,
-		Template:                 TemplateReference{Digest: Digest(encoded)},
-		SourceIdentity:           SourceIdentity{Kind: in.Source, Context: sourceIdentity(in)},
-		Target: Target{
-			Project:      in.State.Project,
-			Environments: []string{in.State.Environment},
-		},
-		DefinitionsRevision: in.State.DefinitionsRevision,
-		PhaseCompletion: PhaseCompletion{
-			Authored: true,
-			Applied:  false,
-			Imported: map[string]bool{in.State.Environment: false},
-		},
+	plan.Manifest, err = buildManifest(in, encoded, envRows, decisions)
+	if err != nil {
+		return nil, err
 	}
-	// EVERY planned key gets a manifest row, declared or not. A key the project
-	// does not declare yet is exactly the key an import is about to create, and
-	// leaving it tokenless would leave the one row phase 2 cannot check —
-	// the row an edited manifest would choose to forge.
-	var missing []string
-	for _, row := range rows {
-		key := row.target
-		observed, ok := state[key]
-		if !ok {
-			missing = append(missing, quoteName(key))
+	// Bind each environment's values file to this run by content digest, so a
+	// values file cannot be imported under a different run's manifest even when
+	// both target the same (project, environment). Only environments that write a
+	// values file get a digest; the reference is the id for existing environments
+	// and the name for created ones, matching the values file's own addressing.
+	for _, env := range plan.Envs {
+		if !env.HasValues {
 			continue
 		}
-		var id *string
-		if observed.Declared {
-			keyID := observed.ID
-			id = &keyID
+		body, err := Encode(env.Values)
+		if err != nil {
+			return nil, err
 		}
-		plan.Manifest.Occurrences = append(plan.Manifest.Occurrences, ManifestOccurrence{
-			Key: key, Environment: in.State.Environment, Token: observed.Token,
-		})
-		plan.Manifest.Target.Keys = append(plan.Manifest.Target.Keys, TargetKey{Name: key, ID: id})
-		if row.record.Version != "" {
-			plan.Manifest.SourceVersions = append(plan.Manifest.SourceVersions, SourceVersion{
-				Key: key, Environment: in.State.Environment, Version: row.record.Version,
-			})
+		ref := env.EnvID
+		if env.Create {
+			ref = env.EnvName
+		}
+		plan.Manifest.ValuesDigests = append(plan.Manifest.ValuesDigests,
+			ValuesDigest{Environment: ref, Digest: Digest(body)})
+	}
+	plan.Manifest.ValuesDigests = nonNil(plan.Manifest.ValuesDigests)
+	// Created environments are explicit, reviewable bundle lines (ADR § Targeting
+	// and hierarchy creation): `definitions apply` creates them. Deduped and
+	// sorted so the bundle is byte-stable.
+	seenEnv := map[string]bool{}
+	var created []string
+	for _, e := range in.Envs {
+		if e.Create && !seenEnv[e.EnvName] {
+			seenEnv[e.EnvName] = true
+			created = append(created, e.EnvName)
 		}
 	}
-	if len(missing) > 0 {
-		slices.Sort(missing)
-		return nil, failure(in.Source, CodeMalformed, "",
-			"the presence read returned no occurrence for %d planned key(s): %s — phase 1 must ask about "+
-				"every key it plans", len(missing), strings.Join(missing, ", "))
+	slices.Sort(created)
+	for _, name := range created {
+		plan.Bundle.Environments = append(plan.Bundle.Environments, definitions.Environment{Name: name})
 	}
-	plan.Manifest.SourceVersions = nonNil(plan.Manifest.SourceVersions)
-	plan.Manifest.Occurrences = nonNil(plan.Manifest.Occurrences)
 	plan.Bundle, err = definitions.Normalize(plan.Bundle)
 	if err != nil {
 		return nil, fmt.Errorf("import: normalizing definitions bundle: %w", err)
 	}
-	// A run that writes nothing emits NO values file. An empty one is an
-	// artifact its own phase 2 refuses ("the values file holds no entries"),
-	// which would end every idempotent re-run in a refusal for having correctly
-	// done nothing.
-	if len(plan.Values.Entries) > 0 {
-		plan.HasValues = true
-	}
 	return plan, nil
 }
 
-func sourceIdentity(in PlanInput) string {
-	if in.SourceIdentity != "" {
-		return in.SourceIdentity
+// reconcileKeys makes the project-scoped, per-key decision across every
+// environment. It returns the decisions keyed by target, the sorted target
+// order, the folder rows for the template, the plaintext hints, or a refusal —
+// an existing declaration this import disagrees with, or a key whose folder
+// differs between environments (two environments proposing one key under two
+// folders is the reconciliation conflict the wizard resolves interactively and
+// flag mode cannot reach, since flag mode has one environment).
+func reconcileKeys(in ProjectPlanInput, envRows [][]mappedRecord, recordedFolders map[string]string,
+	classChoice map[string]string, downgraded map[string]bool, typeChoice map[string]schema.Type,
+	declaredState map[string]KeyState) (map[string]keyDecision, []string, map[string]string, []string, error) {
+	decisions := map[string]keyDecision{}
+	var order []string
+	folders := map[string]string{}
+	folderOf := map[string]string{} // target key -> reconciled folder
+	plaintextSeen := map[string]bool{}
+	var plaintextHints []string
+	var incompatible []string
+	var folderConflicts []string
+
+	for i, rows := range envRows {
+		rootCollapse := in.Source == k8sSource && singleSourceFolder(in.Envs[i].Records)
+		for _, row := range rows {
+			rec, target := row.record, row.target
+			sourcePath := recordPath(rec)
+
+			sourceFolder := strings.Join(rec.Folder, "/")
+			targetFolder, ok := recordedFolders[sourceFolder]
+			if !ok {
+				if len(recordedFolders) > 0 {
+					return nil, nil, nil, nil, failure(in.Source, CodeMalformed, sourcePath,
+						"the mapping template records no folder for source path %s; a replay against a source with "+
+							"folders the template never saw is a different mapping, not the same one",
+						quoteName(sourceFolder))
+				}
+				var err error
+				if targetFolder, err = targetFolderPath(rec.Folder, rootCollapse); err != nil {
+					return nil, nil, nil, nil, err
+				}
+			}
+			if prior, seen := folderOf[target]; seen && prior != targetFolder {
+				folderConflicts = append(folderConflicts, fmt.Sprintf(
+					"%s maps onto folder %s and %s in different environments",
+					quoteName(target), quoteName(prior), quoteName(targetFolder)))
+				continue
+			}
+			folderOf[target] = targetFolder
+			folders[sourceFolder] = targetFolder
+
+			if rec.PlaintextHint && !plaintextSeen[target] {
+				plaintextSeen[target] = true
+				plaintextHints = append(plaintextHints, target)
+			}
+
+			if _, done := decisions[target]; done {
+				continue
+			}
+			class, declType, typeSupplied := desiredDeclaration(target, classChoice, typeChoice)
+			existing, isDeclared := declaredState[target]
+			declared := false
+			if isDeclared {
+				switch {
+				case existing.Classification != class:
+					incompatible = append(incompatible, fmt.Sprintf(
+						"%s is declared `%s` but this import would declare `%s`",
+						quoteName(target), existing.Classification, class))
+					continue
+				case !compatibleImportedType(existing.Type, declType):
+					incompatible = append(incompatible, fmt.Sprintf(
+						"%s is declared type `%s` but this import would declare `%s`",
+						quoteName(target), existing.Type, declType))
+					continue
+				}
+				declared = true
+			}
+			decisions[target] = keyDecision{
+				target: target, class: class, declType: declType, typeSupplied: typeSupplied,
+				downgraded: downgraded[target], folder: targetFolder, declared: declared,
+			}
+			order = append(order, target)
+		}
 	}
-	return in.FileDigest
+	// A key seen first under a conflicting folder still has its decision folder
+	// from the first environment; the conflict list forces a refusal regardless,
+	// so a stale folder in a discarded decision never reaches an artifact.
+	if len(incompatible) > 0 {
+		slices.Sort(incompatible)
+		return nil, nil, nil, nil, failure(in.Source, CodeIncompatible, "",
+			"%d key(s) already carry a declaration this import disagrees with; import never modifies a "+
+				"declaration, so resolve each by declaring the existing classification and type for that key "+
+				"in the mapping template, or by reclassifying the key first: %s",
+			len(incompatible), strings.Join(incompatible, "; "))
+	}
+	if len(folderConflicts) > 0 {
+		slices.Sort(folderConflicts)
+		return nil, nil, nil, nil, failure(in.Source, CodeIncompatible, "",
+			"%d key(s) reconcile to different folders across environments; one bundle declares one folder per "+
+				"key, so resolve each with an explicit folder in the mapping template: %s",
+			len(folderConflicts), strings.Join(folderConflicts, "; "))
+	}
+	slices.Sort(order)
+	return decisions, order, folders, plaintextHints, nil
+}
+
+// planEnvironment decides one environment's buckets and values. Trim offenders
+// are collected project-wide (deduped by key) so the refusal names them once.
+func planEnvironment(in ProjectPlanInput, e EnvInput, rows []mappedRecord, decisions map[string]keyDecision,
+	trimOffenders *[]string, trimSeen map[string]bool) (EnvPlan, error) {
+	envID := e.EnvID
+	envRef := envID
+	if e.Create {
+		envRef = e.EnvName
+	}
+	overwrite := templateOverwrites(in.Template, envRef)
+	trimAck := templateTrimAcks(in.Template, envRef)
+
+	state := make(map[string]KeyState, len(e.Keys))
+	for _, k := range e.Keys {
+		state[k.Name] = k
+	}
+
+	envPlan := EnvPlan{EnvID: envID, EnvName: e.EnvName, Create: e.Create}
+	envPlan.Values = ValuesFile{
+		FormatVersion: FormatVersion,
+		Project:       in.Project,
+	}
+	// A created environment has no id at phase 1, so its values file carries the
+	// name; `values import` resolves it after `definitions apply`.
+	if e.Create {
+		envPlan.Values.EnvironmentName = e.EnvName
+	} else {
+		envPlan.Values.Environment = envID
+	}
+	for _, row := range rows {
+		rec, target := row.record, row.target
+		if _, planned := decisions[target]; !planned {
+			// The key was dropped in reconciliation (a folder conflict), which is
+			// already a refusal; never reachable on the success path.
+			continue
+		}
+		if schema.Normalize(rec.Value) != rec.Value && !trimAck[target] {
+			if !trimSeen[target] {
+				trimSeen[target] = true
+				*trimOffenders = append(*trimOffenders, quoteName(target))
+			}
+			continue
+		}
+		// A created environment has no prior state: every key is absent, so it is
+		// `new` and there is nothing to overwrite.
+		existing := state[target]
+		switch {
+		case existing.Set && !overwrite[target]:
+			envPlan.Set = append(envPlan.Set, target)
+			continue
+		case existing.Set:
+			envPlan.Set = append(envPlan.Set, target)
+			envPlan.Overwritten = append(envPlan.Overwritten, target)
+		default:
+			envPlan.New = append(envPlan.New, target)
+		}
+		envPlan.Values.Entries = append(envPlan.Values.Entries, ValuesEntry{Key: target, Value: rec.Value})
+	}
+	envPlan.HasValues = len(envPlan.Values.Entries) > 0
+	return envPlan, nil
+}
+
+// buildTemplate assembles the mapping template. Flag mode records its effective
+// template identically to a wizard session, so a flag-mode run is replayable
+// without ceremony.
+func buildTemplate(in ProjectPlanInput, tmpl Template, renames []Rename, folders map[string]string,
+	envs []EnvPlan) Template {
+	tmpl.FormatVersion = FormatVersion
+	tmpl.ConnectorContractVersion = ConnectorContractVersion
+	tmpl.Source = in.Source
+	tmpl.Project = in.Project
+	// The scope is one connector read's shape. A single-environment session (flag
+	// mode, single-env replay, or a one-target wizard) records the read it made;
+	// a multi-environment session records the first environment's read as the
+	// representative scope, with per-environment source slices carried on the
+	// environment rows.
+	first := in.Envs[0]
+	tmpl.Scope = first.Scope
+	tmpl.Scope.FileDigest = first.FileDigest
+	if first.EnvSlug != "" {
+		tmpl.Scope.EnvSlug = first.EnvSlug
+	}
+	tmpl.Environments = nil
+	for _, e := range in.Envs {
+		target := e.EnvID
+		if e.Create {
+			target = e.EnvName
+		}
+		tmpl.Environments = append(tmpl.Environments, EnvironmentMapping{
+			Source: sourceEnvironment(e.EnvSlug),
+			Target: target,
+			Create: e.Create,
+		})
+	}
+	tmpl.Folders = folderRows(folders)
+	if tmpl.Renames == nil {
+		tmpl.Renames = renames
+	}
+	// Overwrites and trim acknowledgements are per (key, environment). The
+	// overwrite rows record what was actually admitted this run; the trim rows
+	// re-state the input template's acknowledgements for the environment they
+	// applied to. Grouped by environment (input order), sorted by key within.
+	tmpl.Overwrites = nil
+	tmpl.TrimAcknowledgements = nil
+	for i, e := range in.Envs {
+		envRef := e.EnvID
+		if e.Create {
+			envRef = e.EnvName
+		}
+		for _, name := range envs[i].Overwritten {
+			tmpl.Overwrites = append(tmpl.Overwrites, KeyEnvironment{Key: name, Environment: envRef})
+		}
+		acks := make([]string, 0)
+		for name := range templateTrimAcks(in.Template, envRef) {
+			acks = append(acks, name)
+		}
+		slices.Sort(acks)
+		for _, name := range acks {
+			tmpl.TrimAcknowledgements = append(tmpl.TrimAcknowledgements,
+				KeyEnvironment{Key: name, Environment: envRef})
+		}
+	}
+	emptySlices(&tmpl)
+	return tmpl
+}
+
+// buildManifest assembles the run manifest: the bound record of the run and the
+// phase-2 precondition. Every key a run touches in an existing environment gets
+// a server-minted occurrence row — including skipped ones, so a later overwrite
+// re-run reviews the same occurrences it was shown. Created environments are
+// tokenless: they contribute no occurrence rows and are named without an id.
+func buildManifest(in ProjectPlanInput, encodedTemplate []byte, envRows [][]mappedRecord,
+	decisions map[string]keyDecision) (Manifest, error) {
+	first := in.Envs[0]
+	m := Manifest{
+		FormatVersion:            FormatVersion,
+		ConnectorContractVersion: ConnectorContractVersion,
+		Template:                 TemplateReference{Digest: Digest(encodedTemplate)},
+		SourceIdentity:           SourceIdentity{Kind: in.Source, Context: sourceContext(first)},
+		Target:                   Target{Project: in.Project},
+		DefinitionsRevision:      in.DefinitionsRevision,
+		PhaseCompletion:          PhaseCompletion{Authored: true, Applied: false, Imported: map[string]bool{}},
+	}
+	keyID := map[string]*string{}
+	var keyOrder []string
+	var missing []string
+	for i, e := range in.Envs {
+		envRef := e.EnvID
+		if e.Create {
+			// Created environments are named, not id'd, and sit in a distinct
+			// field: they are tokenless (no presence read happened), so they
+			// contribute no occurrence row and are outside the precondition.
+			envRef = e.EnvName
+			m.Target.CreatedEnvironments = append(m.Target.CreatedEnvironments, e.EnvName)
+		} else {
+			m.Target.Environments = append(m.Target.Environments, e.EnvID)
+		}
+		m.PhaseCompletion.Imported[envRef] = false
+		state := make(map[string]KeyState, len(e.Keys))
+		for _, k := range e.Keys {
+			state[k.Name] = k
+		}
+		for _, row := range envRows[i] {
+			key := row.target
+			if _, planned := decisions[key]; !planned {
+				continue
+			}
+			if _, seen := keyID[key]; !seen {
+				keyOrder = append(keyOrder, key)
+				keyID[key] = nil
+			}
+			if e.Create {
+				// Tokenless by construction: no presence read, so no occurrence.
+				continue
+			}
+			observed, ok := state[key]
+			if !ok {
+				missing = append(missing, quoteName(key))
+				continue
+			}
+			if observed.Declared {
+				id := observed.ID
+				keyID[key] = &id
+			}
+			m.Occurrences = append(m.Occurrences, ManifestOccurrence{
+				Key: key, Environment: e.EnvID, Token: observed.Token,
+			})
+			if row.record.Version != "" {
+				m.SourceVersions = append(m.SourceVersions, SourceVersion{
+					Key: key, Environment: e.EnvID, Version: row.record.Version,
+				})
+			}
+		}
+	}
+	if len(missing) > 0 {
+		slices.Sort(missing)
+		return Manifest{}, failure(in.Source, CodeMalformed, "",
+			"the presence read returned no occurrence for %d planned key(s): %s — phase 1 must ask about "+
+				"every key it plans", len(missing), strings.Join(missing, ", "))
+	}
+	for _, key := range keyOrder {
+		m.Target.Keys = append(m.Target.Keys, TargetKey{Name: key, ID: keyID[key]})
+	}
+	m.Target.Environments = nonNil(m.Target.Environments)
+	m.SourceVersions = nonNil(m.SourceVersions)
+	m.Occurrences = nonNil(m.Occurrences)
+	return m, nil
+}
+
+// mergeSkipped unions the per-environment source-skip lists, deduped and sorted.
+func mergeSkipped(envs []EnvInput) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, e := range envs {
+		for _, name := range e.Skipped {
+			if !seen[name] {
+				seen[name] = true
+				out = append(out, name)
+			}
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+func sourceContext(e EnvInput) string {
+	if e.SourceIdentity != "" {
+		return e.SourceIdentity
+	}
+	return e.FileDigest
 }
 
 func desiredDeclaration(target string, classChoice map[string]string,

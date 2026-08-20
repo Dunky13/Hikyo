@@ -99,8 +99,10 @@ func runImport(ctx context.Context, ios IO, args []string) error {
 	switch {
 	case *from == "" && *mapping == "":
 		if onTerminal(ios) {
-			return failf(ExitRefused,
-				"the interactive import wizard is not served by this build. Use flag mode or a recorded mapping:\n%s", importUsage)
+			// Wizard: no source arguments on a TTY. The target project is resolved
+			// from the ambient chain (it must pre-exist); the environments are
+			// chosen interactively, so no --environment is required here.
+			return runImportWizard(ctx, ios, c, *outDir)
 		}
 		return failf(ExitUsage, "hikyo import needs --from or --mapping (there is no terminal to prompt on).\n%s", importUsage)
 	case *from != "" && *mapping != "":
@@ -170,20 +172,16 @@ func runImport(ctx context.Context, ios IO, args []string) error {
 		if err != nil {
 			return failf(ExitRefused, "%v", err)
 		}
-		// A multi-environment template is a wizard session's artifact. Replaying
-		// only its first environment would import a fraction of what the human
-		// reviewed and say nothing about the rest, so it is refused by name
-		// until the wizard exists to replay it properly.
-		if len(parsed.Environments) != 1 {
-			return failf(ExitRefused,
-				"this mapping template maps %d environments; an import run targets exactly one "+
-					"(project, environment). Multi-environment sessions are the wizard's, which this build "+
-					"does not serve", len(parsed.Environments))
-		}
+		// A multi-environment template is a wizard session's artifact; the replay
+		// fans the recorded source over every environment it names (§ multi-env
+		// replay below). A single-environment template targets exactly one, the
+		// way flag mode does.
 		template = &parsed
 		source = parsed.Source
 		c.Project = parsed.Project
-		c.Env = parsed.Environments[0].Target
+		if len(parsed.Environments) == 1 {
+			c.Env = parsed.Environments[0].Target
+		}
 		*envSlug = parsed.Scope.EnvSlug
 		if parsed.Scope.FileDigest == "" && (source == "k8s" || source == "vault") {
 			if *file != "" {
@@ -258,6 +256,16 @@ func runImport(ctx context.Context, ios IO, args []string) error {
 	if err != nil {
 		return err
 	}
+
+	// Multi-environment replay fans the one recorded source read over every
+	// environment the template names — presence varies per environment, the
+	// bundle and manifest are one. A conflict the wizard would have resolved
+	// interactively is refused here, non-interactively, by the planner.
+	if template != nil && len(template.Environments) > 1 {
+		return runReplayMultiEnv(ctx, ios, client, project, projectID, source, result, fileDigest,
+			*envSlug, sourcePath, template, candidates, *outDir)
+	}
+
 	envID, err := addressed(resolved, DimEnv, "", "import --environment")
 	if err != nil {
 		return err
@@ -276,19 +284,7 @@ func runImport(ctx context.Context, ios IO, args []string) error {
 		Project:             projectID,
 		Environment:         envID,
 		DefinitionsRevision: occurrences.DefinitionsRevision,
-	}
-	for _, k := range occurrences.Items {
-		row := importer.KeyState{Name: k.Name, Declared: k.Declared, Set: k.Set, Token: k.Token}
-		if k.KeyId != nil {
-			row.ID = *k.KeyId
-		}
-		if k.Classification != nil {
-			row.Classification = string(*k.Classification)
-		}
-		if k.DeclaredType != nil {
-			row.Type = *k.DeclaredType
-		}
-		planIn.State.Keys = append(planIn.State.Keys, row)
+		Keys:                occurrenceKeys(occurrences),
 	}
 
 	plan, err := importer.BuildPlan(planIn)
@@ -580,29 +576,45 @@ func runValuesImport(ctx context.Context, ios IO, args []string) error {
 		}{Key: e.Key, Value: e.Value})
 	}
 	if list := splitList(overwrite); len(list) > 0 {
+		// A created-environment values file is tokenless and takes no
+		// precondition, so skip-by-default is the only thing between an import and
+		// a clobber. `--overwrite` would defeat it with no occurrence-token review
+		// behind it — the unreviewed overwrite the two-phase binding exists to
+		// prevent — and a freshly created environment has nothing to overwrite.
+		// Refused up front, before any server contact.
+		if values.EnvironmentName != "" {
+			return failf(ExitRefused,
+				"--overwrite is refused for a created-environment values file: it is tokenless, so the overwrite "+
+					"would not be reviewed against an occurrence; import into the created environment first, then "+
+					"overwrite with a fresh reviewed run")
+		}
 		body.Overwrite = &list
 	}
+
+	// The run manifest, if any, is parsed and bound to THIS run before it is
+	// consumed as a precondition or stamped by markImported. It must agree with
+	// the values file on the project: a manifest from an unrelated run must never
+	// be accepted, or it would either forge a precondition for an environment it
+	// never reviewed, or — for a tokenless created environment, where the import
+	// itself proceeds — get its phase-completion marker corrupted for a run this
+	// file is not part of. The project cross-check needs no server contact.
+	var manifest *importer.Manifest
 	if manifestPath != "" {
 		rawManifest, err := importer.ReadFile(manifestPath)
 		if err != nil {
 			return failf(ExitUsage, "reading the run manifest: %v", err)
 		}
-		manifest, err := importer.ParseManifest(rawManifest)
+		parsed, err := importer.ParseManifest(rawManifest)
 		if err != nil {
 			return failf(ExitRefused, "%v", err)
 		}
-		pre := apigen.ImportPrecondition{
-			DefinitionsRevision: manifest.DefinitionsRevision,
-			EnvironmentIds:      manifest.Target.Environments,
+		if parsed.Target.Project != values.Project {
+			return failf(ExitRefused,
+				"the run manifest was authored for project %s but the values file is for %s; pair the values file "+
+					"with the manifest from the same run",
+				importer.QuoteName(parsed.Target.Project), importer.QuoteName(values.Project))
 		}
-		for _, o := range manifest.Occurrences {
-			pre.Occurrences = append(pre.Occurrences, struct {
-				EnvironmentId apigen.ID      `json:"environment_id"`
-				Key           apigen.KeyName `json:"key"`
-				Token         string         `json:"token"`
-			}{EnvironmentId: o.Environment, Key: o.Key, Token: o.Token})
-		}
-		body.Precondition = &pre
+		manifest = &parsed
 	}
 
 	client, _, resolved, err := authenticatedTarget(st, ios, flags)
@@ -621,11 +633,122 @@ func runValuesImport(ctx context.Context, ios IO, args []string) error {
 	if err != nil {
 		return err
 	}
-	// The values file binds both target dimensions even without a manifest.
-	// Same environment ids and key names can exist in different projects; a
-	// one-dimensional check would silently retarget reviewed plaintext.
-	if err := validateImportArtifactTargets(values, targetProject, env); err != nil {
-		return err
+
+	// A created-environment values file (authored by a wizard session that will
+	// create the environment) carries the environment NAME, not an id: the id did
+	// not exist at phase 1. `definitions apply` has since created it, so bind by
+	// name against the now-resolved environment. A created environment is
+	// tokenless by construction, so it takes NO precondition — a manifest
+	// precondition, which reviewed no occurrence for it, would reject every key.
+	// The values file itself must target the resolved project. With the
+	// manifest↔values project cross-check above, this also pins the manifest to
+	// the invocation's project.
+	if values.Project != targetProject {
+		return failf(ExitRefused,
+			"the values file was authored for project %s but this invocation targets %s",
+			importer.QuoteName(values.Project), importer.QuoteName(targetProject))
+	}
+
+	createdEnvFile := values.EnvironmentName != ""
+	if createdEnvFile {
+		var envObj apigen.Environment
+		if err := client.Do(ctx, http.MethodGet,
+			project+"/environments/"+url.PathEscape(env), nil, &envObj); err != nil {
+			return err
+		}
+		if envObj.Name != values.EnvironmentName {
+			return failf(ExitRefused,
+				"the values file was authored for the environment named %s but %s resolves to %s; "+
+					"apply the definitions bundle so the environment exists, then target it",
+				importer.QuoteName(values.EnvironmentName), env, importer.QuoteName(envObj.Name))
+		}
+		// A created environment is tokenless, so it takes no precondition. But if a
+		// manifest was supplied, it must actually name this created environment —
+		// otherwise markImported would stamp a marker onto a run this file is not
+		// part of.
+		if manifest != nil {
+			if !slices.Contains(manifest.Target.CreatedEnvironments, values.EnvironmentName) {
+				return failf(ExitRefused,
+					"the run manifest does not name the created environment %s; it records %v — pair the values "+
+						"file with the manifest from the same run",
+					importer.QuoteName(values.EnvironmentName), manifest.Target.CreatedEnvironments)
+			}
+			fmt.Fprintf(ios.Stderr,
+				"note: %s is a created environment and is tokenless; the run manifest's precondition does not apply to it\n",
+				envObj.Name)
+		}
+	} else {
+		// The values file binds both target dimensions even without a manifest.
+		// Same environment ids and key names can exist in different projects; a
+		// one-dimensional check would silently retarget reviewed plaintext.
+		if err := validateImportArtifactTargets(values, targetProject, env); err != nil {
+			return err
+		}
+		if manifest != nil {
+			// The manifest must actually name this environment. Without the check,
+			// a manifest naming only environment A but carrying copied occurrence
+			// rows for B could be presented against B, and the slice below would
+			// synthesize a precondition for an environment the reviewed manifest
+			// never covered.
+			if !slices.Contains(manifest.Target.Environments, env) {
+				return failf(ExitRefused,
+					"the run manifest does not name environment %s; it records %v — pair the values file with the "+
+						"manifest from the same run", env, manifest.Target.Environments)
+			}
+			// The precondition is sliced to THIS environment. A run manifest spans
+			// every environment a session touched, but `values import` is per
+			// environment, and importing environment B must not present
+			// environment A's occurrences — importing A first advances them, so a
+			// whole-manifest precondition would reject B on A's now-stale tokens.
+			pre := apigen.ImportPrecondition{
+				DefinitionsRevision: manifest.DefinitionsRevision,
+				EnvironmentIds:      []string{env},
+			}
+			for _, o := range manifest.Occurrences {
+				if o.Environment != env {
+					continue
+				}
+				pre.Occurrences = append(pre.Occurrences, struct {
+					EnvironmentId apigen.ID      `json:"environment_id"`
+					Key           apigen.KeyName `json:"key"`
+					Token         string         `json:"token"`
+				}{EnvironmentId: o.Environment, Key: o.Key, Token: o.Token})
+			}
+			body.Precondition = &pre
+		}
+	}
+
+	// Bind the values file to THIS run by content. Project and environment alone
+	// do not distinguish two runs targeting the same target: without this, run B's
+	// values could import under run A's manifest (its occurrence tokens bind the
+	// reviewed STATE, not the plaintext), and for a tokenless created environment
+	// there is no token at all. A digest mismatch means the file is not the one
+	// this manifest reviewed.
+	if manifest != nil && len(manifest.ValuesDigests) > 0 {
+		ref := env
+		if createdEnvFile {
+			ref = values.EnvironmentName
+		}
+		reencoded, err := importer.Encode(values)
+		if err != nil {
+			return err
+		}
+		var recorded string
+		found := false
+		for _, d := range manifest.ValuesDigests {
+			if d.Environment == ref {
+				recorded, found = d.Digest, true
+				break
+			}
+		}
+		if !found {
+			return failf(ExitRefused,
+				"the run manifest records no values digest for %s; pair the values file with the manifest from the same run", ref)
+		}
+		if importer.Digest(reencoded) != recorded {
+			return failf(ExitRefused,
+				"the values file does not match the run manifest's recorded digest for %s; it is not the values file this manifest reviewed", ref)
+		}
 	}
 
 	var result apigen.ImportValuesResult
@@ -640,7 +763,13 @@ func runValuesImport(ctx context.Context, ios IO, args []string) error {
 	// not exist, and claiming it here would be a marker for an act nobody
 	// performed.
 	if manifestPath != "" {
-		if err := markImported(manifestPath, env); err != nil {
+		// The manifest keys created environments by name (they had no id at
+		// phase 1) and existing ones by id.
+		ref := env
+		if createdEnvFile {
+			ref = values.EnvironmentName
+		}
+		if err := markImported(manifestPath, ref); err != nil {
 			fmt.Fprintf(ios.Stderr,
 				"the import landed, but the run manifest could not be updated (%v); "+
 					"a resumed migration will read it as not yet imported\n", err)

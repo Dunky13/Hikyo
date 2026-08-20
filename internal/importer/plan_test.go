@@ -121,6 +121,174 @@ func planFrom(t *testing.T, fixture string, st ServerState, tmpl *Template) (*Pl
 	return BuildPlan(in)
 }
 
+// envFrom reads a k8s fixture and mints a per-name undeclared token for anything
+// the fixture state does not declare, mirroring the CLI's presence read for one
+// environment. Undeclared tokens are salted with the environment id so the two
+// environments' occurrences are distinguishable, as the server's scoped tokens
+// are.
+func envFrom(t *testing.T, fixture, envID string, keys []KeyState, tmpl *Template) EnvInput {
+	t.Helper()
+	res, err := run(t, k8sSource, fixture, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := PlanInput{Source: k8sSource, Records: res.Records, Template: tmpl}
+	candidates, err := PlannedNames(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	declared := map[string]bool{}
+	for _, k := range keys {
+		declared[k.Name] = true
+	}
+	state := append([]KeyState{}, keys...)
+	for _, name := range candidates {
+		if !declared[name] {
+			state = append(state, KeyState{Name: name, Token: "v1:undeclared-" + envID + "-" + name})
+		}
+	}
+	return EnvInput{
+		Records: res.Records, Skipped: res.Skipped, Scope: res.Scope,
+		FileDigest: "sha256:fixture", EnvID: envID, Keys: state,
+	}
+}
+
+// TestProjectPlanFansOutAcrossEnvironments: one source, two existing target
+// environments, one project-wide bundle, and per-environment buckets that differ
+// only by presence.
+func TestProjectPlanFansOutAcrossEnvironments(t *testing.T) {
+	prod := envFrom(t, "k8s-multi.yaml", "env_prod",
+		[]KeyState{declaredKey("DB_PASSWORD", "secret", true, "v1:tok-prod")}, nil)
+	staging := envFrom(t, "k8s-multi.yaml", "env_staging",
+		[]KeyState{declaredKey("DB_PASSWORD", "secret", false, "v1:tok-staging")}, nil)
+	plan, err := BuildProjectPlan(ProjectPlanInput{
+		Source: k8sSource, Project: "prj_1", DefinitionsRevision: 7,
+		Envs: []EnvInput{prod, staging},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// One project-wide bundle: the three undeclared keys declared once each;
+	// DB_PASSWORD is already declared in both environments and not re-declared.
+	if len(plan.Bundle.Keys) != 3 {
+		t.Fatalf("bundle keys = %d, want one project-wide declaration per undeclared key", len(plan.Bundle.Keys))
+	}
+	if strings.Join(plan.AlreadyDeclared, ",") != "DB_PASSWORD" {
+		t.Errorf("already declared = %v, want DB_PASSWORD once project-wide", plan.AlreadyDeclared)
+	}
+
+	// Presence varies by environment: DB_PASSWORD is set in prod (skipped) and
+	// absent in staging (imported).
+	if len(plan.Envs) != 2 {
+		t.Fatalf("env plans = %d", len(plan.Envs))
+	}
+	byEnv := map[string]EnvPlan{}
+	for _, e := range plan.Envs {
+		byEnv[e.EnvID] = e
+	}
+	if strings.Join(byEnv["env_prod"].Set, ",") != "DB_PASSWORD" {
+		t.Errorf("prod set = %v, want DB_PASSWORD skipped", byEnv["env_prod"].Set)
+	}
+	for _, e := range byEnv["env_prod"].Values.Entries {
+		if e.Key == "DB_PASSWORD" {
+			t.Error("prod imported a set key without overwrite consent")
+		}
+	}
+	stagingHasPassword := false
+	for _, e := range byEnv["env_staging"].Values.Entries {
+		if e.Key == "DB_PASSWORD" {
+			stagingHasPassword = true
+		}
+	}
+	if !stagingHasPassword {
+		t.Error("staging (absent) did not import DB_PASSWORD")
+	}
+
+	// One manifest naming both environments, with occurrences per (key, env).
+	if len(plan.Manifest.Target.Environments) != 2 {
+		t.Errorf("manifest environments = %v", plan.Manifest.Target.Environments)
+	}
+	perEnv := map[string]int{}
+	for _, o := range plan.Manifest.Occurrences {
+		perEnv[o.Environment]++
+	}
+	if perEnv["env_prod"] != 4 || perEnv["env_staging"] != 4 {
+		t.Errorf("occurrence counts = %v, want 4 per environment", perEnv)
+	}
+
+	// The template records both environment rows.
+	if len(plan.Template.Environments) != 2 {
+		t.Errorf("template environments = %+v", plan.Template.Environments)
+	}
+}
+
+// TestManifestBindsEachValuesFileByDigest: the manifest records, per writing
+// environment, the digest of that environment's canonical values file — the
+// binding that stops a values file being imported under a different run's
+// manifest. The recorded digest must equal the digest the CLI recomputes from
+// the parsed values file at import.
+func TestManifestBindsEachValuesFileByDigest(t *testing.T) {
+	prod := envFrom(t, "k8s-multi.yaml", "env_prod", nil, nil)
+	staging := envFrom(t, "k8s-multi.yaml", "env_staging", nil, nil)
+	plan, err := BuildProjectPlan(ProjectPlanInput{
+		Source: k8sSource, Project: "prj_1", DefinitionsRevision: 7,
+		Envs: []EnvInput{prod, staging},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	byRef := map[string]string{}
+	for _, d := range plan.Manifest.ValuesDigests {
+		byRef[d.Environment] = d.Digest
+	}
+	for _, env := range plan.Envs {
+		if !env.HasValues {
+			continue
+		}
+		body, err := Encode(env.Values)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := byRef[env.EnvID]; got != Digest(body) {
+			t.Errorf("env %s digest = %q, want %q (the values file's own digest)", env.EnvID, got, Digest(body))
+		}
+	}
+	// A tampered values file (a changed value) no longer matches — the property
+	// the CLI relies on when it refuses a mispaired file.
+	tampered := plan.Envs[0].Values
+	tampered.Entries = append([]ValuesEntry{}, tampered.Entries...)
+	tampered.Entries[0].Value += "X"
+	body, _ := Encode(tampered)
+	if Digest(body) == byRef[plan.Envs[0].EnvID] {
+		t.Error("a changed value produced the same digest")
+	}
+}
+
+// TestProjectPlanRefusesFolderConflict: a key that reconciles to two different
+// folders across environments cannot be declared once (the bundle carries one
+// folder_path per key), so the run refuses. Multi-folder records defeat the k8s
+// single-Secret root collapse, so the folders are the ones the records name.
+func TestProjectPlanRefusesFolderConflict(t *testing.T) {
+	env := func(id, dbFolder string) EnvInput {
+		return EnvInput{
+			EnvID: id,
+			Records: []Record{
+				{Folder: []string{dbFolder}, SourceName: "DB_HOST", Value: "h", Type: schema.TypeString},
+				{Folder: []string{"api"}, SourceName: "API_KEY", Value: "k", Type: schema.TypeString},
+			},
+		}
+	}
+	_, err := BuildProjectPlan(ProjectPlanInput{
+		Source: k8sSource, Project: "prj_1", DefinitionsRevision: 7,
+		Envs: []EnvInput{env("env_a", "db"), env("env_b", "database")},
+	})
+	wantCode(t, err, CodeIncompatible)
+	if !strings.Contains(err.Error(), "folder") {
+		t.Errorf("refusal does not name the folder conflict: %v", err)
+	}
+}
+
 // TestBucketsAreNewAndSetOnly pins the flat-model amendment: two buckets, and a
 // `set` key is skipped by default and listed by name.
 func TestBucketsAreNewAndSetOnly(t *testing.T) {

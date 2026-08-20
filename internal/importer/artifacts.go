@@ -145,11 +145,18 @@ type TargetKey struct {
 	ID   *string `json:"id"`
 }
 
-// Target is the run's target identity.
+// Target is the run's target identity. Environments names the EXISTING target
+// environments by their server-owned id; CreatedEnvironments names the ones the
+// session will create, by NAME, because they have no id at phase 1 (phase 1
+// never writes). Created environments are tokenless by construction — they carry
+// no occurrence row and sit outside the phase-2 precondition
+// (docs/handoff/112-import-wizard.md) — so their names never occupy an id slot,
+// which is why they live in a distinct field rather than mixed into Environments.
 type Target struct {
-	Project      string      `json:"project"`
-	Environments []string    `json:"environments"`
-	Keys         []TargetKey `json:"keys"`
+	Project             string      `json:"project"`
+	Environments        []string    `json:"environments"`
+	CreatedEnvironments []string    `json:"created_environments,omitempty"`
+	Keys                []TargetKey `json:"keys"`
 }
 
 // ManifestOccurrence is one server-minted opaque occurrence token, per
@@ -164,6 +171,19 @@ type ManifestOccurrence struct {
 	Key         string `json:"key"`
 	Environment string `json:"environment"`
 	Token       string `json:"token"`
+}
+
+// ValuesDigest binds one environment's values file to THIS run by content. The
+// occurrence tokens bind the reviewed STATE (that it has not moved), not the
+// plaintext an operator is about to write; without this, two runs targeting the
+// same (project, environment) could be mispaired — run B's values imported under
+// run A's manifest, or run A's completion marker stamped for run B — because
+// project and environment alone do not distinguish runs. The digest is over the
+// canonical values-file serialization, so it is deterministic: a wizard session
+// and a flag run with coinciding choices produce the same digest.
+type ValuesDigest struct {
+	Environment string `json:"environment"`
+	Digest      string `json:"digest"`
 }
 
 // PhaseCompletion records how far a run got, so a resumed migration knows where
@@ -184,6 +204,7 @@ type Manifest struct {
 	Target                   Target               `json:"target"`
 	DefinitionsRevision      int64                `json:"definitions_revision"`
 	Occurrences              []ManifestOccurrence `json:"occurrences"`
+	ValuesDigests            []ValuesDigest       `json:"values_digests"`
 	PhaseCompletion          PhaseCompletion      `json:"phase_completion"`
 }
 
@@ -200,11 +221,17 @@ type ValuesEntry struct {
 // ValuesFile is one target environment's material for `values import`. It is
 // the ONLY artifact this package produces that carries plaintext, and the CLI
 // writes it through the secret-file discipline — never to stdout.
+//
+// An EXISTING environment's file carries Environment (its id). A CREATED
+// environment has no id at phase 1, so its file carries EnvironmentName instead
+// and Environment is empty; `values import` resolves the name to its id after
+// `definitions apply` creates the environment.
 type ValuesFile struct {
-	FormatVersion int           `json:"format_version"`
-	Project       string        `json:"project"`
-	Environment   string        `json:"environment"`
-	Entries       []ValuesEntry `json:"entries"`
+	FormatVersion   int           `json:"format_version"`
+	Project         string        `json:"project"`
+	Environment     string        `json:"environment,omitempty"`
+	EnvironmentName string        `json:"environment_name,omitempty"`
+	Entries         []ValuesEntry `json:"entries"`
 }
 
 // ---------------------------------------------------------------------------
@@ -309,14 +336,20 @@ func ParseManifest(raw []byte) (Manifest, error) {
 		return Manifest{}, failure("import", CodeMalformed, "run-manifest.json",
 			"the manifest names no target project")
 	}
-	if len(m.Target.Environments) == 0 {
+	if len(m.Target.Environments) == 0 && len(m.Target.CreatedEnvironments) == 0 {
 		return Manifest{}, failure("import", CodeMalformed, "run-manifest.json",
-			"the manifest names no target environment; the precondition re-evaluates read(E) for every environment it names")
+			"the manifest names no target environment; the precondition re-evaluates read(E) for every existing environment it names")
 	}
 	for i, env := range m.Target.Environments {
 		if env == "" {
 			return Manifest{}, failure("import", CodeMalformed, "run-manifest.json",
 				"target environment %d is empty", i+1)
+		}
+	}
+	for i, env := range m.Target.CreatedEnvironments {
+		if env == "" {
+			return Manifest{}, failure("import", CodeMalformed, "run-manifest.json",
+				"created environment %d is empty", i+1)
 		}
 	}
 	return m, nil
@@ -338,9 +371,13 @@ func ParseValuesFile(raw []byte) (ValuesFile, error) {
 		return ValuesFile{}, failure("import", CodeMalformed, "values file",
 			"the values file names no project")
 	}
-	if v.Environment == "" {
+	if v.Environment == "" && v.EnvironmentName == "" {
 		return ValuesFile{}, failure("import", CodeMalformed, "values file",
 			"the values file names no environment; `values import` is per environment")
+	}
+	if v.Environment != "" && v.EnvironmentName != "" {
+		return ValuesFile{}, failure("import", CodeMalformed, "values file",
+			"the values file names both an environment id and an environment name; a created environment carries only its name")
 	}
 	if len(v.Entries) == 0 {
 		return ValuesFile{}, failure("import", CodeMalformed, "values file", "the values file holds no entries")

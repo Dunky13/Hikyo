@@ -32,6 +32,7 @@ func init() {
 		scenario{"import_e2e_live_source_fixtures", scenarioImportLiveSourcesE2E},
 		scenario{"import_precondition_is_not_an_oracle", scenarioImportPreconditionOracle},
 		scenario{"import_undeclared_transition_binds_declaration", scenarioImportUndeclaredTransition},
+		scenario{"import_multi_environment_fan_out", scenarioMultiEnvImportE2E},
 	)
 }
 
@@ -594,6 +595,122 @@ func scenarioImportPerSourceE2E(t *testing.T, db *store.DB) {
 			}
 		})
 	}
+}
+
+// scenarioMultiEnvImportE2E is #112's multi-environment acceptance: one source
+// fanned over two target environments emits ONE project-wide bundle reconciled
+// to one identity/type/classification per key, plus a values file per
+// environment. The documented flow runs end to end with no re-plan, and each
+// environment's import presents only its own occurrences — so importing the
+// second does not fail on the first's now-advanced tokens.
+func scenarioMultiEnvImportE2E(t *testing.T, db *store.DB) {
+	who, scope, values, envs, keys := valueFixture(t, db, "importmultienv")
+	actor := service.LocalPrincipal(who)
+	staging := mustEnv(t, envs, actor, scope, "staging")
+	prod := mustEnv(t, envs, actor, scope, "prod")
+
+	raw, err := os.ReadFile(filepath.Join("..", "importer", "testdata", "k8s-multi.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := importer.Run(t.Context(), "k8s", importer.Input{Path: "k8s-multi.yaml", Data: raw})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantKeys := []string{"API_KEY", "DB_HOST", "DB_PASSWORD", "DB_PORT"}
+
+	plan := mustProjectPlan(t, "k8s", result, values, actor, scope, raw, staging, prod)
+	if len(plan.Bundle.Keys) != len(wantKeys) {
+		t.Fatalf("bundle declares %d keys, want ONE project-wide declaration per key (%d)",
+			len(plan.Bundle.Keys), len(wantKeys))
+	}
+	if len(plan.Envs) != 2 || len(plan.Manifest.Target.Environments) != 2 {
+		t.Fatalf("plan does not span both environments: envs=%d manifest=%v",
+			len(plan.Envs), plan.Manifest.Target.Environments)
+	}
+
+	// Apply the one bundle by hand (definitions plan|apply is #70), then import
+	// each environment's values file against the original manifest.
+	for _, k := range plan.Bundle.Keys {
+		mustKey(t, keys, actor, scope, k.Name, k.Classification, schema.DefaultPresenceRules())
+	}
+	for _, env := range []domain.Scope{staging, prod} {
+		req := importRequestForEnv(t, plan, string(env.Env))
+		imported, err := values.Import(t.Context(), actor, env, req)
+		if err != nil {
+			t.Fatalf("phase 2 refused %s the run its own phase 1 authored: %v", env.Env, err)
+		}
+		if strings.Join(imported.Imported, ",") != strings.Join(wantKeys, ",") {
+			t.Fatalf("%s imported = %v, want %v", env.Env, imported.Imported, wantKeys)
+		}
+	}
+}
+
+// mustProjectPlan mirrors the wizard/multi-env CLI: transform names, ask each
+// environment about every candidate, then plan the whole project at once.
+func mustProjectPlan(t *testing.T, source string, result importer.Result, values *service.Values,
+	actor service.Actor, scope domain.Scope, raw []byte, envs ...domain.Scope) *importer.ProjectPlan {
+	t.Helper()
+	planned, err := importer.PlannedCandidates(importer.PlanInput{Source: source, Records: result.Records})
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidates := make([]service.ImportCandidate, 0, len(planned))
+	for _, c := range planned {
+		candidates = append(candidates, service.ImportCandidate{
+			Name: c.Name, IntendedClassification: c.Classification, IntendedType: c.Type,
+		})
+	}
+	in := importer.ProjectPlanInput{Source: source, Project: string(scope.Project)}
+	for _, env := range envs {
+		presence, err := values.Occurrences(t.Context(), actor, env, candidates)
+		if err != nil {
+			t.Fatal(err)
+		}
+		in.DefinitionsRevision = presence.DefinitionsRevision
+		envIn := importer.EnvInput{
+			Records: result.Records, Skipped: result.Skipped, Scope: result.Scope,
+			FileDigest: importer.Digest(raw), EnvID: string(env.Env),
+		}
+		for _, k := range presence.Keys {
+			envIn.Keys = append(envIn.Keys, importer.KeyState{
+				Name: k.Name, ID: k.KeyID, Declared: k.Declared,
+				Classification: k.Classification, Type: k.Type, Set: k.Set, Token: k.Token,
+			})
+		}
+		in.Envs = append(in.Envs, envIn)
+	}
+	plan, err := importer.BuildProjectPlan(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return plan
+}
+
+// importRequestForEnv builds one environment's phase-2 call from a project plan,
+// slicing the manifest precondition to that environment — the way the CLI's
+// per-environment `values import` does.
+func importRequestForEnv(t *testing.T, plan *importer.ProjectPlan, envID string) service.ImportRequest {
+	t.Helper()
+	req := service.ImportRequest{Precondition: &service.ImportPrecondition{
+		DefinitionsRevision: plan.Manifest.DefinitionsRevision,
+		Environments:        []string{envID},
+	}}
+	for _, env := range plan.Envs {
+		if env.EnvID == envID {
+			for _, e := range env.Values.Entries {
+				req.Entries = append(req.Entries, service.ImportEntry{Key: e.Key, Value: e.Value})
+			}
+		}
+	}
+	for _, o := range plan.Manifest.Occurrences {
+		if o.Environment != envID {
+			continue
+		}
+		req.Precondition.Occurrences = append(req.Precondition.Occurrences,
+			service.ImportOccurrenceRef{Key: o.Key, Environment: o.Environment, Token: o.Token})
+	}
+	return req
 }
 
 // scenarioImportUndeclaredTransition pins the declaration intent carried by an
