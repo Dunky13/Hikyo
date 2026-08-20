@@ -105,16 +105,19 @@ const (
 	// declaration-size bounds. `any_of` validation is linear in the number of
 	// alternatives and every alternative's failure is enumerated, so the
 	// alternative count bounds both the work and the error payload.
-	MaxEnumMembers       = 64
+	MaxEnumMembers       = 256
 	MaxEnumMemberBytes   = 512
 	MaxPatternBytes      = 512
 	MaxAnyOfAlternatives = 8
 	// The JSON Schema declaration bounds. Bytes bound the document, depth
 	// bounds nesting, and the subschema count bounds the applicator graph —
-	// none of the three implies the others, so all three are enforced.
+	// none of the three implies the others, so all three are enforced. Values
+	// are the ops-spec § 8 "Schema & validation" bounds verbatim (≤ 64 KiB
+	// declaration, `$ref` nesting ≤ 32) — the operations spec owns the
+	// enumeration (schema-model ADR § profile).
 	//
-	MaxJSONSchemaBytes = 16384
-	MaxJSONSchemaDepth = 16
+	MaxJSONSchemaBytes = 65536
+	MaxJSONSchemaDepth = 32
 	// MaxEvaluationWork is the ADR's STEP CAP, enforced where it is decidable:
 	// at declaration. It IS a step cap and not merely a size bound, because the
 	// profile admits no keyword that costs more than LINEAR time in the
@@ -142,9 +145,12 @@ const (
 	MaxValueBytes = 65536
 	// MaxVerdictErrors and MaxVerdictErrorBytes cap what one verdict may
 	// report. Error multiplicity leaks structure for a secret key and is a
-	// response-amplification lever for any key.
-	MaxVerdictErrors     = 20
-	MaxVerdictErrorBytes = 4096
+	// response-amplification lever for any key — but the leak is closed by the
+	// disclosure rule (schema locations only, never instance paths, locked #12),
+	// so the ops-spec § 8 values (≤ 100 errors / 64 KiB per verdict) govern the
+	// count and size, and the byte cap bounds the amplification.
+	MaxVerdictErrors     = 100
+	MaxVerdictErrorBytes = 65536
 	// EvaluationDeadline is the per-validation wall-clock budget. RE2 is
 	// linear so the primitives cannot exceed it; it exists for the JSON Schema
 	// leg, whose cost the profile bounds statically and this bounds

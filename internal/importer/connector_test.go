@@ -552,7 +552,15 @@ func TestSOPSAliasBombFailsAtTheNamedBoundBeforeMaterializing(t *testing.T) {
 // first would make the record cap count what it liked rather than what it
 // parsed.
 func TestPersonalOverridesAreChargedBeforeTheyAreSkipped(t *testing.T) {
-	_, err := run(t, infisicalSource, "infisical-many-personal.json", "dev")
+	in := read(t, "infisical-many-personal.json")
+	in.EnvSlug = "dev"
+	// A modest injected record cap: every personal override must be CHARGED
+	// before it is skipped, so the count reaches the cap even though no personal
+	// record survives the merge. Injected rather than the real MaxRecords
+	// (50 000) so the fixture need not carry fifty thousand rows to prove the
+	// charging order.
+	b := &Budget{source: infisicalSource, maxBytes: MaxDecodedBytes, maxCount: 100}
+	_, err := infisicalConnector{}.Read(t.Context(), in, b)
 	wantCode(t, err, CodeBound)
 	if !strings.Contains(err.Error(), "record cap") {
 		t.Errorf("the refusal does not name the bound: %v", err)

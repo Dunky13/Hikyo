@@ -369,7 +369,7 @@ func TestIdPStringsAreBounded(t *testing.T) {
 	if _, e := DecodeUser([]byte(long)); e == nil || e.SCIMType != TypeInvalidValue {
 		t.Fatalf("an over-long userName must be refused: %v", e)
 	}
-	huge := make([]byte, (1<<20)+1)
+	huge := make([]byte, bodyBound+1)
 	for i := range huge {
 		huge[i] = ' '
 	}

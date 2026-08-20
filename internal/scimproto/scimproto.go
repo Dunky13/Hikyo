@@ -148,7 +148,7 @@ func Unauthorized() *Error {
 // The same number is enforced EARLIER, in api's contract-validation decoder,
 // because validation materializes the body before this package sees it. This
 // check is the protocol's own statement of the bound, not the only one.
-const bodyBound = 1 << 20 // 1 MiB
+const bodyBound = 256 << 10 // 256 KiB (ops-catalogue SCIM § "Wire request body cap", fixed)
 
 // filterBound is the largest filter this server parses. It matches the
 // per-string bound: a filter is one IdP-supplied string like any other.

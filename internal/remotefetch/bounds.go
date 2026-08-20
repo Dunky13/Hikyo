@@ -27,15 +27,15 @@ const (
 	// cap exists to bound a hostile or broken peer, not to fit the payload.
 	ResponseCap = 1 << 20 // 1 MiB
 
-	// RemoteCount caps configured entries. Rhymes with row 13's environment cap
-	// scale. It bounds the fan-out's worst case as much as the directory's
-	// size: fifty entries is a fleet, not a rounding error.
-	RemoteCount = 50
+	// RemoteCount caps configured entries. Ops-catalogue value (multi-instance
+	// § "Remote count cap": 25) — twenty-five entries is a fleet, not a
+	// rounding error.
+	RemoteCount = 25
 
 	// FanOut caps parallel fetches, matching the four-concurrent-per-org
-	// pattern in rows 17 and 19. With RemoteCount at 50 this makes a full
-	// directory view at most thirteen sequential rounds of a ten-second
-	// deadline in the pathological all-unreachable case.
+	// pattern in rows 17 and 19. With RemoteCount at 25 this makes a full
+	// directory view at most seven sequential rounds of a ten-second deadline
+	// in the pathological all-unreachable case.
 	FanOut = 4
 
 	// CoalesceWindow is how long concurrent viewers share one in-flight fetch.

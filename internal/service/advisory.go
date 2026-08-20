@@ -55,8 +55,8 @@ import (
 const (
 	advisoryBuffer            = 32
 	advisoryPrincipalLimit    = 4
-	advisoryOrgLimit          = 128
-	advisoryInstanceWideLimit = 1024
+	advisoryOrgLimit          = 32
+	advisoryInstanceWideLimit = 128
 )
 
 // AdvisoryEvent is one metadata-only fact about a change.

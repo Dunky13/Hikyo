@@ -230,8 +230,12 @@ func TestReplayMappingUsesBoundedFileReader(t *testing.T) {
 
 func TestWriteArtifactsRefusesValuesFilePhaseTwoCannotRead(t *testing.T) {
 	outDir := t.TempDir()
-	entries := make([]importer.ValuesEntry, 0, 65)
-	for i := 0; i < cap(entries); i++ {
+	// Enough max-size entries that the written values file exceeds the per-file
+	// cap phase 2 would read it back under. Derived from the bound (plus JSON
+	// overhead margin) so it holds if MaxFileBytes moves.
+	count := importer.MaxFileBytes/importer.MaxValueBytes + 2
+	entries := make([]importer.ValuesEntry, 0, count)
+	for i := 0; i < count; i++ {
 		entries = append(entries, importer.ValuesEntry{
 			Key: fmt.Sprintf("KEY_%d", i), Value: strings.Repeat("x", importer.MaxValueBytes),
 		})

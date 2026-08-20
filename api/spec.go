@@ -114,10 +114,11 @@ func scimJSONDecoder(body io.Reader, _ http.Header, _ *openapi3.SchemaRef, _ ope
 	return decoded, nil
 }
 
-// SCIMBodyBound is the largest SCIM request body this server accepts. It is
+// SCIMBodyBound is the largest SCIM request body this server accepts
+// (ops-catalogue SCIM § "Wire request body cap": 256 KiB, fixed). It is
 // declared here, at the FIRST place that materializes one, and re-stated by the
 // protocol package's own check so the two cannot drift apart silently.
-const SCIMBodyBound = 1 << 20
+const SCIMBodyBound = 256 << 10
 
 func load() {
 	openapi3filter.RegisterBodyDecoder(scimMediaType, scimJSONDecoder)
