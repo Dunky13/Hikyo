@@ -258,7 +258,7 @@ func runScanningDefinitionsApplyLifecycle(t *testing.T, db *store.DB) {
 		}
 	})
 
-	t.Run("secret to config does not scan sealed occurrences", func(t *testing.T) {
+	t.Run("secret to config requires interactive declassification", func(t *testing.T) {
 		f := seedDefinitionsProject(t, db, "scandeclassnoop", true)
 		execRaw(t, db, "UPDATE keys SET classification = 'secret' WHERE id = '"+f.key+"'")
 		publishDefinitionValue(t, db, f, "BASE_KEY", ptr(plantedCredential))
@@ -267,15 +267,9 @@ func runScanningDefinitionsApplyLifecycle(t *testing.T, db *store.DB) {
 		bundle := parseDefinitions(t, exportDefinitions(t, svc, f))
 		bundle.Keys[0].Classification = "config"
 		plan := planDefinitions(t, svc, f, encodeDefinitions(t, bundle))
-		warnedBefore := scanEventCount(t, db, "scanning.finding_warned")
-		if _, err := svc.Apply(t.Context(), service.LocalPrincipal(custodian), f.scope(), plan.ID, service.ApplyOptions{}); err != nil {
-			t.Fatalf("apply secret to config: %v", err)
-		}
-		if got := scanEventCount(t, db, "scanning.finding_warned"); got != warnedBefore {
-			t.Fatalf("finding_warned count after ciphertext-only apply = %d, want unchanged %d", got, warnedBefore)
-		}
-		if got := queryInt(t, db, "SELECT COUNT(*) FROM keys WHERE id = '"+f.key+"' AND classification = 'config'"); got != 1 {
-			t.Fatalf("config key rows after declassification = %d, want 1", got)
-		}
+		before := captureDefinitionsState(t, db, f.project)
+		_, err := svc.Apply(t.Context(), service.LocalPrincipal(custodian), f.scope(), plan.ID, service.ApplyOptions{})
+		assertRefusalUnchanged(t, db, f, before, err, "BASE_KEY")
+		assertSafeContains(t, err, "`key reclassify` / declassification ceremony")
 	})
 }

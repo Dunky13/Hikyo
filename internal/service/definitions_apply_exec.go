@@ -339,9 +339,9 @@ func (s *Definitions) guardDeletions(ctx context.Context, r store.Repos, az *aut
 	return nil
 }
 
-// enforceReveal runs the inherited reveal gates for every entry whose apply
-// requires reveal: a value-dependent rule change on a secret key, and
-// declassification. A CI identity without reveal fails here, naming the entry.
+// enforceReveal runs the inherited reveal gate for a value-dependent rule
+// change on a secret key. A secret → config update is refused here before the
+// apply executor: only the interactive declassification ceremony may do it.
 func (s *Definitions) enforceReveal(ctx context.Context, r store.Repos, az *authz.TxAuthorizer, caller authz.Identity,
 	p authz.Proof, scope domain.Scope, res definitions.Resolution) error {
 	for _, upd := range res.KeyUpdates {
@@ -362,15 +362,20 @@ func (s *Definitions) enforceReveal(ctx context.Context, r store.Repos, az *auth
 			}
 		}
 		if wasSecret && upd.Desired.Classification == string(schema.Config) {
-			if err := revealGate(ctx, az, caller, scope, authz.OpKeyDeclassify, key, "declassification"); err != nil {
-				return &detailErr{
-					detail: fmt.Sprintf("definitions apply requires reveal for key %q", key.Name),
-					err:    err,
-				}
-			}
+			return refuseApplyDeclassification(key.Name)
 		}
 	}
 	return nil
+}
+
+// refuseApplyDeclassification closes Surface 1 for the definitions Git flow:
+// apply has no plaintext legitimately in process to scan and ADR §6 forbids
+// decrypting it without the disclosure ceremony. The equivalent direct
+// transition also requires revealGate because config values escape the reveal
+// ceremony; allowing apply to perform it would bypass that reauthentication.
+func refuseApplyDeclassification(keyName string) error {
+	detail := fmt.Sprintf("definitions apply cannot declassify key %q from secret to config: apply has no plaintext to run the Surface-1 scanner and must not decrypt it outside ceremony; use interactive `key reclassify` / declassification ceremony, which performs disclosure-class reauthentication and scanning", keyName)
+	return &detailErr{detail: detail, err: fmt.Errorf("%w: %s", domain.ErrInvalid, detail)}
 }
 
 func jsonUnmarshal(s string, v any) error {
@@ -844,6 +849,13 @@ func (s *Definitions) updateKey(ctx context.Context, r store.Repos, caller authz
 		if err := refuseAdapterPinnedKey(ctx, r.Catalogue(), p, key); err != nil {
 			return err
 		}
+		if upd.PrevClassification == string(schema.Secret) && k.Classification == string(schema.Config) {
+			// Surface 1 requires declassification to meet the scanner, but apply has
+			// no plaintext in process and ADR §6 forbids decrypt-without-ceremony.
+			// Direct `key reclassify` also requires disclosure-class revealGate;
+			// applying the same transition here would bypass that reauthentication.
+			return refuseApplyDeclassification(k.Name)
+		}
 		if err := r.Catalogue().SetClassification(ctx, p, upd.ID, k.Classification); err != nil {
 			return err
 		}
@@ -853,11 +865,6 @@ func (s *Definitions) updateKey(ctx context.Context, r store.Repos, caller authz
 			if _, err := r.ScanningDismissals().DeleteByKey(ctx, p, upd.ID); err != nil {
 				return err
 			}
-		} else if upd.PrevClassification == string(schema.Secret) && k.Classification == string(schema.Config) {
-			// Definitions apply changes only the classification column: it does not
-			// read, decrypt, or re-seal existing value occurrences, so no plaintext is
-			// legitimately in process to scan. Do not scan ciphertext; ADR §6.1's
-			// no-retro-scan rule leaves those values to be scanned when next edited.
 		}
 		if err := insertDefinitionEvent(ctx, r, p, caller, audit.EventKeyReclassified, "key", upd.ID, audit.Payload{
 			"name": audit.SanitizeFreeText(k.Name), "previous_classification": upd.PrevClassification,

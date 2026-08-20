@@ -23,27 +23,25 @@ import (
 // reachable tree cannot ship unscanned.
 //
 // The exclusion list is the ADR's "fixed schema keywords + server-generated
-// immutable identifiers", keyed by OwnerType.FieldName and named field-by-field
-// so a reviewer sees exactly what is not scanned and why. Excluding a field
-// stops the walk at that field (its whole subtree, if it has one) — a named
-// stop, never a silent skip.
+// immutable identifiers", keyed by OwnerType.FieldName and named leaf-by-leaf
+// so a reviewer sees exactly what is not scanned and why. Aggregate fields can
+// never be excluded: the walk always descends into them, and only terminal
+// string/blob leaves may match this list.
 var excludedContentFields = map[string]string{
 	// --- direct-edit (service) model ---
 	"KeySpec.Classification": "closed enum secret|config, not author free-text",
 	"KeySpec.GroupID":        "server-generated group identifier, not composed content",
-	"KeySpec.Presence": "schema.PresenceRules subtree: only PresenceMode (closed none|all|explicit enum) " +
-		"and server-issued environment ids — no author free-text",
+	"Presence.Mode":          "closed none|all|explicit enum in both presence models",
+	"Presence.Environments": "environment references: direct-edit values are server-issued ids; bundle env-name references are scanned " +
+		"at their declaration site in the same bundle and dangling references are refused",
 	"Rule.Type": "closed type enum, a fixed schema keyword",
 	// --- definitions bundle model ---
 	"Key.ID":             "server-generated key identifier, not composed content",
 	"Key.Classification": "closed enum secret|config, not author free-text",
 	"Key.Group": "key-group NAME reference; a dangling one is refused by definitions.Resolve " +
 		"(validateKeyReferences) before persist, and a real group's name is itself scanned via key_groups",
-	"Key.RequiredIn": "definitions.Presence subtree: Mode (closed enum) + presence env-NAME references; " +
-		"dangling ones refused by Resolve, real env names scanned via environments",
-	"Key.ForbiddenIn": "definitions.Presence subtree, as Key.RequiredIn",
-	"Environment.ID":  "server-generated environment identifier, not composed content",
-	"KeyGroup.ID":     "server-generated group identifier, not composed content",
+	"Environment.ID": "server-generated environment identifier, not composed content",
+	"KeyGroup.ID":    "server-generated group identifier, not composed content",
 }
 
 const coverageSentinel = "AKIAIOSFODNN7EXAMPLE_sentinel"
@@ -71,6 +69,13 @@ type coverageLeaf struct {
 // addressable root. Composing navFns is how the walk threads pointer allocation
 // and slice materialisation down to a deep leaf.
 type navFn func(root reflect.Value) reflect.Value
+
+func isContentLeafType(typ reflect.Type) bool {
+	if typ.Kind() == reflect.String {
+		return true
+	}
+	return typ.Kind() == reflect.Slice && (typ.Elem().Kind() == reflect.String || typ.Elem().Kind() == reflect.Uint8)
+}
 
 // collectContentLeaves recursively enumerates the author-controlled content
 // leaves of typ. It FAILS CLOSED: any reflect kind it does not recognise is a
@@ -130,8 +135,12 @@ func collectContentLeaves(t *testing.T, typ reflect.Type, path string, nav navFn
 		var out []coverageLeaf
 		for i := 0; i < typ.NumField(); i++ {
 			f := typ.Field(i)
-			if _, excluded := excludedContentFields[typ.Name()+"."+f.Name]; excluded {
-				continue // named stop: this field (and its subtree) is not scanned, by justification above
+			if reason, excluded := excludedContentFields[typ.Name()+"."+f.Name]; excluded {
+				if !isContentLeafType(f.Type) {
+					t.Errorf("coverage walk: exclusion %s.%s is an aggregate, not a leaf (%s): %s", typ.Name(), f.Name, f.Type, reason)
+				} else {
+					continue // named terminal-leaf exclusion, justified above
+				}
 			}
 			idx := i
 			childNav := func(root reflect.Value) reflect.Value { return nav(root).Field(idx) }

@@ -52,6 +52,16 @@ var sweepAllowedFindingKeys = map[string]bool{
 	"rule_id": true, "surface": true, "locator": true, "acknowledgement": true,
 }
 
+var sweepForbiddenFindingKeys = map[string]bool{
+	"offset": true, "length": true, "excerpt": true,
+	"match": true, "value": true, "fingerprint": true,
+}
+
+type sweepFinding struct {
+	ruleID  string
+	locator string
+}
+
 // assertNoCanary fails if the planted credential (or a bare AWS-key prefix, which
 // catches a partial echo) appears in the given output surface.
 func assertNoCanary(t *testing.T, surface string, out []byte) {
@@ -64,28 +74,63 @@ func assertNoCanary(t *testing.T, surface string, out []byte) {
 	}
 }
 
-// assertFindingKeysClosed walks a decoded JSON body and asserts every object that
-// looks like a scan finding (carries rule_id or locator) exposes only the closed
-// redacted key set — so no disclosing field can ride the wire, even as an empty
-// member the canary sweep alone would not catch.
-func assertFindingKeysClosed(t *testing.T, surface string, raw []byte) {
+// decodeJSONStream accepts both one JSON document and NDJSON. Audit export is
+// JSON per line, so every exported line is decoded and walked instead of being
+// dismissed as "not JSON".
+func decodeJSONStream(t *testing.T, surface string, raw []byte) []any {
 	t.Helper()
 	var doc any
-	if err := json.Unmarshal(raw, &doc); err != nil {
-		return // not JSON (e.g. the export NDJSON is handled by the byte sweep)
+	if err := json.Unmarshal(raw, &doc); err == nil {
+		return []any{doc}
 	}
+	var docs []any
+	for lineNo, line := range bytes.Split(raw, []byte("\n")) {
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 {
+			continue
+		}
+		var doc any
+		if err := json.Unmarshal(line, &doc); err != nil {
+			t.Fatalf("SS4 sweep: %s NDJSON line %d is not valid JSON: %v", surface, lineNo+1, err)
+		}
+		docs = append(docs, doc)
+	}
+	return docs
+}
+
+// assertFindingKeysClosed walks every JSON/NDJSON document. Wire finding DTOs
+// (objects with a locator) are closed to the four redacted keys. Audit finding
+// payloads deliberately have their audit schema instead, so every object is
+// additionally checked for the disclosure-key blacklist. Returned identities
+// let each caller prove the scanner actually fired before checking absence.
+func assertFindingKeysClosed(t *testing.T, surface string, raw []byte) ([]sweepFinding, int) {
+	t.Helper()
+	docs := decodeJSONStream(t, surface, raw)
+	var findings []sweepFinding
 	var walk func(v any)
 	walk = func(v any) {
 		switch node := v.(type) {
 		case map[string]any:
-			_, hasRule := node["rule_id"]
+			rule, hasRule := node["rule_id"]
 			_, hasLoc := node["locator"]
-			if hasRule || hasLoc {
+			if hasLoc {
 				for k := range node {
 					if !sweepAllowedFindingKeys[k] {
 						t.Errorf("SS4 sweep: a finding object in %s carries the non-redacted key %q (offset/length/excerpt disclosure is banned by construction)", surface, k)
 					}
 				}
+			}
+			for k := range node {
+				if sweepForbiddenFindingKeys[strings.ToLower(k)] {
+					t.Errorf("SS4 sweep: an object in %s carries the disclosure key %q", surface, k)
+				}
+			}
+			if hasRule {
+				f := sweepFinding{ruleID: fmt.Sprint(rule)}
+				if locator, ok := node["locator"].(string); ok {
+					f.locator = locator
+				}
+				findings = append(findings, f)
 			}
 			for _, child := range node {
 				walk(child)
@@ -96,7 +141,61 @@ func assertFindingKeysClosed(t *testing.T, surface string, raw []byte) {
 			}
 		}
 	}
-	walk(doc)
+	for _, doc := range docs {
+		walk(doc)
+	}
+	return findings, len(docs)
+}
+
+func requireFinding(t *testing.T, surface string, findings []sweepFinding, requireLocator bool) sweepFinding {
+	t.Helper()
+	for _, finding := range findings {
+		if finding.ruleID != "" && (!requireLocator || finding.locator != "") {
+			return finding
+		}
+	}
+	t.Fatalf("SS4 sweep: %s carried no rendered finding; the surface is vacuous", surface)
+	return sweepFinding{}
+}
+
+// Text output cannot be structurally decoded, so reject the banned redaction
+// field names as standalone rendered columns/attributes on every CLI stream.
+func assertNoDisclosureKeysText(t *testing.T, surface, out string) {
+	t.Helper()
+	for _, line := range strings.Split(out, "\n") {
+		for _, field := range strings.FieldsFunc(strings.ToLower(line), func(r rune) bool {
+			return !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_')
+		}) {
+			if field == "offset" || field == "length" || field == "excerpt" {
+				t.Errorf("SS4 sweep: %s renders the banned finding field %q", surface, field)
+			}
+		}
+	}
+}
+
+// assertRenderedFindingLine proves a CLI warning/refusal is non-vacuous: one
+// rendered line must carry the redacted rule ID and immutable locator together.
+func assertRenderedFindingLine(t *testing.T, surface, out string, want sweepFinding) {
+	t.Helper()
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, want.ruleID) && strings.Contains(line, want.locator) {
+			assertNoDisclosureKeysText(t, surface+" finding line", line)
+			// Remove the two fields the human rendering is allowed to carry, then
+			// reject every other finding attribute by name. This pins the table/
+			// stderr contract to rule ID + locator, not merely canary absence.
+			remainder := strings.ReplaceAll(line, want.ruleID, "")
+			remainder = strings.ReplaceAll(remainder, want.locator, "")
+			for _, field := range strings.FieldsFunc(strings.ToLower(remainder), func(r rune) bool {
+				return !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_')
+			}) {
+				if sweepForbiddenFindingKeys[field] || field == "surface" || field == "acknowledgement" {
+					t.Errorf("SS4 sweep: %s finding line carries unexpected finding attribute %q", surface, field)
+				}
+			}
+			return
+		}
+	}
+	t.Fatalf("SS4 sweep: %s has no finding line carrying rule ID %q + locator %q; output=%q", surface, want.ruleID, want.locator, out)
 }
 
 // sweepEnv is the assembled real stack for the canary sweep: a live server, an
@@ -135,11 +234,9 @@ func runScanningCanarySweep(t *testing.T, db *store.DB) {
 	if code != http.StatusOK {
 		t.Fatalf("SS4 sweep: value warn write returned %d: %s", code, body)
 	}
+	valueFindings, _ := assertFindingKeysClosed(t, "HTTP value-warn body", body)
+	valueFinding := requireFinding(t, "HTTP value-warn body", valueFindings, true)
 	assertNoCanary(t, "HTTP value-warn body", body)
-	assertFindingKeysClosed(t, "HTTP value-warn body", body)
-	if !bytes.Contains(body, []byte("findings")) {
-		t.Fatal("SS4 sweep: the value-warn body carried no findings; the surface is vacuous")
-	}
 
 	// --- surface 2: a declaration write that BLOCKS (HTTP body) ------------
 	blockBody := map[string]any{
@@ -153,11 +250,9 @@ func runScanningCanarySweep(t *testing.T, db *store.DB) {
 	if code == http.StatusOK {
 		t.Fatalf("SS4 sweep: a declaration carrying the canary was not blocked (got 200): %s", body)
 	}
+	blockFindings, _ := assertFindingKeysClosed(t, "HTTP declaration-block body", body)
+	blockFinding := requireFinding(t, "HTTP declaration-block body", blockFindings, true)
 	assertNoCanary(t, "HTTP declaration-block body", body)
-	assertFindingKeysClosed(t, "HTTP declaration-block body", body)
-	if !bytes.Contains(body, []byte("finding")) {
-		t.Fatalf("SS4 sweep: the block body named no finding: %s", body)
-	}
 
 	// --- surface 3: import output (HTTP body) ------------------------------
 	importBody := map[string]any{"entries": []map[string]string{{"key": "CONFIG_KEY", "value": plantedCredential + "IMPORT"}}}
@@ -165,8 +260,9 @@ func runScanningCanarySweep(t *testing.T, db *store.DB) {
 	if code != http.StatusOK {
 		t.Fatalf("SS4 sweep: import returned %d: %s", code, body)
 	}
+	importFindings, _ := assertFindingKeysClosed(t, "HTTP import body", body)
+	requireFinding(t, "HTTP import body", importFindings, true)
 	assertNoCanary(t, "HTTP import body", body)
-	assertFindingKeysClosed(t, "HTTP import body", body)
 
 	// --- surface 4: CLI value set warn (stdout table + stderr) -------------
 	valueFile := filepath.Join(t.TempDir(), "value")
@@ -175,27 +271,29 @@ func runScanningCanarySweep(t *testing.T, db *store.DB) {
 	}
 	target := []string{"--instance", "local", "--org", e.org, "--project", e.project, "--env", e.env}
 	stdout, stderr := e.runCLI(t, append([]string{"values", "set", "CONFIG_KEY", "--value-file", valueFile}, target...)...)
+	assertRenderedFindingLine(t, "CLI value-set stderr (warn)", stderr, valueFinding)
+	assertNoDisclosureKeysText(t, "CLI value-set stdout (table)", stdout)
+	assertNoDisclosureKeysText(t, "CLI value-set stderr (warn)", stderr)
 	assertNoCanary(t, "CLI value-set stdout (table)", []byte(stdout))
 	assertNoCanary(t, "CLI value-set stderr (warn)", []byte(stderr))
-	if !strings.Contains(stderr, "secret-scanning") {
-		t.Fatalf("SS4 sweep: CLI value set printed no scanning warning to stderr; the surface is vacuous. stderr=%q", stderr)
-	}
 
 	// --- surface 5: CLI value set warn, `-o json` --------------------------
 	stdout, stderr = e.runCLI(t, append([]string{"values", "set", "CONFIG_KEY", "--value-file", valueFile, "-o", "json"}, target...)...)
+	cliJSONFindings, _ := assertFindingKeysClosed(t, "CLI value-set json", []byte(stdout))
+	requireFinding(t, "CLI value-set json", cliJSONFindings, true)
+	assertNoDisclosureKeysText(t, "CLI value-set stderr (json run)", stderr)
 	assertNoCanary(t, "CLI value-set stdout (json)", []byte(stdout))
-	assertFindingKeysClosed(t, "CLI value-set json", []byte(stdout))
 	assertNoCanary(t, "CLI value-set stderr (json run)", []byte(stderr))
 
 	// --- surface 6: CLI declaration create that BLOCKS (stderr refusal) ----
 	stdout, stderr = e.runCLI(t, "key", "create", "--name", "SWEEP_CLI_BLOCKED",
 		"--classification", "config", "--declaration", `{"rule":{"type":"string"}}`,
 		"--description", "runbook "+plantedCredential, "--instance", "local", "--org", e.org, "--project", e.project)
+	assertRenderedFindingLine(t, "CLI key-create stderr (block)", stderr, blockFinding)
+	assertNoDisclosureKeysText(t, "CLI key-create stdout (block)", stdout)
+	assertNoDisclosureKeysText(t, "CLI key-create stderr (block)", stderr)
 	assertNoCanary(t, "CLI key-create stdout (block)", []byte(stdout))
 	assertNoCanary(t, "CLI key-create stderr (block)", []byte(stderr))
-	if !strings.Contains(stderr, "secret-scanning refused") {
-		t.Fatalf("SS4 sweep: CLI key create did not print the scanning refusal to stderr; surface vacuous. stderr=%q", stderr)
-	}
 
 	// --- surface 7: the audit EXPORT stream (tenant, paginated, + instance) -
 	var tenant bytes.Buffer
@@ -203,13 +301,19 @@ func runScanningCanarySweep(t *testing.T, db *store.DB) {
 	if err := e.audits.Export(tctx(t), e.admin, domain.Scope{Org: domain.OrgID(e.org)}, store.AuditFilter{}, 1, &tenant); err != nil {
 		t.Fatalf("SS4 sweep: tenant audit export: %v", err)
 	}
-	assertNoCanary(t, "audit tenant export stream", tenant.Bytes())
 	if tenant.Len() == 0 {
 		t.Fatal("SS4 sweep: the tenant audit export produced no bytes; the scanning events did not commit")
 	}
+	tenantFindings, _ := assertFindingKeysClosed(t, "audit tenant export stream", tenant.Bytes())
+	requireFinding(t, "audit tenant export stream", tenantFindings, false)
+	assertNoCanary(t, "audit tenant export stream", tenant.Bytes())
 	var instance bytes.Buffer
 	if err := e.audits.InstanceExport(tctx(t), e.admin, store.AuditFilter{}, 1, &instance); err != nil {
 		t.Fatalf("SS4 sweep: instance audit export: %v", err)
+	}
+	_, instanceRecords := assertFindingKeysClosed(t, "audit instance export stream", instance.Bytes())
+	if instanceRecords == 0 {
+		t.Fatal("SS4 sweep: the instance audit export produced no records; the surface is vacuous")
 	}
 	assertNoCanary(t, "audit instance export stream", instance.Bytes())
 }
