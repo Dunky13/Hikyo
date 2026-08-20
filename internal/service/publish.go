@@ -1106,16 +1106,17 @@ func materialize(ctx context.Context, r store.Repos, p authz.Proof, sealer *cryp
 const MaxRenderBytesPerTarget = 1 << 20
 
 // checkRenderTotal refuses a publish whose resolved environment would render a
-// delivery target larger than a Kubernetes Secret can hold. A Secret's size is
-// the sum of its data keys and values; the rendered target is every SET cell's
-// name plus value, so that is exactly what is summed.
+// delivery target larger than a Kubernetes Secret can hold. Kubernetes'
+// ValidateSecret charges the sum of the data VALUE bytes (not the key names)
+// against MaxSecretSize, so that is exactly what is summed — matching the
+// grounding limit avoids refusing a target Kubernetes would accept.
 func checkRenderTotal(cells []resolvedCell, envID string) error {
 	total := 0
 	for _, cell := range cells {
 		if !cell.set {
 			continue
 		}
-		total += len(cell.key.Name) + len(cell.value)
+		total += len(cell.value)
 		if total > MaxRenderBytesPerTarget {
 			return fmt.Errorf("%w: environment %s renders more than the %d-byte per-target limit",
 				domain.ErrLimitExceeded, envID, MaxRenderBytesPerTarget)

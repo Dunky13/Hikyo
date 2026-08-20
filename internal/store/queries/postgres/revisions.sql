@@ -244,7 +244,10 @@ DELETE FROM revision_key_changes
 WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id)
   AND environment_id = sqlc.arg(chain_env_id);
 
--- name: CountPendingChangesForProjectExcludingCell :one
+-- name: CountPendingChangesForProject :one
 SELECT COUNT(*) FROM pending_changes
-WHERE org_id = sqlc.arg(org_id) AND project_id = sqlc.arg(project_id)
-  AND NOT (environment_id = sqlc.arg(environment_id) AND key_id = sqlc.arg(key_id) AND owner_id = sqlc.arg(owner_id));
+WHERE org_id = sqlc.arg(org_id) AND project_id = sqlc.arg(project_id);
+
+-- name: CountPendingChangeForCell :one
+SELECT COUNT(*) FROM pending_changes
+WHERE org_id = sqlc.arg(org_id) AND project_id = sqlc.arg(project_id) AND environment_id = sqlc.arg(environment_id) AND key_id = sqlc.arg(key_id) AND owner_id = sqlc.arg(owner_id);

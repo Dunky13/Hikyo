@@ -6,10 +6,21 @@ package conformance
 // the named refusal it fires (or why it is a clamp / unreachable / pending),
 // and the fixture that proves it.
 //
-// Two tests give it teeth:
+// The registry is a LEDGER plus a VALUE PIN, not a fixture executor: the named
+// refusal for each bound is proven by that bound's own fixture (the test named
+// in Fixture), which lives in the package that owns the bound. What this file
+// adds on top is (a) a single place that must name a fixture or a loud deferral
+// for every bound, and (b) a build-time pin of every bound's VALUE to the spec,
+// so the failure Codex worried about — silently drifting a constant — fails
+// here. Removing a bound's own refusal logic is caught by that bound's fixture,
+// not by this ledger.
+//
+// Three tests give it teeth:
 //   - TestBoundRegistryIsWellFormed: every entry is complete for its status, so
 //     a bound cannot be registered without either a fixture or an explicit,
 //     owner-named deferral.
+//   - TestBoundRegistryPendingBoundsAreDisposition: every pending bound is a
+//     loud, owner-named human-disposition item, never a silent gap.
 //   - TestReconciledBoundsMatchOpsSpecValues: every reconciled EXPORTED constant
 //     equals its ops-spec value, so a future edit that drifts a bound off spec
 //     fails the build here rather than silently.
@@ -17,6 +28,7 @@ package conformance
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Hikyo-Org/hikyo/api"
 	"github.com/Hikyo-Org/hikyo/internal/admission"
@@ -85,14 +97,16 @@ var Registry = []Bound{
 	{"Key groups per project", "ops-spec §8", "domain.ErrLimitExceeded (MaxKeyGroupsPerProject)", "service definitions_test", StatusEnforced},
 	{"Declaration bytes / $ref depth / subschemas / enum / pattern / any_of", "ops-spec §8", "declaration-time rejection", "schema declare_test / conformance catalogue_test", StatusEnforced},
 	{"Verdict errors / bytes", "ops-spec §8", "verdict cap (MaxVerdictErrors / MaxVerdictErrorBytes)", "schema validate_test", StatusEnforced},
+	{"Evaluation budget (steps + deadline)", "ops-spec §8", "step-cap at declaration + per-value wall-clock deadline (EvaluationDeadline)", "schema declare_test / deadline_internal_test", StatusEnforced},
+	{"Plan expiry / open-plan quota", "ops-spec §8 source-of-truth", "PlanTTL + MaxOpenPlansPerProject", "isolation definitions_e2e", StatusEnforced},
 	{"Per-target render total", "ops-spec §8", "domain.ErrLimitExceeded (MaxRenderBytesPerTarget)", "service.TestRenderTotalRefusesAnOversizedTarget", StatusEnforced},
 	{"Pending versions per project", "ops-spec §8", "domain.ErrLimitExceeded (MaxPendingPerProject)", "isolation.TestPendingPerProjectCap", StatusEnforced},
 	{"Bundle bytes / entries", "ops-spec §8", "definitions.ErrLimitExceeded (MaxBundle*)", "definitions bundle_test", StatusEnforced},
 	{"Open plans per project", "ops-spec §8", "domain.ErrLimitExceeded (MaxOpenPlansPerProject)", "isolation definitions_e2e", StatusEnforced},
 	{"Pins quota per project", "ops-spec §8", "invalidDetail (PinQuota)", "conformance revisions_test", StatusEnforced},
 	{"Grants per org", "ops-spec §8", "domain.ErrLimitExceeded (MaxGrantsPerOrg)", "isolation.TestGrantPerOrgCap", StatusEnforced},
-	{"Per-project storage high-water (warn 1 GiB / refuse 4 GiB)", "ops-spec §8 (§141)", "publish refusal + doctor warn + metric + UI banner", "ENFORCEMENT-PENDING: needs a per-project payload-byte accounting subsystem (SUM over value_entries+snapshot_entries) and a project-scoped store proof action; multi-surface (publish/doctor/metric/UI). Owner: retention/publish.", StatusPending},
-	{"Schema-revision rate 60/h per project", "ops-spec §8 (§151)", "loud rate-limit refusal", "ENFORCEMENT-PENDING: needs the §179 expensive-path rate-limit subsystem (per-principal windowed counter), which is not yet implemented. Owner: server runtime.", StatusPending},
+	{"Per-project storage high-water (warn 1 GiB / refuse 4 GiB)", "ops-spec §8 (§141)", "publish refusal + doctor warn + metric + UI banner", "ENFORCEMENT-PENDING: the publish path EXISTS (internal/service/publish.go), but the refusal needs a per-project payload-byte accounting mechanism (SUM over value_entries+snapshot_entries) + a project-scoped store proof action + the 1 GiB doctor/metric surface — net-new infrastructure the v1.0 no-scope-expansion milestone defers. HUMAN-DISPOSITION: build now vs. ticket.", StatusPending},
+	{"Schema-revision rate 60/h per project", "ops-spec §8 (§151)", "loud rate-limit refusal", "ENFORCEMENT-PENDING: the schema-mutation path EXISTS, but the refusal needs a per-principal windowed rate-limit mechanism (the §179 expensive-path budget layer) that is not yet built anywhere. HUMAN-DISPOSITION: build the budget layer now vs. ticket.", StatusPending},
 
 	// §9 encryption.
 	{"Reencrypt CAS (no-resurrect)", "ops-spec §9", "row_version CAS conflict", "store authn CAS", StatusEnforced},
@@ -107,7 +121,7 @@ var Registry = []Bound{
 
 	// §20 audit ops.
 	{"Audit free text", "ops-spec §20", "truncation to audit.FreeTextBound", "audit audit_test", StatusSanitize},
-	{"Audit exports 2/org · 6/instance", "ops-spec §20 (§179)", "expensive-path budget refusal", "ENFORCEMENT-PENDING: needs the §179 expensive-path concurrency/rate budget layer (search/export/publish/sync), which is not yet implemented as a general layer. Owner: server runtime.", StatusPending},
+	{"Audit exports 2/org · 6/instance", "ops-spec §20 (§179)", "expensive-path budget refusal", "ENFORCEMENT-PENDING: the audit-export path EXISTS (internal/service/audit.go Export), but the concurrency/rate cap needs the §179 expensive-path budget layer (per-org concurrency + per-principal rate across search/export/publish/sync) that is not yet built anywhere. HUMAN-DISPOSITION: build the budget layer now vs. ticket.", StatusPending},
 
 	// SAML / SCIM wire bounds.
 	{"SAML document bytes / depth / tokens", "ops-catalogue §SAML", "samlsp.ErrDocument* ", "samlsp xml_test", StatusEnforced},
@@ -204,6 +218,27 @@ func TestReconciledBoundsMatchOpsSpecValues(t *testing.T) {
 	for _, p := range pins {
 		if p.got != p.want {
 			t.Errorf("%s = %d, ops-spec requires %d", p.name, p.got, p.want)
+		}
+	}
+
+	// Duration-valued bounds, pinned the same way.
+	type dpin struct {
+		name string
+		got  time.Duration
+		want time.Duration
+	}
+	dpins := []dpin{
+		{"schema.EvaluationDeadline", schema.EvaluationDeadline, 100 * time.Millisecond},
+		{"service.PlanTTL", service.PlanTTL, 24 * time.Hour},
+		{"service.BootstrapLifetime", service.BootstrapLifetime, 24 * time.Hour},
+		{"service.BrowserSessionIdle", service.BrowserSessionIdle, 7 * 24 * time.Hour},
+		{"service.BrowserSessionAbsolute", service.BrowserSessionAbsolute, 30 * 24 * time.Hour},
+		{"service.CLISessionIdle", service.CLISessionIdle, 30 * 24 * time.Hour},
+		{"service.CLISessionAbsolute", service.CLISessionAbsolute, 90 * 24 * time.Hour},
+	}
+	for _, p := range dpins {
+		if p.got != p.want {
+			t.Errorf("%s = %v, ops-spec requires %v", p.name, p.got, p.want)
 		}
 	}
 }

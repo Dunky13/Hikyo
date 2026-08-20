@@ -16,20 +16,29 @@ import (
 // under-cap case are left alone.
 func TestRenderTotalRefusesAnOversizedTarget(t *testing.T) {
 	big := resolvedCell{key: store.CatalogueKey{Name: "BIG"}, set: true,
-		value: strings.Repeat("x", MaxRenderBytesPerTarget)}
+		value: strings.Repeat("x", MaxRenderBytesPerTarget+1)}
 	if err := checkRenderTotal([]resolvedCell{big}, "env_prod"); !errors.Is(err, domain.ErrLimitExceeded) {
 		t.Fatalf("an over-cap target must be refused with ErrLimitExceeded: %v", err)
 	}
 
-	// Two half-cap set cells still cross the bound in aggregate — the cap is on
-	// the target total, not any single value.
-	half := strings.Repeat("x", MaxRenderBytesPerTarget/2)
+	// Two just-over-half-cap set cells cross the bound in aggregate — the cap is
+	// on the summed VALUE bytes, not any single value.
+	overHalf := strings.Repeat("x", MaxRenderBytesPerTarget/2+1)
 	pair := []resolvedCell{
-		{key: store.CatalogueKey{Name: "A"}, set: true, value: half},
-		{key: store.CatalogueKey{Name: "B"}, set: true, value: half},
+		{key: store.CatalogueKey{Name: "A"}, set: true, value: overHalf},
+		{key: store.CatalogueKey{Name: "B"}, set: true, value: overHalf},
 	}
 	if err := checkRenderTotal(pair, "env_prod"); !errors.Is(err, domain.ErrLimitExceeded) {
-		t.Fatalf("two half-cap values must sum past the target cap: %v", err)
+		t.Fatalf("two over-half values must sum past the target cap: %v", err)
+	}
+
+	// Exactly-at-the-cap value bytes are accepted — matching Kubernetes, which
+	// charges value bytes only (key names are not counted).
+	exact := []resolvedCell{
+		{key: store.CatalogueKey{Name: "A-LONG-KEY-NAME"}, set: true, value: strings.Repeat("x", MaxRenderBytesPerTarget)},
+	}
+	if err := checkRenderTotal(exact, "env_prod"); err != nil {
+		t.Fatalf("a target whose value bytes equal the cap must publish (names uncounted): %v", err)
 	}
 
 	// An absent cell of any nominal size is not delivered, so it is not charged.

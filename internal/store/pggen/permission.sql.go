@@ -27,6 +27,7 @@ const countGrantsForOrg = `-- name: CountGrantsForOrg :one
 SELECT COUNT(*) FROM grants WHERE org_id = $1
 `
 
+// hikyo:authn-resolution
 func (q *Queries) CountGrantsForOrg(ctx context.Context, orgID pgtype.Text) (int64, error) {
 	row := q.db.QueryRow(ctx, countGrantsForOrg, orgID)
 	var count int64

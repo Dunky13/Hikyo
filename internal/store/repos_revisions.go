@@ -147,21 +147,32 @@ func (r sqlitePending) ListMarkers(ctx context.Context, p authz.Proof) ([]Pendin
 }
 
 func (r sqlitePending) CountForProjectExcludingCell(ctx context.Context, p authz.Proof, keyID, ownerID string) (int64, error) {
-	chain, err := authz.Verify(p, authz.StorePendingStage, r.tok)
+	chain, err := authz.Verify(p, authz.StorePendingCountForProjectExcludingCell, r.tok)
 	if err != nil {
 		return 0, err
 	}
-	env, err := envOf(chain, authz.StorePendingStage)
+	env, err := envOf(chain, authz.StorePendingCountForProjectExcludingCell)
 	if err != nil {
 		return 0, err
 	}
-	return r.q.CountPendingChangesForProjectExcludingCell(ctx, sqlitegen.CountPendingChangesForProjectExcludingCellParams{
-		OrgID:         string(chain.Org),
-		ProjectID:     string(chain.Project),
-		EnvironmentID: env,
-		KeyID:         keyID,
-		OwnerID:       ownerID,
+	// Two provable, chain-scoped counts rather than one NOT-predicate the SQL
+	// analyzer cannot confine: the project total minus this cell's own row (0 or
+	// 1 by the pending_changes uniqueness) is the project size AROUND the row
+	// being staged.
+	total, err := r.q.CountPendingChangesForProject(ctx, sqlitegen.CountPendingChangesForProjectParams{
+		OrgID: string(chain.Org), ProjectID: string(chain.Project),
 	})
+	if err != nil {
+		return 0, err
+	}
+	cell, err := r.q.CountPendingChangeForCell(ctx, sqlitegen.CountPendingChangeForCellParams{
+		OrgID: string(chain.Org), ProjectID: string(chain.Project),
+		EnvironmentID: env, KeyID: keyID, OwnerID: ownerID,
+	})
+	if err != nil {
+		return 0, err
+	}
+	return total - cell, nil
 }
 
 func (r sqlitePending) Stage(ctx context.Context, p authz.Proof, change NewPendingChange) error {
@@ -864,21 +875,28 @@ func (r pgPending) ListMarkers(ctx context.Context, p authz.Proof) ([]PendingMar
 }
 
 func (r pgPending) CountForProjectExcludingCell(ctx context.Context, p authz.Proof, keyID, ownerID string) (int64, error) {
-	chain, err := authz.Verify(p, authz.StorePendingStage, r.tok)
+	chain, err := authz.Verify(p, authz.StorePendingCountForProjectExcludingCell, r.tok)
 	if err != nil {
 		return 0, err
 	}
-	env, err := envOf(chain, authz.StorePendingStage)
+	env, err := envOf(chain, authz.StorePendingCountForProjectExcludingCell)
 	if err != nil {
 		return 0, err
 	}
-	return r.q.CountPendingChangesForProjectExcludingCell(ctx, pggen.CountPendingChangesForProjectExcludingCellParams{
-		OrgID:         string(chain.Org),
-		ProjectID:     string(chain.Project),
-		EnvironmentID: env,
-		KeyID:         keyID,
-		OwnerID:       ownerID,
+	total, err := r.q.CountPendingChangesForProject(ctx, pggen.CountPendingChangesForProjectParams{
+		OrgID: string(chain.Org), ProjectID: string(chain.Project),
 	})
+	if err != nil {
+		return 0, err
+	}
+	cell, err := r.q.CountPendingChangeForCell(ctx, pggen.CountPendingChangeForCellParams{
+		OrgID: string(chain.Org), ProjectID: string(chain.Project),
+		EnvironmentID: env, KeyID: keyID, OwnerID: ownerID,
+	})
+	if err != nil {
+		return 0, err
+	}
+	return total - cell, nil
 }
 
 func (r pgPending) Stage(ctx context.Context, p authz.Proof, change NewPendingChange) error {

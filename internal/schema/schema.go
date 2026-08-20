@@ -151,11 +151,12 @@ const (
 	// count and size, and the byte cap bounds the amplification.
 	MaxVerdictErrors     = 100
 	MaxVerdictErrorBytes = 65536
-	// EvaluationDeadline is the per-validation wall-clock budget. RE2 is
-	// linear so the primitives cannot exceed it; it exists for the JSON Schema
-	// leg, whose cost the profile bounds statically and this bounds
-	// dynamically. Exceeding it fails the operation loud.
-	EvaluationDeadline = 250 * time.Millisecond
+	// EvaluationDeadline is the per-validation wall-clock budget, the ops-spec
+	// § 8 value (100 ms deadline per value). RE2 is linear so the primitives
+	// cannot exceed it; it exists for the JSON Schema leg, whose cost the profile
+	// bounds statically and this bounds dynamically. Exceeding it fails the
+	// operation loud.
+	EvaluationDeadline = 100 * time.Millisecond
 	// MaxConcurrentJSONSchemaEvaluations bounds how many JSON Schema
 	// evaluations may be in flight at once, ACROSS THE PROCESS.
 	//

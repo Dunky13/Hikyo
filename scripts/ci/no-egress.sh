@@ -1,46 +1,66 @@
 #!/usr/bin/env bash
 # mvp-boundary O7 + ops-spec §13 / CI invariant 4: an instrumented boot+idle run
 # of `hikyo server`, with NOTHING configured (no remotes, no recipients, no
-# adapters, no IdPs), originates ZERO outbound connections and still boots and
-# serves. strace records every connect(2); the run fails if any targets a
-# non-loopback address. Loopback and AF_UNIX/AF_NETLINK connects are the local
-# machinery (sqlite has none, but DNS-over-127.0.0.53 and the like are fine).
+# adapters, no IdPs), originates ZERO outbound connections and still boots AND
+# serves. strace records every outbound syscall (connect/sendto/sendmsg); the
+# run fails if any targets a non-loopback address, or if the server cannot serve.
 #
-# Linux-only: it depends on strace and connect(2) tracing. Runs in CI, not on a
+# Linux-only: it depends on strace and syscall tracing. Runs in CI, not on a
 # developer's macOS box.
 set -euo pipefail
 
 command -v strace >/dev/null || { echo "no-egress: strace is required"; exit 2; }
 
 work="$(mktemp -d)"
-trap 'rm -rf "$work"; [ -n "${pgid:-}" ] && kill -TERM "-${pgid}" 2>/dev/null || true' EXIT
+pgid=""
+trap 'rm -rf "$work"; [ -n "$pgid" ] && kill -TERM "-${pgid}" 2>/dev/null || true' EXIT
 
 bin="$work/hikyo"
 go build -o "$bin" ./cmd/hikyo
 
 port=47811
 origin="http://127.0.0.1:${port}"
-trace="$work/connect.log"
+trace="$work/net.log"
+stracelog="$work/strace.err"
 serverlog="$work/server.log"
 
 export HIKYO_STATE_DIR="$work/state"
 export HIKYO_DB="sqlite:$work/hikyo.db"
 mkdir -p "$HIKYO_STATE_DIR"
 
-# setsid so the whole strace+server tree shares one process group we can reap.
-setsid strace -f -e trace=connect -o "$trace" \
-	"$bin" server --dev --listen "127.0.0.1:${port}" >"$serverlog" 2>&1 &
+# Fail early if the port is already answering — otherwise a stray listener could
+# satisfy the health checks below while hikyo silently fails to bind.
+if curl -sf "${origin}/healthz" >/dev/null 2>&1; then
+	echo "no-egress: ${origin} already answering before boot — port in use"
+	exit 1
+fi
+
+# Trace TCP connect(2) AND UDP sendto/sendmsg(2): both are outbound paths, and a
+# UDP send needs no connect(), so tracing connect alone would miss it.
+setsid strace -f -e trace=connect,sendto,sendmsg -o "$trace" \
+	"$bin" server --dev --listen "127.0.0.1:${port}" >"$serverlog" 2>"$stracelog" &
 child=$!
 pgid="$(ps -o pgid= "$child" | tr -d ' ')"
 
-# Boots and serves with outbound unavailable (CI invariant 4).
-healthy=0
+# Boots AND serves with outbound unavailable (CI invariant 4): both liveness
+# (/healthz) and readiness (/readyz = DB reachable + keyring loaded + migrations
+# current). A 200/503 split would mean the process is up but cannot serve.
+ready=0
 for _ in $(seq 1 60); do
-	if curl -sf "${origin}/healthz" >/dev/null 2>&1; then healthy=1; break; fi
+	if curl -sf "${origin}/healthz" >/dev/null 2>&1 && curl -sf "${origin}/readyz" >/dev/null 2>&1; then
+		ready=1
+		break
+	fi
 	sleep 0.5
 done
-if [ "$healthy" -ne 1 ]; then
-	echo "no-egress: server never became healthy at ${origin}"
+if [ "$ready" -ne 1 ]; then
+	echo "no-egress: server never became healthy AND ready at ${origin}"
+	sed -n '1,120p' "$serverlog" >&2
+	exit 1
+fi
+# Confirm it is OUR hikyo that bound the port, not a pre-existing listener.
+if ! grep -q "boot complete" "$serverlog" || ! grep -q "addr=127.0.0.1:${port}" "$serverlog"; then
+	echo "no-egress: could not confirm hikyo bound ${origin} (boot-complete log absent)"
 	sed -n '1,120p' "$serverlog" >&2
 	exit 1
 fi
@@ -53,14 +73,29 @@ kill -TERM "-${pgid}" 2>/dev/null || true
 pgid=""
 wait "$child" 2>/dev/null || true
 
-# Any connect(2) to an AF_INET/AF_INET6 address that is not loopback is egress.
-egress="$(grep -E 'connect\([0-9]+, \{sa_family=AF_INET6?,' "$trace" \
-	| grep -vE '127\.0\.0\.[0-9]+|"::1"|::ffff:127\.' || true)"
+# strace must actually have traced — a missing file or an attach error means we
+# proved nothing about egress and must not report a green result.
+if [ ! -f "$trace" ]; then
+	echo "no-egress: strace produced no trace file; egress was not instrumented"
+	cat "$stracelog" >&2 || true
+	exit 1
+fi
+if grep -qiE 'ptrace|could not attach|failed to' "$stracelog"; then
+	echo "no-egress: strace reported an attach/trace error; instrumentation unreliable"
+	cat "$stracelog" >&2
+	exit 1
+fi
+
+# Any connect/sendto/sendmsg to an AF_INET/AF_INET6 address outside loopback
+# (127/8, ::1) is egress. inet_addr("127.x.x.x") and "::1" are loopback; a
+# connected-UDP sendto carries a NULL address and its connect() was already
+# traced above.
+egress="$(grep -E '(connect|sendto|sendmsg)\([0-9]+, .*sa_family=AF_INET6?' "$trace" \
+	| grep -vE 'inet_addr\("127\.|"::1"|::ffff:127\.|sin6_addr=.*"::1"' || true)"
 if [ -n "$egress" ]; then
-	echo "no-egress: an unconfigured boot+idle attempted outbound connections:"
+	echo "no-egress: an unconfigured boot+idle attempted outbound traffic:"
 	echo "$egress"
 	exit 1
 fi
 
-count="$(grep -cE 'connect\([0-9]+, \{sa_family=AF_INET6?,' "$trace" || true)"
-echo "no-egress: OK — booted, served, and originated 0 non-loopback connections (${count} loopback connect(2) calls seen)"
+echo "no-egress: OK — booted, served, ready, and originated 0 non-loopback connect/sendto/sendmsg"
