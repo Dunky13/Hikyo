@@ -40,6 +40,10 @@ import (
 // may have its own code without disclosing anything a caller could not already
 // read: shape errors are `invalid`, state refusals are `conflict`, and a triple
 // that is not held is `not found`.
+// MaxGrantsPerOrg is the ops-spec § 8 loud sanity cap on grant rows per
+// organization — it exists to make runaway grant-minting loud, not to ration.
+const MaxGrantsPerOrg = 1000
+
 var (
 	// ErrNoSuchCapability refuses a capability outside the ADR's closed set.
 	ErrNoSuchCapability = fmt.Errorf("%w: service: no such capability", domain.ErrInvalid)
@@ -681,6 +685,20 @@ func writeGrantRow(ctx context.Context, az *authz.TxAuthorizer, spec GrantSpec, 
 	if existing != nil {
 		out.GrantID = existing.ID
 	} else {
+		// The per-org sanity cap (ops-spec § 8: ≤ 1000 grants per org). Counted
+		// under this transaction so a concurrent mint cannot walk past it, and
+		// only for org-anchored grants — instance-scope grants are the tiny
+		// bootstrap set, not the runaway-minting concern the cap names.
+		if spec.Scope.Org != "" {
+			n, err := az.CountGrantsInOrg(ctx, string(spec.Scope.Org))
+			if err != nil {
+				return GrantResult{}, err
+			}
+			if n >= MaxGrantsPerOrg {
+				return GrantResult{}, fmt.Errorf("%w: an organization holds at most %d grants",
+					domain.ErrLimitExceeded, MaxGrantsPerOrg)
+			}
+		}
 		grantID, err := newID("grt")
 		if err != nil {
 			return GrantResult{}, err

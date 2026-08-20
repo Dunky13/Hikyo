@@ -64,6 +64,12 @@ func (a *TxAuthorizer) GrantOriginCount(ctx context.Context, grantID string) (in
 	return a.r.GrantOriginCount(ctx, grantID)
 }
 
+// CountGrantsInOrg reports how many grant rows an organization holds — the
+// read behind the per-org grant sanity cap.
+func (a *TxAuthorizer) CountGrantsInOrg(ctx context.Context, org string) (int64, error) {
+	return a.r.CountGrantsInOrg(ctx, org)
+}
+
 // DeleteGrantRow removes a grant row whose last origin was released.
 func (a *TxAuthorizer) DeleteGrantRow(ctx context.Context, grantID string, p domain.PrincipalID) (bool, error) {
 	return a.r.DeleteGrantRow(ctx, grantID, p)

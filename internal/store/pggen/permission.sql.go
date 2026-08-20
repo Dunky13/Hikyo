@@ -23,6 +23,17 @@ func (q *Queries) CountGrantOrigins(ctx context.Context, grantID string) (int64,
 	return count, err
 }
 
+const countGrantsForOrg = `-- name: CountGrantsForOrg :one
+SELECT COUNT(*) FROM grants WHERE org_id = $1
+`
+
+func (q *Queries) CountGrantsForOrg(ctx context.Context, orgID pgtype.Text) (int64, error) {
+	row := q.db.QueryRow(ctx, countGrantsForOrg, orgID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const deleteGrantOrigin = `-- name: DeleteGrantOrigin :execrows
 DELETE FROM grant_origins
 WHERE grant_id = $1 AND kind = $2 AND subject = $3

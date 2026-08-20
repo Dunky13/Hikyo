@@ -3,6 +3,7 @@ package isolation
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -116,6 +117,39 @@ func runGrantAuthority(t *testing.T, db *store.DB) {
 		Target: grantee, Capability: domain.CapRead, Scope: prjScope(),
 	}); err != nil {
 		t.Fatalf("project-scope manage-members granting a HELD capability must succeed: %v", err)
+	}
+}
+
+func TestGrantPerOrgCapSQLite(t *testing.T)   { runGrantPerOrgCap(t, seededDB(t, openSQLite)) }
+func TestGrantPerOrgCapPostgres(t *testing.T) { runGrantPerOrgCap(t, seededDB(t, openPostgres)) }
+
+// runGrantPerOrgCap: the ops-spec § 8 loud sanity cap. Once an org holds
+// MaxGrantsPerOrg grant rows, a new grant is refused by name — the cap exists
+// to make runaway minting loud, not to ration. Counted inside the granting
+// transaction, so it holds on both engines.
+func runGrantPerOrgCap(t *testing.T, db *store.DB) {
+	g := grantSvc(db)
+	ctx := t.Context()
+
+	// Fill org_a to the cap with org-scope filler rows. The table carries no
+	// uniqueness over the triple (see runGrantDedup), so one principal and one
+	// capability suffice; raw-seeded so the test does not pay for
+	// MaxGrantsPerOrg real grant transactions.
+	var b strings.Builder
+	b.WriteString("INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ")
+	for i := 0; i < service.MaxGrantsPerOrg; i++ {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		fmt.Fprintf(&b, "('grt_fill_%d', 'usr_grantee', 'read', 'org_a', NULL, NULL, '2026-01-01T00:00:00.000000Z')", i)
+	}
+	execRaw(t, db, b.String())
+
+	// A genuinely new grant now exceeds the cap and is refused by name.
+	if _, err := g.Create(ctx, service.LocalPrincipal(orgAdmin), service.GrantSpec{
+		Target: grantee, Capability: domain.CapPublish, Scope: prjScope(),
+	}); !errors.Is(err, domain.ErrLimitExceeded) {
+		t.Fatalf("granting past the per-org cap must be refused with ErrLimitExceeded: %v", err)
 	}
 }
 
