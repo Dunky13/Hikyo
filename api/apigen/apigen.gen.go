@@ -4724,6 +4724,18 @@ type SamlStartResult struct {
 	RedirectUrl string `json:"redirect_url"`
 }
 
+// ScanningKeyRotation defines model for ScanningKeyRotation.
+type ScanningKeyRotation struct {
+	// DismissalsDropped How many dismissal rows the rotation invalidated. Every stored
+	// fingerprint became unrecomputable under the new key, so all
+	// dismissals were dropped and their warns will re-fire.
+	DismissalsDropped int64 `json:"dismissals_dropped"`
+
+	// ScanningKeyVersion The new scanning-fingerprint key version. Operator bookkeeping only;
+	// a fingerprint is never exported, displayed or compared.
+	ScanningKeyVersion int64 `json:"scanning_key_version"`
+}
+
 // ScimAttention One raised attention state on a binding. Each names its cause AND a
 // server-authored remediation: a state that only says something is wrong
 // makes the binding view a puzzle.
@@ -6522,6 +6534,9 @@ type ServerInterface interface {
 	// GetRetentionHealth Read payload-pruner health.
 	// (GET /api/v1/instance/retention-health)
 	GetRetentionHealth(w http.ResponseWriter, r *http.Request)
+	// RotateScanningKey Rotate the secret-scanning fingerprint key.
+	// (POST /api/v1/instance/rotate-scanning-key)
+	RotateScanningKey(w http.ResponseWriter, r *http.Request)
 	// RotateTokenKey Rotate the root change-token key.
 	// (POST /api/v1/instance/rotate-token-key)
 	RotateTokenKey(w http.ResponseWriter, r *http.Request)
@@ -7392,6 +7407,12 @@ func (_ Unimplemented) RenameRemote(w http.ResponseWriter, r *http.Request, remo
 // GetRetentionHealth Read payload-pruner health.
 // (GET /api/v1/instance/retention-health)
 func (_ Unimplemented) GetRetentionHealth(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RotateScanningKey Rotate the secret-scanning fingerprint key.
+// (POST /api/v1/instance/rotate-scanning-key)
+func (_ Unimplemented) RotateScanningKey(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -9570,6 +9591,20 @@ func (siw *ServerInterfaceWrapper) GetRetentionHealth(w http.ResponseWriter, r *
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetRetentionHealth(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RotateScanningKey operation middleware
+func (siw *ServerInterfaceWrapper) RotateScanningKey(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RotateScanningKey(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -16734,6 +16769,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/api/v1/instance/rotate-token-key", wrapper.RotateTokenKey)
 	})
 	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/instance/rotate-scanning-key", wrapper.RotateScanningKey)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/adapters", wrapper.ListAdapters)
 	})
 	r.Group(func(r chi.Router) {
@@ -22604,6 +22642,84 @@ func (response GetRetentionHealth429JSONResponse) VisitGetRetentionHealthRespons
 type GetRetentionHealth500JSONResponse struct{ InternalJSONResponse }
 
 func (response GetRetentionHealth500JSONResponse) VisitGetRetentionHealthResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateScanningKeyRequestObject struct {
+}
+
+type RotateScanningKeyResponseObject interface {
+	VisitRotateScanningKeyResponse(w http.ResponseWriter) error
+}
+
+type RotateScanningKey200JSONResponse ScanningKeyRotation
+
+func (response RotateScanningKey200JSONResponse) VisitRotateScanningKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateScanningKey401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response RotateScanningKey401JSONResponse) VisitRotateScanningKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateScanningKey404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response RotateScanningKey404JSONResponse) VisitRotateScanningKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateScanningKey429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response RotateScanningKey429JSONResponse) VisitRotateScanningKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateScanningKey500JSONResponse struct{ InternalJSONResponse }
+
+func (response RotateScanningKey500JSONResponse) VisitRotateScanningKeyResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -38525,6 +38641,9 @@ type StrictServerInterface interface {
 	// GetRetentionHealth Read payload-pruner health.
 	// (GET /api/v1/instance/retention-health)
 	GetRetentionHealth(ctx context.Context, request GetRetentionHealthRequestObject) (GetRetentionHealthResponseObject, error)
+	// RotateScanningKey Rotate the secret-scanning fingerprint key.
+	// (POST /api/v1/instance/rotate-scanning-key)
+	RotateScanningKey(ctx context.Context, request RotateScanningKeyRequestObject) (RotateScanningKeyResponseObject, error)
 	// RotateTokenKey Rotate the root change-token key.
 	// (POST /api/v1/instance/rotate-token-key)
 	RotateTokenKey(ctx context.Context, request RotateTokenKeyRequestObject) (RotateTokenKeyResponseObject, error)
@@ -40857,6 +40976,30 @@ func (sh *strictHandler) GetRetentionHealth(w http.ResponseWriter, r *http.Reque
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetRetentionHealthResponseObject); ok {
 		if err := validResponse.VisitGetRetentionHealthResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RotateScanningKey operation middleware
+func (sh *strictHandler) RotateScanningKey(w http.ResponseWriter, r *http.Request) {
+	var request RotateScanningKeyRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RotateScanningKey(ctx, request.(RotateScanningKeyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RotateScanningKey")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RotateScanningKeyResponseObject); ok {
+		if err := validResponse.VisitRotateScanningKeyResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

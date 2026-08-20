@@ -427,6 +427,10 @@ var pinnedContractSurface = map[string]bool{
 	"POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/export":                 true,
 	"GET /api/v1/orgs/{org}/projects/{project}/events":                                                    true,
 	"POST /api/v1/instance/rotate-token-key":                                                              true,
+	// rotate-scanning-key (#74): replaces this instance's own scanning key and
+	// drops this instance's own dismissal rows. It returns this instance's own
+	// data and never fetches, relays or forwards on the caller's behalf.
+	"POST /api/v1/instance/rotate-scanning-key": true,
 
 	// SCIM provisioning (#73): the administrative binding surface and the
 	// standards-mandated SCIM 2.0 wire surface. The DIRECTION here is the

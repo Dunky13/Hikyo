@@ -8226,6 +8226,44 @@ paths:
         "500":
           $ref: "#/components/responses/Internal"
 
+  /api/v1/instance/rotate-scanning-key:
+    post:
+      operationId: rotateScanningKey
+      tags: [instance]
+      summary: Rotate the secret-scanning fingerprint key.
+      description: |
+        Mints a new scanning-fingerprint key, retires the old one, and drops
+        every dismissal row in the same transaction.
+
+        Outright replacement: there is no version keyring and no reencrypt walk,
+        because a fingerprint is a keyed digest, not a ciphertext to preserve.
+        Every stored fingerprint becomes unrecomputable under the new key, so
+        keeping the dismissals would silently suppress warns that must now
+        re-fire - dropping them is the safe direction.
+
+        It rides `rotate-dek`, the same tier-3 rotation authority as
+        `rotate-token-key`.
+      x-hikyo-class: instance
+      x-hikyo-operation: crypto.rotate-scanning-key
+      x-hikyo-formula: [rotate-dek@instance]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "200":
+          description: The rotation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScanningKeyRotation"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
   /api/v1/orgs/{org}/projects/{project}/adapters:
     parameters:
       - $ref: "#/components/parameters/OrgID"
@@ -10412,6 +10450,24 @@ components:
             change token's public contract carries the SCHEME version, never
             the key version, because a consumer that could tell key versions
             apart could tell a rotation from a content change.
+    ScanningKeyRotation:
+      type: object
+      required: [scanning_key_version, dismissals_dropped]
+      additionalProperties: false
+      properties:
+        scanning_key_version:
+          type: integer
+          format: int64
+          description: |
+            The new scanning-fingerprint key version. Operator bookkeeping only;
+            a fingerprint is never exported, displayed or compared.
+        dismissals_dropped:
+          type: integer
+          format: int64
+          description: |
+            How many dismissal rows the rotation invalidated. Every stored
+            fingerprint became unrecomputable under the new key, so all
+            dismissals were dropped and their warns will re-fire.
     ValueCell:
       type: object
       description: |

@@ -363,6 +363,8 @@ var wireRegistry = map[string]Class{
 	// The root token key belongs to the instance, so there is no tenant object
 	// whose nonexistence a refusal could mimic.
 	"http:POST /api/v1/instance/rotate-token-key": ClassInstance,
+	// The scanning fingerprint key is instance-scoped too (#74).
+	"http:POST /api/v1/instance/rotate-scanning-key": ClassInstance,
 
 	// Deployment adapters (#65). Every project and target surface is tenant
 	// class; dynamic reveal/reauth checks over the adapter's environment set are
@@ -461,8 +463,11 @@ var wireRegistry = map[string]Class{
 	// belongs to the instance, so there is no tenant object whose nonexistence
 	// a refusal could mimic.
 	"cli:rotate-token-key": ClassInstance,
-	"cli:instance-config":  ClassInstance,
-	"cli:doctor":           ClassInstance,
+	// `rotate-scanning-key` reaches one instance-scoped route: the scanning
+	// fingerprint key belongs to the instance, same shape as rotate-token-key.
+	"cli:rotate-scanning-key": ClassInstance,
+	"cli:instance-config":     ClassInstance,
+	"cli:doctor":              ClassInstance,
 	// `access` reaches BOTH classes — the org/project/env grant routes are
 	// tenant-class, the instance-scope ones are instance-class. It is
 	// classified instance because that is the WEAKER probe contract of the
@@ -569,6 +574,7 @@ var wireEvents = map[string][]audit.EventType{
 	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/pins":                          {audit.EventPinCreated, audit.EventPinReassigned, audit.EventPinRenewed, audit.EventPinExpiryRefused},
 	"http:DELETE /api/v1/orgs/{org}/projects/{project}/environments/{environment}/pins/{workloadPrincipal}":    {audit.EventPinReleased},
 	"http:POST /api/v1/instance/rotate-token-key":                                                              {audit.EventTokenKeyRotated},
+	"http:POST /api/v1/instance/rotate-scanning-key":                                                           {audit.EventScanningKeyRotated},
 
 	"http:POST /api/v1/auth/local/login": {
 		audit.EventAuthLogin,
@@ -949,6 +955,7 @@ var wireRoutes = map[string][]Operation{
 	// per event over the environment the event names.
 	"http:GET /api/v1/orgs/{org}/projects/{project}/events": {OpAdvisoryWatch, OpAdvisoryEvent},
 	"http:POST /api/v1/instance/rotate-token-key":           {OpRotateTokenKey},
+	"http:POST /api/v1/instance/rotate-scanning-key":        {OpRotateScanningKey},
 
 	"http:GET /api/v1/orgs/{org}/projects/{project}/key-groups":            {OpKeyGroupList},
 	"http:POST /api/v1/orgs/{org}/projects/{project}/key-groups":           {OpKeyGroupCreate},

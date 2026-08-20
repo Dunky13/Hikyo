@@ -224,6 +224,14 @@ const (
 	// same one-active-per-scope index, same retirement path.
 	OpRotateTokenKey Operation = "crypto.rotate-token-key"
 
+	// `rotate-scanning-key` is the rotation inventory's sixth member
+	// (secret-scanning ADR section 4): outright replacement of the tier-3
+	// scanning-fingerprint key with no version keyring and no reencrypt walk,
+	// dropping every dismissal row in the same transaction. It rides the same
+	// `rotate-dek` authority as the other tier-3 rotations for the same reason
+	// `rotate-token-key` does.
+	OpRotateScanningKey Operation = "crypto.rotate-scanning-key"
+
 	OpKeyGroupCreate Operation = "key-group.create"
 	OpKeyGroupGet    Operation = "key-group.get"
 	OpKeyGroupList   Operation = "key-group.list"
@@ -707,7 +715,19 @@ const (
 	StoreKeysInsertMaster               StoreOp = "keys.InsertMaster"
 	StoreKeysInsertTier3                StoreOp = "keys.InsertTier3"
 	StoreKeysRotateTokenKey             StoreOp = "keys.RotateTokenKey"
+	StoreKeysRotateScanningKey          StoreOp = "keys.RotateScanningKey"
 	StoreKeysInsertScopeGeneration      StoreOp = "keys.InsertScopeGeneration"
+
+	// Secret-scanning dismissal rows (#74, secret-scanning ADR section 4). The
+	// "keep as config" sticky-dismissal surface. Insert/Exists ride the
+	// environment-scoped config-value write; DeleteByKey rides key deletion and
+	// reclassification-to-secret; DeleteByProject rides project deletion;
+	// DeleteAll rides `rotate-scanning-key` (instance-scoped, cross-tenant).
+	StoreScanningDismissalsInsert          StoreOp = "scanningdismissals.Insert"
+	StoreScanningDismissalsExists          StoreOp = "scanningdismissals.Exists"
+	StoreScanningDismissalsDeleteByKey     StoreOp = "scanningdismissals.DeleteByKey"
+	StoreScanningDismissalsDeleteByProject StoreOp = "scanningdismissals.DeleteByProject"
+	StoreScanningDismissalsDeleteAll       StoreOp = "scanningdismissals.DeleteAll"
 
 	// Audit trails (#45). INSERT and SELECT only — the append-only invariant
 	// lives at the query layer; these are the only store doors to it. The
@@ -1166,11 +1186,16 @@ var operations = map[Operation]opSpec{
 		events:   []audit.EventType{audit.EventProjectRenamed},
 	},
 	OpProjectDelete: {
-		class:    ClassTenant,
-		level:    domain.LevelProject,
-		formula:  Formula{{Cap: domain.CapManageProjects, At: domain.LevelOrg}},
-		storeOps: map[StoreOp]bool{StoreProjectsGet: true, StoreProjectsDelete: true, StoreAuditTenantInsert: true},
-		events:   []audit.EventType{audit.EventProjectDeleted},
+		class:   ClassTenant,
+		level:   domain.LevelProject,
+		formula: Formula{{Cap: domain.CapManageProjects, At: domain.LevelOrg}},
+		storeOps: map[StoreOp]bool{
+			StoreProjectsGet: true, StoreProjectsDelete: true, StoreAuditTenantInsert: true,
+			// A project's dismissals are removed with it (#74, ADR section 4
+			// lifecycle).
+			StoreScanningDismissalsDeleteByProject: true,
+		},
+		events: []audit.EventType{audit.EventProjectDeleted},
 	},
 
 	// The Environment aggregate (#48). `definitions-edit` is the permission
@@ -1417,6 +1442,9 @@ var operations = map[Operation]opSpec{
 			// those are is what this store op is for.
 			StoreValuesEnvironmentsWithValue: true,
 			StoreCatalogueRevisionBump:       true, StoreAuditTenantInsert: true,
+			// A key's dismissals reference it (composite FK), so they must be
+			// dropped before the key row goes (#74, ADR section 4 lifecycle).
+			StoreScanningDismissalsDeleteByKey: true,
 		},
 		events: []audit.EventType{audit.EventKeyDeleted},
 	},
@@ -1437,6 +1465,9 @@ var operations = map[Operation]opSpec{
 			StoreCatalogueSetClassification: true, StoreCatalogueRevisionBump: true,
 			StoreCatalogueAdapterPins:  true,
 			StoreCataloguePresenceList: true, StoreAuditTenantInsert: true,
+			// Reclassifying a key to secret makes its dismissals moot and drops
+			// them (#74, ADR section 4 lifecycle).
+			StoreScanningDismissalsDeleteByKey: true,
 		},
 		events: []audit.EventType{audit.EventKeyReclassified},
 	},
@@ -1829,6 +1860,13 @@ var operations = map[Operation]opSpec{
 			StoreProjectsLock: true, StoreCatalogueList: true,
 			StoreValuesGet: true, StoreSnapshotsLatest: true,
 			StorePendingStage: true, StoreAuditTenantInsert: true,
+			// The environment-scoped Surface-1 config-value ingress is where the
+			// scanner runs (#74, ADR section 7 warn transaction): the sticky-match
+			// lookup that suppresses a re-warn, and the "keep as config" dismissal
+			// this same principal records under the write authority they already
+			// hold. The full scan/dismiss wiring lands with the scanning stream;
+			// this is the store authority that write path needs.
+			StoreScanningDismissalsExists: true, StoreScanningDismissalsInsert: true,
 		},
 		events: []audit.EventType{audit.EventValueStaged},
 	},
@@ -1913,6 +1951,21 @@ var operations = map[Operation]opSpec{
 			StoreAuditInstanceInsert: true,
 		},
 		events: []audit.EventType{audit.EventTokenKeyRotated},
+	},
+	// `rotate-scanning-key` (secret-scanning ADR section 4), modelled precisely
+	// on rotate-token-key: same instance class, same `rotate-dek` authority. It
+	// retires the scanning-fingerprint key and drops EVERY dismissal row in the
+	// one transaction — old fingerprints are unrecomputable under the new key,
+	// so keeping the rows would silently suppress warns that must now re-fire.
+	OpRotateScanningKey: {
+		class:   ClassInstance,
+		formula: Formula{{Cap: domain.CapRotateDEK, At: domain.LevelNone}},
+		storeOps: map[StoreOp]bool{
+			StoreKeysRotateScanningKey:       true,
+			StoreScanningDismissalsDeleteAll: true,
+			StoreAuditInstanceInsert:         true,
+		},
+		events: []audit.EventType{audit.EventScanningKeyRotated},
 	},
 	OpRevisionList: {
 		class:       ClassTenant,

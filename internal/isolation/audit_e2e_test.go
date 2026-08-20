@@ -1089,6 +1089,11 @@ func runValueLifecycle(t *testing.T, db *store.DB, actor service.Actor, who doma
 	if _, err := revisions.RotateTokenKey(ctx, service.LocalPrincipal(root)); err != nil {
 		t.Fatal(err)
 	}
+	// `rotate-scanning-key` (#74) is the same shape: instance-scoped, the only
+	// emitter of crypto.scanning_key_rotated.
+	if _, err := revisions.RotateScanningKey(ctx, service.LocalPrincipal(root)); err != nil {
+		t.Fatal(err)
+	}
 	// A `values import` run (#68), so value.imported has a real emitter. It
 	// carries the manifest precondition, which is the shape that matters to the
 	// trail: `manifest_bound` is the fact an investigator reads first.

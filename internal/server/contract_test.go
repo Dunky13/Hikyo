@@ -1275,6 +1275,10 @@ func (s stubRevisions) RotateTokenKey(context.Context, service.Actor) (service.T
 	return service.TokenKeyRotation{}, s.outcome()
 }
 
+func (s stubRevisions) RotateScanningKey(context.Context, service.Actor) (service.ScanningKeyRotation, error) {
+	return service.ScanningKeyRotation{}, s.outcome()
+}
+
 func hierarchyServer(t *testing.T, outcome error) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(server.New(stubReady{}, &server.API{

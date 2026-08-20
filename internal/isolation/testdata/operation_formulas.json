@@ -181,6 +181,14 @@
     ]
   },
   {
+    "operation": "crypto.rotate-scanning-key",
+    "class": "instance",
+    "level": "instance",
+    "formula": [
+      "rotate-dek@instance"
+    ]
+  },
+  {
     "operation": "crypto.rotate-token-key",
     "class": "instance",
     "level": "instance",

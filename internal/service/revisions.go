@@ -615,3 +615,70 @@ func (s *Revisions) RotateTokenKey(ctx context.Context, actor Actor) (TokenKeyRo
 	adopt()
 	return TokenKeyRotation{Version: next.Version}, nil
 }
+
+// ScanningKeyRotation is one `rotate-scanning-key`.
+type ScanningKeyRotation struct {
+	// Version is the scanning-fingerprint key's new version — operator-facing
+	// bookkeeping only, like TokenKeyRotation.Version.
+	Version uint32
+	// DismissalsDropped is how many dismissal rows the rotation invalidated, so
+	// the operator sees the blast radius of the re-fire the rotation caused.
+	DismissalsDropped int64
+}
+
+// RotateScanningKey mints a new scanning-fingerprint key, retires the old one,
+// drops EVERY dismissal row, and adopts the new key for every subsequent
+// fingerprint — all in one transaction.
+//
+// It is the exact twin of RotateTokenKey (secret-scanning ADR section 4), and
+// the same reasoning applies: a scanning key is a tier-3 key alongside the
+// DEKs, so `rotate-dek` is its authority and inventing a sixth atom would amend
+// a locked ADR to say what an existing one already says. What differs is the
+// dismissal drop: outright replacement makes every stored fingerprint
+// unrecomputable, so keeping the rows would silently suppress warns that must
+// now re-fire — dropping them is the safe direction, and it rides the same
+// transaction so no crash window leaves the key rotated but the rows alive.
+func (s *Revisions) RotateScanningKey(ctx context.Context, actor Actor) (ScanningKeyRotation, error) {
+	if s.Keyring == nil {
+		return ScanningKeyRotation{}, errors.New("service: scanning key rotation requires a keyring")
+	}
+	next, adopt, err := s.Keyring.PrepareScanningKeyRotation()
+	if err != nil {
+		return ScanningKeyRotation{}, err
+	}
+	next.CreatedAt = store.CanonTime(s.now())
+	var dropped int64
+	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+		caller, err := actor.resolve(ctx, az, s.now())
+		if err != nil {
+			return err
+		}
+		p, err := az.Authorize(ctx, caller, authz.OpRotateScanningKey, domain.Scope{})
+		if err != nil {
+			return err
+		}
+		if err := r.Keys().RotateScanningKey(ctx, p, next); err != nil {
+			return err
+		}
+		// Every fingerprint is now unrecomputable under the new key: drop them
+		// all in the same transaction as the key swap.
+		if dropped, err = r.ScanningDismissals().DeleteAll(ctx, p); err != nil {
+			return err
+		}
+		ev, err := newAuditEvent(ctx, audit.EventScanningKeyRotated, caller.Principal,
+			audit.Object{Type: "instance", ID: "instance"}, audit.OutcomeSuccess, "",
+			audit.Payload{"key_version": int64(next.Version)})
+		if err != nil {
+			return err
+		}
+		return r.Audit().InsertInstance(ctx, p, ev)
+	})
+	if errors.Is(err, store.ErrRotationSuperseded) {
+		return ScanningKeyRotation{}, fmt.Errorf("%w: %s", domain.ErrConflict, err)
+	}
+	if err != nil {
+		return ScanningKeyRotation{}, err
+	}
+	adopt()
+	return ScanningKeyRotation{Version: next.Version, DismissalsDropped: dropped}, nil
+}

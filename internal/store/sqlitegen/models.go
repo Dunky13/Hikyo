@@ -741,6 +741,18 @@ type SamlTransaction struct {
 	ConsumedAt          sql.NullString
 }
 
+type ScanningDismissal struct {
+	ID               string
+	OrgID            string
+	ProjectID        string
+	EnvironmentID    string
+	KeyID            string
+	RuleDigest       string
+	ValueFingerprint []byte
+	CreatedAt        string
+	CreatedBy        string
+}
+
 type ScimAttention struct {
 	ID         string
 	OrgID      string

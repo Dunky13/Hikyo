@@ -220,3 +220,50 @@ func runRotateTokenKey(ctx context.Context, ios IO, args []string) error {
 		JSON:    out,
 	})
 }
+
+// runRotateScanningKey is the operator's `rotate-scanning-key` (#74).
+//
+// It WARNS BEFORE PROCEEDING, and the warning states what actually happens:
+// every dismissal is dropped, so every "keep as config" acceptance is forgotten
+// and those config values warn again on next save. Nothing else moves — no
+// value, no declaration, no revision.
+func runRotateScanningKey(ctx context.Context, ios IO, args []string) error {
+	var format string
+	var confirm bool
+	st, flags, err := parseCommon("rotate-scanning-key", ios, args, func(fs *flag.FlagSet) {
+		fs.StringVar(&format, "o", "table", "output format: table or json")
+		fs.BoolVar(&confirm, "yes", false, "proceed without the interactive confirmation")
+	})
+	if err != nil {
+		return err
+	}
+	f, err := ParseFormat(format)
+	if err != nil {
+		return err
+	}
+	if err := flags.checkNoPositionals("rotate-scanning-key"); err != nil {
+		return err
+	}
+	fmt.Fprintln(ios.Stderr,
+		"rotate-scanning-key replaces the secret-scanning fingerprint key and\n"+
+			"drops EVERY dismissal. Every 'keep as config' acceptance is forgotten,\n"+
+			"so those config values warn again on next save. No value, declaration\n"+
+			"or revision changes.")
+	if !confirm {
+		return failf(ExitRefused, "rotate-scanning-key needs --yes to proceed")
+	}
+
+	client, _, _, err := authenticatedTarget(st, ios, flags)
+	if err != nil {
+		return err
+	}
+	var out apigen.ScanningKeyRotation
+	if err := client.Do(ctx, http.MethodPost, "/api/v1/instance/rotate-scanning-key", nil, &out); err != nil {
+		return err
+	}
+	return Render(ios.Stdout, f, Table{
+		Columns: []string{"SCANNING KEY VERSION", "DISMISSALS DROPPED"},
+		Rows:    [][]string{{strconv.FormatInt(out.ScanningKeyVersion, 10), strconv.FormatInt(out.DismissalsDropped, 10)}},
+		JSON:    out,
+	})
+}

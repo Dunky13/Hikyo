@@ -743,6 +743,18 @@ type SamlTransaction struct {
 	ConsumedAt          pgtype.Timestamptz
 }
 
+type ScanningDismissal struct {
+	ID               string
+	OrgID            string
+	ProjectID        string
+	EnvironmentID    string
+	KeyID            string
+	RuleDigest       string
+	ValueFingerprint []byte
+	CreatedAt        pgtype.Timestamptz
+	CreatedBy        string
+}
+
 type ScimAttention struct {
 	ID         string
 	OrgID      string

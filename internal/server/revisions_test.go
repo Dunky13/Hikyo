@@ -139,3 +139,7 @@ func (historyRevisionService) Watch(context.Context, service.Actor, domain.Scope
 func (historyRevisionService) RotateTokenKey(context.Context, service.Actor) (service.TokenKeyRotation, error) {
 	return service.TokenKeyRotation{}, domain.ErrNotFound
 }
+
+func (historyRevisionService) RotateScanningKey(context.Context, service.Actor) (service.ScanningKeyRotation, error) {
+	return service.ScanningKeyRotation{}, domain.ErrNotFound
+}

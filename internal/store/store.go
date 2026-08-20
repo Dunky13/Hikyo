@@ -409,6 +409,36 @@ type Repos interface {
 	Adapters() AdapterRepo
 	// Definitions is the plan ledger behind definitions plan/apply (#70).
 	Definitions() DefinitionsRepo
+	// ScanningDismissals is the secret-scanning "keep as config" dismissal
+	// surface (#74). It is on the WRITE bundle only: the sticky-match lookup
+	// (Exists) runs inside the same value-write transaction that may record a
+	// dismissal, so a read-only twin would have no caller — the shape SCIM took
+	// for the same reason.
+	ScanningDismissals() ScanningDismissalRepo
+}
+
+// ScanningDismissalRepo is the proof-bound dismissal-row surface (#74,
+// secret-scanning ADR section 4). Every method is authorized against its own
+// registered store operation and binds its chain from the proof.
+type ScanningDismissalRepo interface {
+	// Insert records one "keep as config" acknowledgement. A second insert of
+	// the identical (org, project, env, key, rule digest, fingerprint) tuple
+	// hits the UNIQUE constraint and surfaces as ErrConflict — the dismissal is
+	// already sticky.
+	Insert(ctx context.Context, p authz.Proof, d NewDismissal) error
+	// Exists is the sticky-match lookup that suppresses a re-warn on a value
+	// already accepted for this (key, rule digest, fingerprint) in the proof's
+	// environment.
+	Exists(ctx context.Context, p authz.Proof, keyID, ruleDigest string, fingerprint []byte) (bool, error)
+	// DeleteByKey drops one key's dismissals across every environment
+	// (reclassification-to-secret and key deletion; ADR section 4 lifecycle).
+	DeleteByKey(ctx context.Context, p authz.Proof, keyID string) (int64, error)
+	// DeleteByProject drops a project's dismissals (project deletion; ADR
+	// section 4 lifecycle).
+	DeleteByProject(ctx context.Context, p authz.Proof) (int64, error)
+	// DeleteAll drops every dismissal instance-wide for scanning-key rotation:
+	// old fingerprints become unrecomputable and must die.
+	DeleteAll(ctx context.Context, p authz.Proof) (int64, error)
 }
 
 // ReadRepos bundles the read-only repositories bound to one read
