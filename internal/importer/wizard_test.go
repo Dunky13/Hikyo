@@ -326,6 +326,122 @@ func TestWizardSkipsAlreadyDeclaredKeys(t *testing.T) {
 	}
 }
 
+// TestWizardRecordsExistingNonDefaultDeclaration: a key already declared with a
+// non-default classification (config) is recorded as the reviewed consent, so
+// the planner treats it as already-declared instead of refusing it against the
+// uniform secret default.
+func TestWizardRecordsExistingNonDefaultDeclaration(t *testing.T) {
+	res, err := run(t, k8sSource, "k8s-multi.yaml", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	host := &scriptHost{
+		t: t, source: k8sSource,
+		reads: []SourceRead{{Result: res, FileDigest: "sha256:a"}},
+		envs:  []NamedEnv{{ID: "env_prod", Name: "prod"}},
+		presence: func(envID string, c []PlannedCandidate) ServerState {
+			st := undeclaredState(envID, c)
+			for i := range st.Keys {
+				if st.Keys[i].Name == "DB_HOST" {
+					st.Keys[i] = declaredKey("DB_HOST", "config", false, "v1:tok-host")
+				}
+			}
+			return st
+		},
+		confirm: map[string]bool{
+			"Read live": false, "Map another": false, "Edit this": false,
+			"Downgrade": false, "Declare": false, "overwrite": false, "import the trim": false,
+		},
+		choose: map[string]int{"source": 1, "Target environment": 0},
+		line:   map[string]string{"Export file path": "export.yaml"},
+	}
+	wiz, err := Wizard(host, "prj_1")
+	if err != nil {
+		t.Fatalf("wizard refused a key declared config against the secret default: %v", err)
+	}
+	found := false
+	for _, c := range wiz.Template.Classifications {
+		if c.Key == "DB_HOST" && c.Class == "config" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("existing config declaration not recorded as consent: %+v", wiz.Template.Classifications)
+	}
+	if !contains(wiz.AlreadyDeclared, "DB_HOST") {
+		t.Errorf("DB_HOST not reported already declared: %v", wiz.AlreadyDeclared)
+	}
+}
+
+// TestWizardRefusesRevisionDivergence: if the project's definitions revision
+// changes between two environments' presence reads, the manifest would bind
+// tokens against two catalogue states — refused.
+func TestWizardRefusesRevisionDivergence(t *testing.T) {
+	res, err := run(t, k8sSource, "k8s-multi.yaml", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	host := &scriptHost{
+		t: t, source: k8sSource,
+		reads: []SourceRead{{Result: res, FileDigest: "sha256:a"}},
+		envs:  []NamedEnv{{ID: "env_prod", Name: "prod"}, {ID: "env_staging", Name: "staging"}},
+		presence: func(envID string, c []PlannedCandidate) ServerState {
+			st := undeclaredState(envID, c)
+			if envID == "env_staging" {
+				st.DefinitionsRevision = 8 // prod read 7; a change landed mid-session
+			}
+			return st
+		},
+		confirm: map[string]bool{
+			"Read live": false, "Edit this": false, "Downgrade": false,
+			"Declare": false, "overwrite": false, "import the trim": false,
+		},
+		choose: map[string]int{"source": 1, "Target environment": 0},
+		line:   map[string]string{"Export file path": "export.yaml"},
+	}
+	callHost := &mapAnotherOnce{scriptHost: host}
+	_, err = Wizard(callHost, "prj_1")
+	wantCode(t, err, CodeIncompatible)
+	if !strings.Contains(err.Error(), "revision") {
+		t.Errorf("refusal does not name the revision change: %v", err)
+	}
+}
+
+// TestWizardRefusesCreatingExistingEnvironment: choosing "create" and naming an
+// environment that already exists is a contradiction (import never modifies an
+// environment), refused rather than emitting a `create <existing>` bundle line.
+func TestWizardRefusesCreatingExistingEnvironment(t *testing.T) {
+	res, err := run(t, k8sSource, "k8s-multi.yaml", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	host := &scriptHost{
+		t: t, source: k8sSource,
+		reads: []SourceRead{{Result: res, FileDigest: "sha256:a"}},
+		envs:  []NamedEnv{{ID: "env_prod", Name: "prod"}},
+		presence: func(envID string, c []PlannedCandidate) ServerState {
+			return undeclaredState(envID, c)
+		},
+		confirm: map[string]bool{"Read live": false, "Map another": false},
+		choose:  map[string]int{"source": 1, "Target environment": 1}, // the "+ create" option
+		line:    map[string]string{"Export file path": "export.yaml", "New environment name": "prod"},
+	}
+	_, err = Wizard(host, "prj_1")
+	wantCode(t, err, CodeMalformed)
+	if !strings.Contains(err.Error(), "already exists") {
+		t.Errorf("refusal does not explain the collision: %v", err)
+	}
+}
+
+func contains(s []string, v string) bool {
+	for _, x := range s {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}
+
 // mapAnotherOnce answers the "Map another?" confirm true exactly once, so the
 // fan-out loop adds a second environment and then terminates, and picks a fresh
 // existing environment on each "Target environment" choice.

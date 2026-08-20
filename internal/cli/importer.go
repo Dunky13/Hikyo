@@ -576,6 +576,18 @@ func runValuesImport(ctx context.Context, ios IO, args []string) error {
 		}{Key: e.Key, Value: e.Value})
 	}
 	if list := splitList(overwrite); len(list) > 0 {
+		// A created-environment values file is tokenless and takes no
+		// precondition, so skip-by-default is the only thing between an import and
+		// a clobber. `--overwrite` would defeat it with no occurrence-token review
+		// behind it — the unreviewed overwrite the two-phase binding exists to
+		// prevent — and a freshly created environment has nothing to overwrite.
+		// Refused up front, before any server contact.
+		if values.EnvironmentName != "" {
+			return failf(ExitRefused,
+				"--overwrite is refused for a created-environment values file: it is tokenless, so the overwrite "+
+					"would not be reviewed against an occurrence; import into the created environment first, then "+
+					"overwrite with a fresh reviewed run")
+		}
 		body.Overwrite = &list
 	}
 
@@ -640,6 +652,16 @@ func runValuesImport(ctx context.Context, ios IO, args []string) error {
 			manifest, err := importer.ParseManifest(rawManifest)
 			if err != nil {
 				return failf(ExitRefused, "%v", err)
+			}
+			// The manifest must actually name this environment. Without the check,
+			// a manifest naming only environment A but carrying copied occurrence
+			// rows for B could be presented against B, and the slice below would
+			// synthesize a precondition for an environment the reviewed manifest
+			// never covered.
+			if !slices.Contains(manifest.Target.Environments, env) {
+				return failf(ExitRefused,
+					"the run manifest does not name environment %s; it records %v — pair the values file with the "+
+						"manifest from the same run", env, manifest.Target.Environments)
 			}
 			// The precondition is sliced to THIS environment. A run manifest spans
 			// every environment a session touched, but `values import` is per

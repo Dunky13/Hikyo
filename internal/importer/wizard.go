@@ -94,12 +94,32 @@ func Wizard(host WizardHost, project string) (*ProjectPlan, error) {
 		return nil, err
 	}
 
+	// ONE source read, fanned across the target environments (import-paths ADR
+	// § The two-phase invariant: keys/types/classifications are project-scoped,
+	// "only presence varies by environment"). Reading one slice and mapping it
+	// onto several targets is what makes the session faithfully replayable — the
+	// template records one scope, and a replay re-reads that one source and fans
+	// it the same way.
+	sel, err := wizardSelector(host, source)
+	if err != nil {
+		return nil, err
+	}
+	read, err := host.ReadSource(source, sel)
+	if err != nil {
+		return nil, err
+	}
+	if read.Result.DecodedBytes > MaxSessionDecodedBytes {
+		return nil, failure(source, CodeBound, "",
+			"the source read totals %d decoded bytes, exceeding the %d-byte wizard-session aggregate cap",
+			read.Result.DecodedBytes, MaxSessionDecodedBytes)
+	}
+
 	existing, err := host.ExistingEnvironments()
 	if err != nil {
 		return nil, err
 	}
 
-	envs, err := wizardEnvironments(host, source, existing)
+	envs, err := wizardEnvironments(host, source, existing, read)
 	if err != nil {
 		return nil, err
 	}
@@ -108,18 +128,15 @@ func Wizard(host WizardHost, project string) (*ProjectPlan, error) {
 	}
 
 	tmpl := &Template{}
-	// Renames and folders are structural — no server contact.
-	valuesByKey, manual, err := wizardRenames(host, source, envs, tmpl)
+	// Renames are structural — no server contact.
+	valuesByKey, _, err := wizardRenames(host, source, envs, tmpl)
 	if err != nil {
 		return nil, err
 	}
-	if err := wizardFolders(host, source, envs, manual, tmpl); err != nil {
-		return nil, err
-	}
 	// A first presence read (with the default classification/type intent) learns
-	// which keys the project already declares, so classification and type review
-	// can skip them — an existing declaration governs and is not re-offered.
-	declared, err := wizardDeclaredSet(host, source, envs, tmpl)
+	// what the project already declares, so classification and type review can
+	// skip those keys and record the EXISTING declaration as the reviewed consent.
+	declared, err := wizardDeclaredSet(host, source, envs)
 	if err != nil {
 		return nil, err
 	}
@@ -174,19 +191,21 @@ func wizardSource(host WizardHost) (string, error) {
 	return sources[i], nil
 }
 
-// wizardEnvironments is states 2 and 3: for each target environment, the human
-// picks (or creates) it and provides the source slice that maps onto it. A
-// created environment is declared up front here and carries no presence read.
-func wizardEnvironments(host WizardHost, source string, existing []NamedEnv) ([]wizardEnv, error) {
+// wizardEnvironments is state 3: the human maps the one source read onto one or
+// more target environments — existing ones, or ones the session will create,
+// declared up front. Every environment shares the same source read; only
+// presence varies.
+func wizardEnvironments(host WizardHost, source string, existing []NamedEnv, read SourceRead) ([]wizardEnv, error) {
 	options := make([]string, 0, len(existing)+1)
+	existingNames := map[string]bool{}
 	for _, e := range existing {
 		options = append(options, e.Name)
+		existingNames[e.Name] = true
 	}
 	options = append(options, "+ create a new environment")
 
 	claimed := map[string]bool{}
 	var envs []wizardEnv
-	sessionDecoded := 0
 	for {
 		add := true
 		if len(envs) > 0 {
@@ -199,30 +218,22 @@ func wizardEnvironments(host WizardHost, source string, existing []NamedEnv) ([]
 				break
 			}
 		}
-		env, err := wizardOneEnvironment(host, source, existing, options, claimed)
+		env, err := wizardOneEnvironment(host, source, existing, options, existingNames, claimed)
 		if err != nil {
 			return nil, err
 		}
-		// The aggregate session bound is enforced across the fan-out, over and
-		// above each read's own per-run caps.
-		sessionDecoded += env.read.Result.DecodedBytes
-		if sessionDecoded > MaxSessionDecodedBytes {
-			return nil, failure(source, CodeBound, "",
-				"the session's reads total %d decoded bytes, exceeding the %d-byte wizard-session aggregate cap",
-				sessionDecoded, MaxSessionDecodedBytes)
-		}
+		env.read = read
 		envs = append(envs, env)
 	}
 	return envs, nil
 }
 
 func wizardOneEnvironment(host WizardHost, source string, existing []NamedEnv, options []string,
-	claimed map[string]bool) (wizardEnv, error) {
+	existingNames, claimed map[string]bool) (wizardEnv, error) {
 	choice, err := host.Choose("Target environment:", options, 0)
 	if err != nil {
 		return wizardEnv{}, err
 	}
-	var env wizardEnv
 	if choice == len(existing) {
 		name, err := host.Line("New environment name:", "")
 		if err != nil {
@@ -232,31 +243,27 @@ func wizardOneEnvironment(host WizardHost, source string, existing []NamedEnv, o
 		if name == "" {
 			return wizardEnv{}, failure(source, CodeMalformed, "", "a created environment needs a name")
 		}
+		// A created environment must not collide with one that already exists —
+		// import never modifies an environment, so `create <existing>` is a
+		// contradiction, not a target — nor with one already mapped this session.
+		if existingNames[name] {
+			return wizardEnv{}, failure(source, CodeMalformed, "",
+				"environment %s already exists; map it as an existing target rather than creating it", quoteName(name))
+		}
 		if claimed[name] {
 			return wizardEnv{}, failure(source, CodeMalformed, "",
 				"environment %s is already mapped this session", quoteName(name))
 		}
-		env = wizardEnv{ref: name, name: name, create: true}
-	} else {
-		e := existing[choice]
-		if claimed[e.ID] {
-			return wizardEnv{}, failure(source, CodeMalformed, "",
-				"environment %s is already mapped this session", quoteName(e.Name))
-		}
-		env = wizardEnv{ref: e.ID, name: e.Name}
+		claimed[name] = true
+		return wizardEnv{ref: name, name: name, create: true}, nil
 	}
-	claimed[env.ref] = true
-
-	sel, err := wizardSelector(host, source)
-	if err != nil {
-		return wizardEnv{}, err
+	e := existing[choice]
+	if claimed[e.ID] {
+		return wizardEnv{}, failure(source, CodeMalformed, "",
+			"environment %s is already mapped this session", quoteName(e.Name))
 	}
-	read, err := host.ReadSource(source, sel)
-	if err != nil {
-		return wizardEnv{}, err
-	}
-	env.read = read
-	return env, nil
+	claimed[e.ID] = true
+	return wizardEnv{ref: e.ID, name: e.Name}, nil
 }
 
 // wizardSelector is state 2: the connector selectors for one source slice,
@@ -387,39 +394,50 @@ func wizardRenames(host WizardHost, source string, envs []wizardEnv, tmpl *Templ
 }
 
 // wizardDeclaredSet performs the first presence read (default declaration
-// intent) purely to learn which keys the project already declares, so
-// classification and type review can skip them. Its tokens are not kept — the
-// second read carries the final intent.
-func wizardDeclaredSet(host WizardHost, source string, envs []wizardEnv, tmpl *Template) (map[string]bool, error) {
-	declared := map[string]bool{}
+// intent) purely to learn what the project already declares. Declared keys are
+// project-scoped, so one existing environment answers for the whole project;
+// its tokens are not kept — the second read carries the final intent. A session
+// with only created environments reads nothing (the project declares nothing an
+// import would collide with, or the collision surfaces at plan time).
+func wizardDeclaredSet(host WizardHost, source string, envs []wizardEnv) (map[string]KeyState, error) {
+	declared := map[string]KeyState{}
+	var ref string
+	var records []Record
 	for i := range envs {
-		if envs[i].create {
-			continue
+		if !envs[i].create {
+			ref = envs[i].ref
+			records = envs[i].read.Result.Records
+			break
 		}
-		candidates, err := PlannedCandidates(PlanInput{
-			Source: source, Records: envs[i].read.Result.Records, Template: tmpl,
-		})
-		if err != nil {
-			return nil, err
-		}
-		state, err := host.Presence(envs[i].ref, candidates)
-		if err != nil {
-			return nil, err
-		}
-		for _, k := range state.Keys {
-			if k.Declared {
-				declared[k.Name] = true
-			}
+	}
+	if ref == "" {
+		return declared, nil
+	}
+	candidates, err := PlannedCandidates(PlanInput{Source: source, Records: records})
+	if err != nil {
+		return nil, err
+	}
+	state, err := host.Presence(ref, candidates)
+	if err != nil {
+		return nil, err
+	}
+	for _, k := range state.Keys {
+		if k.Declared {
+			declared[k.Name] = k
 		}
 	}
 	return declared, nil
 }
 
-// wizardClassType is state 5's classification and typing half, for keys the
-// project does not already declare: classification (secret default, explicit
-// per-key downgrades) and a deterministic type suggestion (across all
-// environments' values, applied only on accept).
-func wizardClassType(host WizardHost, valuesByKey map[string][]string, declared map[string]bool,
+// wizardClassType is state 5's classification and typing half. For a key the
+// project does NOT already declare it prompts: classification (secret default,
+// explicit per-key downgrades) and a deterministic type suggestion (across the
+// key's values, applied only on accept). For a key it DOES already declare, it
+// records the EXISTING classification and type as the reviewed consent — the
+// escape hatch the ADR means by "resolved by hand" — but only when they diverge
+// from the uniform secret/string default, so a default-declared key stays
+// byte-identical to a flag run (which records nothing for it).
+func wizardClassType(host WizardHost, valuesByKey map[string][]string, declared map[string]KeyState,
 	tmpl *Template) error {
 	keys := make([]string, 0, len(valuesByKey))
 	for k := range valuesByKey {
@@ -427,7 +445,23 @@ func wizardClassType(host WizardHost, valuesByKey map[string][]string, declared 
 	}
 	sort.Strings(keys)
 	for _, key := range keys {
-		if declared[key] {
+		if existing, ok := declared[key]; ok {
+			host.Notice(fmt.Sprintf("%s is already declared (%s %s); keeping the existing declaration.",
+				quoteName(key), existing.Classification, existing.Type))
+			// Record the existing classification/type as the reviewed consent, but
+			// only where the uniform secret/string default would otherwise make the
+			// planner refuse — so a default-declared key stays byte-identical to a
+			// flag run. A non-declarable existing type (an any_of the imported
+			// string does not satisfy) is left unrecorded on purpose: the planner
+			// refuses it, which is the human's to resolve.
+			if existing.Classification != "" && existing.Classification != string(schema.Secret) {
+				tmpl.Classifications = append(tmpl.Classifications,
+					ClassificationChoice{Key: key, Class: existing.Classification})
+			}
+			if existing.Type != "" && !compatibleImportedType(existing.Type, schema.TypeString) &&
+				isDeclarableType(existing.Type) {
+				tmpl.Types = append(tmpl.Types, TypeChoice{Key: key, Type: existing.Type, Accepted: true})
+			}
 			continue
 		}
 		class, downgraded, err := wizardClassification(host, key)
@@ -443,78 +477,6 @@ func wizardClassType(host WizardHost, valuesByKey map[string][]string, declared 
 		}
 		tmpl.Types = append(tmpl.Types, TypeChoice{Key: key, Type: string(typ), Accepted: true})
 	}
-	return nil
-}
-
-// wizardFolders computes each key's folder per environment and, on a conflict
-// (a key under two folders across environments — one bundle declares one folder
-// per key), asks the human to pick one; the full folder map is then recorded so
-// the replay honours it.
-func wizardFolders(host WizardHost, source string, envs []wizardEnv, manual map[string]string,
-	tmpl *Template) error {
-	// source folder -> target folder, and per key the folders seen.
-	sourceFolders := map[string]string{}
-	keyFolders := map[string]map[string]bool{}
-	keySource := map[string][]string{}
-	conflict := false
-	for i := range envs {
-		e := envs[i]
-		rootCollapse := source == k8sSource && singleSourceFolder(e.read.Result.Records)
-		for _, rec := range e.read.Result.Records {
-			target, _, err := targetName(rec.SourceName, manual)
-			if err != nil {
-				return err
-			}
-			sourceFolder := strings.Join(rec.Folder, "/")
-			tf, err := targetFolderPath(rec.Folder, rootCollapse)
-			if err != nil {
-				return err
-			}
-			sourceFolders[sourceFolder] = tf
-			if keyFolders[target] == nil {
-				keyFolders[target] = map[string]bool{}
-			}
-			if !keyFolders[target][tf] {
-				keyFolders[target][tf] = true
-				keySource[target] = append(keySource[target], sourceFolder)
-			}
-			if len(keyFolders[target]) > 1 {
-				conflict = true
-			}
-		}
-	}
-	if !conflict {
-		return nil // let the planner compute folders; matches flag mode byte-for-byte
-	}
-	// Resolve each conflicting key, then record the FULL folder map (the planner
-	// requires every source folder to be recorded once any is).
-	keys := make([]string, 0, len(keyFolders))
-	for k := range keyFolders {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, key := range keys {
-		if len(keyFolders[key]) < 2 {
-			continue
-		}
-		opts := make([]string, 0, len(keyFolders[key]))
-		for f := range keyFolders[key] {
-			opts = append(opts, f)
-		}
-		sort.Strings(opts)
-		i, err := host.Choose(fmt.Sprintf("%s maps to more than one folder; keep which?",
-			quoteName(key)), opts, 0)
-		if err != nil {
-			return err
-		}
-		for _, sf := range keySource[key] {
-			sourceFolders[sf] = opts[i]
-		}
-	}
-	for sf, tf := range sourceFolders {
-		tmpl.Folders = append(tmpl.Folders, FolderMapping{SourcePath: sf, TargetPath: tf})
-	}
-	sort.Slice(tmpl.Folders, func(i, j int) bool { return tmpl.Folders[i].SourcePath < tmpl.Folders[j].SourcePath })
 	return nil
 }
 
@@ -557,6 +519,7 @@ func wizardType(host WizardHost, key string, values []string) (schema.Type, erro
 // presence read.
 func wizardPresence(host WizardHost, source string, envs []wizardEnv, tmpl *Template) (int64, error) {
 	var revision int64
+	haveRevision := false
 	for i := range envs {
 		if envs[i].create {
 			continue
@@ -571,8 +534,19 @@ func wizardPresence(host WizardHost, source string, envs []wizardEnv, tmpl *Temp
 		if err != nil {
 			return 0, err
 		}
-		envs[i].state = state
+		// Every environment's read must observe the SAME project catalogue
+		// revision. A definitions change committed mid-session would make the
+		// occurrence tokens across environments describe different catalogue
+		// states — an incoherent manifest. Refuse it; the human re-runs.
+		if haveRevision && state.DefinitionsRevision != revision {
+			return 0, failure(source, CodeIncompatible, "",
+				"the project's definitions revision changed during the session (%d then %d); "+
+					"re-run the import so every environment is reviewed against one catalogue",
+				revision, state.DefinitionsRevision)
+		}
 		revision = state.DefinitionsRevision
+		haveRevision = true
+		envs[i].state = state
 	}
 	return revision, nil
 }

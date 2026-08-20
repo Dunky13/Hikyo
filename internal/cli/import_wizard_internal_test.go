@@ -5,8 +5,12 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Hikyo-Org/hikyo/internal/importer"
 )
 
 // nopWriteCloser backs an injected OpenTerminal: its existence is what
@@ -50,6 +54,43 @@ func TestImportNoTerminalIsAHardError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "needs --from or --mapping") {
 		t.Fatalf("err = %v, want the no-arguments usage refusal", err)
+	}
+}
+
+// TestValuesImportRefusesOverwriteForCreatedEnvFile: a created-environment
+// values file (name-addressed, tokenless) may not be imported with --overwrite —
+// the overwrite would bypass skip-by-default with no occurrence review. Refused
+// before any server contact.
+func TestValuesImportRefusesOverwriteForCreatedEnvFile(t *testing.T) {
+	body, err := importer.Encode(importer.ValuesFile{
+		FormatVersion: importer.FormatVersion, Project: "prj_x", EnvironmentName: "staging",
+		Entries: []importer.ValuesEntry{{Key: "API_KEY", Value: "v"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "values-staging.json")
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stateDir := t.TempDir()
+	ios := IO{
+		Stdin: strings.NewReader(""), Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{},
+		Env: Env{Getenv: func(k string) string {
+			if k == "HIKYO_STATE_DIR" {
+				return stateDir
+			}
+			return ""
+		}},
+	}
+	err = runValuesImport(context.Background(), ios,
+		[]string{"--file", path, "--overwrite", "API_KEY", "--env", "env_staging", "--instance", "unknown-ref"})
+	var cliErr *Error
+	if !errors.As(err, &cliErr) || cliErr.Code != ExitRefused {
+		t.Fatalf("err = %v, want ExitRefused", err)
+	}
+	if !strings.Contains(err.Error(), "tokenless") {
+		t.Fatalf("err = %v, want the tokenless-overwrite refusal", err)
 	}
 }
 

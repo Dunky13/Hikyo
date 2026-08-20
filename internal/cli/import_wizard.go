@@ -60,6 +60,13 @@ func runImportWizard(ctx context.Context, ios IO, c commonFlags, outDir string) 
 	if err != nil {
 		return failf(ExitRefused, "%v", err)
 	}
+	// The session may have paused on a prompt past its deadline without any
+	// network call observing the expiry (a create-only session makes no read
+	// after the source). Refuse before emitting rather than write artifacts a
+	// stale session authored.
+	if err := ctx.Err(); err != nil {
+		return failf(ExitRefused, "the import session exceeded its %s deadline before emitting artifacts", importer.SessionDeadline)
+	}
 	valuesPaths, err := writeProjectArtifacts(ios, outDir, plan)
 	if err != nil {
 		return err
@@ -400,6 +407,10 @@ func writeProjectArtifacts(ios IO, outDir string, plan *importer.ProjectPlan) ([
 			cleanup()
 			return nil, failf(ExitRefused, "writing the values file for %s: %v", vt.envRef, err)
 		}
+		// Track the emitted plaintext file so a LATER values-file failure removes
+		// it too — a half-authored migration must not leave one environment's
+		// plaintext on disk beside a missing sibling.
+		created = append(created, vt.path)
 		valuesPaths = append(valuesPaths, vt.path)
 	}
 	return valuesPaths, nil

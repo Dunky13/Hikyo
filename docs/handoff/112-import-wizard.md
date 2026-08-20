@@ -80,18 +80,38 @@ leave a stale token.
 every environment a session touched, but each `values import` is per environment, and importing
 B must not present A's occurrences (A's own import already advanced them).
 
-## Known limitations (for the reviewer / future work)
+## Multi-environment model: one source fanned (ADR "only presence varies")
 
-- **Per-environment source slices in replay.** The wizard reads a source per target environment
-  (so type suggestions can span differing per-env values). The mapping template records ONE
-  `scope` (the first environment's read); a multi-environment REPLAY fans that one recorded source
-  over every environment it names (presence varies, values are the one read's). A template whose
-  environments used genuinely different per-env source files (e.g. Infisical per-slug exports) is
-  not fully reproducible from the single recorded scope. The regenerated manifest is a different
-  run manifest, which the ADR already treats as visible, not silent.
-- **Plaintext-on-disk warning** names the emitted values files but not the wizard's per-environment
-  source export files (flag mode names its single `--file`). A follow-up could thread the read
-  source paths into `reportProject`.
+The wizard reads the source **once** and maps that one read onto one or more target environments
+(existing and/or created). Keys/types/classifications are project-scoped and reconciled once; only
+presence — the buckets and the values written — varies per environment. This is what makes a
+multi-environment session **faithfully replayable**: the template records one `scope`, and replay
+re-reads that one source and fans it the same way, so wizard and replay agree.
+
+A genuinely per-environment-different-source migration (e.g. Infisical staging-slug vs prod-slug
+with different values, which is what would exercise interactive type/classification RECONCILIATION
+conflicts) is **not** covered by v1: run the wizard once per slice. The reconciliation machinery
+still enforces one identity/type/classification/folder per key in the bundle, and the planner
+**refuses** any cross-environment conflict non-interactively (folder conflict → `CodeIncompatible`),
+which is the "refused in replay" half of the acceptance criterion. Future work: record per-environment
+scope in the template to author true multi-source reconciliation interactively.
+
+## Codex review R1 → fixes applied (this branch)
+
+R1 (gpt-5.6-sol high) returned CHANGES; all findings fixed:
+- CRITICAL: `--overwrite` refused for a created-environment (tokenless) values file, before any
+  server contact; wizard refuses `create <existing-env-name>`.
+- HIGH: multi-env replay no longer imports one source's values into every environment (the wizard
+  now uses the one-source-fan model above, so replay reproduces it).
+- HIGH: `values import` requires the target environment to be named in the manifest before slicing
+  its precondition.
+- HIGH: the wizard records an existing non-default declaration (config, or a non-string type) as
+  reviewed consent, so a declared key no longer hits a spurious incompatible refusal.
+- HIGH: folder-conflict-prompt corruption is mooted (one source cannot conflict); the planner keeps
+  the folder-conflict refusal as the safety net for hand-edited templates.
+- MEDIUM: mixed definitions revisions across the session are refused; partial multi-values-file
+  writes are fully cleaned up (no orphan plaintext); the session deadline is checked before emission.
+- The plaintext-on-disk warning now names the wizard's source export file alongside the values files.
 
 ## Note: ops-catalogue vs code bound divergence (pre-existing, do not fix here)
 
