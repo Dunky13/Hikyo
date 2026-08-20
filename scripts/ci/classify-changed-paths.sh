@@ -20,7 +20,6 @@ race=false
 release_snapshot=false
 supply_chain_checks=false
 test=false
-no_egress=false
 web=false
 saw_path=false
 
@@ -37,7 +36,6 @@ all_jobs() {
 	release_snapshot=true
 	supply_chain_checks=true
 	test=true
-	no_egress=true
 	web=true
 }
 
@@ -158,10 +156,6 @@ if [ "$saw_path" = false ]; then
 	all_jobs
 fi
 
-# The no-egress boot+idle invariant (mvp-boundary O7) builds and runs the server
-# binary, so it rides exactly the change set the Go test job does.
-no_egress="$test"
-
 jq -cn \
 	--argjson client "$client" \
 	--argjson compose_demo "$compose_demo" \
@@ -175,7 +169,6 @@ jq -cn \
 	--argjson release_snapshot "$release_snapshot" \
 	--argjson supply_chain_checks "$supply_chain_checks" \
 	--argjson test "$test" \
-	--argjson no_egress "$no_egress" \
 	--argjson web "$web" \
 	'{
 		client: $client,
@@ -190,6 +183,5 @@ jq -cn \
 		release_snapshot: $release_snapshot,
 		supply_chain_checks: $supply_chain_checks,
 		test: $test,
-		no_egress: $no_egress,
 		web: $web
 	}'

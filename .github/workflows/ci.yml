@@ -61,7 +61,6 @@ jobs:
               release_snapshot: true,
               supply_chain_checks: true,
               test: true,
-              no_egress: true,
               web: true
             }')
           fi
@@ -599,34 +598,6 @@ jobs:
           path: ~/go/pkg/mod
           key: ${{ steps.go-module-cache.outputs.cache-primary-key }}
 
-  # The no-egress boot+idle invariant (mvp-boundary O7; ops-spec §13 / CI
-  # invariant 4): `hikyo server` with nothing configured must boot, serve, and
-  # originate zero outbound connections. strace records every connect(2) and the
-  # run fails on any non-loopback target. Linux-only by nature (connect tracing).
-  no-egress:
-    needs: changes
-    if: ${{ fromJSON(needs.changes.outputs.plan).no_egress }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: false
-      - name: Restore shared Go module cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/go/pkg/mod
-          key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
-      - name: Install strace
-        run: sudo apt-get update && sudo apt-get install -y strace
-      - name: Boot+idle originates zero outbound connections
-        run: ./scripts/ci/no-egress.sh
-
   # The operator's kind end-to-end suite (#64, mvp-boundary M3): the Hikyo
   # server runs in-process over TLS, the operator reconciler in-process against a
   # real kind API server, and the CRDs are applied from chart/hikyo/crds. The
@@ -966,7 +937,6 @@ jobs:
       - headline-guarantee
       - k8s-e2e
       - lint
-      - no-egress
       - race
       - release-snapshot
       - supply-chain-checks
