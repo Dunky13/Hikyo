@@ -91,7 +91,7 @@ if grep -F -- 'prototypes/' "$site_root/sw.js" >/dev/null; then
 fi
 
 legacy_matches=$(grep -R -n -i -E --include='*.html' \
-	'wenv|(^|[^[:alnum:]])ew_' "$site_root/prototypes" 2>/dev/null |
+	'wenv|envweave|(^|[^[:alnum:]])ew_' "$site_root/prototypes" 2>/dev/null |
 	grep -F -v -- 'wenv/change-token/v1' || true)
 if [ -n "$legacy_matches" ]; then
 	printf 'docs PWA gate: prototype HTML contains legacy product identity\n%s\n' \

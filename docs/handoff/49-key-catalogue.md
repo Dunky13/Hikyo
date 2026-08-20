@@ -1,6 +1,6 @@
 # Handoff: #49 key catalogue & schema validation engine
 
-Issue: https://github.com/Hikyo-Org/hikyo/issues/49 (parent #41, blocked by #48 — merged).
+Issue: https://github.com/Hikyo-Org/Hikyo/issues/49 (parent #41, blocked by #48 — merged).
 Specs, all on `wayfinder-docs`: `docs/adr/schema-model.md` **as amended by**
 `docs/adr/flat-model.md` (ripple-register entry (a)–(h): no layers, no
 project defaults, no `masked`, presence `set | absent`, values attach to
@@ -375,7 +375,7 @@ new key routes in `TestUniformNonexistentAtEveryLevel`.
 
 `go build` / `go vet` / `gofmt -l .` clean. `go test ./...` **zero failures on
 sqlite**; conformance + isolation + store **zero failures on postgres**
-(`HIKYO_TEST_POSTGRES_DSN`, database `wenv_test_49` — the two postgres reset
+(`HIKYO_TEST_POSTGRES_DSN`, database `hikyo_test_49` — the two postgres reset
 helpers grew the four new tables in dependency order). Both runs taken after
 every edit, including the two-axis review pass below.
 

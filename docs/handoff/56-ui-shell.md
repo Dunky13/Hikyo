@@ -244,7 +244,7 @@ name**, at org scope or below. Decisions, each argued rather than assumed:
   demanding one would be circular. It is a resolution-surface read, exactly
   like `GET /auth/identities` ("the caller's own linked identities"), and it is
   classified the same way: `ClassUnauthenticated` in the wire registry, no
-  `x-wenv-operation`/`x-wenv-formula` pair. **The registry entry that was not
+  `x-hikyo-operation`/`x-hikyo-formula` pair. **The registry entry that was not
   created is itself the decision** — recorded here so the next reader does not
   re-derive it.
 - **Not audited, pinned as a reviewed deviation** in

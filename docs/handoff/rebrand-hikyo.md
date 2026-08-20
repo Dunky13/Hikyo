@@ -1,6 +1,6 @@
 # Hikyo rebrand handoff
 
-Branch: `t3code/rebrand-wenv-to-hikyo`
+Branch: historical rebrand branch (merged)
 
 ## Delivered
 

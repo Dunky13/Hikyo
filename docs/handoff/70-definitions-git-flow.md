@@ -1,6 +1,6 @@
 # Handoff: #70 definitions Git flow — export / check / plan / apply
 
-Issue: https://github.com/Hikyo-Org/hikyo/issues/70. Parent: #41. This is slice A: canonical bundle, store, service, authorization/audit, API, CLI, and Go E2E. Slice B owns the web surface described at the end.
+Issue: https://github.com/Hikyo-Org/Hikyo/issues/70. Parent: #41. This is slice A: canonical bundle, store, service, authorization/audit, API, CLI, and Go E2E. Slice B owns the web surface described at the end.
 
 ## What exists
 

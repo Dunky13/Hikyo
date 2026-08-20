@@ -685,7 +685,7 @@ func (a *API) validateAgainstContract(next http.Handler) http.Handler {
 		// validation and with its refusal ranked behind authentication.
 		// http.MaxBytesReader cannot be used there: it fails the read, and the
 		// contract validator's own body handling turns that into a
-		// pre-authentication Wenv 400 describing the request — which is the
+		// pre-authentication Hikyo 400 describing the request — which is the
 		// thing the wire must never do.
 		wire := isSCIMWireRequest(r)
 		if wire {

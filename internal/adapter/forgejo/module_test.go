@@ -26,11 +26,11 @@ func TestSyncClaimPruneAndTeardown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantWrites := []string{"put-secret:PROD_MANAGED_BY_WENV", "create-variable:PROD_MANAGED_BY_WENV", "put-secret:PROD_TOKEN", "create-variable:PROD_LOG_LEVEL"}
+	wantWrites := []string{"put-secret:PROD_MANAGED_BY_HIKYO", "create-variable:PROD_MANAGED_BY_HIKYO", "put-secret:PROD_TOKEN", "create-variable:PROD_LOG_LEVEL"}
 	if !slices.Equal(api.writes, wantWrites) {
 		t.Fatalf("writes = %v, want sentinel-first %v", api.writes, wantWrites)
 	}
-	for _, key := range []string{"secret:PROD_MANAGED_BY_WENV", "variable:PROD_MANAGED_BY_WENV", "variable:PROD_LOG_LEVEL", "secret:PROD_TOKEN"} {
+	for _, key := range []string{"secret:PROD_MANAGED_BY_HIKYO", "variable:PROD_MANAGED_BY_HIKYO", "variable:PROD_LOG_LEVEL", "secret:PROD_TOKEN"} {
 		if journal.states[key] != adapter.Owned {
 			t.Errorf("%s state = %q, want owned", key, journal.states[key])
 		}
@@ -42,7 +42,7 @@ func TestSyncClaimPruneAndTeardown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantDeletes := []string{"delete-secret:PROD_TOKEN", "delete-variable:PROD_LOG_LEVEL", "delete-secret:PROD_MANAGED_BY_WENV", "delete-variable:PROD_MANAGED_BY_WENV"}
+	wantDeletes := []string{"delete-secret:PROD_TOKEN", "delete-variable:PROD_LOG_LEVEL", "delete-secret:PROD_MANAGED_BY_HIKYO", "delete-variable:PROD_MANAGED_BY_HIKYO"}
 	if !slices.Equal(api.writes, wantDeletes) {
 		t.Fatalf("teardown writes = %v, want sentinels-last %v", api.writes, wantDeletes)
 	}
@@ -137,8 +137,8 @@ func TestDispatchWindowVariableReplayUsesUpdateNotCreate(t *testing.T) {
 func TestOwnedVariableDeletedAtProviderRetriesCreateUnderFreshEffect(t *testing.T) {
 	api := &fakeAPI{id: 42, version: "1.21.0", secrets: map[string]bool{}, failures: map[string]error{"update-variable:LOG_LEVEL": &ResponseError{Status: 404}}}
 	journal := newFakeJournal()
-	journal.states["secret:MANAGED_BY_WENV"] = adapter.Owned
-	journal.states["variable:MANAGED_BY_WENV"] = adapter.Owned
+	journal.states["secret:MANAGED_BY_HIKYO"] = adapter.Owned
+	journal.states["variable:MANAGED_BY_HIKYO"] = adapter.Owned
 	journal.states["variable:LOG_LEVEL"] = adapter.Owned
 
 	request := adapter.SyncRequest{
@@ -150,7 +150,7 @@ func TestOwnedVariableDeletedAtProviderRetriesCreateUnderFreshEffect(t *testing.
 	if !IsNotFound(err) {
 		t.Fatalf("first Sync() error = %v, want definite 404 retry", err)
 	}
-	want := []string{"put-secret:MANAGED_BY_WENV", "update-variable:MANAGED_BY_WENV", "update-variable:LOG_LEVEL"}
+	want := []string{"put-secret:MANAGED_BY_HIKYO", "update-variable:MANAGED_BY_HIKYO", "update-variable:LOG_LEVEL"}
 	if !slices.Equal(api.writes, want) {
 		t.Fatalf("first-attempt writes=%v, want exactly one request for repaired effect %v", api.writes, want)
 	}
@@ -166,7 +166,7 @@ func TestOwnedVariableDeletedAtProviderRetriesCreateUnderFreshEffect(t *testing.
 	if _, err := (&Module{API: api}).Sync(t.Context(), request, journal); err != nil {
 		t.Fatal(err)
 	}
-	want = append(want, "put-secret:MANAGED_BY_WENV", "update-variable:MANAGED_BY_WENV", "create-variable:LOG_LEVEL")
+	want = append(want, "put-secret:MANAGED_BY_HIKYO", "update-variable:MANAGED_BY_HIKYO", "create-variable:LOG_LEVEL")
 	if !slices.Equal(api.writes, want) {
 		t.Fatalf("replay writes=%v, want fresh create attempt %v", api.writes, want)
 	}
@@ -189,7 +189,7 @@ func TestPostPrepareGateFailureFinishesWithoutProviderRequest(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			api := &fakeAPI{id: 42, version: "1.21.0", secrets: map[string]bool{}, failures: map[string]error{}}
 			journal := newFakeJournal()
-			journal.states["secret:MANAGED_BY_WENV"] = tt.state
+			journal.states["secret:MANAGED_BY_HIKYO"] = tt.state
 			journal.gateErrAt, journal.gateErr = 5, gateErr
 			_, err := (&Module{API: api}).Sync(t.Context(), adapter.SyncRequest{Target: testTargetNoPrefix(), Ledger: journal.ledger()}, journal)
 			if !errors.Is(err, gateErr) {
@@ -198,9 +198,9 @@ func TestPostPrepareGateFailureFinishesWithoutProviderRequest(t *testing.T) {
 			if len(api.writes) != 0 {
 				t.Fatalf("provider writes after failed post-Prepare gate = %v", api.writes)
 			}
-			completion := journal.completions["secret:MANAGED_BY_WENV"]
-			if len(completion) != 1 || completion[0].Outcome != "failure" || completion[0].State != tt.state || journal.states["secret:MANAGED_BY_WENV"] != tt.state {
-				t.Fatalf("completion=%+v state=%q, want preserved %q", completion, journal.states["secret:MANAGED_BY_WENV"], tt.state)
+			completion := journal.completions["secret:MANAGED_BY_HIKYO"]
+			if len(completion) != 1 || completion[0].Outcome != "failure" || completion[0].State != tt.state || journal.states["secret:MANAGED_BY_HIKYO"] != tt.state {
+				t.Fatalf("completion=%+v state=%q, want preserved %q", completion, journal.states["secret:MANAGED_BY_HIKYO"], tt.state)
 			}
 		})
 	}
@@ -230,9 +230,9 @@ func TestPostPrepareGateFailurePropagatesFinishErrorFirst(t *testing.T) {
 	finishErr := errors.New("durable OUTCOME failed")
 	api := &fakeAPI{id: 42, version: "1.21.0", secrets: map[string]bool{}, failures: map[string]error{}}
 	journal := newFakeJournal()
-	journal.states["secret:MANAGED_BY_WENV"] = adapter.Reserved
+	journal.states["secret:MANAGED_BY_HIKYO"] = adapter.Reserved
 	journal.gateErrAt, journal.gateErr = 5, gateErr
-	journal.finishErrFor, journal.finishErr = "secret:MANAGED_BY_WENV", finishErr
+	journal.finishErrFor, journal.finishErr = "secret:MANAGED_BY_HIKYO", finishErr
 	_, err := (&Module{API: api}).Sync(t.Context(), adapter.SyncRequest{Target: testTargetNoPrefix(), Ledger: journal.ledger()}, journal)
 	if !errors.Is(err, finishErr) || errors.Is(err, gateErr) {
 		t.Fatalf("Sync() error = %v, want Finish error before Gate error", err)
@@ -244,8 +244,8 @@ func TestFinishErrorsOverrideVariableConflictAndPruneProviderErrors(t *testing.T
 	t.Run("variable conflict", func(t *testing.T) {
 		api := &fakeAPI{id: 42, version: "1.21.0", secrets: map[string]bool{}, failures: map[string]error{}, conflict: map[string]bool{"MODE": true}}
 		journal := newFakeJournal()
-		journal.states["secret:MANAGED_BY_WENV"] = adapter.Owned
-		journal.states["variable:MANAGED_BY_WENV"] = adapter.Owned
+		journal.states["secret:MANAGED_BY_HIKYO"] = adapter.Owned
+		journal.states["variable:MANAGED_BY_HIKYO"] = adapter.Owned
 		journal.finishErrFor = "variable:MODE"
 		journal.finishErr = finishErr
 		_, err := (&Module{API: api}).Sync(t.Context(), adapter.SyncRequest{Target: testTargetNoPrefix(), Manifest: []adapter.ManifestEntry{{CanonicalName: "MODE", Classification: adapter.ConfigClassification, Value: "x"}}, Ledger: journal.ledger()}, journal)
@@ -284,8 +284,8 @@ func TestProviderOutcomeMatrixPreservesOnlyClaimsThatMayHaveLanded(t *testing.T)
 		t.Run(tt.name, func(t *testing.T) {
 			api := &fakeAPI{id: 42, version: "1.21.0", secrets: map[string]bool{}, failures: map[string]error{"put-secret:TOKEN": tt.provider}}
 			journal := newFakeJournal()
-			journal.states["secret:MANAGED_BY_WENV"] = adapter.Owned
-			journal.states["variable:MANAGED_BY_WENV"] = adapter.Owned
+			journal.states["secret:MANAGED_BY_HIKYO"] = adapter.Owned
+			journal.states["variable:MANAGED_BY_HIKYO"] = adapter.Owned
 			journal.states["secret:TOKEN"] = tt.prior
 			_, err := (&Module{API: api}).Sync(t.Context(), adapter.SyncRequest{
 				Target:   testTargetNoPrefix(),

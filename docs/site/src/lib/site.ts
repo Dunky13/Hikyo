@@ -1,4 +1,4 @@
-export const repositoryUrl = 'https://github.com/Hikyo-Org/hikyo';
+export const repositoryUrl = 'https://github.com/Hikyo-Org/Hikyo';
 export const themeStorageKey = 'hikyo-theme';
 
 export const siteBase = import.meta.env.BASE_URL === '/'

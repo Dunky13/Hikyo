@@ -1,6 +1,6 @@
 # Handoff: #73 SCIM provisioning
 
-Issue: https://github.com/Hikyo-Org/hikyo/issues/73. Governing spec:
+Issue: https://github.com/Hikyo-Org/Hikyo/issues/73. Governing spec:
 `docs/adr/scim-provisioning.md` (locked 2026-08-06), with endpoint and CLI
 spellings in `docs/adr/api-cli-spellings.md` §1. Builds directly on #55
 (permission model, `docs/handoff/55-permission-model.md`) and #54/#72 (human
@@ -424,14 +424,14 @@ row lock as its first statement.
   `internal/isolation/testdata/audited_exemptions.json`. Then
   `go test ./internal/cli -update`.
 - **Run the postgres leg.**
-  `HIKYO_TEST_POSTGRES_DSN=postgres://hikyo:wenv@127.0.0.1:5432/wenv_test go test ./... -count=1`.
+  `HIKYO_TEST_POSTGRES_DSN=postgres://hikyo:hikyo@127.0.0.1:5432/hikyo_test go test ./... -count=1`.
 
 ## Verification record
 
 - `gofmt -l .` clean; `go build ./...` and `go vet ./...` clean.
 - `go test ./... -count=1` on **sqlite**: **919 passed, 0 failed, 33 packages**.
 - `go test ./... -count=1` with `HIKYO_TEST_POSTGRES_DSN` (**both engines**):
-  **1422 passed, 0 failed, 33 packages**. The `wenv_test*` databases were
+  **1422 passed, 0 failed, 33 packages**. The `hikyo_test*` databases were
   dropped and recreated first, because this branch adds migrations.
 - `go tool sqlc generate` idempotent.
 - `internal/isolation/testdata/annotated_queries.json` and
@@ -641,10 +641,10 @@ warning raised when every credential a binding holds predates the current epoch,
 cleared by re-mint plus the first completed re-assertion cycle. They observe the
 same event from two surfaces and neither reads the other's state.
 
-### Rebased onto main after #61/#50 and the Hikyo rebrand
+### Rebased onto main after #61/#50 and the repository rebrand
 
 The branch was rebased onto `origin/main` after #61 (machine identities), #50
-(flat values) and the Wenv → Hikyo rebrand landed. Two things a later reader
+(flat values) and the repository rebrand landed. Two things a later reader
 needs:
 
 - **The migration is `00017_scim.sql`** in both dialects (main took 00013 through
@@ -685,7 +685,7 @@ Wire bodies are excluded from `validateAgainstContract`; the protocol layer
 already owns resource parsing, and the two properties the transport still had
 to hold — one JSON value, within the bound — moved into `API.scimBodyIsOneValue`,
 which runs BEFORE contract validation (it must: `http.MaxBytesReader` fails the
-read, and the validator turns that into a pre-auth Wenv 400) and whose refusals
+read, and the validator turns that into a pre-auth Hikyo 400) and whose refusals
 are ranked behind authentication by `writeSCIMRequestError`. The generated
 binder's own failures route there too. Non-SCIM routes are unchanged.
 

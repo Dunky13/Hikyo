@@ -1,6 +1,6 @@
 # Handoff: #113 OpenAPI artifact-class admission
 
-Issue: https://github.com/Hikyo-Org/hikyo/issues/113.
+Issue: https://github.com/Hikyo-Org/Hikyo/issues/113.
 
 **State: complete.** The embedded OpenAPI document is the sole runtime source
 for bearer artifact-class admission. A resolved bearer whose class is absent

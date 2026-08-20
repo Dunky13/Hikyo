@@ -354,7 +354,7 @@ func ValidateRequest(r *http.Request) error {
 			// after the provisioning credential authenticates — not here.
 			//
 			// Contract validation runs before any credential is resolved, so a
-			// body check here answers an unauthenticated caller with a Wenv 400
+			// body check here answers an unauthenticated caller with a Hikyo 400
 			// describing what is wrong with their request. The wire's contract
 			// is that nothing about a request is answered before the caller has
 			// proved they may ask; the uniform 401 is the whole answer.

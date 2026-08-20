@@ -1,6 +1,6 @@
 # Handoff: #44 authorize chokepoint
 
-Issue: https://github.com/Hikyo-Org/hikyo/issues/44 (parent #41). Spec:
+Issue: https://github.com/Hikyo-Org/Hikyo/issues/44 (parent #41). Spec:
 `docs/adr/tenant-isolation.md` and `docs/adr/permission-model.md` on
 `wayfinder-docs`.
 

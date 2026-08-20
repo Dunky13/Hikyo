@@ -1,6 +1,6 @@
 # Handoff: #64 Kubernetes operator — CRDs, controller, kind harness
 
-Issue: https://github.com/Hikyo-Org/hikyo/issues/64 (parent #41; mvp-boundary
+Issue: https://github.com/Hikyo-Org/Hikyo/issues/64 (parent #41; mvp-boundary
 M3). Spec: [`docs/adr/k8s-integration.md`](../adr/k8s-integration.md), with
 [`system-architecture.md`](../adr/system-architecture.md) § multicall (operator
 is a separate deployable, controller-runtime, no root key in the operator pod),

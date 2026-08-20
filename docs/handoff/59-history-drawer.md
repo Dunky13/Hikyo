@@ -1,6 +1,6 @@
 # Handoff — #59 History drawer + restore + pin lifecycle UI
 
-Ticket: [#59](https://github.com/Hikyo-Org/hikyo/issues/59) (parent #41). Blocked-by
+Ticket: [#59](https://github.com/Hikyo-Org/Hikyo/issues/59) (parent #41). Blocked-by
 #52 (rollback & pins), #53 (retention & GC), #56 (UI shell / flow registry), #57
 (environment matrix) and #58 (reveal ceremonies) — all merged before this work.
 

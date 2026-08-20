@@ -1,6 +1,6 @@
 # Handoff: #54 Human auth, full — OIDC, WebAuthn, TOTP, recovery, sessions, assurance
 
-Issue: https://github.com/Hikyo-Org/hikyo/issues/54 (parent #41). Governing spec:
+Issue: https://github.com/Hikyo-Org/Hikyo/issues/54 (parent #41). Governing spec:
 `docs/adr/human-auth.md` (on `wayfinder-docs`:
 `git show wayfinder-docs:docs/adr/human-auth.md`), acceptance row A1 in
 `docs/adr/mvp-boundary.md`. Extends the #47 first slice
@@ -335,7 +335,7 @@ CSRF token delivered via authenticated `GET /auth/whoami` after the redirect
 lands, regenerated on rotation **[A9]**. `Authenticate` must accept both
 artifact types (today hard-pins cli).
 
-> **[A9] superseded at #56.** Delivery is the readable `__Host-wenv-csrf`
+> **[A9] superseded at #56.** Delivery is the readable `__Host-hikyo-csrf`
 > cookie beside the HttpOnly session cookie, not `whoami` — chosen as the more
 > secure shape: whoami-delivery would mint on a GET (a write on a safe method)
 > and churn the token across tabs, while both variants are equally

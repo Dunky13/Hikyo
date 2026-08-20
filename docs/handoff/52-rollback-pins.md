@@ -1,6 +1,6 @@
 # Handoff: #52 rollback & pins — restore as publish, durable pins (E2E)
 
-Issue: https://github.com/Hikyo-Org/hikyo/issues/52 (parent #41, blocked by
+Issue: https://github.com/Hikyo-Org/Hikyo/issues/52 (parent #41, blocked by
 #51 — merged). Specs, all on `wayfinder-docs`: `docs/adr/revision-model.md`
 (§ Rollback, § Diffs and secret safety, § Retention — read through the
 flat-model amendment banner: the `masked` restore rows, "never weakens a

@@ -1,6 +1,6 @@
 # Handoff: #48 hierarchy CRUD — org / project / environment / folder via API + CLI
 
-Issue: https://github.com/Hikyo-Org/hikyo/issues/48 (parent #41, blocked by #47 — merged).
+Issue: https://github.com/Hikyo-Org/Hikyo/issues/48 (parent #41, blocked by #47 — merged).
 Specs, all on `wayfinder-docs`: `docs/spec/domain-model.md`, `docs/adr/flat-model.md`
 (supersedes the inheritance model in full), `docs/adr/api-cli-surface.md`,
 `docs/spec/api-cli-spellings.md`, `docs/adr/tenant-isolation.md`,

@@ -1,6 +1,6 @@
 # Handoff: #51 revisions & publishing — drafts, snapshots, change token, SSE
 
-Issue: https://github.com/Hikyo-Org/hikyo/issues/51 (parent #41, blocked by #50 — merged).
+Issue: https://github.com/Hikyo-Org/Hikyo/issues/51 (parent #41, blocked by #50 — merged).
 Specs, all on `wayfinder-docs`: `docs/adr/revision-model.md` (primary, read
 through its two amendment banners), `docs/adr/flat-model.md` (its ripple
 register governs every `layer` the revision ADR names),
@@ -284,7 +284,7 @@ Commands:
     go test ./internal/conformance/ -count=1 -run TestConformanceSQLite
     go test ./internal/isolation/ -count=1 -run 'TestDemoFlowSQLite|TestDelivery'
     # database must be OWNED by the hikyo role (the harness drops tables);
-    # wenv_test is owned by role wenv and fails with "must be owner of table"
+    # hikyo_test is owned by role hikyo and fails with "must be owner of table"
     HIKYO_TEST_POSTGRES_DSN=postgres://hikyo:hikyo@127.0.0.1:5432/hikyo_51_revisions \
       go test ./internal/conformance/ ./internal/isolation/ -count=1
 
