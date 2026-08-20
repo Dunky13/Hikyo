@@ -38,6 +38,19 @@ import (
 // walk past.
 const MaxEnvironmentsPerProject = 50
 
+// MaxResolvedCells is the ops-spec § 8 config-time composability budget:
+// environments × declared keys ≤ 100 000, "the operation that would exceed it
+// (creating the env, declaring the key) is refused loud, naming the budget".
+// It is enforced BY CONSTRUCTION rather than by a runtime check nothing can
+// reach: MaxEnvironmentsPerProject × schema.MaxKeysPerProject is 50 000, half
+// the budget, so no legal configuration can exceed it while those two caps
+// hold. That is precisely the spec's "makes the maxima compose by
+// construction" guarantee; TestResolvedCellBudgetComposesByConstruction pins
+// it, so a future loosening of either component cap fails the build here rather
+// than silently voiding the budget. A dead runtime refusal would add reachable-
+// looking code for an unreachable state.
+const MaxResolvedCells = 100_000
+
 // Name and path bounds. No ADR fixes a display-name length for org, project,
 // environment or folder; 128 bytes is the bound the org contract already
 // carried since #47, adopted here for every entity so there is one number

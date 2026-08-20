@@ -57,9 +57,21 @@ type AuditCommitSeq int64
 // ranges and lexicographically last in the fixed-width text form).
 var auditMaxTime = time.Date(9999, 12, 31, 23, 59, 59, 999999000, time.UTC)
 
-func (f AuditFilter) bounds() (from, to time.Time, err error) {
+// AuditMaxPageSize is the page-size ceiling (ops-spec § 10 response caps: list
+// endpoints paged, page ≤ 1 000 items; audit pages § 2). A larger requested
+// Limit is CLAMPED here, not refused — a page cap is a response-shape bound
+// like SCIM's count clamp, applied at the single store chokepoint every audit
+// page read routes through.
+const AuditMaxPageSize = 1000
+
+// bounds normalizes and validates the filter. It takes a pointer so the page
+// clamp it applies is seen by the SQL binding that follows in every caller.
+func (f *AuditFilter) bounds() (from, to time.Time, err error) {
 	if f.Limit <= 0 {
 		return time.Time{}, time.Time{}, errors.New("store: audit page limit must be positive")
+	}
+	if f.Limit > AuditMaxPageSize {
+		f.Limit = AuditMaxPageSize
 	}
 	if f.Order != AuditPageBySeq && f.Order != AuditPageByCommit {
 		return time.Time{}, time.Time{}, fmt.Errorf("store: unknown audit page order %d", f.Order)
