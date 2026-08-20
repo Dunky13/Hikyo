@@ -42,6 +42,10 @@ type IO struct {
 	ReadPassword func(prompt string) (string, error)
 	// OpenTerminal backs the print triad's interactive leg.
 	OpenTerminal func() (io.WriteCloser, error)
+	// StderrIsTerminal reports whether Stderr is a TTY. `run
+	// --use-human-session` requires it (api-cli-surface ADR: "stderr-is-a-TTY
+	// (an additional refusal, never the control)"). Nil means false.
+	StderrIsTerminal func() bool
 	// OpenURL launches a browser without printing the opaque handoff state.
 	// Nil uses the platform browser opener.
 	OpenURL func(string) error

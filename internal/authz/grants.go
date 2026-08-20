@@ -104,7 +104,7 @@ func (a *TxAuthorizer) EnvironmentReauthSettings(ctx context.Context, envID stri
 
 // ProjectMachineReveal reads the per-project machine-reveal opt-in
 // (source-of-truth ADR). ErrNotFound for an unknown project.
-func (a *TxAuthorizer) ProjectMachineReveal(ctx context.Context, projectID string) (bool, error) {
+func (a *TxAuthorizer) ProjectMachineReveal(ctx context.Context, projectID string) (authn.MachineRevealState, error) {
 	return a.r.ProjectMachineReveal(ctx, projectID)
 }
 

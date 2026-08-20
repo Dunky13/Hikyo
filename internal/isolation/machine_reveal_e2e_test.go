@@ -162,12 +162,57 @@ func runMachineRevealOptIn(t *testing.T, db *store.DB) {
 	if n := queryInt(t, db, `SELECT COUNT(*) FROM audit_tenant_events WHERE type = 'settings.machine_reveal_changed'`); n != 3 {
 		t.Fatalf("opt-in flips audited %d times, want 3", n)
 	}
+
+	// A READ-ONLY workload's delivery does not change with the flip, but the
+	// ADR binds the cursor to every authorization movement and names the
+	// opt-in change: its cursor must move on each flip, and an off-on-off
+	// pair between two polls must not land back on a current cursor.
+	ro, err := ident.CreateServiceAccount(ctx, service.LocalPrincipal(identAdmin), prjScope(), "readonly-workload", domain.ClassWorkload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	roCred, err := ident.MintCredential(ctx, service.LocalPrincipal(identAdmin), prjScope(), ro.ID, service.MintRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	grantMachineRead(t, db, ro.Principal, envA1)
+	roFirst, err := del.Fetch(ctx, roCred.Value, env, "", service.FetchOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := settings.SetMachineReveal(ctx, operator, prjScope(), false); err != nil {
+		t.Fatal(err)
+	}
+	roAfterOne, err := del.Fetch(ctx, roCred.Value, env, roFirst.Cursor, service.FetchOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if roAfterOne.Current {
+		t.Fatal("an opt-in flip left a read-only workload's cursor current")
+	}
+	if _, err := settings.SetMachineReveal(ctx, operator, prjScope(), true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := settings.SetMachineReveal(ctx, operator, prjScope(), false); err != nil {
+		t.Fatal(err)
+	}
+	roAfterPair, err := del.Fetch(ctx, roCred.Value, env, roAfterOne.Cursor, service.FetchOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if roAfterPair.Current {
+		t.Fatal("an off-on-off pair between two polls landed back on a current cursor")
+	}
+	if _, err := settings.SetMachineReveal(ctx, operator, prjScope(), true); err != nil {
+		t.Fatal(err)
+	}
+
 	// An idempotent write is not a flip and is not audited as one.
 	if _, err := settings.SetMachineReveal(ctx, operator, prjScope(), true); err != nil {
 		t.Fatal(err)
 	}
-	if n := queryInt(t, db, `SELECT COUNT(*) FROM audit_tenant_events WHERE type = 'settings.machine_reveal_changed'`); n != 3 {
-		t.Fatalf("an idempotent write was audited as a flip (%d events)", n)
+	if n := queryInt(t, db, `SELECT COUNT(*) FROM audit_tenant_events WHERE type = 'settings.machine_reveal_changed'`); n != 7 {
+		t.Fatalf("an idempotent write was audited as a flip (%d events, want 7)", n)
 	}
 }
 

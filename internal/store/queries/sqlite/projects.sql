@@ -9,14 +9,14 @@ VALUES (?, ?, ?, ?);
 -- name: GetProject :one
 SELECT id, org_id, name, created_at,
        retention_revision_count, retention_age_seconds, definitions_source,
-       machine_reveal
+       machine_reveal, machine_reveal_generation
 FROM projects
 WHERE org_id = ? AND id = ?;
 
 -- name: ListProjects :many
 SELECT id, org_id, name, created_at,
        retention_revision_count, retention_age_seconds, definitions_source,
-       machine_reveal
+       machine_reveal, machine_reveal_generation
 FROM projects
 WHERE org_id = ? ORDER BY name;
 
@@ -52,7 +52,7 @@ WHERE org_id = ? AND id = ?;
 -- column live, so flipping it back to 0 withdraws machine secret delivery on
 -- the next fetch without touching any grant row.
 -- name: SetProjectMachineReveal :execrows
-UPDATE projects SET machine_reveal = ?
+UPDATE projects SET machine_reveal = ?, machine_reveal_generation = machine_reveal_generation + 1
 WHERE org_id = ? AND id = ?;
 
 -- name: DeleteProject :execrows

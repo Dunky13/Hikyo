@@ -353,7 +353,7 @@ func (s *Delivery) FetchAs(ctx context.Context, actor Actor, scope domain.Scope,
 		// plaintext only while the project has opted in (source-of-truth ADR).
 		// Read live on every fetch, like the grants; it is part of the
 		// authorized projection, so flipping it moves every machine cursor.
-		revealOptIn, err := az.MachineRevealOptIn(ctx, caller, scope.Project)
+		revealOptIn, revealGeneration, err := az.MachineRevealOptIn(ctx, caller, scope.Project)
 		if err != nil {
 			return err
 		}
@@ -394,7 +394,7 @@ func (s *Delivery) FetchAs(ctx context.Context, actor Actor, scope domain.Scope,
 			string(scope.Org), string(scope.Project), string(scope.Env),
 			delivery.EncodeCursor(delivery.Cursor{
 				ChangeToken:              changeToken,
-				Projection:               projectionOf(grants, scope),
+				Projection:               projectionOf(grants, scope, revealGeneration),
 				AuthorizationRevision:    revisionOfAuthority,
 				PinGeneration:            pinGeneration,
 				Mode:                     mode,
@@ -797,13 +797,23 @@ func withoutReveal(grants []authz.GrantRow) []authz.GrantRow {
 // disclosure capability is granted or revoked — which is exactly when what the
 // caller may receive changes, now that `reveal` and `reveal-history` gate
 // whether a secret's plaintext crosses (deliveryRows).
-func projectionOf(grants []authz.GrantRow, scope domain.Scope) []string {
+//
+// The machine-reveal opt-in's generation is the projection's last term for a
+// machine caller: the opt-in is part of what the caller is authorized to
+// receive, and binding its generation rather than its value makes every flip
+// move the cursor - also for a read-only principal the flip does not yet
+// affect, and across an off-on-off pair between two polls. Humans carry
+// generation 0 and no term.
+func projectionOf(grants []authz.GrantRow, scope domain.Scope, revealGeneration int64) []string {
 	at := domain.Scope{Org: scope.Org, Project: scope.Project, Env: scope.Env}
 	var out []string
 	for _, cap := range []domain.Capability{domain.CapRead, domain.CapReveal, domain.CapRevealHistory} {
 		if holds(grants, cap, at) {
 			out = append(out, string(cap))
 		}
+	}
+	if revealGeneration > 0 {
+		out = append(out, fmt.Sprintf("machine-reveal-generation:%d", revealGeneration))
 	}
 	return out
 }

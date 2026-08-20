@@ -13,3 +13,8 @@
 -- cursor, because the authorized delivery projection changed.
 ALTER TABLE projects ADD COLUMN machine_reveal INTEGER NOT NULL DEFAULT 0
     CHECK (machine_reveal IN (0, 1));
+-- machine_reveal_generation advances on every flip and is bound into every
+-- machine delivery cursor, so a flip moves the cursor even for a principal
+-- whose grant rows make it invisible, and across an off-on-off pair between
+-- two polls (machine-identities ADR: any authorization movement invalidates).
+ALTER TABLE projects ADD COLUMN machine_reveal_generation INTEGER NOT NULL DEFAULT 0;

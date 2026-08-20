@@ -158,3 +158,83 @@ func onlyTrailingBlank(s string) error {
 	}
 	return nil
 }
+
+// Refusal names one entry Encode could not represent.
+type Refusal struct {
+	Key    string
+	Reason string
+}
+
+// Encode renders entries as a dotenv document that Parse reads back
+// byte-exact. Values that the unquoted grammar would alter - surrounding
+// whitespace (Parse trims it), a leading quote, a `#`, a backslash, a control
+// character or a newline - are double-quoted with the escapes parseDoubleQuoted
+// understands; every other value is written bare. This is deliberately NOT the
+// Compose renderer's raw encoding: that one is consumed by Compose's
+// `format: raw`, which performs no unquoting, whereas a document written for
+// humans and for `values import --from-dotenv` must survive the round trip.
+// A NUL byte cannot be carried by either grammar and is refused by name.
+func Encode(entries []Entry) ([]byte, []Refusal, error) {
+	var refusals []Refusal
+	for _, e := range entries {
+		if err := schema.CheckKeyName(e.Key); err != nil {
+			refusals = append(refusals, Refusal{Key: e.Key, Reason: "invalid name"})
+			continue
+		}
+		if strings.IndexByte(e.Value, 0) >= 0 {
+			refusals = append(refusals, Refusal{Key: e.Key, Reason: "NUL byte"})
+		}
+	}
+	if len(refusals) > 0 {
+		return nil, refusals, nil
+	}
+	var b strings.Builder
+	for _, e := range entries {
+		b.WriteString(e.Key)
+		b.WriteByte('=')
+		if needsQuoting(e.Value) {
+			b.WriteByte('"')
+			for i := 0; i < len(e.Value); i++ {
+				switch c := e.Value[i]; c {
+				case '\\':
+					b.WriteString(`\\`)
+				case '"':
+					b.WriteString(`\"`)
+				case '\n':
+					b.WriteString(`\n`)
+				case '\r':
+					b.WriteString(`\r`)
+				case '\t':
+					b.WriteString(`\t`)
+				default:
+					b.WriteByte(c)
+				}
+			}
+			b.WriteByte('"')
+		} else {
+			b.WriteString(e.Value)
+		}
+		b.WriteByte('\n')
+	}
+	return []byte(b.String()), nil, nil
+}
+
+// needsQuoting reports whether a bare value would not parse back to itself.
+func needsQuoting(v string) bool {
+	if v == "" {
+		return false
+	}
+	if v != strings.TrimSpace(v) {
+		return true
+	}
+	if v[0] == '"' || v[0] == '\'' {
+		return true
+	}
+	for i := 0; i < len(v); i++ {
+		switch c := v[i]; {
+		case c == '#', c == '\\', c == '"', c == '\n', c == '\r', c == '\t', c < 0x20, c == 0x7f:
+			return true
+		}
+	}
+	return false
+}

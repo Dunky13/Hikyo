@@ -192,9 +192,13 @@ func (a *TxAuthorizer) machineRevealWithdrawn(ctx context.Context, caller Identi
 	if !domain.IsServiceAccountKind(caller.Class) || chain.Project == "" {
 		return false, nil
 	}
+	// Both disclosure atoms: the opt-in governs machine access to plaintext,
+	// current (`reveal`) and superseded (`reveal-history`) alike - the
+	// permission model keeps them independent of each other, not of the
+	// opt-in.
 	demandsReveal := false
 	for _, atom := range f {
-		if atom.Cap == domain.CapReveal {
+		if atom.Cap == domain.CapReveal || atom.Cap == domain.CapRevealHistory {
 			demandsReveal = true
 			break
 		}
@@ -202,33 +206,38 @@ func (a *TxAuthorizer) machineRevealWithdrawn(ctx context.Context, caller Identi
 	if !demandsReveal {
 		return false, nil
 	}
-	on, err := a.r.ProjectMachineReveal(ctx, string(chain.Project))
+	st, err := a.r.ProjectMachineReveal(ctx, string(chain.Project))
 	if errors.Is(err, domain.ErrNotFound) {
 		return true, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	return !on, nil
+	return !st.Enabled, nil
 }
 
 // MachineRevealOptIn reports the project's machine-reveal opt-in for callers
-// that project grants per key (the delivery path) rather than per formula.
-// A machine identity without the opt-in is delivered secret presence only,
-// whatever reveal rows it holds. Humans always answer true: the flag governs
-// machine disclosure and nothing else.
-func (a *TxAuthorizer) MachineRevealOptIn(ctx context.Context, caller Identity, project domain.ProjectID) (bool, error) {
+// that project grants per key (the delivery path) rather than per formula,
+// together with the opt-in's GENERATION - a counter every flip advances, so
+// a cursor bound to it moves on every flip (machine-identities ADR: "any
+// authorization movement invalidates the cursor", naming the opt-in change),
+// including for a principal whose grant rows make the flip invisible and
+// across an off-on-off pair between two polls. A machine identity without
+// the opt-in is delivered secret presence only, whatever reveal rows it
+// holds. Humans always answer true at generation 0: the flag governs machine
+// disclosure and nothing else.
+func (a *TxAuthorizer) MachineRevealOptIn(ctx context.Context, caller Identity, project domain.ProjectID) (bool, int64, error) {
 	if !domain.IsServiceAccountKind(caller.Class) {
-		return true, nil
+		return true, 0, nil
 	}
-	on, err := a.r.ProjectMachineReveal(ctx, string(project))
+	st, err := a.r.ProjectMachineReveal(ctx, string(project))
 	if errors.Is(err, domain.ErrNotFound) {
-		return false, nil
+		return false, 0, nil
 	}
 	if err != nil {
-		return false, err
+		return false, 0, err
 	}
-	return on, nil
+	return st.Enabled, st.Generation, nil
 }
 
 func (a *TxAuthorizer) authorizeInstance(ctx context.Context, caller Identity, op Operation, spec opSpec) (Proof, error) {

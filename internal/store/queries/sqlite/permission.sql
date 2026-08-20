@@ -98,7 +98,7 @@ SELECT protected, reauth_window_seconds FROM environments WHERE id = ?;
 -- before (or while) an operation proof is minted.
 -- hikyo:authn-resolution
 -- name: ProjectMachineReveal :one
-SELECT machine_reveal FROM projects WHERE id = ?;
+SELECT machine_reveal, machine_reveal_generation FROM projects WHERE id = ?;
 
 -- The machine allowlists key on the principal's class; kind discriminates
 -- human from machine. An unclassified machine principal fails closed in Go.

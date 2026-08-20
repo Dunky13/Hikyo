@@ -110,10 +110,11 @@ The shared dimensions are `--instance`, `--org`, `--project`, `--env`, and
 `run` and `compose` accept machine credentials only, through `--token-file` or
 `HIKYO_TOKEN`. `compose` has no human path. `run` has one narrow exception:
 `--use-human-session` runs under the stored human session, but only when all of a
-controlling terminal, an enumerated confirmation of the environment and key set,
-and a live disclosure window hold. Without a live window it exits `3`; open one
-with the reveal ceremony first. `--config-only` carries no secrets, so it needs
-no window.
+controlling terminal with stderr on it, an enumerated confirmation of the
+environment and key set, and a live disclosure window hold. Without a live
+window the CLI opens one from the terminal with an authenticator code where the
+environment's window allows it, and exits `3` naming the browser path where it
+does not. The four conditions hold under `--config-only` too.
 
 ```text
 hikyo run [--config-only] [--allow-override KEY,KEY] [--project-directory DIR] [--token-file PATH] -- <command> [args...]

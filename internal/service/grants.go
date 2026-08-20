@@ -601,11 +601,11 @@ func lockAndClassify(ctx context.Context, az *authz.TxAuthorizer, target domain.
 	// depth check below refuses it by name either way.
 	optIn := false
 	if scope.Project != "" {
-		on, err := az.ProjectMachineReveal(ctx, string(scope.Project))
+		st, err := az.ProjectMachineReveal(ctx, string(scope.Project))
 		if err != nil && !errors.Is(err, domain.ErrNotFound) {
 			return "", err
 		}
-		optIn = on && err == nil
+		optIn = err == nil && st.Enabled
 	}
 	if err := checkPrincipalClass(class, capability, optIn); err != nil {
 		return "", err

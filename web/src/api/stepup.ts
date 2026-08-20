@@ -37,6 +37,10 @@ export function stepUpFailureText(error: unknown): string {
         return 'No authenticator stands on this account, so there is no code to present. Enrol one under Account & security first.';
       case 401:
         return 'That code was not accepted. A code is valid for one time step and is used once: wait for the next code and try again.';
+      case 409:
+        return error.detail !== undefined && error.detail !== ''
+          ? `${error.detail}.`
+          : 'That code was already used for its time step: wait for the next code and try again.';
       case 429:
         return 'Too many attempts right now. Wait a moment and try again.';
       default:

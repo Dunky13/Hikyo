@@ -382,19 +382,26 @@ func (r *Resolver) EnvironmentReauthSettings(ctx context.Context, envID string) 
 // check and the chokepoint's machine conjunct both consult it before an
 // operation proof exists. An unknown project answers ErrNotFound, which every
 // caller treats as "opt-in off" - fail-closed, never widened by absence.
-func (r *Resolver) ProjectMachineReveal(ctx context.Context, projectID string) (bool, error) {
+func (r *Resolver) ProjectMachineReveal(ctx context.Context, projectID string) (MachineRevealState, error) {
 	if r.sq != nil {
-		flag, err := r.sq.ProjectMachineReveal(ctx, projectID)
+		row, err := r.sq.ProjectMachineReveal(ctx, projectID)
 		if err != nil {
-			return false, notFoundOr(err)
+			return MachineRevealState{}, notFoundOr(err)
 		}
-		return flag == 1, nil
+		return MachineRevealState{Enabled: row.MachineReveal == 1, Generation: row.MachineRevealGeneration}, nil
 	}
-	flag, err := r.pg.ProjectMachineReveal(ctx, projectID)
+	row, err := r.pg.ProjectMachineReveal(ctx, projectID)
 	if err != nil {
-		return false, notFoundOr(err)
+		return MachineRevealState{}, notFoundOr(err)
 	}
-	return flag, nil
+	return MachineRevealState{Enabled: row.MachineReveal, Generation: row.MachineRevealGeneration}, nil
+}
+
+// MachineRevealState is the per-project machine-reveal opt-in and its
+// generation, the counter every flip advances (bound into machine cursors).
+type MachineRevealState struct {
+	Enabled    bool
+	Generation int64
 }
 
 // PrincipalClass resolves a principal's class for the normative machine

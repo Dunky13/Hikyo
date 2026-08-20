@@ -57,7 +57,7 @@ func (q *Queries) DeleteProject(ctx context.Context, arg DeleteProjectParams) (i
 const getProject = `-- name: GetProject :one
 SELECT id, org_id, name, created_at,
        retention_revision_count, retention_age_seconds, definitions_source,
-       machine_reveal
+       machine_reveal, machine_reveal_generation
 FROM projects
 WHERE org_id = $1 AND id = $2
 `
@@ -79,6 +79,7 @@ func (q *Queries) GetProject(ctx context.Context, arg GetProjectParams) (Project
 		&i.RetentionAgeSeconds,
 		&i.DefinitionsSource,
 		&i.MachineReveal,
+		&i.MachineRevealGeneration,
 	)
 	return i, err
 }
@@ -123,7 +124,7 @@ func (q *Queries) ListAllProjects(ctx context.Context) ([]ListAllProjectsRow, er
 const listProjects = `-- name: ListProjects :many
 SELECT id, org_id, name, created_at,
        retention_revision_count, retention_age_seconds, definitions_source,
-       machine_reveal
+       machine_reveal, machine_reveal_generation
 FROM projects
 WHERE org_id = $1 ORDER BY name
 `
@@ -146,6 +147,7 @@ func (q *Queries) ListProjects(ctx context.Context, chainOrgID string) ([]Projec
 			&i.RetentionAgeSeconds,
 			&i.DefinitionsSource,
 			&i.MachineReveal,
+			&i.MachineRevealGeneration,
 		); err != nil {
 			return nil, err
 		}
@@ -220,7 +222,7 @@ func (q *Queries) SetProjectDefinitionsSource(ctx context.Context, arg SetProjec
 }
 
 const setProjectMachineReveal = `-- name: SetProjectMachineReveal :execrows
-UPDATE projects SET machine_reveal = $1
+UPDATE projects SET machine_reveal = $1, machine_reveal_generation = machine_reveal_generation + 1
 WHERE org_id = $2 AND id = $3
 `
 

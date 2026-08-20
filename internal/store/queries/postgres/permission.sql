@@ -73,7 +73,7 @@ SELECT protected, reauth_window_seconds FROM environments WHERE id = sqlc.arg(id
 
 -- hikyo:authn-resolution
 -- name: ProjectMachineReveal :one
-SELECT machine_reveal FROM projects WHERE id = sqlc.arg(id);
+SELECT machine_reveal, machine_reveal_generation FROM projects WHERE id = sqlc.arg(id);
 
 -- hikyo:authn-resolution
 -- name: GetPrincipalClass :one

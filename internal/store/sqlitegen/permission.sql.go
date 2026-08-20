@@ -466,16 +466,21 @@ func (q *Queries) ListManageMembersHoldersForOrg(ctx context.Context, orgID sql.
 }
 
 const projectMachineReveal = `-- name: ProjectMachineReveal :one
-SELECT machine_reveal FROM projects WHERE id = ?
+SELECT machine_reveal, machine_reveal_generation FROM projects WHERE id = ?
 `
+
+type ProjectMachineRevealRow struct {
+	MachineReveal           int64
+	MachineRevealGeneration int64
+}
 
 // The machine-reveal opt-in is read beside session resolution: the grant
 // writer's class check and the chokepoint's machine conjunct both need it
 // before (or while) an operation proof is minted.
 // hikyo:authn-resolution
-func (q *Queries) ProjectMachineReveal(ctx context.Context, id string) (int64, error) {
+func (q *Queries) ProjectMachineReveal(ctx context.Context, id string) (ProjectMachineRevealRow, error) {
 	row := q.db.QueryRowContext(ctx, projectMachineReveal, id)
-	var machine_reveal int64
-	err := row.Scan(&machine_reveal)
-	return machine_reveal, err
+	var i ProjectMachineRevealRow
+	err := row.Scan(&i.MachineReveal, &i.MachineRevealGeneration)
+	return i, err
 }

@@ -40,6 +40,14 @@ func ceremonyServer(t *testing.T, window apigen.RevealWindow) (http.Handler, *[]
 				EnvironmentId: "env_70", SessionId: "ses_rotated", SessionToken: &rotated,
 				WindowExpires: apigen.Timestamp(time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)),
 			})
+		case strings.HasSuffix(r.URL.Path, "/values/export"):
+			if !live || !strings.Contains(r.Header.Get("Authorization"), rotated) {
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(`{"error":{"code":"forbidden","message":"not permitted"}}`))
+				return
+			}
+			v := "s3cret"
+			_ = json.NewEncoder(w).Encode(apigen.ExportedValues{Items: []apigen.ExportedValue{{Name: "DATABASE_PASSWORD", Classification: apigen.KeyClassificationSecret, Value: &v}}})
 		case strings.HasSuffix(r.URL.Path, "/values/DATABASE_PASSWORD/reveal"):
 			if !live || !strings.Contains(r.Header.Get("Authorization"), rotated) {
 				w.WriteHeader(http.StatusForbidden)
@@ -141,5 +149,19 @@ func TestRevealCeremonyHandsBackTheRefusalWithoutReveal(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "not permitted") {
 		t.Errorf("the server's own refusal was replaced: %s", stderr.String())
+	}
+}
+
+func TestRevealCeremonyCoversExport(t *testing.T) {
+	handler, _ := ceremonyServer(t, apigen.RevealWindow{CanReveal: true, EffectiveWindowSeconds: 300, TotpOffered: true})
+	ios, stdout, stderr := definitionsTestIO(t, handler)
+	ios.ReadPassword = func(string) (string, error) { return "123456", nil }
+	args := []string{"values", "export", "--reveal", "--format", "dotenv", "--dangerously-print",
+		"--instance", "local", "--org", "org_70", "--project", "prj_70", "--env", "env_70"}
+	if code := cli.Run(t.Context(), ios, args); code != cli.ExitOK {
+		t.Fatalf("exit %d, want ok; stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "DATABASE_PASSWORD=s3cret") {
+		t.Fatalf("export did not carry the revealed value after the ceremony: %q", stdout.String())
 	}
 }

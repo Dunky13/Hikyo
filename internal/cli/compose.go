@@ -241,18 +241,24 @@ func runRun(ctx context.Context, ios IO, args []string) error {
 //  3. an enumerated confirmation — the environment and the exact key names to be
 //     injected, printed to the controlling terminal, answered y/N there;
 //  4. the bound reauth ceremony — a live disclosure window for the environment,
-//     which task A2's `reveal` ceremony opens. This verb only CHECKS it; it never
-//     opens one. Under --config-only no secrets are delivered, so the ceremony
-//     does not apply.
+//     opened inline by the TOTP ceremony where the window allows it. Required
+//     under --config-only too: the four conditions are locked as a set.
 //
 // The offline snapshot machinery is deliberately NOT reached on this path: a
 // human-session snapshot served offline later would bypass the machine-only rule
 // the delivery model rests on, so a human-session run never saves one.
 func runHumanSession(ctx context.Context, ios IO, st *State, flags commonFlags, cfg *compose.Config, childArgs []string, configOnly bool, allowOverride []string) error {
-	// (2) TTY gate, first: a refusal that needs no session and no server.
+	// (2) TTY gate, first: a refusal that needs no session and no server. Both
+	// halves are required by name: a controlling terminal (the confirmation and
+	// the code are read there) AND stderr being a TTY (the locked condition -
+	// a human session driving a process whose stderr is captured is refused).
 	if !onTerminal(ios) {
 		return failf(ExitRefused,
 			"hikyo run --use-human-session requires a controlling terminal for the confirmation and reauth ceremony; there is none")
+	}
+	if ios.StderrIsTerminal == nil || !ios.StderrIsTerminal() {
+		return failf(ExitRefused,
+			"hikyo run --use-human-session requires stderr to be a terminal; a captured stderr means a non-interactive process, which the human-session exception refuses")
 	}
 
 	client, session, resolved, err := authenticatedTarget(st, ios, flags)
@@ -278,15 +284,14 @@ func runHumanSession(ctx context.Context, ios IO, st *State, flags commonFlags, 
 		fmt.Fprintf(ios.Stderr, "target: %s [origin %s, artifact human-session]\n", echo, session.Origin)
 	}
 
-	// (4) Bound reauth ceremony: a live disclosure window must already be open.
-	// Skipped under --config-only, whose projection carries no secrets.
-	if !configOnly {
-		// Opened inline (TOTP) where the environment's window allows it; a
-		// 0-window environment is refused with the browser path named.
-		if err := ensureRevealWindow(ctx, client, st, ios, &session, project, env,
-			failf(ExitAuth, "a live disclosure window is required: run the reveal ceremony first")); err != nil {
-			return err
-		}
+	// (4) Bound reauth ceremony: a live disclosure window over the environment,
+	// opened inline (TOTP) where the environment's window allows it; a
+	// 0-window environment is refused with the browser path named. Required
+	// under --config-only too: the exception's four conditions are locked
+	// without a projection carve-out (api-cli-surface ADR).
+	if err := ensureRevealWindow(ctx, client, st, ios, &session, project, env,
+		failf(ExitAuth, "a live disclosure window is required: run the reveal ceremony first")); err != nil {
+		return err
 	}
 
 	resp, err := fetchDelivery(ctx, client, org, resolved.Get(DimProject), env, configOnly, nil, "")

@@ -65,8 +65,23 @@ func TestRunHumanSessionRefusedWithoutTTY(t *testing.T) {
 	}
 }
 
+func TestRunHumanSessionRefusedWhenStderrIsNotATerminal(t *testing.T) {
+	// A controlling terminal exists but stderr is captured: the locked condition
+	// "stderr-is-a-TTY" refuses before any session lookup.
+	ios, _, stderr := definitionsTestIO(t, runHumanServer(t, true))
+	ios.OpenTerminal = openTTY("y\n")
+	ios.StderrIsTerminal = func() bool { return false }
+	if code := cli.Run(t.Context(), ios, runArgs()); code != cli.ExitRefused {
+		t.Fatalf("exit %d, want refused; stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "stderr to be a terminal") {
+		t.Errorf("refusal does not name stderr: %s", stderr.String())
+	}
+}
+
 func TestRunHumanSessionRefusedWhenDeclined(t *testing.T) {
 	ios, _, stderr := definitionsTestIO(t, runHumanServer(t, true))
+	ios.StderrIsTerminal = func() bool { return true }
 	ios.OpenTerminal = openTTY("n\n")
 	if code := cli.Run(t.Context(), ios, runArgs()); code != cli.ExitRefused {
 		t.Fatalf("exit %d, want refused; stderr=%s", code, stderr.String())
@@ -78,6 +93,7 @@ func TestRunHumanSessionRefusedWhenDeclined(t *testing.T) {
 
 func TestRunHumanSessionRequiresLiveWindow(t *testing.T) {
 	ios, _, stderr := definitionsTestIO(t, runHumanServer(t, false))
+	ios.StderrIsTerminal = func() bool { return true }
 	ios.OpenTerminal = openTTY("y\n")
 	if code := cli.Run(t.Context(), ios, runArgs()); code != cli.ExitAuth {
 		t.Fatalf("exit %d, want ExitAuth; stderr=%s", code, stderr.String())
@@ -87,16 +103,23 @@ func TestRunHumanSessionRequiresLiveWindow(t *testing.T) {
 	}
 }
 
-func TestRunHumanSessionConfigOnlySkipsWindow(t *testing.T) {
-	// --config-only carries no secrets, so the reveal ceremony does not apply: with
-	// a dead window and a "yes" confirmation the run reaches exec (captured here).
-	ios, _, stderr := definitionsTestIO(t, runHumanServer(t, false))
-	ios.OpenTerminal = openTTY("y\n")
+func TestRunHumanSessionConfigOnlyStillNeedsTheWindow(t *testing.T) {
+	// --config-only carries no secrets, but the exception's four conditions are
+	// locked as a set: with a dead window the run is refused, with a live one
+	// and a "yes" confirmation it reaches exec (captured here).
+	dead, _, stderr := definitionsTestIO(t, runHumanServer(t, false))
+	dead.StderrIsTerminal = func() bool { return true }
+	dead.OpenTerminal = openTTY("y\n")
+	if code := cli.Run(t.Context(), dead, runArgs("--config-only")); code != cli.ExitAuth {
+		t.Fatalf("config-only with a dead window: exit %d, want ExitAuth; stderr=%s", code, stderr.String())
+	}
+	live, _, stderr2 := definitionsTestIO(t, runHumanServer(t, true))
+	live.StderrIsTerminal = func() bool { return true }
+	live.OpenTerminal = openTTY("y\n")
 	var execed bool
-	ios.Exec = func(argv0 string, argv, env []string) error { execed = true; return nil }
-	code := cli.Run(t.Context(), ios, runArgs("--config-only"))
-	if code != cli.ExitOK {
-		t.Fatalf("exit %d, want ok; stderr=%s", code, stderr.String())
+	live.Exec = func(argv0 string, argv, env []string) error { execed = true; return nil }
+	if code := cli.Run(t.Context(), live, runArgs("--config-only")); code != cli.ExitOK {
+		t.Fatalf("exit %d, want ok; stderr=%s", code, stderr2.String())
 	}
 	if !execed {
 		t.Error("config-only human-session run did not reach exec")

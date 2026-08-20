@@ -585,14 +585,15 @@ type Principal struct {
 }
 
 type Project struct {
-	ID                     string
-	OrgID                  string
-	Name                   string
-	CreatedAt              string
-	RetentionRevisionCount sql.NullInt64
-	RetentionAgeSeconds    sql.NullInt64
-	DefinitionsSource      string
-	MachineReveal          int64
+	ID                      string
+	OrgID                   string
+	Name                    string
+	CreatedAt               string
+	RetentionRevisionCount  sql.NullInt64
+	RetentionAgeSeconds     sql.NullInt64
+	DefinitionsSource       string
+	MachineReveal           int64
+	MachineRevealGeneration int64
 }
 
 type ProjectSchemaRevision struct {

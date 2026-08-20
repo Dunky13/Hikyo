@@ -13,8 +13,8 @@ import (
 	"strings"
 
 	"github.com/Hikyo-Org/hikyo/api/apigen"
-	"github.com/Hikyo-Org/hikyo/internal/compose"
 	"github.com/Hikyo-Org/hikyo/internal/disclose"
+	"github.com/Hikyo-Org/hikyo/internal/dotenv"
 )
 
 // The value verbs (#50): `hikyo values get|set|diff|copy`.
@@ -395,7 +395,10 @@ func runValues(ctx context.Context, ios IO, args []string) error {
 			body.Revision = &revision
 		}
 		var out apigen.ExportedValues
-		if err := client.Do(ctx, http.MethodPost, base+"/values/export", body, &out); err != nil {
+		exportEnv := resolved.Get(DimEnv)
+		if err := ceremony([]string{exportEnv}, func() error {
+			return client.Do(ctx, http.MethodPost, base+"/values/export", body, &out)
+		}); err != nil {
 			return err
 		}
 		if dotenvExport {
@@ -415,11 +418,11 @@ func runValues(ctx context.Context, ios IO, args []string) error {
 // Compose renderer would deliver. Secrets appear only under `--reveal` (the
 // server returns their plaintext then, and the output goes through the print
 // triad because it may carry secret material); without `--reveal` every secret
-// is omitted and their count is reported on stderr. A value carrying a newline
-// cannot be a raw line and is refused by name, exactly as the Compose delivery
-// path refuses it.
+// is omitted and their count is reported on stderr. Values are written through
+// internal/dotenv's quoting encoder, so what `values import --from-dotenv`
+// reads back is byte-exact (surrounding whitespace, quotes, `#`, newlines).
 func exportDotenv(ios IO, out apigen.ExportedValues, reveal bool, deliver disclose.Options) error {
-	var rows []compose.Row
+	var rows []dotenv.Entry
 	omitted := 0
 	for _, item := range out.Items {
 		if item.Value == nil {
@@ -430,9 +433,9 @@ func exportDotenv(ios IO, out apigen.ExportedValues, reveal bool, deliver disclo
 			}
 			continue
 		}
-		rows = append(rows, compose.Row{Name: item.Name, Value: *item.Value})
+		rows = append(rows, dotenv.Entry{Key: item.Name, Value: *item.Value})
 	}
-	content, refusals, err := compose.EncodeRaw(rows)
+	content, refusals, err := dotenv.Encode(rows)
 	if err != nil {
 		return failf(ExitInternal, "encoding the dotenv export: %v", err)
 	}
@@ -442,7 +445,7 @@ func exportDotenv(ios IO, out apigen.ExportedValues, reveal bool, deliver disclo
 			names = append(names, fmt.Sprintf("%s (%s)", r.Key, r.Reason))
 		}
 		return failf(ExitRefused,
-			"hikyo values export --format dotenv: %s cannot be represented as a raw dotenv line; export as json instead",
+			"hikyo values export --format dotenv: %s cannot be represented as a dotenv line; export as json instead",
 			strings.Join(names, ", "))
 	}
 	body := strings.TrimRight(string(content), "\n")
