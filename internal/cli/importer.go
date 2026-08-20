@@ -99,8 +99,10 @@ func runImport(ctx context.Context, ios IO, args []string) error {
 	switch {
 	case *from == "" && *mapping == "":
 		if onTerminal(ios) {
-			return failf(ExitRefused,
-				"the interactive import wizard is not served by this build. Use flag mode or a recorded mapping:\n%s", importUsage)
+			// Wizard: no source arguments on a TTY. The target project is resolved
+			// from the ambient chain (it must pre-exist); the environments are
+			// chosen interactively, so no --environment is required here.
+			return runImportWizard(ctx, ios, c, *outDir)
 		}
 		return failf(ExitUsage, "hikyo import needs --from or --mapping (there is no terminal to prompt on).\n%s", importUsage)
 	case *from != "" && *mapping != "":
@@ -170,20 +172,16 @@ func runImport(ctx context.Context, ios IO, args []string) error {
 		if err != nil {
 			return failf(ExitRefused, "%v", err)
 		}
-		// A multi-environment template is a wizard session's artifact. Replaying
-		// only its first environment would import a fraction of what the human
-		// reviewed and say nothing about the rest, so it is refused by name
-		// until the wizard exists to replay it properly.
-		if len(parsed.Environments) != 1 {
-			return failf(ExitRefused,
-				"this mapping template maps %d environments; an import run targets exactly one "+
-					"(project, environment). Multi-environment sessions are the wizard's, which this build "+
-					"does not serve", len(parsed.Environments))
-		}
+		// A multi-environment template is a wizard session's artifact; the replay
+		// fans the recorded source over every environment it names (§ multi-env
+		// replay below). A single-environment template targets exactly one, the
+		// way flag mode does.
 		template = &parsed
 		source = parsed.Source
 		c.Project = parsed.Project
-		c.Env = parsed.Environments[0].Target
+		if len(parsed.Environments) == 1 {
+			c.Env = parsed.Environments[0].Target
+		}
 		*envSlug = parsed.Scope.EnvSlug
 		if parsed.Scope.FileDigest == "" && (source == "k8s" || source == "vault") {
 			if *file != "" {
@@ -258,6 +256,16 @@ func runImport(ctx context.Context, ios IO, args []string) error {
 	if err != nil {
 		return err
 	}
+
+	// Multi-environment replay fans the one recorded source read over every
+	// environment the template names — presence varies per environment, the
+	// bundle and manifest are one. A conflict the wizard would have resolved
+	// interactively is refused here, non-interactively, by the planner.
+	if template != nil && len(template.Environments) > 1 {
+		return runReplayMultiEnv(ctx, ios, client, project, projectID, source, result, fileDigest,
+			*envSlug, sourcePath, template, candidates, *outDir)
+	}
+
 	envID, err := addressed(resolved, DimEnv, "", "import --environment")
 	if err != nil {
 		return err
@@ -276,19 +284,7 @@ func runImport(ctx context.Context, ios IO, args []string) error {
 		Project:             projectID,
 		Environment:         envID,
 		DefinitionsRevision: occurrences.DefinitionsRevision,
-	}
-	for _, k := range occurrences.Items {
-		row := importer.KeyState{Name: k.Name, Declared: k.Declared, Set: k.Set, Token: k.Token}
-		if k.KeyId != nil {
-			row.ID = *k.KeyId
-		}
-		if k.Classification != nil {
-			row.Classification = string(*k.Classification)
-		}
-		if k.DeclaredType != nil {
-			row.Type = *k.DeclaredType
-		}
-		planIn.State.Keys = append(planIn.State.Keys, row)
+		Keys:                occurrenceKeys(occurrences),
 	}
 
 	plan, err := importer.BuildPlan(planIn)

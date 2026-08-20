@@ -258,6 +258,11 @@ type Result struct {
 	// variable or helper kind). It is reported to the operator, never persisted
 	// in a mapping or manifest.
 	Resolution string
+	// DecodedBytes is how many decoded bytes this read charged. A wizard session
+	// sums it across the fan-out to enforce the aggregate session bound (ops
+	// catalogue: Wizard session aggregate). A single flag/replay read is already
+	// bounded per run and ignores it.
+	DecodedBytes int
 }
 
 // Connector is the in-process connector interface. It is deliberately narrow
@@ -444,8 +449,19 @@ func validateResult(name string, result Result, b *Budget) (Result, error) {
 			"%d value(s) are not UTF-8 text (invalid encoding or a NUL byte); Hikyo values are UTF-8 text: %s",
 			len(binary), strings.Join(binary, ", "))
 	}
+	result.DecodedBytes = b.decoded
 	return result, nil
 }
+
+// The aggregate wizard-session bound (ops catalogue: "Wizard session aggregate",
+// 30 min / 100 MiB). It bounds the whole fan-out of connector reads in one
+// interactive session, over and above each read's own per-run bounds — a
+// session that reads a hundred sources cannot slip a hundred near-cap reads past
+// the per-run caps.
+const (
+	MaxSessionDecodedBytes = 100 << 20
+	SessionDeadline        = 30 * time.Minute
+)
 
 // nonNil renders a nil slice as an empty one before serialization. `[]` says
 // "nothing here"; a JSON null would read as "unknown" for a fact the artifact

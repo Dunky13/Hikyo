@@ -84,9 +84,11 @@ type wizardEnv struct {
 
 // Wizard runs the whole interactive session and returns the authored project
 // plan, or an error (a refusal the human could not resolve, or an aborted
-// session). Project and DefinitionsRevision are the resolved target the CLI
-// supplies; the project must pre-exist (import never creates a project).
-func Wizard(host WizardHost, project string, definitionsRevision int64) (*ProjectPlan, error) {
+// session). The project is the resolved target the CLI supplies; it must
+// pre-exist (import never creates a project). The definitions revision the
+// manifest records is captured from the presence reads (it is project-scoped, so
+// every environment reports the same one) and is informational only.
+func Wizard(host WizardHost, project string) (*ProjectPlan, error) {
 	source, err := wizardSource(host)
 	if err != nil {
 		return nil, err
@@ -109,7 +111,8 @@ func Wizard(host WizardHost, project string, definitionsRevision int64) (*Projec
 	if err := wizardKeyReview(host, source, envs, tmpl); err != nil {
 		return nil, err
 	}
-	if err := wizardPresence(host, source, envs, tmpl); err != nil {
+	definitionsRevision, err := wizardPresence(host, source, envs, tmpl)
+	if err != nil {
 		return nil, err
 	}
 	if err := wizardCollisions(host, envs, tmpl); err != nil {
@@ -164,6 +167,7 @@ func wizardEnvironments(host WizardHost, source string, existing []NamedEnv) ([]
 
 	claimed := map[string]bool{}
 	var envs []wizardEnv
+	sessionDecoded := 0
 	for {
 		add := true
 		if len(envs) > 0 {
@@ -179,6 +183,14 @@ func wizardEnvironments(host WizardHost, source string, existing []NamedEnv) ([]
 		env, err := wizardOneEnvironment(host, source, existing, options, claimed)
 		if err != nil {
 			return nil, err
+		}
+		// The aggregate session bound is enforced across the fan-out, over and
+		// above each read's own per-run caps.
+		sessionDecoded += env.read.Result.DecodedBytes
+		if sessionDecoded > MaxSessionDecodedBytes {
+			return nil, failure(source, CodeBound, "",
+				"the session's reads total %d decoded bytes, exceeding the %d-byte wizard-session aggregate cap",
+				sessionDecoded, MaxSessionDecodedBytes)
 		}
 		envs = append(envs, env)
 	}
@@ -504,7 +516,8 @@ func wizardType(host WizardHost, key string, values []string) (schema.Type, erro
 // wizardPresence performs the per-environment presence read now that the target
 // names, classifications and types are settled. Created environments have no
 // presence read.
-func wizardPresence(host WizardHost, source string, envs []wizardEnv, tmpl *Template) error {
+func wizardPresence(host WizardHost, source string, envs []wizardEnv, tmpl *Template) (int64, error) {
+	var revision int64
 	for i := range envs {
 		if envs[i].create {
 			continue
@@ -513,15 +526,16 @@ func wizardPresence(host WizardHost, source string, envs []wizardEnv, tmpl *Temp
 			Source: source, Records: envs[i].read.Result.Records, Template: tmpl,
 		})
 		if err != nil {
-			return err
+			return 0, err
 		}
 		state, err := host.Presence(envs[i].ref, candidates)
 		if err != nil {
-			return err
+			return 0, err
 		}
 		envs[i].state = state
+		revision = state.DefinitionsRevision
 	}
-	return nil
+	return revision, nil
 }
 
 // wizardCollisions is state 7: per environment, each key already `set` is shown

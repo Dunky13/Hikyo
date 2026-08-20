@@ -71,7 +71,7 @@ func (h *scriptHost) Presence(envID string, cands []PlannedCandidate) (ServerSta
 // undeclaredState mints an undeclared token per candidate, mirroring the server
 // presence read for a project that declares nothing yet.
 func undeclaredState(envID string, cands []PlannedCandidate) ServerState {
-	st := ServerState{Environment: envID}
+	st := ServerState{Environment: envID, DefinitionsRevision: 7}
 	for _, c := range cands {
 		st.Keys = append(st.Keys, KeyState{Name: c.Name, Token: "v1:undeclared-" + c.Name})
 	}
@@ -125,7 +125,7 @@ func TestWizardSingleEnvMatchesFlagRun(t *testing.T) {
 		choose: map[string]int{"source": 1, "Target environment": 0},
 		line:   map[string]string{"Export file path": "export.yaml"},
 	}
-	wiz, err := Wizard(host, "prj_1", 7)
+	wiz, err := Wizard(host, "prj_1")
 	if err != nil {
 		t.Fatalf("wizard: %v", err)
 	}
@@ -193,7 +193,7 @@ func TestWizardFansOutAcrossEnvironments(t *testing.T) {
 	host.confirm["Map another"] = true
 	callHost := &mapAnotherOnce{scriptHost: host}
 
-	wiz, err := Wizard(callHost, "prj_1", 7)
+	wiz, err := Wizard(callHost, "prj_1")
 	if err != nil {
 		t.Fatalf("wizard: %v", err)
 	}
