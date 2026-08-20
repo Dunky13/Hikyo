@@ -54,10 +54,10 @@ const (
 
 // Bound is one row of the registry.
 type Bound struct {
-	Name    string      // the ops-spec name of the bound
-	Spec    string      // its ops-spec / ops-catalogue home
-	Refusal string      // the named refusal it fires, or the clamp/invariant/reason
-	Fixture string      // the test that proves it, or the owner/reason for a pending bound
+	Name    string // the ops-spec name of the bound
+	Spec    string // its ops-spec / ops-catalogue home
+	Refusal string // the named refusal it fires, or the clamp/invariant/reason
+	Fixture string // the test that proves it, or the owner/reason for a pending bound
 	Status  BoundStatus
 }
 
