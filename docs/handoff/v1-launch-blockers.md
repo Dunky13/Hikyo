@@ -31,6 +31,9 @@ motivated it: `docs/handoff/v1-readiness-audit.md`.
 
 ## Not done / follow-ups
 
+- Workload `reveal-history` under a pin (permission-model ADR: "`reveal-history` only where a pin requires it") is not grantable — the pre-existing machine allowlist refuses it outright; this PR only adds the opt-in conjunct at the chokepoint for both disclosure atoms. Follow-up ticket needed.
+- CLI 0-window disclosure ceremony via browser handoff (api-cli-surface ADR § reauth transports): the existing `cli-reauth` flow is adapter-purpose only; generalising it is server + web work. Decision 2 above.
+
 - Codex cross-model review: see `.xreview/launch-blockers-r*.md` (R1–R3 cap); outcome recorded below once complete.
 - Playwright e2e (desktop) run locally: see outcome below.
 - Docker quick path, chart root-key/Ingress, `hikyo init`, field-level error detail: audit option B, not in this PR.
