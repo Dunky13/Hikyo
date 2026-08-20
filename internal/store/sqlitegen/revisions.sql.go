@@ -9,6 +9,33 @@ import (
 	"context"
 )
 
+const countPendingChangesForProjectExcludingCell = `-- name: CountPendingChangesForProjectExcludingCell :one
+SELECT COUNT(*) FROM pending_changes
+WHERE org_id = ? AND project_id = ?
+  AND NOT (environment_id = ? AND key_id = ? AND owner_id = ?)
+`
+
+type CountPendingChangesForProjectExcludingCellParams struct {
+	OrgID         string
+	ProjectID     string
+	EnvironmentID string
+	KeyID         string
+	OwnerID       string
+}
+
+func (q *Queries) CountPendingChangesForProjectExcludingCell(ctx context.Context, arg CountPendingChangesForProjectExcludingCellParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countPendingChangesForProjectExcludingCell,
+		arg.OrgID,
+		arg.ProjectID,
+		arg.EnvironmentID,
+		arg.KeyID,
+		arg.OwnerID,
+	)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countRevisionPinsForProject = `-- name: CountRevisionPinsForProject :one
 SELECT COUNT(*) FROM revision_pins WHERE org_id = ? AND project_id = ?
 `

@@ -11,6 +11,33 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countPendingChangesForProjectExcludingCell = `-- name: CountPendingChangesForProjectExcludingCell :one
+SELECT COUNT(*) FROM pending_changes
+WHERE org_id = $1 AND project_id = $2
+  AND NOT (environment_id = $3 AND key_id = $4 AND owner_id = $5)
+`
+
+type CountPendingChangesForProjectExcludingCellParams struct {
+	OrgID         string
+	ProjectID     string
+	EnvironmentID string
+	KeyID         string
+	OwnerID       string
+}
+
+func (q *Queries) CountPendingChangesForProjectExcludingCell(ctx context.Context, arg CountPendingChangesForProjectExcludingCellParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countPendingChangesForProjectExcludingCell,
+		arg.OrgID,
+		arg.ProjectID,
+		arg.EnvironmentID,
+		arg.KeyID,
+		arg.OwnerID,
+	)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countRevisionPinsForProject = `-- name: CountRevisionPinsForProject :one
 SELECT COUNT(*) FROM revision_pins
 WHERE org_id = $1 AND project_id = $2

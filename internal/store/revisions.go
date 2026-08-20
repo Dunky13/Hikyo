@@ -194,6 +194,13 @@ type PendingRepo interface {
 	// DiscardKey removes every draft referencing one key across the proof's
 	// project, in the transaction that deletes the key.
 	DiscardKey(ctx context.Context, p authz.Proof, keyID string) (int64, error)
+	// CountForProjectExcludingCell counts the project's pending rows other than
+	// the (env, key, owner) cell about to be staged — under the stage proof,
+	// since the count is part of admitting a stage. Stage is delete-then-insert,
+	// so excluding the cell makes the count the size the project would have
+	// AROUND the new row: the caller refuses when it has reached the per-project
+	// pending cap.
+	CountForProjectExcludingCell(ctx context.Context, p authz.Proof, keyID, ownerID string) (int64, error)
 }
 
 // SnapshotReader is the read side of the published state.

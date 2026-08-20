@@ -193,3 +193,8 @@ WHERE org_id = ? AND project_id = ? AND environment_id = ?;
 -- name: DeleteRevisionKeyChangesForEnvironment :execrows
 DELETE FROM revision_key_changes
 WHERE org_id = ? AND project_id = ? AND environment_id = ?;
+
+-- name: CountPendingChangesForProjectExcludingCell :one
+SELECT COUNT(*) FROM pending_changes
+WHERE org_id = ? AND project_id = ?
+  AND NOT (environment_id = ? AND key_id = ? AND owner_id = ?);

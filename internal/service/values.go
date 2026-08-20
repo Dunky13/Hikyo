@@ -51,6 +51,12 @@ import (
 // tag; a second sealed column on this row would take its own.
 const valueFieldTag = "value"
 
+// MaxPendingPerProject is the ops-spec § 8 loud cap on pending versions per
+// project. Per-user working state is separately UNIQUE per (user, project,
+// env, key) by the pending_changes constraint; this bounds the project-wide
+// total so a script cannot flood the draft space.
+const MaxPendingPerProject = 100
+
 // The copy-operation labels for the audit trail: which ergonomic operation a
 // duplication was. The three share one authorization story and must still be
 // distinguishable in the record. They are plain strings — the audit payload's
@@ -483,6 +489,18 @@ func (s *Values) stage(ctx context.Context, actor Actor, scope domain.Scope, key
 		key, err := findKey(ctx, r.Catalogue(), p, keyName)
 		if err != nil {
 			return err
+		}
+		// The per-project pending cap (ops-spec § 8: ≤ 100 pending versions per
+		// project, loud). Counted under the project lock, excluding this cell —
+		// staging is delete-then-insert, so re-staging an existing draft never
+		// grows the count, and only a genuinely new cell can breach the cap.
+		pending, err := r.Pending().CountForProjectExcludingCell(ctx, p, key.ID, string(caller.Principal))
+		if err != nil {
+			return err
+		}
+		if pending >= MaxPendingPerProject {
+			return fmt.Errorf("%w: a project holds at most %d pending changes",
+				domain.ErrLimitExceeded, MaxPendingPerProject)
 		}
 		revision, err := currentRevision(ctx, r, p)
 		if err != nil {
