@@ -137,7 +137,7 @@ func runRevisionDemo(t *testing.T, ios func() cli.IO, org, baseURL string, beare
 			Value *string
 		}
 	}
-	decode(run(append(append([]string{"values", "export"}, envScope...), "-o", "json")...), &exported)
+	decode(run(append(append([]string{"values", "export"}, envScope...), "--format", "json")...), &exported)
 	if exported.Revision != published.Environments[0].Revision {
 		t.Fatalf("export served revision %d, want the one just published (%d)",
 			exported.Revision, published.Environments[0].Revision)

@@ -17,6 +17,7 @@ import (
 	"github.com/Hikyo-Org/hikyo/api/apigen"
 	"github.com/Hikyo-Org/hikyo/internal/definitions"
 	"github.com/Hikyo-Org/hikyo/internal/disclose"
+	"github.com/Hikyo-Org/hikyo/internal/dotenv"
 	"github.com/Hikyo-Org/hikyo/internal/importer"
 )
 
@@ -536,10 +537,11 @@ func validateImportArtifactTargets(values importer.ValuesFile, project, env stri
 // movement rejects those keys by name. Without it, the verb behaves exactly as
 // locked.
 func runValuesImport(ctx context.Context, ios IO, args []string) error {
-	var valuesFile, manifestPath, overwrite, format string
+	var valuesFile, manifestPath, overwrite, format, fromDotenv string
 	st, flags, err := parseCommon("values import", ios, args, func(fs *flag.FlagSet) {
 		fs.StringVar(&format, "o", "table", "output format: table or json")
 		fs.StringVar(&valuesFile, "file", "", "the values file an import authored")
+		fs.StringVar(&fromDotenv, "from-dotenv", "", "a plaintext .env whose values are staged through the strict import path")
 		fs.StringVar(&manifestPath, "manifest", "", "the run manifest to verify as a precondition")
 		fs.StringVar(&overwrite, "overwrite", "",
 			"enumerated keys to overwrite where the environment already has a value, comma-separated")
@@ -554,9 +556,25 @@ func runValuesImport(ctx context.Context, ios IO, args []string) error {
 	if err := flags.checkNoPositionals("values import"); err != nil {
 		return err
 	}
+	// The dotenv leg (source-of-truth ADR § Onboarding under a closed schema): the
+	// same strict, human-only import path, fed from a raw `.env` instead of an
+	// importer-authored artifact. It has no manifest, no precondition, and no
+	// created-environment handling — a `.env` is a flat name→value list — so it is
+	// mutually exclusive with the artifact flags and takes its own path.
+	if fromDotenv != "" {
+		switch {
+		case valuesFile != "":
+			return failf(ExitUsage, "hikyo values import takes --file or --from-dotenv, not both")
+		case manifestPath != "":
+			return failf(ExitUsage, "hikyo values import --from-dotenv takes no --manifest (a .env carries no run manifest)")
+		case overwrite != "":
+			return failf(ExitUsage, "hikyo values import --from-dotenv takes no --overwrite")
+		}
+		return runValuesImportDotenv(ctx, ios, st, flags, f, fromDotenv)
+	}
 	if valuesFile == "" {
 		return failf(ExitUsage,
-			"usage: hikyo values import --env <e> --file <values-file> [--manifest <run-manifest.json>] [--overwrite KEY,KEY]")
+			"usage: hikyo values import --env <e> (--file <values-file> | --from-dotenv <.env>) [--manifest <run-manifest.json>] [--overwrite KEY,KEY]")
 	}
 
 	raw, err := importer.ReadFile(valuesFile)
@@ -783,6 +801,68 @@ func runValuesImport(ctx context.Context, ios IO, args []string) error {
 	}
 	fmt.Fprintf(ios.Stderr, "imported %d value(s); delete %s now that it has landed\n",
 		len(result.Imported), valuesFile)
+	rows := make([][]string, 0, len(result.Imported)+len(result.Skipped))
+	for _, k := range result.Imported {
+		rows = append(rows, []string{k, "imported"})
+	}
+	for _, k := range result.Skipped {
+		rows = append(rows, []string{k, "skipped"})
+	}
+	return Render(ios.Stdout, f, Table{Columns: []string{"KEY", "OUTCOME"}, Rows: rows, JSON: result})
+}
+
+// runValuesImportDotenv stages a raw `.env` through the SAME strict server path
+// `values import` uses. Undeclared keys are rejected by name by the server — the
+// closed schema is not conceded here, since a years-old `.env` is the canonical
+// accumulated-typo case (source-of-truth ADR: `values import --declare` is
+// rejected; the scaffold-then-import path is the sanctioned one). Values never
+// cross argv — only the file path does — and after a successful import the
+// operator is warned that the source `.env` is still plaintext on disk.
+func runValuesImportDotenv(ctx context.Context, ios IO, st *State, flags commonFlags, f Format, path string) error {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return failf(ExitUsage, "reading %s: %v", path, err)
+	}
+	entries, err := dotenv.Parse(raw)
+	if err != nil {
+		return failf(ExitRefused, "%v", err)
+	}
+
+	body := apigen.ImportValuesRequest{}
+	for _, e := range entries {
+		body.Entries = append(body.Entries, struct {
+			Key   apigen.KeyName `json:"key"`
+			Value string         `json:"value"`
+		}{Key: apigen.KeyName(e.Key), Value: e.Value})
+	}
+
+	client, _, resolved, err := authenticatedTarget(st, ios, flags)
+	if err != nil {
+		return err
+	}
+	project, err := projectBase(resolved)
+	if err != nil {
+		return err
+	}
+	env, err := addressed(resolved, DimEnv, flags.Env, "values import")
+	if err != nil {
+		return err
+	}
+
+	var result apigen.ImportValuesResult
+	if err := client.Do(ctx, http.MethodPost,
+		project+"/environments/"+url.PathEscape(env)+"/values/import", body, &result); err != nil {
+		return err
+	}
+	warnFindings(ios, result.Findings)
+	if len(result.Skipped) > 0 {
+		sorted := append([]string{}, result.Skipped...)
+		sort.Strings(sorted)
+		fmt.Fprintf(ios.Stderr, "skipped (already set): %s\n", strings.Join(sorted, ", "))
+	}
+	fmt.Fprintf(ios.Stderr,
+		"imported %d value(s); the source .env at %s is still plaintext on disk — delete it now that the values have landed\n",
+		len(result.Imported), path)
 	rows := make([][]string, 0, len(result.Imported)+len(result.Skipped))
 	for _, k := range result.Imported {
 		rows = append(rows, []string{k, "imported"})
