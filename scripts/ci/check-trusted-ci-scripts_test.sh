@@ -4,21 +4,29 @@ set -eu
 script_dir=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 workflow="$script_dir/../../.github/workflows/ci.yml"
 controller="$script_dir/../../.github/workflows/ci-control.yml"
+# Out-of-band fuzz reporting moved to its own trusted base-context workflow
+# (#189): ci.yml / ci-control.yml execute untrusted PR code and hold no
+# issue/PR write, while fuzz-report.yml runs on workflow_run completion in the
+# base context and is the sole holder of write authority.
+reporter="$script_dir/../../.github/workflows/fuzz-report.yml"
 
-require_workflow_line() {
-	expected=$1
-	if ! grep -F -- "$expected" "$workflow" >/dev/null; then
-		printf 'trusted CI scripts fixture failed: missing %s\n' "$expected" >&2
+require_line() {
+	file=$1
+	expected=$2
+	if ! grep -F -- "$expected" "$file" >/dev/null; then
+		printf 'trusted CI scripts fixture failed: missing %s in %s\n' "$expected" "$(basename "$file")" >&2
 		exit 1
 	fi
 }
 
-require_workflow_line "git show \"\$BASE_SHA:scripts/ci/classify-changed-paths.sh\" >\"\$trusted_classifier\""
-require_workflow_line "\"\$trusted_classifier\" --files"
-require_workflow_line "git show \"\$BASE_SHA:scripts/ci/check-required-jobs.sh\" >\"\$trusted_checker\""
-require_workflow_line "\"\$trusted_checker\" \"\$GITHUB_EVENT_NAME\" \"\$NEEDS_JSON\" \"\$PLAN_JSON\""
-require_workflow_line 'name: Upload minimized fuzz reproducers'
-require_workflow_line './scripts/ci/report-fuzz-finding.sh main'
+# The reusable validation graph runs untrusted PR code through base-controlled
+# trusted scripts (fetched at BASE_SHA) and uploads the fuzz reproducers as an
+# artifact the trusted reporter re-validates.
+require_line "$workflow" "git show \"\$BASE_SHA:scripts/ci/classify-changed-paths.sh\" >\"\$trusted_classifier\""
+require_line "$workflow" "\"\$trusted_classifier\" --files"
+require_line "$workflow" "git show \"\$BASE_SHA:scripts/ci/check-required-jobs.sh\" >\"\$trusted_checker\""
+require_line "$workflow" "\"\$trusted_checker\" \"\$GITHUB_EVENT_NAME\" \"\$NEEDS_JSON\" \"\$PLAN_JSON\""
+require_line "$workflow" 'name: Upload minimized fuzz reproducers'
 
 if grep -Eq '^[[:space:]]+pull_request:' "$workflow"; then
 	printf 'trusted CI scripts fixture failed: direct pull-request trigger is enabled\n' >&2
@@ -29,25 +37,49 @@ if ! grep -F 'pull_request_target:' "$controller" >/dev/null ||
 	printf 'trusted CI scripts fixture failed: base-controlled entrypoint is missing\n' >&2
 	exit 1
 fi
-validation_block=$(sed -n '/^  validation:/,/^  classify-fuzz-findings:/p' "$controller")
-classification_block=$(sed -n '/^  classify-fuzz-findings:/,/^  report-fuzz-failure:/p' "$controller")
-reporter_block=$(sed -n '/^  report-fuzz-failure:/,/^  ci-required:/p' "$controller")
-fuzz_block=$(sed -n '/^  fuzz:/,/^  report-main-fuzz-failure:/p' "$workflow")
-main_reporter_block=$(sed -n '/^  report-main-fuzz-failure:/,/^  headline-guarantee:/p' "$workflow")
-if printf '%s\n' "$validation_block" | grep -E '(issues|pull-requests): write' >/dev/null ||
-	printf '%s\n' "$classification_block" | grep -E '(issues|pull-requests): write' >/dev/null ||
-	printf '%s\n' "$fuzz_block" | grep -E '(issues|pull-requests): write' >/dev/null; then
-	printf 'trusted CI scripts fixture failed: untrusted validation received issue writes\n' >&2
-	exit 1
-fi
-if ! grep -F "ref: \${{ github.event.pull_request.base.sha }}" "$controller" >/dev/null ||
-	! printf '%s\n' "$reporter_block" | grep -F 'issues: write' >/dev/null ||
-	! printf '%s\n' "$reporter_block" | grep -F 'pull-requests: write' >/dev/null ||
-	! printf '%s\n' "$main_reporter_block" | grep -F 'issues: write' >/dev/null ||
-	! grep -F "FUZZ_CLASSIFICATION: \${{ needs.classify-fuzz-findings.outputs.classification }}" "$controller" >/dev/null ||
-	! grep -F "./scripts/ci/report-fuzz-finding.sh \"PR #\${{ github.event.pull_request.number }}\"" "$controller" >/dev/null; then
-	printf 'trusted CI scripts fixture failed: trusted fuzz reporter is missing\n' >&2
+
+# The untrusted validation graph (ci.yml, ci-control.yml) holds NO issue/PR write
+# anywhere: executing attacker-influenced PR code must never reach a write token.
+if grep -Eq '(issues|pull-requests): write' "$workflow" ||
+	grep -Eq '(issues|pull-requests): write' "$controller"; then
+	printf 'trusted CI scripts fixture failed: untrusted validation graph received issue/PR writes\n' >&2
 	exit 1
 fi
 
-printf 'trusted CI scripts fixture: base workflow owns PR orchestration, gate logic, and issue writes\n'
+# The trusted reporter runs out of band on workflow_run completion, never as a
+# direct pull_request(_target) job, and binds PR identity ONLY to GitHub-owned
+# workflow_run metadata — never to an artifact an untrusted PR job could forge.
+if ! grep -Eq '^  workflow_run:' "$reporter"; then
+	printf 'trusted CI scripts fixture failed: reporter is not a workflow_run job\n' >&2
+	exit 1
+fi
+if grep -Eq '^[[:space:]]+pull_request(_target)?:' "$reporter"; then
+	printf 'trusted CI scripts fixture failed: reporter carries a direct pull-request trigger\n' >&2
+	exit 1
+fi
+require_line "$reporter" 'github.event.workflow_run.pull_requests'
+
+# The read-only classify job replays untrusted reproducers against the trusted
+# base and holds no write; only the report jobs hold write. report-pr routes a
+# PR finding (issues + PR write), report-main opens a repository issue for a main
+# push (issues write). Both post through the base-controlled trusted script.
+classify_block=$(sed -n '/^  classify:/,/^  report-pr:/p' "$reporter")
+report_pr_block=$(sed -n '/^  report-pr:/,/^  report-main:/p' "$reporter")
+report_main_block=$(sed -n '/^  report-main:/,$p' "$reporter")
+if printf '%s\n' "$classify_block" | grep -Eq '(issues|pull-requests): write'; then
+	printf 'trusted CI scripts fixture failed: read-only classify job received issue/PR writes\n' >&2
+	exit 1
+fi
+if ! printf '%s\n' "$report_pr_block" | grep -F 'issues: write' >/dev/null ||
+	! printf '%s\n' "$report_pr_block" | grep -F 'pull-requests: write' >/dev/null ||
+	! printf '%s\n' "$report_pr_block" | grep -F './scripts/ci/report-fuzz-finding.sh "PR #' >/dev/null; then
+	printf 'trusted CI scripts fixture failed: trusted PR fuzz reporter is missing\n' >&2
+	exit 1
+fi
+if ! printf '%s\n' "$report_main_block" | grep -F 'issues: write' >/dev/null ||
+	! printf '%s\n' "$report_main_block" | grep -F './scripts/ci/report-fuzz-finding.sh main' >/dev/null; then
+	printf 'trusted CI scripts fixture failed: trusted main fuzz reporter is missing\n' >&2
+	exit 1
+fi
+
+printf 'trusted CI scripts fixture: untrusted validation graph holds no writes; the out-of-band reporter owns PR binding and issue writes\n'

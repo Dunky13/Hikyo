@@ -242,6 +242,60 @@ func (q *Queries) ListValueEntries(ctx context.Context, arg ListValueEntriesPara
 	return items, nil
 }
 
+const listValueEntriesForReencrypt = `-- name: ListValueEntriesForReencrypt :many
+SELECT id, environment_id, key_id, ciphertext FROM value_entries
+WHERE org_id = $1 AND project_id = $2
+  AND id > $3
+ORDER BY id LIMIT $4
+`
+
+type ListValueEntriesForReencryptParams struct {
+	ChainOrgID     string
+	ChainProjectID string
+	Cursor         string
+	PageLimit      int32
+}
+
+type ListValueEntriesForReencryptRow struct {
+	ID            string
+	EnvironmentID string
+	KeyID         string
+	Ciphertext    []byte
+}
+
+// ListValueEntriesForReencrypt pages a project's entire value set by id (keyset
+// cursor) so reencrypt walks it in fixed chunks. It spans every environment: a
+// DEK covers the whole project. id > ” returns the first page.
+func (q *Queries) ListValueEntriesForReencrypt(ctx context.Context, arg ListValueEntriesForReencryptParams) ([]ListValueEntriesForReencryptRow, error) {
+	rows, err := q.db.Query(ctx, listValueEntriesForReencrypt,
+		arg.ChainOrgID,
+		arg.ChainProjectID,
+		arg.Cursor,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListValueEntriesForReencryptRow
+	for rows.Next() {
+		var i ListValueEntriesForReencryptRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.EnvironmentID,
+			&i.KeyID,
+			&i.Ciphertext,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listValueEnvironmentsForKey = `-- name: ListValueEnvironmentsForKey :many
 SELECT environment_id FROM value_entries
 WHERE org_id = $1 AND project_id = $2
@@ -276,4 +330,37 @@ func (q *Queries) ListValueEnvironmentsForKey(ctx context.Context, arg ListValue
 		return nil, err
 	}
 	return items, nil
+}
+
+const reencryptValueEntry = `-- name: ReencryptValueEntry :execrows
+UPDATE value_entries SET ciphertext = $1
+WHERE org_id = $2 AND project_id = $3
+  AND id = $4 AND ciphertext = $5
+`
+
+type ReencryptValueEntryParams struct {
+	NewCiphertext  []byte
+	ChainOrgID     string
+	ChainProjectID string
+	ID             string
+	OldCiphertext  []byte
+}
+
+// ReencryptValueEntry re-seals one value row's ciphertext in place. The id (and
+// thus the AAD) is unchanged -- only the DEK version moves -- so this is exempt
+// from the delete-then-insert-with-fresh-id rule that governs value CHANGES.
+// Compare-and-swap on the old ciphertext: if a concurrent write replaced it, the
+// row is already on a fresh version and this matches zero rows (anti-resurrection).
+func (q *Queries) ReencryptValueEntry(ctx context.Context, arg ReencryptValueEntryParams) (int64, error) {
+	result, err := q.db.Exec(ctx, reencryptValueEntry,
+		arg.NewCiphertext,
+		arg.ChainOrgID,
+		arg.ChainProjectID,
+		arg.ID,
+		arg.OldCiphertext,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

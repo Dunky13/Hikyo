@@ -62,6 +62,18 @@ func parseHeader(record []byte) (header, int, error) {
 	return h, pos, nil
 }
 
+// RecordKeyVersion reports the wrapping-key version named in a record's
+// authenticated header, without opening it. reencrypt reads it to decide
+// whether a row is already on the active DEK version (skip) or still on a
+// superseded one (re-seal). A malformed or unknown-format header is an error.
+func RecordKeyVersion(record []byte) (uint32, error) {
+	h, _, err := parseHeader(record)
+	if err != nil {
+		return 0, err
+	}
+	return h.keyVersion, nil
+}
+
 func readLP(buf []byte, pos int) ([]byte, int, error) {
 	if pos+4 > len(buf) {
 		return nil, 0, ErrDecrypt

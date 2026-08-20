@@ -321,6 +321,9 @@ func (s *Providers) Put(ctx context.Context, actor Actor, slug string, in Provid
 	return out, nil
 }
 
+// fence:delegated — returns the sealed secret and its instance DEK version to
+// create/update, which fence on that version (fenceInstanceVersion) in the
+// write transaction before the provider row is written.
 func (s *Providers) sealSecret(providerID, secret string) ([]byte, int64, error) {
 	sealer := s.Keyring.ForInstance()
 	sealed, err := sealer.SealField(providerSecretAAD(providerID), []byte(secret))
@@ -346,6 +349,11 @@ func (s *Providers) create(ctx context.Context, r store.Repos, az *authz.TxAutho
 		JITPolicy: in.JITPolicy, AssurancePolicy: in.AssurancePolicy, Enabled: in.Enabled,
 		DEKVersion: dek, CreatedAt: now, UpdatedAt: now,
 	}
+	// Writer fence (invariant 7): refuse if a rotate-dek --instance retired the
+	// version the secret was sealed under since sealSecret snapshotted it.
+	if err := fenceInstanceVersion(ctx, r, p, uint32(dek)); err != nil {
+		return err
+	}
 	if err := az.CreateProvider(ctx, prov); err != nil {
 		return err
 	}
@@ -370,6 +378,11 @@ func (s *Providers) update(ctx context.Context, r store.Repos, az *authz.TxAutho
 		Scopes: in.Scopes, RedirectURI: s.redirectURI(existing.Slug),
 		JITPolicy: in.JITPolicy, AssurancePolicy: in.AssurancePolicy, Enabled: in.Enabled,
 		DEKVersion: dek, RowVersion: existing.RowVersion, UpdatedAt: s.now(),
+	}
+	// Writer fence (invariant 7): refuse a secret sealed under a version a
+	// concurrent rotate-dek --instance retired.
+	if err := fenceInstanceVersion(ctx, r, p, uint32(dek)); err != nil {
+		return err
 	}
 	swapped, err := az.UpdateProvider(ctx, upd)
 	if err != nil {

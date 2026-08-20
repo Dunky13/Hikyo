@@ -359,6 +359,12 @@ func (s *Auth) EnrolTOTPStart(ctx context.Context, presented, password string) (
 		if err := az.ClearPendingTOTP(ctx, account.ID); err != nil {
 			return err
 		}
+		// Writer fence (invariant 7): refuse if a rotate-dek --instance retired
+		// the version the seed was sealed under. This INSERT has no row_version
+		// CAS, so the fence is the only guard against stranding it.
+		if err := az.AssertActiveInstanceDEKVersion(ctx, int64(sealer.Version())); err != nil {
+			return err
+		}
 		return az.CreateTOTP(ctx, authz.NewTOTPCredential{
 			ID: totpID, AccountID: account.ID, Seed: sealed,
 			DEKVersion: int64(sealer.Version()), CredentialEpoch: liveEpoch,
@@ -875,6 +881,12 @@ func (s *Auth) GenerateRecoveryCodes(ctx context.Context, presented, proof strin
 			AccountID: account.ID, Batch: sealed,
 			DEKVersion: int64(sealer.Version()), CredentialEpoch: epoch,
 		}
+		// Writer fence (invariant 7): refuse if a rotate-dek --instance retired
+		// the version the batch was sealed under. The first-batch WriteRecoveryCodes
+		// is a bare INSERT with no row_version CAS, so the fence is its only guard.
+		if err := az.AssertActiveInstanceDEKVersion(ctx, int64(sealer.Version())); err != nil {
+			return err
+		}
 		if hasBatch {
 			batch.RowVersion = existing.RowVersion
 			swapped, err := az.ReplaceRecoveryCodes(ctx, batch, now)
@@ -1122,6 +1134,11 @@ func (s *Auth) attemptRecovery(ctx context.Context, username, code string) (Reco
 		if err != nil {
 			return err
 		}
+		// Writer fence (invariant 7): refuse if a rotate-dek --instance retired
+		// the version the pruned batch was sealed under.
+		if err := az.AssertActiveInstanceDEKVersion(ctx, int64(sealer.Version())); err != nil {
+			return err
+		}
 		swapped, err := az.ReplaceRecoveryCodes(ctx, authz.RecoveryBatch{
 			AccountID: account.ID, Batch: sealed, DEKVersion: int64(sealer.Version()),
 			CredentialEpoch: liveEpoch, RowVersion: live.RowVersion,
@@ -1250,6 +1267,10 @@ func zeroVerifiers(vs [][]byte) {
 // not distinguishable from a match by the dominant crypto cost (finding
 // MEDIUM-6). The batch is sealed once; if that ever fails the scan still runs
 // against an in-memory dummy so the path never becomes observably cheaper.
+//
+// fence:exempt — the sealed dummy batch is held in memory for timing only and
+// is NEVER written to any table, so no writer fence applies (there is no row to
+// strand under a rotated DEK version).
 func (s *Auth) burnRecoveryMatch(ctx context.Context, code string) {
 	s.dummyRecoveryOnce.Do(func() {
 		_, verifiers, err := crypto.GenerateRecoveryBatch(RecoveryBatchSize)

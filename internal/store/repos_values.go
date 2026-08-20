@@ -96,6 +96,41 @@ func (r sqliteValues) List(ctx context.Context, p authz.Proof) ([]ValueEntry, er
 	return out, nil
 }
 
+func (r sqliteValues) ListForReencrypt(ctx context.Context, p authz.Proof, cursor string, limit int) ([]ReencryptValueRow, error) {
+	chain, err := authz.Verify(p, authz.StoreValuesListForReencrypt, r.tok)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.q.ListValueEntriesForReencrypt(ctx, sqlitegen.ListValueEntriesForReencryptParams{
+		OrgID: string(chain.Org), ProjectID: string(chain.Project), ID: cursor, Limit: int64(limit),
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ReencryptValueRow, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, ReencryptValueRow{
+			ID: row.ID, EnvironmentID: row.EnvironmentID, KeyID: row.KeyID, Ciphertext: row.Ciphertext,
+		})
+	}
+	return out, nil
+}
+
+func (r sqliteValues) Reencrypt(ctx context.Context, p authz.Proof, id string, newCiphertext, oldCiphertext []byte) (bool, error) {
+	chain, err := authz.Verify(p, authz.StoreValuesReencrypt, r.tok)
+	if err != nil {
+		return false, err
+	}
+	n, err := r.q.ReencryptValueEntry(ctx, sqlitegen.ReencryptValueEntryParams{
+		Ciphertext: newCiphertext, OrgID: string(chain.Org), ProjectID: string(chain.Project),
+		ID: id, Ciphertext_2: oldCiphertext,
+	})
+	if err != nil {
+		return false, err
+	}
+	return n == 1, nil
+}
+
 func (r sqliteValues) EnvironmentsWithValue(ctx context.Context, p authz.Proof, keyID string) ([]string, error) {
 	chain, err := authz.Verify(p, authz.StoreValuesEnvironmentsWithValue, r.tok)
 	if err != nil {
@@ -277,6 +312,42 @@ func (r pgValues) List(ctx context.Context, p authz.Proof) ([]ValueEntry, error)
 		out = append(out, valueFromPG(row))
 	}
 	return out, nil
+}
+
+func (r pgValues) ListForReencrypt(ctx context.Context, p authz.Proof, cursor string, limit int) ([]ReencryptValueRow, error) {
+	chain, err := authz.Verify(p, authz.StoreValuesListForReencrypt, r.tok)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.q.ListValueEntriesForReencrypt(ctx, pggen.ListValueEntriesForReencryptParams{
+		ChainOrgID: string(chain.Org), ChainProjectID: string(chain.Project),
+		Cursor: cursor, PageLimit: int32(limit),
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ReencryptValueRow, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, ReencryptValueRow{
+			ID: row.ID, EnvironmentID: row.EnvironmentID, KeyID: row.KeyID, Ciphertext: row.Ciphertext,
+		})
+	}
+	return out, nil
+}
+
+func (r pgValues) Reencrypt(ctx context.Context, p authz.Proof, id string, newCiphertext, oldCiphertext []byte) (bool, error) {
+	chain, err := authz.Verify(p, authz.StoreValuesReencrypt, r.tok)
+	if err != nil {
+		return false, err
+	}
+	n, err := r.q.ReencryptValueEntry(ctx, pggen.ReencryptValueEntryParams{
+		NewCiphertext: newCiphertext, ChainOrgID: string(chain.Org), ChainProjectID: string(chain.Project),
+		ID: id, OldCiphertext: oldCiphertext,
+	})
+	if err != nil {
+		return false, err
+	}
+	return n == 1, nil
 }
 
 func (r pgValues) EnvironmentsWithValue(ctx context.Context, p authz.Proof, keyID string) ([]string, error) {

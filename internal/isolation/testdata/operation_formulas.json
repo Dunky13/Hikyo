@@ -181,6 +181,46 @@
     ]
   },
   {
+    "operation": "crypto.reencrypt-instance",
+    "class": "instance",
+    "level": "instance",
+    "formula": [
+      "reencrypt@instance"
+    ]
+  },
+  {
+    "operation": "crypto.reencrypt-project",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "reencrypt@instance"
+    ]
+  },
+  {
+    "operation": "crypto.rotate-dek",
+    "class": "instance",
+    "level": "instance",
+    "formula": [
+      "rotate-dek@instance"
+    ]
+  },
+  {
+    "operation": "crypto.rotate-master-key",
+    "class": "instance",
+    "level": "instance",
+    "formula": [
+      "rotate-master-key@instance"
+    ]
+  },
+  {
+    "operation": "crypto.rotate-root-key",
+    "class": "instance",
+    "level": "instance",
+    "formula": [
+      "rotate-root-key@instance"
+    ]
+  },
+  {
     "operation": "crypto.rotate-scanning-key",
     "class": "instance",
     "level": "instance",

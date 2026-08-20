@@ -1065,6 +1065,68 @@ export type ExportedValue = {
     value?: string;
 };
 
+export type RotateDekRequest = {
+    /**
+     * `project` rotates one project's DEK (org and project required);
+     * `instance` rotates the instance DEK for rows belonging to no project.
+     *
+     */
+    scope: 'project' | 'instance';
+    /**
+     * Organisation id. Required when scope is `project`, absent otherwise.
+     */
+    org?: string;
+    /**
+     * Project id. Required when scope is `project`, absent otherwise.
+     */
+    project?: string;
+};
+
+export type DekRotation = {
+    scope: 'project' | 'instance';
+    org?: string;
+    project?: string;
+    /**
+     * The new active DEK version. Old versions remain readable until reencrypt.
+     */
+    key_version: number;
+};
+
+export type RotateRootKeyRequest = {
+    /**
+     * `prepare` seals the master under the new root; `verify` confirms the
+     * operator installed it at the primary source; `finalize` retires the
+     * old wrapper. Run in that order.
+     *
+     */
+    phase: 'prepare' | 'verify' | 'finalize';
+};
+
+export type RootKeyRotation = {
+    phase: 'prepare' | 'verify' | 'finalize';
+    /**
+     * The epoch this phase concerns — the new epoch for prepare/verify, the surviving epoch after finalize.
+     */
+    root_key_epoch: number;
+};
+
+export type ReencryptResult = {
+    scope: 'project' | 'instance';
+    org?: string;
+    project?: string;
+    /**
+     * How many ciphertext rows this run moved onto the active DEK version.
+     */
+    rows_moved: number;
+};
+
+export type MasterKeyRotation = {
+    /**
+     * The new master key version. Every tier-3 key is now wrapped under it.
+     */
+    key_version: number;
+};
+
 export type TokenKeyRotation = {
     /**
      * The new root token key version. Operator bookkeeping only - the
@@ -17093,6 +17155,288 @@ export type RotateTokenKeyResponses = {
 };
 
 export type RotateTokenKeyResponse = RotateTokenKeyResponses[keyof RotateTokenKeyResponses];
+
+export type RotateDekData = {
+    body: RotateDekRequest;
+    path?: never;
+    query?: never;
+    url: '/api/v1/instance/rotate-dek';
+};
+
+export type RotateDekErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type RotateDekError = RotateDekErrors[keyof RotateDekErrors];
+
+export type RotateDekResponses = {
+    /**
+     * The rotation.
+     */
+    200: DekRotation;
+};
+
+export type RotateDekResponse = RotateDekResponses[keyof RotateDekResponses];
+
+export type ReencryptInstanceData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/instance/reencrypt';
+};
+
+export type ReencryptInstanceErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type ReencryptInstanceError = ReencryptInstanceErrors[keyof ReencryptInstanceErrors];
+
+export type ReencryptInstanceResponses = {
+    /**
+     * The reencrypt result.
+     */
+    200: ReencryptResult;
+};
+
+export type ReencryptInstanceResponse = ReencryptInstanceResponses[keyof ReencryptInstanceResponses];
+
+export type RotateMasterKeyData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/instance/rotate-master-key';
+};
+
+export type RotateMasterKeyErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type RotateMasterKeyError = RotateMasterKeyErrors[keyof RotateMasterKeyErrors];
+
+export type RotateMasterKeyResponses = {
+    /**
+     * The rotation.
+     */
+    200: MasterKeyRotation;
+};
+
+export type RotateMasterKeyResponse = RotateMasterKeyResponses[keyof RotateMasterKeyResponses];
+
+export type RotateRootKeyData = {
+    body: RotateRootKeyRequest;
+    path?: never;
+    query?: never;
+    url: '/api/v1/instance/rotate-root-key';
+};
+
+export type RotateRootKeyErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type RotateRootKeyError = RotateRootKeyErrors[keyof RotateRootKeyErrors];
+
+export type RotateRootKeyResponses = {
+    /**
+     * The phase result.
+     */
+    200: RootKeyRotation;
+};
+
+export type RotateRootKeyResponse = RotateRootKeyResponses[keyof RotateRootKeyResponses];
+
+export type ReencryptProjectData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/reencrypt';
+};
+
+export type ReencryptProjectErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type ReencryptProjectError = ReencryptProjectErrors[keyof ReencryptProjectErrors];
+
+export type ReencryptProjectResponses = {
+    /**
+     * The reencrypt result.
+     */
+    200: ReencryptResult;
+};
+
+export type ReencryptProjectResponse = ReencryptProjectResponses[keyof ReencryptProjectResponses];
 
 export type RotateScanningKeyData = {
     body?: never;

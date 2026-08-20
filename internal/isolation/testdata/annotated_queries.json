@@ -1027,9 +1027,27 @@
   },
   {
     "engine": "postgres",
+    "name": "ListOidcProvidersForReencrypt",
+    "annotation": "authn-resolution",
+    "hash": "b5359d612f0ff91290b7188db97f939e0f2b29dfe516aee2dc4f920fce1d669e"
+  },
+  {
+    "engine": "postgres",
     "name": "ListOrgs",
     "annotation": "instance-scoped",
     "hash": "91cbdac399e1cb40a41409e8b9e4341ce99d84004a6db7a35f0248bbc8516045"
+  },
+  {
+    "engine": "postgres",
+    "name": "ListPasswordCredsForReencrypt",
+    "annotation": "authn-resolution",
+    "hash": "e7a15ddf11fb2cec3d152f62218af861cfa158a0b575faf6b010b89e52396c7d"
+  },
+  {
+    "engine": "postgres",
+    "name": "ListRecoveryCodesForReencrypt",
+    "annotation": "authn-resolution",
+    "hash": "a7a14fc8bea73a38860b072af45c62beec749bd54ffd9783ba20fcaf5ab790c5"
   },
   {
     "engine": "postgres",
@@ -1042,6 +1060,12 @@
     "name": "ListRemotes",
     "annotation": "instance-scoped",
     "hash": "a34a26d3d1efa537ef9ce54d82a3409ec901784aa84cb033244abeb4628a4411"
+  },
+  {
+    "engine": "postgres",
+    "name": "ListRemotesForReencrypt",
+    "annotation": "instance-scoped",
+    "hash": "d864b9c15732b8bbf47781b3c320e9d7a059d30ac530e12e12074379ff94b5aa"
   },
   {
     "engine": "postgres",
@@ -1063,6 +1087,12 @@
   },
   {
     "engine": "postgres",
+    "name": "ListSamlKeysForReencrypt",
+    "annotation": "authn-resolution",
+    "hash": "121e73ffd3087370c6bcadd0f6db29145adc9abf72278b115453027300585e96"
+  },
+  {
+    "engine": "postgres",
     "name": "ListServiceAccounts",
     "annotation": "authn-resolution",
     "hash": "6e2c462b123e4db1dc3bf0f2f18c55cc23417f2e3ceff9439222e4d06462f2c0"
@@ -1072,6 +1102,12 @@
     "name": "ListSessionsForPrincipal",
     "annotation": "authn-resolution",
     "hash": "10fbed34cef07c89220b201eae3fe1a1882ddb5c3db84e2e4f48a5e289b28f42"
+  },
+  {
+    "engine": "postgres",
+    "name": "ListTotpCredsForReencrypt",
+    "annotation": "authn-resolution",
+    "hash": "f9a97e912d46b2ef0e6c11dd47c87870e0e8c6e281ff5d597ae4a33b38381951"
   },
   {
     "engine": "postgres",
@@ -1186,6 +1222,42 @@
     "name": "RecordRemoteFetchFailure",
     "annotation": "instance-scoped",
     "hash": "201e65b37b33b477600d302ef11bd313ff454839f390aa443e5e669fec2e0a7a"
+  },
+  {
+    "engine": "postgres",
+    "name": "ReencryptOidcProvider",
+    "annotation": "authn-resolution",
+    "hash": "ff887e781c1235ae95a34ab24b21c652782611032382c5a97bfa441d2c02b74d"
+  },
+  {
+    "engine": "postgres",
+    "name": "ReencryptPasswordCred",
+    "annotation": "authn-resolution",
+    "hash": "a52ab6c3f463b2287608749032f766d8e7f02cac5790dc73f099ad7eb24475bf"
+  },
+  {
+    "engine": "postgres",
+    "name": "ReencryptRecoveryCodes",
+    "annotation": "authn-resolution",
+    "hash": "12ecf72366cc877f11e3557d71f0aea8df1620b0cba09bb2478627764b43aecc"
+  },
+  {
+    "engine": "postgres",
+    "name": "ReencryptRemote",
+    "annotation": "instance-scoped",
+    "hash": "5dae8faf051dbd661c65399c3dd24a8e992baf2a19dd899490bb86ca241835d7"
+  },
+  {
+    "engine": "postgres",
+    "name": "ReencryptSamlKey",
+    "annotation": "authn-resolution",
+    "hash": "91dcc96080d7d93ee4d48c4246bc9dee6bc32dc70fc5d6bd894d50a333ff4d80"
+  },
+  {
+    "engine": "postgres",
+    "name": "ReencryptTotpCred",
+    "annotation": "authn-resolution",
+    "hash": "b7476c443aa3bb63f054cd1bda8ab6729b587c0879e7b45f295637adf5dd0b9a"
   },
   {
     "engine": "postgres",
@@ -2389,9 +2461,27 @@
   },
   {
     "engine": "sqlite",
+    "name": "ListOidcProvidersForReencrypt",
+    "annotation": "authn-resolution",
+    "hash": "0df9d463d9a4c8cd88e4f194352647544bdd81502c21186a90b2698efaf9a331"
+  },
+  {
+    "engine": "sqlite",
     "name": "ListOrgs",
     "annotation": "instance-scoped",
     "hash": "91cbdac399e1cb40a41409e8b9e4341ce99d84004a6db7a35f0248bbc8516045"
+  },
+  {
+    "engine": "sqlite",
+    "name": "ListPasswordCredsForReencrypt",
+    "annotation": "authn-resolution",
+    "hash": "d05b767efd734b08508c8612835cc67d775d786fad8ccef6c6cd4b4cecd1afc6"
+  },
+  {
+    "engine": "sqlite",
+    "name": "ListRecoveryCodesForReencrypt",
+    "annotation": "authn-resolution",
+    "hash": "74c4977eccce71aec43a5beab43648e6954173581a755903760695bb13b55ae7"
   },
   {
     "engine": "sqlite",
@@ -2404,6 +2494,12 @@
     "name": "ListRemotes",
     "annotation": "instance-scoped",
     "hash": "a34a26d3d1efa537ef9ce54d82a3409ec901784aa84cb033244abeb4628a4411"
+  },
+  {
+    "engine": "sqlite",
+    "name": "ListRemotesForReencrypt",
+    "annotation": "instance-scoped",
+    "hash": "9bc3059a38342b98e99d557017a461f3f2e520eaef6e6b6107e68bd8b73e4dcf"
   },
   {
     "engine": "sqlite",
@@ -2425,6 +2521,12 @@
   },
   {
     "engine": "sqlite",
+    "name": "ListSamlKeysForReencrypt",
+    "annotation": "authn-resolution",
+    "hash": "c5b409d365b37093c0f03c3535f01735530a1cb15eea1e03d9722d3345936623"
+  },
+  {
+    "engine": "sqlite",
     "name": "ListServiceAccounts",
     "annotation": "authn-resolution",
     "hash": "38eadb7b55b69f037445fca03be3286eb89eaec8e0f1249992e44b6c2cab5159"
@@ -2434,6 +2536,12 @@
     "name": "ListSessionsForPrincipal",
     "annotation": "authn-resolution",
     "hash": "99b234b5ff1eb47a8e98779309de76763e080bf519ade4fdbab4d7ce8bc1333c"
+  },
+  {
+    "engine": "sqlite",
+    "name": "ListTotpCredsForReencrypt",
+    "annotation": "authn-resolution",
+    "hash": "039c419ba16abddf6377e77a60bd75086c6b59027e988ffaeceef6b40d1c3fdc"
   },
   {
     "engine": "sqlite",
@@ -2548,6 +2656,42 @@
     "name": "RecordRemoteFetchFailure",
     "annotation": "instance-scoped",
     "hash": "bbe2a990f915f7aabfd728a4b5b7f49b1d4eb92c14730fef146dcdca20cd0f9f"
+  },
+  {
+    "engine": "sqlite",
+    "name": "ReencryptOidcProvider",
+    "annotation": "authn-resolution",
+    "hash": "ff887e781c1235ae95a34ab24b21c652782611032382c5a97bfa441d2c02b74d"
+  },
+  {
+    "engine": "sqlite",
+    "name": "ReencryptPasswordCred",
+    "annotation": "authn-resolution",
+    "hash": "a52ab6c3f463b2287608749032f766d8e7f02cac5790dc73f099ad7eb24475bf"
+  },
+  {
+    "engine": "sqlite",
+    "name": "ReencryptRecoveryCodes",
+    "annotation": "authn-resolution",
+    "hash": "12ecf72366cc877f11e3557d71f0aea8df1620b0cba09bb2478627764b43aecc"
+  },
+  {
+    "engine": "sqlite",
+    "name": "ReencryptRemote",
+    "annotation": "instance-scoped",
+    "hash": "5dae8faf051dbd661c65399c3dd24a8e992baf2a19dd899490bb86ca241835d7"
+  },
+  {
+    "engine": "sqlite",
+    "name": "ReencryptSamlKey",
+    "annotation": "authn-resolution",
+    "hash": "91dcc96080d7d93ee4d48c4246bc9dee6bc32dc70fc5d6bd894d50a333ff4d80"
+  },
+  {
+    "engine": "sqlite",
+    "name": "ReencryptTotpCred",
+    "annotation": "authn-resolution",
+    "hash": "b7476c443aa3bb63f054cd1bda8ab6729b587c0879e7b45f295637adf5dd0b9a"
   },
   {
     "engine": "sqlite",

@@ -17,16 +17,19 @@ import (
 func TestRedactionSurfacesAgainstPlantedSecret(t *testing.T) {
 	planted := []byte("PLANTED-SECRET-0123456789abcdef01")
 	kr := &Keyring{
-		master:   keyHandle{id: "master", version: 1, key: planted},
-		instance: keyHandle{id: "dek-instance", version: 1, key: planted},
-		token:    keyHandle{id: "token-root", version: 1, key: planted},
+		token: keyHandle{id: "token-root", version: 1, key: planted},
 	}
+	kr.master.Store(singleMaster(1, planted))
+	kr.instance.Store(&versionSet{active: 1, byVer: map[uint32]keyHandle{1: {id: "dek-instance", version: 1, key: planted}}})
+	dekSet := &versionSet{active: 1, byVer: map[uint32]keyHandle{1: {id: "dek", key: planted}}}
 	sealers := map[string]any{
 		"keyring":         kr,
-		"project sealer":  &ProjectSealer{kr: kr, orgID: "o", projectID: "p", dek: keyHandle{id: "dek", key: planted}},
+		"project sealer":  &ProjectSealer{kr: kr, orgID: "o", projectID: "p", deks: dekSet},
 		"instance sealer": &InstanceSealer{kr: kr},
 		"key handle":      keyHandle{id: "h", key: planted},
-		"dek entry":       dekEntry{scope: "s", handle: keyHandle{id: "h", key: planted}},
+		"version set":     dekSet,
+		"master set":      kr.master.Load(),
+		"dek entry":       dekEntry{scope: "s", set: dekSet},
 	}
 
 	leaks := []string{

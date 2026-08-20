@@ -1768,6 +1768,133 @@ func (q *Queries) ListGrantsForResetTarget(ctx context.Context, principalID stri
 	return items, nil
 }
 
+const listOidcProvidersForReencrypt = `-- name: ListOidcProvidersForReencrypt :many
+SELECT id, client_secret, dek_version, row_version FROM oidc_providers WHERE id > $1 ORDER BY id LIMIT $2
+`
+
+type ListOidcProvidersForReencryptParams struct {
+	Cursor    string
+	PageLimit int32
+}
+
+type ListOidcProvidersForReencryptRow struct {
+	ID           string
+	ClientSecret []byte
+	DekVersion   int64
+	RowVersion   int64
+}
+
+// hikyo:authn-resolution
+func (q *Queries) ListOidcProvidersForReencrypt(ctx context.Context, arg ListOidcProvidersForReencryptParams) ([]ListOidcProvidersForReencryptRow, error) {
+	rows, err := q.db.Query(ctx, listOidcProvidersForReencrypt, arg.Cursor, arg.PageLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListOidcProvidersForReencryptRow
+	for rows.Next() {
+		var i ListOidcProvidersForReencryptRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ClientSecret,
+			&i.DekVersion,
+			&i.RowVersion,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPasswordCredsForReencrypt = `-- name: ListPasswordCredsForReencrypt :many
+SELECT account_id, verifier, dek_version, row_version FROM password_credentials WHERE account_id > $1 ORDER BY account_id LIMIT $2
+`
+
+type ListPasswordCredsForReencryptParams struct {
+	Cursor    string
+	PageLimit int32
+}
+
+type ListPasswordCredsForReencryptRow struct {
+	AccountID  string
+	Verifier   []byte
+	DekVersion int64
+	RowVersion int64
+}
+
+// Reencrypt walk (#75/#187): see the sqlite twin. class=authn, no tenant chain.
+// hikyo:authn-resolution
+func (q *Queries) ListPasswordCredsForReencrypt(ctx context.Context, arg ListPasswordCredsForReencryptParams) ([]ListPasswordCredsForReencryptRow, error) {
+	rows, err := q.db.Query(ctx, listPasswordCredsForReencrypt, arg.Cursor, arg.PageLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPasswordCredsForReencryptRow
+	for rows.Next() {
+		var i ListPasswordCredsForReencryptRow
+		if err := rows.Scan(
+			&i.AccountID,
+			&i.Verifier,
+			&i.DekVersion,
+			&i.RowVersion,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRecoveryCodesForReencrypt = `-- name: ListRecoveryCodesForReencrypt :many
+SELECT account_id, batch, dek_version, row_version FROM recovery_codes WHERE account_id > $1 ORDER BY account_id LIMIT $2
+`
+
+type ListRecoveryCodesForReencryptParams struct {
+	Cursor    string
+	PageLimit int32
+}
+
+type ListRecoveryCodesForReencryptRow struct {
+	AccountID  string
+	Batch      []byte
+	DekVersion int64
+	RowVersion int64
+}
+
+// hikyo:authn-resolution
+func (q *Queries) ListRecoveryCodesForReencrypt(ctx context.Context, arg ListRecoveryCodesForReencryptParams) ([]ListRecoveryCodesForReencryptRow, error) {
+	rows, err := q.db.Query(ctx, listRecoveryCodesForReencrypt, arg.Cursor, arg.PageLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRecoveryCodesForReencryptRow
+	for rows.Next() {
+		var i ListRecoveryCodesForReencryptRow
+		if err := rows.Scan(
+			&i.AccountID,
+			&i.Batch,
+			&i.DekVersion,
+			&i.RowVersion,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSessionsForPrincipal = `-- name: ListSessionsForPrincipal :many
 SELECT id, artifact, auth_method, factors, authenticated_at, created_at,
        last_seen_at, idle_expires_at, absolute_expires_at, source_ip,
@@ -1819,6 +1946,48 @@ func (q *Queries) ListSessionsForPrincipal(ctx context.Context, principalID stri
 			&i.UserAgent,
 			&i.RequestingOrigin,
 			&i.HandoffID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTotpCredsForReencrypt = `-- name: ListTotpCredsForReencrypt :many
+SELECT id, seed, dek_version, row_version FROM totp_credentials WHERE id > $1 ORDER BY id LIMIT $2
+`
+
+type ListTotpCredsForReencryptParams struct {
+	Cursor    string
+	PageLimit int32
+}
+
+type ListTotpCredsForReencryptRow struct {
+	ID         string
+	Seed       []byte
+	DekVersion int64
+	RowVersion int64
+}
+
+// hikyo:authn-resolution
+func (q *Queries) ListTotpCredsForReencrypt(ctx context.Context, arg ListTotpCredsForReencryptParams) ([]ListTotpCredsForReencryptRow, error) {
+	rows, err := q.db.Query(ctx, listTotpCredsForReencrypt, arg.Cursor, arg.PageLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListTotpCredsForReencryptRow
+	for rows.Next() {
+		var i ListTotpCredsForReencryptRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Seed,
+			&i.DekVersion,
+			&i.RowVersion,
 		); err != nil {
 			return nil, err
 		}
@@ -1970,6 +2139,106 @@ WHERE principals.id = $1
 // hikyo:authn-resolution
 func (q *Queries) ReconcilePrincipal(ctx context.Context, id string) (int64, error) {
 	result, err := q.db.Exec(ctx, reconcilePrincipal, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const reencryptOidcProvider = `-- name: ReencryptOidcProvider :execrows
+UPDATE oidc_providers SET client_secret=$1, dek_version=$2, row_version=row_version+1 WHERE id=$3 AND row_version=$4
+`
+
+type ReencryptOidcProviderParams struct {
+	Ct         []byte
+	DekVersion int64
+	ID         string
+	RowVersion int64
+}
+
+// hikyo:authn-resolution
+func (q *Queries) ReencryptOidcProvider(ctx context.Context, arg ReencryptOidcProviderParams) (int64, error) {
+	result, err := q.db.Exec(ctx, reencryptOidcProvider,
+		arg.Ct,
+		arg.DekVersion,
+		arg.ID,
+		arg.RowVersion,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const reencryptPasswordCred = `-- name: ReencryptPasswordCred :execrows
+UPDATE password_credentials SET verifier=$1, dek_version=$2, row_version=row_version+1 WHERE account_id=$3 AND row_version=$4
+`
+
+type ReencryptPasswordCredParams struct {
+	Ct         []byte
+	DekVersion int64
+	AccountID  string
+	RowVersion int64
+}
+
+// hikyo:authn-resolution
+func (q *Queries) ReencryptPasswordCred(ctx context.Context, arg ReencryptPasswordCredParams) (int64, error) {
+	result, err := q.db.Exec(ctx, reencryptPasswordCred,
+		arg.Ct,
+		arg.DekVersion,
+		arg.AccountID,
+		arg.RowVersion,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const reencryptRecoveryCodes = `-- name: ReencryptRecoveryCodes :execrows
+UPDATE recovery_codes SET batch=$1, dek_version=$2, row_version=row_version+1 WHERE account_id=$3 AND row_version=$4
+`
+
+type ReencryptRecoveryCodesParams struct {
+	Ct         []byte
+	DekVersion int64
+	AccountID  string
+	RowVersion int64
+}
+
+// hikyo:authn-resolution
+func (q *Queries) ReencryptRecoveryCodes(ctx context.Context, arg ReencryptRecoveryCodesParams) (int64, error) {
+	result, err := q.db.Exec(ctx, reencryptRecoveryCodes,
+		arg.Ct,
+		arg.DekVersion,
+		arg.AccountID,
+		arg.RowVersion,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const reencryptTotpCred = `-- name: ReencryptTotpCred :execrows
+UPDATE totp_credentials SET seed=$1, dek_version=$2, row_version=row_version+1 WHERE id=$3 AND row_version=$4
+`
+
+type ReencryptTotpCredParams struct {
+	Ct         []byte
+	DekVersion int64
+	ID         string
+	RowVersion int64
+}
+
+// hikyo:authn-resolution
+func (q *Queries) ReencryptTotpCred(ctx context.Context, arg ReencryptTotpCredParams) (int64, error) {
+	result, err := q.db.Exec(ctx, reencryptTotpCred,
+		arg.Ct,
+		arg.DekVersion,
+		arg.ID,
+		arg.RowVersion,
+	)
 	if err != nil {
 		return 0, err
 	}

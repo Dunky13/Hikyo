@@ -88,4 +88,22 @@ type ValueRepo interface {
 	// PROJECT proof, in the definitions-apply transaction that deletes the key
 	// with --allow-delete (#70). Returns the number of occurrences removed.
 	ClearKey(ctx context.Context, p authz.Proof, keyID string) (int64, error)
+	// ListForReencrypt pages a project's entire value set by id (keyset cursor,
+	// "" for the first page), for the reencrypt walk. Project-scoped: spans every
+	// environment.
+	ListForReencrypt(ctx context.Context, p authz.Proof, cursor string, limit int) ([]ReencryptValueRow, error)
+	// Reencrypt re-seals one value row's ciphertext in place (same id, same AAD,
+	// new DEK version), compare-and-swapping on the old ciphertext. Reports
+	// whether the row moved (false = a concurrent write already replaced it).
+	Reencrypt(ctx context.Context, p authz.Proof, id string, newCiphertext, oldCiphertext []byte) (bool, error)
+}
+
+// ReencryptValueRow is one value row the reencrypt walk considers: its id, the
+// AAD-reconstruction fields, and the current ciphertext (whose header names the
+// DEK version it is sealed under).
+type ReencryptValueRow struct {
+	ID            string
+	EnvironmentID string
+	KeyID         string
+	Ciphertext    []byte
 }

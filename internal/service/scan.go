@@ -167,6 +167,12 @@ func decodeAckBinding(msg []byte) (ackBinding, error) {
 // sealAck mints an opaque token for a binding. The seal is the crypto envelope
 // package's instance sealer — unforgeable without the instance key, tamper-
 // evident, and opaque. Base64url so it rides a JSON string and a CLI flag.
+//
+// fence:exempt — the token is minted and handed to the caller, NEVER written to
+// any table, so no writer fence applies (there is no row to strand under a
+// rotated DEK version). It is an ephemeral, content-bound, re-mintable artifact
+// like a session token; a rotate-dek that eventually retires its version simply
+// invalidates outstanding tokens, which is acceptable for an acknowledgement.
 func sealAck(kr *crypto.Keyring, b ackBinding) (string, error) {
 	ct, err := kr.ForInstance().SealField(ackAAD(), encodeAckBinding(b))
 	if err != nil {

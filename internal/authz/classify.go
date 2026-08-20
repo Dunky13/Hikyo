@@ -67,6 +67,7 @@ var wireRegistry = map[string]Class{
 	"http:POST /api/v1/auth/totp/enrol/start":          ClassUnauthenticated,
 	"http:POST /api/v1/auth/totp/enrol/confirm":        ClassUnauthenticated,
 	"http:POST /api/v1/auth/totp/step-up":              ClassUnauthenticated,
+	"http:GET /api/v1/auth/totp":                       ClassUnauthenticated,
 	"http:DELETE /api/v1/auth/totp":                    ClassUnauthenticated,
 	"http:POST /api/v1/auth/recovery-codes/regenerate": ClassUnauthenticated,
 	"http:POST /api/v1/auth/recovery/begin":            ClassUnauthenticated,
@@ -361,10 +362,18 @@ var wireRegistry = map[string]Class{
 	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/export":                 ClassTenant,
 	"http:GET /api/v1/orgs/{org}/projects/{project}/events":                                                    ClassTenant,
 	// The root token key belongs to the instance, so there is no tenant object
-	// whose nonexistence a refusal could mimic.
+	// whose nonexistence a refusal could mimic. The same holds for every DEK: a
+	// DEK belongs to the instance's crypto hierarchy, not a tenant.
 	"http:POST /api/v1/instance/rotate-token-key": ClassInstance,
 	// The scanning fingerprint key is instance-scoped too (#74).
 	"http:POST /api/v1/instance/rotate-scanning-key": ClassInstance,
+	"http:POST /api/v1/instance/rotate-dek":          ClassInstance,
+	"http:POST /api/v1/instance/rotate-master-key":   ClassInstance,
+	"http:POST /api/v1/instance/rotate-root-key":     ClassInstance,
+	"http:POST /api/v1/instance/reencrypt":           ClassInstance,
+	// reencrypt of a PROJECT is tenant-class: it reads and writes the project's
+	// own tenant-owned rows, so its refusal mimics that project's nonexistence.
+	"http:POST /api/v1/orgs/{org}/projects/{project}/reencrypt": ClassTenant,
 
 	// Deployment adapters (#65). Every project and target surface is tenant
 	// class; dynamic reveal/reauth checks over the adapter's environment set are
@@ -461,13 +470,20 @@ var wireRegistry = map[string]Class{
 	"cli:pin":      ClassTenant,
 	// `rotate-token-key` reaches one instance-scoped route: the root token key
 	// belongs to the instance, so there is no tenant object whose nonexistence
-	// a refusal could mimic.
+	// a refusal could mimic. `rotate-dek` reaches the DEK rotation route on the
+	// same instance-scoped grounds.
 	"cli:rotate-token-key": ClassInstance,
 	// `rotate-scanning-key` reaches one instance-scoped route: the scanning
 	// fingerprint key belongs to the instance, same shape as rotate-token-key.
 	"cli:rotate-scanning-key": ClassInstance,
-	"cli:instance-config":     ClassInstance,
-	"cli:doctor":              ClassInstance,
+	"cli:rotate-dek":          ClassInstance,
+	"cli:rotate-master-key":   ClassInstance,
+	"cli:rotate-root-key":     ClassInstance,
+	// `reencrypt` reaches both the instance route and the project route; like
+	// `access`, the verb takes the instance class.
+	"cli:reencrypt":       ClassInstance,
+	"cli:instance-config": ClassInstance,
+	"cli:doctor":          ClassInstance,
 	// `access` reaches BOTH classes — the org/project/env grant routes are
 	// tenant-class, the instance-scope ones are instance-class. It is
 	// classified instance because that is the WEAKER probe contract of the
@@ -575,6 +591,11 @@ var wireEvents = map[string][]audit.EventType{
 	"http:DELETE /api/v1/orgs/{org}/projects/{project}/environments/{environment}/pins/{workloadPrincipal}":    {audit.EventPinReleased},
 	"http:POST /api/v1/instance/rotate-token-key":                                                              {audit.EventTokenKeyRotated},
 	"http:POST /api/v1/instance/rotate-scanning-key":                                                           {audit.EventScanningKeyRotated},
+	"http:POST /api/v1/instance/rotate-dek":                                                                    {audit.EventDEKRotated},
+	"http:POST /api/v1/instance/rotate-master-key":                                                             {audit.EventMasterKeyRotated},
+	"http:POST /api/v1/instance/rotate-root-key":                                                               {audit.EventRootKeyRotationPrepared, audit.EventRootKeyRotationVerified, audit.EventRootKeyRotationFinalized},
+	"http:POST /api/v1/instance/reencrypt":                                                                     {audit.EventReencryptCompleted},
+	"http:POST /api/v1/orgs/{org}/projects/{project}/reencrypt":                                                {audit.EventReencryptCompleted},
 
 	"http:POST /api/v1/auth/local/login": {
 		audit.EventAuthLogin,
@@ -953,9 +974,14 @@ var wireRoutes = map[string][]Operation{
 	},
 	// The stream authorizes twice: once at connect over the project, and once
 	// per event over the environment the event names.
-	"http:GET /api/v1/orgs/{org}/projects/{project}/events": {OpAdvisoryWatch, OpAdvisoryEvent},
-	"http:POST /api/v1/instance/rotate-token-key":           {OpRotateTokenKey},
-	"http:POST /api/v1/instance/rotate-scanning-key":        {OpRotateScanningKey},
+	"http:GET /api/v1/orgs/{org}/projects/{project}/events":     {OpAdvisoryWatch, OpAdvisoryEvent},
+	"http:POST /api/v1/instance/rotate-token-key":               {OpRotateTokenKey},
+	"http:POST /api/v1/instance/rotate-scanning-key":            {OpRotateScanningKey},
+	"http:POST /api/v1/instance/rotate-dek":                     {OpRotateDEK},
+	"http:POST /api/v1/instance/rotate-master-key":              {OpRotateMasterKey},
+	"http:POST /api/v1/instance/rotate-root-key":                {OpRotateRootKey},
+	"http:POST /api/v1/instance/reencrypt":                      {OpReencryptInstance},
+	"http:POST /api/v1/orgs/{org}/projects/{project}/reencrypt": {OpReencryptProject},
 
 	"http:GET /api/v1/orgs/{org}/projects/{project}/key-groups":            {OpKeyGroupList},
 	"http:POST /api/v1/orgs/{org}/projects/{project}/key-groups":           {OpKeyGroupCreate},

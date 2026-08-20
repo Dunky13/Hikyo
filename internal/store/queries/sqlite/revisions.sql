@@ -201,3 +201,21 @@ WHERE org_id = ? AND project_id = ?;
 -- name: CountPendingChangeForCell :one
 SELECT COUNT(*) FROM pending_changes
 WHERE org_id = ? AND project_id = ? AND environment_id = ? AND key_id = ? AND owner_id = ?;
+-- Reencrypt walk (#75/#187): page and re-seal project_field ciphertext in place.
+-- name: ListSnapshotEntriesForReencrypt :many
+SELECT id, environment_id, snapshot_id, key_id, ciphertext FROM snapshot_entries
+WHERE org_id = ? AND project_id = ? AND id > ? ORDER BY id LIMIT ?;
+
+-- name: ReencryptSnapshotEntry :execrows
+UPDATE snapshot_entries SET ciphertext = ?
+WHERE org_id = ? AND project_id = ? AND id = ? AND ciphertext = ?;
+
+-- pending_changes ciphertext is NULL for an `unset` draft; skip those rows.
+-- name: ListPendingForReencrypt :many
+SELECT id, environment_id, key_id, ciphertext FROM pending_changes
+WHERE org_id = ? AND project_id = ? AND id > ?
+ORDER BY id LIMIT ?;
+
+-- name: ReencryptPendingChange :execrows
+UPDATE pending_changes SET ciphertext = ?
+WHERE org_id = ? AND project_id = ? AND id = ? AND ciphertext = ?;

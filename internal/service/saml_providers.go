@@ -239,7 +239,7 @@ func (s *SAMLProviders) Put(ctx context.Context, actor Actor, slug string, input
 			if err := az.CreateSAMLProvider(ctx, provider); err != nil {
 				return err
 			}
-			if err := s.ensureSPKey(ctx, az, caller.Principal, generatedKey); err != nil {
+			if err := s.ensureSPKey(ctx, repos, az, proof, caller.Principal, generatedKey); err != nil {
 				return err
 			}
 			output, err = samlProviderView(authz.SAMLProvider{
@@ -1112,6 +1112,9 @@ type generatedSAMLSPKey struct {
 	CreatedAt           time.Time
 }
 
+// fence:delegated — returns the sealed private key and its instance DEK version
+// to ensureSPKey, which fences on that version (fenceInstanceVersion) in the
+// write transaction before the SP-key row is inserted.
 func (s *SAMLProviders) generateSPKey() (generatedSAMLSPKey, error) {
 	id, err := newID("samlkey")
 	if err != nil {
@@ -1160,10 +1163,15 @@ func (s *SAMLProviders) generateSPKey() (generatedSAMLSPKey, error) {
 	}, nil
 }
 
-func (s *SAMLProviders) ensureSPKey(ctx context.Context, az *authz.TxAuthorizer, principal domain.PrincipalID, generated generatedSAMLSPKey) error {
+func (s *SAMLProviders) ensureSPKey(ctx context.Context, r store.Repos, az *authz.TxAuthorizer, p authz.Proof, principal domain.PrincipalID, generated generatedSAMLSPKey) error {
 	if _, err := az.ActiveSAMLSPKey(ctx); err == nil {
 		return nil
 	} else if !errors.Is(err, domain.ErrNotFound) {
+		return err
+	}
+	// Writer fence (invariant 7): refuse if a rotate-dek --instance retired the
+	// version generateSAMLSPKey sealed the private key under.
+	if err := fenceInstanceVersion(ctx, r, p, uint32(generated.DEKVersion)); err != nil {
 		return err
 	}
 	if err := az.CreateSAMLSPKey(ctx, authz.NewSAMLSPKey{

@@ -1098,6 +1098,53 @@ func runValueLifecycle(t *testing.T, db *store.DB, actor service.Actor, who doma
 	if _, err := revisions.RotateScanningKey(ctx, service.LocalPrincipal(root)); err != nil {
 		t.Fatal(err)
 	}
+	// `rotate-dek` (instance scope) gives crypto.dek_rotated a real emitter,
+	// under the same operator principal — it rides the same `rotate-dek` grant.
+	rotation := &service.Rotation{DB: revisions.DB, Keyring: revisions.Keyring, RootKey: probeRootSource{db: revisions.DB}}
+	if _, err := rotation.RotateDEK(ctx, service.LocalPrincipal(root), service.DEKScope{Instance: true}); err != nil {
+		t.Fatal(err)
+	}
+	// `rotate-master-key` gives crypto.master_key_rotated a real emitter.
+	if _, err := rotation.RotateMasterKey(ctx, service.LocalPrincipal(root)); err != nil {
+		t.Fatal(err)
+	}
+	// The full crash-safe root rotation cycle gives each crypto.root_key_* event
+	// a real emitter. It runs after master rotation (which needs the original
+	// root as primary) and models the operator installing the new root between
+	// prepare and verify.
+	curRoot, err := (probeRootSource{db: revisions.DB}).Current(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newRoot, err := crypto.GenerateRootKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootSrc := &mutableRootSource{current: curRoot, next: newRoot}
+	rootRotation := &service.Rotation{DB: revisions.DB, Keyring: revisions.Keyring, RootKey: rootSrc}
+	if _, err := rootRotation.RotateRootKey(ctx, service.LocalPrincipal(root), service.RootRotatePrepare); err != nil {
+		t.Fatalf("root rotation prepare: %v", err)
+	}
+	rootSrc.install() // operator installs the new root at the primary source
+	if _, err := rootRotation.RotateRootKey(ctx, service.LocalPrincipal(root), service.RootRotateVerify); err != nil {
+		t.Fatalf("root rotation verify: %v", err)
+	}
+	if _, err := rootRotation.RotateRootKey(ctx, service.LocalPrincipal(root), service.RootRotateFinalize); err != nil {
+		t.Fatalf("root rotation finalize: %v", err)
+	}
+	// `reencrypt --project` gives crypto.reencrypt_completed a real emitter. Use
+	// a FRESH empty project: prj_a1 carries retention-GC fixtures whose ciphertext
+	// is deliberately not a real envelope, which reencrypt correctly refuses.
+	reencExec(t, db, ctx,
+		`INSERT INTO projects (id, org_id, name, created_at) VALUES ('prj_reenc_emit','org_a','reenc', '2026-01-01T00:00:00Z')`,
+		`INSERT INTO projects (id, org_id, name, created_at) VALUES ('prj_reenc_emit','org_a','reenc', '2026-01-01T00:00:00Z')`)
+	reencExec(t, db, ctx,
+		`INSERT INTO project_schema_revisions (org_id, project_id, revision) VALUES ('org_a','prj_reenc_emit',0)`,
+		`INSERT INTO project_schema_revisions (org_id, project_id, revision) VALUES ('org_a','prj_reenc_emit',0)`)
+	reenc := &service.Reencrypt{DB: revisions.DB, Keyring: revisions.Keyring, ChunkPause: -1}
+	if _, err := reenc.ReencryptProject(ctx, service.LocalPrincipal(root), "org_a", "prj_reenc_emit"); err != nil {
+		t.Fatalf("reencrypt project: %v", err)
+	}
 	// A `values import` run (#68), so value.imported has a real emitter. It
 	// carries the manifest precondition, which is the shape that matters to the
 	// trail: `manifest_bound` is the fact an investigator reads first.

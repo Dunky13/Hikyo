@@ -716,6 +716,60 @@ func (q *Queries) ListPendingChangesForOwnerInEnvironment(ctx context.Context, a
 	return items, nil
 }
 
+const listPendingForReencrypt = `-- name: ListPendingForReencrypt :many
+SELECT id, environment_id, key_id, ciphertext FROM pending_changes
+WHERE org_id = ? AND project_id = ? AND id > ?
+ORDER BY id LIMIT ?
+`
+
+type ListPendingForReencryptParams struct {
+	OrgID     string
+	ProjectID string
+	ID        string
+	Limit     int64
+}
+
+type ListPendingForReencryptRow struct {
+	ID            string
+	EnvironmentID string
+	KeyID         string
+	Ciphertext    []byte
+}
+
+// pending_changes ciphertext is NULL for an `unset` draft; skip those rows.
+func (q *Queries) ListPendingForReencrypt(ctx context.Context, arg ListPendingForReencryptParams) ([]ListPendingForReencryptRow, error) {
+	rows, err := q.db.QueryContext(ctx, listPendingForReencrypt,
+		arg.OrgID,
+		arg.ProjectID,
+		arg.ID,
+		arg.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPendingForReencryptRow
+	for rows.Next() {
+		var i ListPendingForReencryptRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.EnvironmentID,
+			&i.KeyID,
+			&i.Ciphertext,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPendingMarkers = `-- name: ListPendingMarkers :many
 SELECT id, environment_id, key_id, owner_id, operation
 FROM pending_changes
@@ -961,6 +1015,61 @@ func (q *Queries) ListSnapshotEntries(ctx context.Context, arg ListSnapshotEntri
 	return items, nil
 }
 
+const listSnapshotEntriesForReencrypt = `-- name: ListSnapshotEntriesForReencrypt :many
+SELECT id, environment_id, snapshot_id, key_id, ciphertext FROM snapshot_entries
+WHERE org_id = ? AND project_id = ? AND id > ? ORDER BY id LIMIT ?
+`
+
+type ListSnapshotEntriesForReencryptParams struct {
+	OrgID     string
+	ProjectID string
+	ID        string
+	Limit     int64
+}
+
+type ListSnapshotEntriesForReencryptRow struct {
+	ID            string
+	EnvironmentID string
+	SnapshotID    string
+	KeyID         string
+	Ciphertext    []byte
+}
+
+// Reencrypt walk (#75/#187): page and re-seal project_field ciphertext in place.
+func (q *Queries) ListSnapshotEntriesForReencrypt(ctx context.Context, arg ListSnapshotEntriesForReencryptParams) ([]ListSnapshotEntriesForReencryptRow, error) {
+	rows, err := q.db.QueryContext(ctx, listSnapshotEntriesForReencrypt,
+		arg.OrgID,
+		arg.ProjectID,
+		arg.ID,
+		arg.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSnapshotEntriesForReencryptRow
+	for rows.Next() {
+		var i ListSnapshotEntriesForReencryptRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.EnvironmentID,
+			&i.SnapshotID,
+			&i.KeyID,
+			&i.Ciphertext,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSnapshots = `-- name: ListSnapshots :many
 SELECT id, org_id, project_id, environment_id, revision, schema_revision,
        published_by, published_at, payload_present, collected_at, collected_policy
@@ -1074,4 +1183,58 @@ func (q *Queries) RecordSecretValueOccurrence(ctx context.Context, arg RecordSec
 		arg.EnvironmentID,
 	)
 	return err
+}
+
+const reencryptPendingChange = `-- name: ReencryptPendingChange :execrows
+UPDATE pending_changes SET ciphertext = ?
+WHERE org_id = ? AND project_id = ? AND id = ? AND ciphertext = ?
+`
+
+type ReencryptPendingChangeParams struct {
+	Ciphertext   []byte
+	OrgID        string
+	ProjectID    string
+	ID           string
+	Ciphertext_2 []byte
+}
+
+func (q *Queries) ReencryptPendingChange(ctx context.Context, arg ReencryptPendingChangeParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, reencryptPendingChange,
+		arg.Ciphertext,
+		arg.OrgID,
+		arg.ProjectID,
+		arg.ID,
+		arg.Ciphertext_2,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const reencryptSnapshotEntry = `-- name: ReencryptSnapshotEntry :execrows
+UPDATE snapshot_entries SET ciphertext = ?
+WHERE org_id = ? AND project_id = ? AND id = ? AND ciphertext = ?
+`
+
+type ReencryptSnapshotEntryParams struct {
+	Ciphertext   []byte
+	OrgID        string
+	ProjectID    string
+	ID           string
+	Ciphertext_2 []byte
+}
+
+func (q *Queries) ReencryptSnapshotEntry(ctx context.Context, arg ReencryptSnapshotEntryParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, reencryptSnapshotEntry,
+		arg.Ciphertext,
+		arg.OrgID,
+		arg.ProjectID,
+		arg.ID,
+		arg.Ciphertext_2,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }

@@ -687,3 +687,32 @@ UPDATE cli_reauth_handoffs SET code_verifier=$1,approved_windows=$2 WHERE id=$3 
 -- hikyo:authn-resolution
 -- name: ConsumeCLIReauthHandoff :execrows
 UPDATE cli_reauth_handoffs SET consumed_at=$1 WHERE id=$2 AND code_verifier IS NOT NULL AND consumed_at IS NULL;
+
+-- Reencrypt walk (#75/#187): see the sqlite twin. class=authn, no tenant chain.
+-- hikyo:authn-resolution
+-- name: ListPasswordCredsForReencrypt :many
+SELECT account_id, verifier, dek_version, row_version FROM password_credentials WHERE account_id > sqlc.arg(cursor) ORDER BY account_id LIMIT sqlc.arg(page_limit);
+-- hikyo:authn-resolution
+-- name: ReencryptPasswordCred :execrows
+UPDATE password_credentials SET verifier=sqlc.arg(ct), dek_version=sqlc.arg(dek_version), row_version=row_version+1 WHERE account_id=sqlc.arg(account_id) AND row_version=sqlc.arg(row_version);
+
+-- hikyo:authn-resolution
+-- name: ListTotpCredsForReencrypt :many
+SELECT id, seed, dek_version, row_version FROM totp_credentials WHERE id > sqlc.arg(cursor) ORDER BY id LIMIT sqlc.arg(page_limit);
+-- hikyo:authn-resolution
+-- name: ReencryptTotpCred :execrows
+UPDATE totp_credentials SET seed=sqlc.arg(ct), dek_version=sqlc.arg(dek_version), row_version=row_version+1 WHERE id=sqlc.arg(id) AND row_version=sqlc.arg(row_version);
+
+-- hikyo:authn-resolution
+-- name: ListRecoveryCodesForReencrypt :many
+SELECT account_id, batch, dek_version, row_version FROM recovery_codes WHERE account_id > sqlc.arg(cursor) ORDER BY account_id LIMIT sqlc.arg(page_limit);
+-- hikyo:authn-resolution
+-- name: ReencryptRecoveryCodes :execrows
+UPDATE recovery_codes SET batch=sqlc.arg(ct), dek_version=sqlc.arg(dek_version), row_version=row_version+1 WHERE account_id=sqlc.arg(account_id) AND row_version=sqlc.arg(row_version);
+
+-- hikyo:authn-resolution
+-- name: ListOidcProvidersForReencrypt :many
+SELECT id, client_secret, dek_version, row_version FROM oidc_providers WHERE id > sqlc.arg(cursor) ORDER BY id LIMIT sqlc.arg(page_limit);
+-- hikyo:authn-resolution
+-- name: ReencryptOidcProvider :execrows
+UPDATE oidc_providers SET client_secret=sqlc.arg(ct), dek_version=sqlc.arg(dek_version), row_version=row_version+1 WHERE id=sqlc.arg(id) AND row_version=sqlc.arg(row_version);

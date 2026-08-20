@@ -445,8 +445,19 @@ func (s *Auth) attemptLogin(ctx context.Context, username, password string, arti
 			return nil
 		}
 		if upgrade {
-			if err := s.rehash(ctx, az, account.ID, upgradeSealed, upgradeParams, upgradeDEK, current, now); err != nil {
-				return err
+			// Writer fence (invariant 7): if a rotate-dek --instance retired the
+			// version this KDF upgrade sealed under, SKIP the upgrade rather than
+			// fail the login — the credential that just verified is still valid,
+			// exactly like a losing CAS swap. Only a real store error fails here.
+			switch ferr := az.AssertActiveInstanceDEKVersion(ctx, upgradeDEK); {
+			case errors.Is(ferr, domain.ErrConflict):
+				// version rotated under us; leave the current verifier in place
+			case ferr != nil:
+				return ferr
+			default:
+				if err := s.rehash(ctx, az, account.ID, upgradeSealed, upgradeParams, upgradeDEK, current, now); err != nil {
+					return err
+				}
 			}
 		}
 		result, err = s.mintSession(ctx, az, account, artifact, now)
@@ -785,6 +796,14 @@ func (s *Auth) EstablishCredential(ctx context.Context, authority, password stri
 			DEKVersion: dekVersion, CredentialEpoch: liveEpoch,
 			RowVersion: existing.RowVersion,
 		}
+		// Writer fence (invariant 7): the verifier was sealed under the instance
+		// DEK version snapshotted before the argon2 derivation; refuse if a
+		// rotate-dek --instance retired it in that window rather than strand an
+		// unreadable credential. The bare INSERT below has no row_version CAS to
+		// catch this, so the fence is the only guard on the first-credential path.
+		if err := az.AssertActiveInstanceDEKVersion(ctx, dekVersion); err != nil {
+			return err
+		}
 		if !haveCred {
 			if err := az.WritePasswordCredential(ctx, cred, now); err != nil {
 				return err
@@ -836,6 +855,10 @@ func (s *Auth) EstablishCredential(ctx context.Context, authority, password stri
 
 // sealVerifier derives and envelope-encrypts a verifier. It touches no
 // transaction, which is the point: it is the expensive half.
+//
+// fence:delegated — returns the sealed bytes and the instance DEK version to a
+// caller that fences on that version (az.AssertActiveInstanceDEKVersion) in the
+// write transaction, before the credential row is written.
 func (s *Auth) sealVerifier(accountID, password string) ([]byte, authz.KDFParams, int64, error) {
 	salt, err := crypto.NewSalt()
 	if err != nil {

@@ -290,3 +290,12 @@ SELECT id FROM instance_identity WHERE id = 1;
 -- hikyo:authn-resolution
 -- name: LockWorkspaceOrigin :one
 SELECT origin FROM workspace_origins WHERE origin = ?;
+
+-- Reencrypt walk (#75/#187): remotes.credential_sealed has no dek_version, so
+-- the walk header-parses the envelope for the version and CASes on the blob.
+-- hikyo:instance-scoped
+-- name: ListRemotesForReencrypt :many
+SELECT id, credential_sealed FROM remotes WHERE id > ? ORDER BY id LIMIT ?;
+-- hikyo:instance-scoped
+-- name: ReencryptRemote :execrows
+UPDATE remotes SET credential_sealed=sqlc.arg(new_ct) WHERE id=sqlc.arg(id) AND credential_sealed=sqlc.arg(old_ct);

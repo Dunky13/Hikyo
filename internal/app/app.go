@@ -165,6 +165,29 @@ func resolveRootKey(cfg *config.Config, log *slog.Logger) ([]byte, error) {
 	return crypto.ReadRootKey(file, envValue)
 }
 
+// rootKeySource re-reads the operator root key for the rotation operations that
+// need it — master rotation seals the new master under the current root, root
+// rotation reads the primary source at verify. It reuses resolveRootKey, so it
+// honours the same file/env/systemd sources boot used; on a live instance the
+// source already exists, so no dev generation fires on a re-read.
+type rootKeySource struct {
+	cfg *config.Config
+	log *slog.Logger
+}
+
+func (s rootKeySource) Current(context.Context) ([]byte, error) {
+	return resolveRootKey(s.cfg, s.log)
+}
+
+func (s rootKeySource) Next(context.Context) ([]byte, error) {
+	if s.cfg.NewRootKeyFile == "" {
+		return nil, errors.New("no new root key source configured; set HIKYO_NEW_ROOT_KEY_FILE to the new root before --prepare")
+	}
+	// Same file-source validation as the primary root — 64 hex chars, and the
+	// file must not be group/world readable.
+	return crypto.ReadRootKey(s.cfg.NewRootKeyFile, "")
+}
+
 // Boot runs the fail-closed startup sequence: process hardening before any
 // key material exists, migrations (auto-apply by default; with auto-apply
 // disabled a pending migration state refuses to serve), datastore open with
@@ -212,6 +235,12 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 	if err != nil {
 		db.Close()
 		return nil, fmt.Errorf("boot: refusing to serve: %w", err)
+	}
+	if kr.RootRotationPending() {
+		// A root rotation is half-done — the master is dual-wrapped under two
+		// roots. Bootable under either, but warned on every start until
+		// `rotate-root-key --finalize` (encryption-model ADR § Rotation).
+		log.Warn("root key rotation is UNFINISHED: the master is dual-wrapped under the old and new roots; run `hikyo rotate-root-key --verify` then `--finalize` to complete it")
 	}
 
 	// The secret-scanning ruleset compiles once at boot; a Load error refuses to
@@ -279,6 +308,7 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 		return nil, fmt.Errorf("boot: outbound directory client: %w", err)
 	}
 	retentionSvc := &service.Retention{DB: db}
+	reencryptSvc := &service.Reencrypt{DB: db, Keyring: kr}
 	adapterRuntime := store.NewAdapterRuntime(db, func(ctx context.Context, job adapter.Job, _ adapter.Effect) error {
 		return tx.Read(ctx, db, func(ctx context.Context, _ store.ReadRepos, az *authz.TxAuthorizer) error {
 			_, err := az.Authorize(ctx, authz.Identity{Principal: domain.PrincipalID(job.AuthorityPrincipal), Class: domain.ClassHuman}, authz.OpAdapterPush, domain.Scope{
@@ -319,6 +349,8 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 		// mean a subscriber saw half the events.
 		Values:    &service.Values{DB: db, Keyring: kr, Auth: authSvc, Advisory: advisory, Scan: ruleset},
 		Revisions: &service.Revisions{DB: db, Keyring: kr, Auth: authSvc, Advisory: advisory},
+		Rotation:  &service.Rotation{DB: db, Keyring: kr, RootKey: rootKeySource{cfg: cfg, log: log}},
+		Reencrypt: reencryptSvc,
 		Pins:      &service.Pins{DB: db, Keyring: kr, Auth: authSvc},
 		Reveal:    &service.Reveal{DB: db, Auth: authSvc},
 		KeyGroups: &service.KeyGroups{DB: db, Keyring: kr, Advisory: advisory, Scan: ruleset},
@@ -382,6 +414,24 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 				return err
 			},
 			LastSuccess: retentionSvc.LastPruneSuccess,
+		}, {
+			// Read-only operator nudge (#75/#187, scheduler option A): warn when a
+			// scope still carries a retiring DEK version so an operator runs
+			// `reencrypt`. It writes nothing and holds no write grant on any
+			// ciphertext table — reencrypt itself stays an operator act.
+			Name: "reencrypt_retiring_sweep",
+			Run: func(ctx context.Context) error {
+				scopes, err := reencryptSvc.SweepRetiring(ctx)
+				if err != nil {
+					return err
+				}
+				for _, sc := range scopes {
+					log.Warn("DEK scope has a retiring version awaiting reencrypt",
+						"purpose", sc.Purpose, "org", sc.OrgID, "project", sc.ProjectID,
+						"openable_versions", sc.OpenableVersions)
+				}
+				return nil
+			},
 		}}},
 		adapterWorker: adapterWorker,
 	}, nil

@@ -145,6 +145,8 @@ type API struct {
 	Definitions     DefinitionsService
 	Values          ValueService
 	Revisions       RevisionService
+	Rotation        RotationService
+	Reencrypt       ReencryptService
 	Pins            PinService
 	Reveal          RevealService
 	KeyGroups       KeyGroupService

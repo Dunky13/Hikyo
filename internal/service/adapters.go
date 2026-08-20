@@ -306,6 +306,11 @@ func (s *Adapters) Create(ctx context.Context, actor Actor, scope domain.Scope, 
 		if err != nil {
 			return err
 		}
+		// Writer fence (invariant 7): refuse if a rotate-dek retired the DEK
+		// version the credential was sealed under.
+		if err := fenceProject(ctx, r, proof, sealer, scope); err != nil {
+			return err
+		}
 		mutation := store.AdapterCreate{ID: adapterID, Provider: request.Provider, Origin: request.Origin, CredentialCiphertext: sealed, CredentialExpiresAt: connection.CredentialExpiresAt, AuthorityPrincipalID: string(caller.Principal), At: now, Target: targetMutation(targetID, adapterID, request.Target, connection)}
 		record, target, err := r.Adapters().Create(ctx, proof, mutation)
 		if err != nil {
@@ -812,6 +817,11 @@ func (s *Adapters) MoveOrigin(ctx context.Context, actor Actor, scope domain.Sco
 			if err := s.requireAdapterCeremony(ctx, az, caller, scope, adapterEnvironmentSet(environments), authz.OpAdapterConfigure, now); err != nil {
 				return err
 			}
+			// Writer fence (invariant 7): refuse if a rotate-dek retired the DEK
+			// version the pending credential was sealed under.
+			if err := fenceProject(ctx, r, proof, sealer, scope); err != nil {
+				return err
+			}
 			out, err = r.Adapters().MoveOrigin(ctx, proof, store.AdapterOriginMoveMutation{
 				AdapterID: adapterID, Origin: origin, PendingCredentialCiphertext: sealed,
 				AuthorityPrincipalID: string(caller.Principal), KeepRemote: keepRemote, At: now,
@@ -1030,6 +1040,11 @@ func (s *Adapters) ResumeOriginMove(ctx context.Context, actor Actor, scope doma
 		}
 		sealed, err := sealer.SealField(crypto.ProjectFieldAAD{OrgID: string(scope.Org), ProjectID: string(scope.Project), OwnerTable: "adapters", OwnerRowID: move.AdapterID, FieldTag: "credential"}, plain)
 		if err != nil {
+			return err
+		}
+		// Writer fence (invariant 7): refuse if a rotate-dek retired the DEK
+		// version this replacement credential was sealed under.
+		if err := fenceProject(ctx, r, proof, sealer, scope); err != nil {
 			return err
 		}
 		out, err = r.Adapters().ReplaceMoveOrigin(ctx, proof, moveID, origin, sealed, string(caller.Principal), now)
@@ -1261,6 +1276,11 @@ func (s *Adapters) ReplaceCredential(ctx context.Context, actor Actor, scope dom
 				if err := s.Auth.ConsumeAdapterReauthWindow(ctx, az, caller.SessionID, environmentID, authz.OpAdapterCredentialSet, environments, now); err != nil {
 					return fmt.Errorf("%w (%s)", ErrReauthRequired, environmentID)
 				}
+			}
+			// Writer fence (invariant 7): refuse if a rotate-dek retired the DEK
+			// version the new credential was sealed under.
+			if err := fenceProject(ctx, r, proof, sealer, scope); err != nil {
+				return err
 			}
 			result, err = r.Adapters().ReplaceCredential(ctx, proof, store.AdapterCredentialMutation{
 				AdapterID: adapterID, CredentialCiphertext: sealed,

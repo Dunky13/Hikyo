@@ -98,6 +98,11 @@ revisions:                                         --env selects the environment
   hikyo pin list                                    show pins and expired status
   hikyo pin release <workload-principal>            release a durable pin
   hikyo rotate-token-key --yes                      new token key; one full fetch, no restart wave
+  hikyo rotate-dek --instance --yes                 new instance DEK version (old stays readable)
+  hikyo rotate-dek --org O --project P --yes         new project DEK version; follow with reencrypt
+  hikyo rotate-master-key --yes                     new master; re-wrap every tier-3 key
+  hikyo rotate-root-key --prepare|--verify|--finalize  crash-safe root rotation, one phase per run
+  hikyo reencrypt --org O --project P                complete a project rotate-dek; --instance for instance
 
 adapters:
   hikyo adapter create --provider forgejo|github-actions --origin <https-origin> --env E --kind repository|organization|environment

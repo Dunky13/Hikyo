@@ -397,6 +397,11 @@ func writeCell(ctx context.Context, r store.Repos, p authz.Proof, sealer *crypto
 	if err != nil {
 		return time.Time{}, err
 	}
+	// Writer fence (invariant 7): refuse if a rotate-dek retired the sealer's
+	// DEK version since it was built.
+	if err := fenceProject(ctx, r, p, sealer, scope); err != nil {
+		return time.Time{}, err
+	}
 	updatedAt := store.CanonTime(time.Now())
 	if err := r.Values().Put(ctx, p, store.NewValueEntry{
 		ID: id, KeyID: key.ID, Ciphertext: sealed,
@@ -526,6 +531,11 @@ func (s *Values) stage(ctx context.Context, actor Actor, scope domain.Scope, key
 			if sealed, err = sealer.SealField(
 				pendingAAD(string(scope.Org), string(scope.Project), string(scope.Env), key.ID, versionID),
 				[]byte(schema.Normalize(value))); err != nil {
+				return err
+			}
+			// Writer fence: refuse if the sealer's DEK version was retired by a
+			// rotate-dek since it was built (invariant 7).
+			if err := fenceProject(ctx, r, p, sealer, scope); err != nil {
 				return err
 			}
 		}

@@ -639,6 +639,47 @@ export const zExportValuesRequest = z.object({
     reveal: z.boolean().optional()
 });
 
+export const zRotateDekRequest = z.object({
+    scope: z.enum(['project', 'instance']),
+    org: z.string().optional(),
+    project: z.string().optional()
+});
+
+export const zDekRotation = z.object({
+    scope: z.enum(['project', 'instance']),
+    org: z.string().optional(),
+    project: z.string().optional(),
+    key_version: z.coerce.bigint().min(BigInt('-9223372036854775808'), { error: 'Invalid value: Expected int64 to be >= -9223372036854775808' }).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' })
+});
+
+export const zRotateRootKeyRequest = z.object({
+    phase: z.enum([
+        'prepare',
+        'verify',
+        'finalize'
+    ])
+});
+
+export const zRootKeyRotation = z.object({
+    phase: z.enum([
+        'prepare',
+        'verify',
+        'finalize'
+    ]),
+    root_key_epoch: z.coerce.bigint().min(BigInt('-9223372036854775808'), { error: 'Invalid value: Expected int64 to be >= -9223372036854775808' }).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' })
+});
+
+export const zReencryptResult = z.object({
+    scope: z.enum(['project', 'instance']),
+    org: z.string().optional(),
+    project: z.string().optional(),
+    rows_moved: z.coerce.bigint().min(BigInt('-9223372036854775808'), { error: 'Invalid value: Expected int64 to be >= -9223372036854775808' }).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' })
+});
+
+export const zMasterKeyRotation = z.object({
+    key_version: z.coerce.bigint().min(BigInt('-9223372036854775808'), { error: 'Invalid value: Expected int64 to be >= -9223372036854775808' }).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' })
+});
+
 export const zTokenKeyRotation = z.object({
     token_key_version: z.coerce.bigint().min(BigInt('-9223372036854775808'), { error: 'Invalid value: Expected int64 to be >= -9223372036854775808' }).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' })
 });
@@ -4813,6 +4854,40 @@ export const zWatchProjectEventsResponse = z.string();
  * The rotation.
  */
 export const zRotateTokenKeyResponse = zTokenKeyRotation;
+
+export const zRotateDekBody = zRotateDekRequest;
+
+/**
+ * The rotation.
+ */
+export const zRotateDekResponse = zDekRotation;
+
+/**
+ * The reencrypt result.
+ */
+export const zReencryptInstanceResponse = zReencryptResult;
+
+/**
+ * The rotation.
+ */
+export const zRotateMasterKeyResponse = zMasterKeyRotation;
+
+export const zRotateRootKeyBody = zRotateRootKeyRequest;
+
+/**
+ * The phase result.
+ */
+export const zRotateRootKeyResponse = zRootKeyRotation;
+
+export const zReencryptProjectPath = z.object({
+    org: zId,
+    project: zId
+});
+
+/**
+ * The reencrypt result.
+ */
+export const zReencryptProjectResponse = zReencryptResult;
 
 /**
  * The rotation.

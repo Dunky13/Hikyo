@@ -5,14 +5,23 @@ import (
 	"crypto/subtle"
 	"database/sql"
 	"errors"
+	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/Hikyo-Org/hikyo/internal/domain"
 	"github.com/Hikyo-Org/hikyo/internal/store/pggen"
 	"github.com/Hikyo-Org/hikyo/internal/store/sqlitegen"
 )
+
+// purposeInstance is the tier-3 purpose value for the instance DEK. It MUST
+// equal crypto.PurposeInstance; the resolution surface may not import crypto
+// (the boundary allowlist), so the constant is mirrored here rather than
+// referenced. A drift is caught by the writer-fence tests, which seal under the
+// real crypto.PurposeInstance and assert against this query.
+const purposeInstance = "instance"
 
 // Human authentication storage (#47, human-auth ADR).
 //
@@ -534,6 +543,42 @@ func (r *Resolver) UpdatePasswordCredential(ctx context.Context, c PasswordCrede
 		AccountID: c.AccountID, RowVersion: c.RowVersion,
 	})
 	return n == 1, err
+}
+
+// AssertActiveInstanceDEKVersion is the writer fence for the proof-less
+// authentication-resolution surface (encryption-model ADR § Rotation,
+// invariant 7). Password, TOTP and recovery-code writes seal under the instance
+// DEK but run pre-auth with no tenant proof, so they cannot use the keyring's
+// proof-carrying fence (store.Keys.AssertActiveDEKVersion); they call this
+// instead. It runs the SAME query as that fence — postgres FOR SHARE-locks the
+// version row until this transaction commits, sqlite serializes on its single
+// writer — restricted to the instance purpose. A non-active state, or a missing
+// row, means a concurrent rotate-dek --instance retired the version between seal
+// and commit: the credential write is refused as domain.ErrConflict (the caller
+// retries against the new active version) rather than committing a ciphertext
+// under a retired key that reencrypt has already walked past.
+func (r *Resolver) AssertActiveInstanceDEKVersion(ctx context.Context, version int64) error {
+	var state string
+	var err error
+	if r.sq != nil {
+		state, err = r.sq.AssertActiveTier3Version(ctx, sqlitegen.AssertActiveTier3VersionParams{
+			Purpose: purposeInstance, Version: version,
+		})
+	} else {
+		state, err = r.pg.AssertActiveTier3Version(ctx, pggen.AssertActiveTier3VersionParams{
+			Purpose: purposeInstance, Version: version,
+		})
+	}
+	if errors.Is(err, sql.ErrNoRows) || errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("%w: instance DEK version %d is no longer active", domain.ErrConflict, version)
+	}
+	if err != nil {
+		return err
+	}
+	if state != "active" {
+		return fmt.Errorf("%w: instance DEK version %d is %s, not active", domain.ErrConflict, version, state)
+	}
+	return nil
 }
 
 func (r *Resolver) CreateSession(ctx context.Context, s NewSession) error {

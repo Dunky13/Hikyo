@@ -623,6 +623,46 @@ func (q *Queries) ListRemotes(ctx context.Context) ([]ListRemotesRow, error) {
 	return items, nil
 }
 
+const listRemotesForReencrypt = `-- name: ListRemotesForReencrypt :many
+SELECT id, credential_sealed FROM remotes WHERE id > ? ORDER BY id LIMIT ?
+`
+
+type ListRemotesForReencryptParams struct {
+	ID    string
+	Limit int64
+}
+
+type ListRemotesForReencryptRow struct {
+	ID               string
+	CredentialSealed []byte
+}
+
+// Reencrypt walk (#75/#187): remotes.credential_sealed has no dek_version, so
+// the walk header-parses the envelope for the version and CASes on the blob.
+// hikyo:instance-scoped
+func (q *Queries) ListRemotesForReencrypt(ctx context.Context, arg ListRemotesForReencryptParams) ([]ListRemotesForReencryptRow, error) {
+	rows, err := q.db.QueryContext(ctx, listRemotesForReencrypt, arg.ID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRemotesForReencryptRow
+	for rows.Next() {
+		var i ListRemotesForReencryptRow
+		if err := rows.Scan(&i.ID, &i.CredentialSealed); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listWorkspaceOrigins = `-- name: ListWorkspaceOrigins :many
 
 SELECT origin, created_at, created_by FROM workspace_origins ORDER BY origin
@@ -720,6 +760,25 @@ type RecordRemoteFetchFailureParams struct {
 func (q *Queries) RecordRemoteFetchFailure(ctx context.Context, arg RecordRemoteFetchFailureParams) error {
 	_, err := q.db.ExecContext(ctx, recordRemoteFetchFailure, arg.RemoteID, arg.LastAttemptAt, arg.LastOutcome)
 	return err
+}
+
+const reencryptRemote = `-- name: ReencryptRemote :execrows
+UPDATE remotes SET credential_sealed=?1 WHERE id=?2 AND credential_sealed=?3
+`
+
+type ReencryptRemoteParams struct {
+	NewCt []byte
+	ID    string
+	OldCt []byte
+}
+
+// hikyo:instance-scoped
+func (q *Queries) ReencryptRemote(ctx context.Context, arg ReencryptRemoteParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, reencryptRemote, arg.NewCt, arg.ID, arg.OldCt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const renameRemote = `-- name: RenameRemote :execrows

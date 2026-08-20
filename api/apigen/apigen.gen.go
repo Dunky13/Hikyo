@@ -588,6 +588,24 @@ func (e CredentialLifetime) Valid() bool {
 	}
 }
 
+// Defines values for DEKRotationScope.
+const (
+	DEKRotationScopeInstance DEKRotationScope = "instance"
+	DEKRotationScopeProject  DEKRotationScope = "project"
+)
+
+// Valid indicates whether the value is a known member of the DEKRotationScope enum.
+func (e DEKRotationScope) Valid() bool {
+	switch e {
+	case DEKRotationScopeInstance:
+		return true
+	case DEKRotationScopeProject:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DefinitionsBundlePresenceMode.
 const (
 	DefinitionsBundlePresenceModeAll      DefinitionsBundlePresenceMode = "all"
@@ -1044,6 +1062,24 @@ func (e ReauthPurpose) Valid() bool {
 	}
 }
 
+// Defines values for ReencryptResultScope.
+const (
+	ReencryptResultScopeInstance ReencryptResultScope = "instance"
+	ReencryptResultScopeProject  ReencryptResultScope = "project"
+)
+
+// Valid indicates whether the value is a known member of the ReencryptResultScope enum.
+func (e ReencryptResultScope) Valid() bool {
+	switch e {
+	case ReencryptResultScopeInstance:
+		return true
+	case ReencryptResultScopeProject:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RemoteState.
 const (
 	CredentialRejected RemoteState = "credential-rejected"
@@ -1185,6 +1221,66 @@ func (e RoleTemplate) Valid() bool {
 	case Revealer:
 		return true
 	case Viewer:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RootKeyRotationPhase.
+const (
+	RootKeyRotationPhaseFinalize RootKeyRotationPhase = "finalize"
+	RootKeyRotationPhasePrepare  RootKeyRotationPhase = "prepare"
+	RootKeyRotationPhaseVerify   RootKeyRotationPhase = "verify"
+)
+
+// Valid indicates whether the value is a known member of the RootKeyRotationPhase enum.
+func (e RootKeyRotationPhase) Valid() bool {
+	switch e {
+	case RootKeyRotationPhaseFinalize:
+		return true
+	case RootKeyRotationPhasePrepare:
+		return true
+	case RootKeyRotationPhaseVerify:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RotateDEKRequestScope.
+const (
+	RotateDEKRequestScopeInstance RotateDEKRequestScope = "instance"
+	RotateDEKRequestScopeProject  RotateDEKRequestScope = "project"
+)
+
+// Valid indicates whether the value is a known member of the RotateDEKRequestScope enum.
+func (e RotateDEKRequestScope) Valid() bool {
+	switch e {
+	case RotateDEKRequestScopeInstance:
+		return true
+	case RotateDEKRequestScopeProject:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RotateRootKeyRequestPhase.
+const (
+	RotateRootKeyRequestPhaseFinalize RotateRootKeyRequestPhase = "finalize"
+	RotateRootKeyRequestPhasePrepare  RotateRootKeyRequestPhase = "prepare"
+	RotateRootKeyRequestPhaseVerify   RotateRootKeyRequestPhase = "verify"
+)
+
+// Valid indicates whether the value is a known member of the RotateRootKeyRequestPhase enum.
+func (e RotateRootKeyRequestPhase) Valid() bool {
+	switch e {
+	case RotateRootKeyRequestPhaseFinalize:
+		return true
+	case RotateRootKeyRequestPhasePrepare:
+		return true
+	case RotateRootKeyRequestPhaseVerify:
 		return true
 	default:
 		return false
@@ -2585,6 +2681,18 @@ type CredentialResetResult struct {
 	ExpiresAt Timestamp `json:"expires_at"`
 }
 
+// DEKRotation defines model for DEKRotation.
+type DEKRotation struct {
+	// KeyVersion The new active DEK version. Old versions remain readable until reencrypt.
+	KeyVersion int64            `json:"key_version"`
+	Org        *string          `json:"org,omitempty"`
+	Project    *string          `json:"project,omitempty"`
+	Scope      DEKRotationScope `json:"scope"`
+}
+
+// DEKRotationScope defines model for DEKRotation.Scope.
+type DEKRotationScope string
+
 // DeclareValuesRequest defines model for DeclareValuesRequest.
 type DeclareValuesRequest struct {
 	EnvironmentIds []ID `json:"environment_ids"`
@@ -3823,6 +3931,12 @@ type MachineCredentialList struct {
 	Items []MachineCredential `json:"items"`
 }
 
+// MasterKeyRotation defines model for MasterKeyRotation.
+type MasterKeyRotation struct {
+	// KeyVersion The new master key version. Every tier-3 key is now wrapped under it.
+	KeyVersion int64 `json:"key_version"`
+}
+
 // Meta An exact closed allowlist. `additionalProperties: false` is the
 // allowlist's teeth: a field added here is a visible spec change, not a
 // quiet leak of instance configuration to unauthenticated callers.
@@ -4311,6 +4425,19 @@ type RedeemWorkspaceHandoffRequest struct {
 	PkceVerifier string `json:"pkce_verifier"`
 }
 
+// ReencryptResult defines model for ReencryptResult.
+type ReencryptResult struct {
+	Org     *string `json:"org,omitempty"`
+	Project *string `json:"project,omitempty"`
+
+	// RowsMoved How many ciphertext rows this run moved onto the active DEK version.
+	RowsMoved int64                `json:"rows_moved"`
+	Scope     ReencryptResultScope `json:"scope"`
+}
+
+// ReencryptResultScope defines model for ReencryptResult.Scope.
+type ReencryptResultScope string
+
 // Remote One connection entry and its last-known state. There is deliberately no
 // credential field: the stored credential is write-only after storage and
 // is not retrievable through any surface.
@@ -4698,6 +4825,47 @@ type RollbackResult struct {
 	Preview  ImpactPreview   `json:"preview"`
 	Revision int64           `json:"revision"`
 }
+
+// RootKeyRotation defines model for RootKeyRotation.
+type RootKeyRotation struct {
+	Phase RootKeyRotationPhase `json:"phase"`
+
+	// RootKeyEpoch The epoch this phase concerns — the new epoch for prepare/verify, the surviving epoch after finalize.
+	RootKeyEpoch int64 `json:"root_key_epoch"`
+}
+
+// RootKeyRotationPhase defines model for RootKeyRotation.Phase.
+type RootKeyRotationPhase string
+
+// RotateDEKRequest defines model for RotateDEKRequest.
+type RotateDEKRequest struct {
+	// Org Organisation id. Required when scope is `project`, absent otherwise.
+	Org *string `json:"org,omitempty"`
+
+	// Project Project id. Required when scope is `project`, absent otherwise.
+	Project *string `json:"project,omitempty"`
+
+	// Scope `project` rotates one project's DEK (org and project required);
+	// `instance` rotates the instance DEK for rows belonging to no project.
+	Scope RotateDEKRequestScope `json:"scope"`
+}
+
+// RotateDEKRequestScope `project` rotates one project's DEK (org and project required);
+// `instance` rotates the instance DEK for rows belonging to no project.
+type RotateDEKRequestScope string
+
+// RotateRootKeyRequest defines model for RotateRootKeyRequest.
+type RotateRootKeyRequest struct {
+	// Phase `prepare` seals the master under the new root; `verify` confirms the
+	// operator installed it at the primary source; `finalize` retires the
+	// old wrapper. Run in that order.
+	Phase RotateRootKeyRequestPhase `json:"phase"`
+}
+
+// RotateRootKeyRequestPhase `prepare` seals the master under the new root; `verify` confirms the
+// operator installed it at the primary source; `finalize` retires the
+// old wrapper. Run in that order.
+type RotateRootKeyRequestPhase string
 
 // SamlACSRequest defines model for SamlACSRequest.
 type SamlACSRequest struct {
@@ -6302,6 +6470,12 @@ type AddRemoteJSONRequestBody = AddRemoteRequest
 // RenameRemoteJSONRequestBody defines body for RenameRemote for application/json ContentType.
 type RenameRemoteJSONRequestBody = RenameRemoteRequest
 
+// RotateDEKJSONRequestBody defines body for RotateDEK for application/json ContentType.
+type RotateDEKJSONRequestBody = RotateDEKRequest
+
+// RotateRootKeyJSONRequestBody defines body for RotateRootKey for application/json ContentType.
+type RotateRootKeyJSONRequestBody = RotateRootKeyRequest
+
 // PatchSamlProviderJSONRequestBody defines body for PatchSamlProvider for application/json ContentType.
 type PatchSamlProviderJSONRequestBody = SamlProviderPatch
 
@@ -6759,6 +6933,9 @@ type ServerInterface interface {
 	// PutOidcProvider Create or reconfigure an OIDC provider.
 	// (PUT /api/v1/instance/oidc-providers/{slug})
 	PutOidcProvider(w http.ResponseWriter, r *http.Request, slug ProviderSlugPath)
+	// ReencryptInstance Walk the instance credential ciphertext onto the active DEK version.
+	// (POST /api/v1/instance/reencrypt)
+	ReencryptInstance(w http.ResponseWriter, r *http.Request)
 	// ListRemotes The directory of connected instances.
 	// (GET /api/v1/instance/remotes)
 	ListRemotes(w http.ResponseWriter, r *http.Request)
@@ -6777,6 +6954,15 @@ type ServerInterface interface {
 	// GetRetentionHealth Read payload-pruner health.
 	// (GET /api/v1/instance/retention-health)
 	GetRetentionHealth(w http.ResponseWriter, r *http.Request)
+	// RotateDEK Append a new DEK version for one project or the instance scope.
+	// (POST /api/v1/instance/rotate-dek)
+	RotateDEK(w http.ResponseWriter, r *http.Request)
+	// RotateMasterKey Generate a new master key and re-wrap every tier-3 key under it.
+	// (POST /api/v1/instance/rotate-master-key)
+	RotateMasterKey(w http.ResponseWriter, r *http.Request)
+	// RotateRootKey Run one phase of the crash-safe root-key rotation.
+	// (POST /api/v1/instance/rotate-root-key)
+	RotateRootKey(w http.ResponseWriter, r *http.Request)
 	// RotateScanningKey Rotate the secret-scanning fingerprint key.
 	// (POST /api/v1/instance/rotate-scanning-key)
 	RotateScanningKey(w http.ResponseWriter, r *http.Request)
@@ -7125,6 +7311,9 @@ type ServerInterface interface {
 	// RenameKey Rename a key.
 	// (PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/name)
 	RenameKey(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, key KeyID)
+	// ReencryptProject Walk a project's ciphertext onto the active DEK version.
+	// (POST /api/v1/orgs/{org}/projects/{project}/reencrypt)
+	ReencryptProject(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID)
 	// GetProjectRetention Read the project's effective retention policy.
 	// (GET /api/v1/orgs/{org}/projects/{project}/retention)
 	GetProjectRetention(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID)
@@ -7623,6 +7812,12 @@ func (_ Unimplemented) PutOidcProvider(w http.ResponseWriter, r *http.Request, s
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// ReencryptInstance Walk the instance credential ciphertext onto the active DEK version.
+// (POST /api/v1/instance/reencrypt)
+func (_ Unimplemented) ReencryptInstance(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // ListRemotes The directory of connected instances.
 // (GET /api/v1/instance/remotes)
 func (_ Unimplemented) ListRemotes(w http.ResponseWriter, r *http.Request) {
@@ -7656,6 +7851,24 @@ func (_ Unimplemented) RenameRemote(w http.ResponseWriter, r *http.Request, remo
 // GetRetentionHealth Read payload-pruner health.
 // (GET /api/v1/instance/retention-health)
 func (_ Unimplemented) GetRetentionHealth(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RotateDEK Append a new DEK version for one project or the instance scope.
+// (POST /api/v1/instance/rotate-dek)
+func (_ Unimplemented) RotateDEK(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RotateMasterKey Generate a new master key and re-wrap every tier-3 key under it.
+// (POST /api/v1/instance/rotate-master-key)
+func (_ Unimplemented) RotateMasterKey(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RotateRootKey Run one phase of the crash-safe root-key rotation.
+// (POST /api/v1/instance/rotate-root-key)
+func (_ Unimplemented) RotateRootKey(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -8352,6 +8565,12 @@ func (_ Unimplemented) SetKeyGroup(w http.ResponseWriter, r *http.Request, org O
 // RenameKey Rename a key.
 // (PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/name)
 func (_ Unimplemented) RenameKey(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, key KeyID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ReencryptProject Walk a project's ciphertext onto the active DEK version.
+// (POST /api/v1/orgs/{org}/projects/{project}/reencrypt)
+func (_ Unimplemented) ReencryptProject(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -9743,6 +9962,20 @@ func (siw *ServerInterfaceWrapper) PutOidcProvider(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
+// ReencryptInstance operation middleware
+func (siw *ServerInterfaceWrapper) ReencryptInstance(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ReencryptInstance(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListRemotes operation middleware
 func (siw *ServerInterfaceWrapper) ListRemotes(w http.ResponseWriter, r *http.Request) {
 
@@ -9854,6 +10087,48 @@ func (siw *ServerInterfaceWrapper) GetRetentionHealth(w http.ResponseWriter, r *
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetRetentionHealth(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RotateDEK operation middleware
+func (siw *ServerInterfaceWrapper) RotateDEK(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RotateDEK(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RotateMasterKey operation middleware
+func (siw *ServerInterfaceWrapper) RotateMasterKey(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RotateMasterKey(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RotateRootKey operation middleware
+func (siw *ServerInterfaceWrapper) RotateRootKey(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RotateRootKey(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -14318,6 +14593,41 @@ func (siw *ServerInterfaceWrapper) RenameKey(w http.ResponseWriter, r *http.Requ
 	handler.ServeHTTP(w, r)
 }
 
+// ReencryptProject operation middleware
+func (siw *ServerInterfaceWrapper) ReencryptProject(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ReencryptProject(w, r, org, project)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetProjectRetention operation middleware
 func (siw *ServerInterfaceWrapper) GetProjectRetention(w http.ResponseWriter, r *http.Request) {
 
@@ -17049,6 +17359,21 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/api/v1/instance/rotate-token-key", wrapper.RotateTokenKey)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/instance/rotate-dek", wrapper.RotateDEK)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/instance/reencrypt", wrapper.ReencryptInstance)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/instance/rotate-master-key", wrapper.RotateMasterKey)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/instance/rotate-root-key", wrapper.RotateRootKey)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/reencrypt", wrapper.ReencryptProject)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/api/v1/instance/rotate-scanning-key", wrapper.RotateScanningKey)
@@ -22406,6 +22731,98 @@ func (response PutOidcProvider500JSONResponse) VisitPutOidcProviderResponse(w ht
 	return err
 }
 
+type ReencryptInstanceRequestObject struct {
+}
+
+type ReencryptInstanceResponseObject interface {
+	VisitReencryptInstanceResponse(w http.ResponseWriter) error
+}
+
+type ReencryptInstance200JSONResponse ReencryptResult
+
+func (response ReencryptInstance200JSONResponse) VisitReencryptInstanceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReencryptInstance401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ReencryptInstance401JSONResponse) VisitReencryptInstanceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReencryptInstance404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ReencryptInstance404JSONResponse) VisitReencryptInstanceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReencryptInstance409JSONResponse struct{ ConflictJSONResponse }
+
+func (response ReencryptInstance409JSONResponse) VisitReencryptInstanceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReencryptInstance429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ReencryptInstance429JSONResponse) VisitReencryptInstanceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReencryptInstance500JSONResponse struct{ InternalJSONResponse }
+
+func (response ReencryptInstance500JSONResponse) VisitReencryptInstanceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListRemotesRequestObject struct {
 }
 
@@ -23002,6 +23419,312 @@ func (response GetRetentionHealth429JSONResponse) VisitGetRetentionHealthRespons
 type GetRetentionHealth500JSONResponse struct{ InternalJSONResponse }
 
 func (response GetRetentionHealth500JSONResponse) VisitGetRetentionHealthResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateDEKRequestObject struct {
+	Body *RotateDEKJSONRequestBody
+}
+
+type RotateDEKResponseObject interface {
+	VisitRotateDEKResponse(w http.ResponseWriter) error
+}
+
+type RotateDEK200JSONResponse DEKRotation
+
+func (response RotateDEK200JSONResponse) VisitRotateDEKResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateDEK400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response RotateDEK400JSONResponse) VisitRotateDEKResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateDEK401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response RotateDEK401JSONResponse) VisitRotateDEKResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateDEK404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response RotateDEK404JSONResponse) VisitRotateDEKResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateDEK409JSONResponse struct{ ConflictJSONResponse }
+
+func (response RotateDEK409JSONResponse) VisitRotateDEKResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateDEK429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response RotateDEK429JSONResponse) VisitRotateDEKResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateDEK500JSONResponse struct{ InternalJSONResponse }
+
+func (response RotateDEK500JSONResponse) VisitRotateDEKResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateMasterKeyRequestObject struct {
+}
+
+type RotateMasterKeyResponseObject interface {
+	VisitRotateMasterKeyResponse(w http.ResponseWriter) error
+}
+
+type RotateMasterKey200JSONResponse MasterKeyRotation
+
+func (response RotateMasterKey200JSONResponse) VisitRotateMasterKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateMasterKey401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response RotateMasterKey401JSONResponse) VisitRotateMasterKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateMasterKey404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response RotateMasterKey404JSONResponse) VisitRotateMasterKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateMasterKey409JSONResponse struct{ ConflictJSONResponse }
+
+func (response RotateMasterKey409JSONResponse) VisitRotateMasterKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateMasterKey429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response RotateMasterKey429JSONResponse) VisitRotateMasterKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateMasterKey500JSONResponse struct{ InternalJSONResponse }
+
+func (response RotateMasterKey500JSONResponse) VisitRotateMasterKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateRootKeyRequestObject struct {
+	Body *RotateRootKeyJSONRequestBody
+}
+
+type RotateRootKeyResponseObject interface {
+	VisitRotateRootKeyResponse(w http.ResponseWriter) error
+}
+
+type RotateRootKey200JSONResponse RootKeyRotation
+
+func (response RotateRootKey200JSONResponse) VisitRotateRootKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateRootKey400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response RotateRootKey400JSONResponse) VisitRotateRootKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateRootKey401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response RotateRootKey401JSONResponse) VisitRotateRootKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateRootKey404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response RotateRootKey404JSONResponse) VisitRotateRootKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateRootKey409JSONResponse struct{ ConflictJSONResponse }
+
+func (response RotateRootKey409JSONResponse) VisitRotateRootKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateRootKey429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response RotateRootKey429JSONResponse) VisitRotateRootKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateRootKey500JSONResponse struct{ InternalJSONResponse }
+
+func (response RotateRootKey500JSONResponse) VisitRotateRootKeyResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -34099,6 +34822,85 @@ func (response RenameKey500JSONResponse) VisitRenameKeyResponse(w http.ResponseW
 	return err
 }
 
+type ReencryptProjectRequestObject struct {
+	Org     OrgID     `json:"org"`
+	Project ProjectID `json:"project"`
+}
+
+type ReencryptProjectResponseObject interface {
+	VisitReencryptProjectResponse(w http.ResponseWriter) error
+}
+
+type ReencryptProject200JSONResponse ReencryptResult
+
+func (response ReencryptProject200JSONResponse) VisitReencryptProjectResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReencryptProject401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ReencryptProject401JSONResponse) VisitReencryptProjectResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReencryptProject404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ReencryptProject404JSONResponse) VisitReencryptProjectResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReencryptProject409JSONResponse struct{ ConflictJSONResponse }
+
+func (response ReencryptProject409JSONResponse) VisitReencryptProjectResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReencryptProject500JSONResponse struct{ InternalJSONResponse }
+
+func (response ReencryptProject500JSONResponse) VisitReencryptProjectResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetProjectRetentionRequestObject struct {
 	Org     OrgID     `json:"org"`
 	Project ProjectID `json:"project"`
@@ -38987,6 +39789,9 @@ type StrictServerInterface interface {
 	// PutOidcProvider Create or reconfigure an OIDC provider.
 	// (PUT /api/v1/instance/oidc-providers/{slug})
 	PutOidcProvider(ctx context.Context, request PutOidcProviderRequestObject) (PutOidcProviderResponseObject, error)
+	// ReencryptInstance Walk the instance credential ciphertext onto the active DEK version.
+	// (POST /api/v1/instance/reencrypt)
+	ReencryptInstance(ctx context.Context, request ReencryptInstanceRequestObject) (ReencryptInstanceResponseObject, error)
 	// ListRemotes The directory of connected instances.
 	// (GET /api/v1/instance/remotes)
 	ListRemotes(ctx context.Context, request ListRemotesRequestObject) (ListRemotesResponseObject, error)
@@ -39005,6 +39810,15 @@ type StrictServerInterface interface {
 	// GetRetentionHealth Read payload-pruner health.
 	// (GET /api/v1/instance/retention-health)
 	GetRetentionHealth(ctx context.Context, request GetRetentionHealthRequestObject) (GetRetentionHealthResponseObject, error)
+	// RotateDEK Append a new DEK version for one project or the instance scope.
+	// (POST /api/v1/instance/rotate-dek)
+	RotateDEK(ctx context.Context, request RotateDEKRequestObject) (RotateDEKResponseObject, error)
+	// RotateMasterKey Generate a new master key and re-wrap every tier-3 key under it.
+	// (POST /api/v1/instance/rotate-master-key)
+	RotateMasterKey(ctx context.Context, request RotateMasterKeyRequestObject) (RotateMasterKeyResponseObject, error)
+	// RotateRootKey Run one phase of the crash-safe root-key rotation.
+	// (POST /api/v1/instance/rotate-root-key)
+	RotateRootKey(ctx context.Context, request RotateRootKeyRequestObject) (RotateRootKeyResponseObject, error)
 	// RotateScanningKey Rotate the secret-scanning fingerprint key.
 	// (POST /api/v1/instance/rotate-scanning-key)
 	RotateScanningKey(ctx context.Context, request RotateScanningKeyRequestObject) (RotateScanningKeyResponseObject, error)
@@ -39353,6 +40167,9 @@ type StrictServerInterface interface {
 	// RenameKey Rename a key.
 	// (PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/name)
 	RenameKey(ctx context.Context, request RenameKeyRequestObject) (RenameKeyResponseObject, error)
+	// ReencryptProject Walk a project's ciphertext onto the active DEK version.
+	// (POST /api/v1/orgs/{org}/projects/{project}/reencrypt)
+	ReencryptProject(ctx context.Context, request ReencryptProjectRequestObject) (ReencryptProjectResponseObject, error)
 	// GetProjectRetention Read the project's effective retention policy.
 	// (GET /api/v1/orgs/{org}/projects/{project}/retention)
 	GetProjectRetention(ctx context.Context, request GetProjectRetentionRequestObject) (GetProjectRetentionResponseObject, error)
@@ -41207,6 +42024,30 @@ func (sh *strictHandler) PutOidcProvider(w http.ResponseWriter, r *http.Request,
 	}
 }
 
+// ReencryptInstance operation middleware
+func (sh *strictHandler) ReencryptInstance(w http.ResponseWriter, r *http.Request) {
+	var request ReencryptInstanceRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ReencryptInstance(ctx, request.(ReencryptInstanceRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ReencryptInstance")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ReencryptInstanceResponseObject); ok {
+		if err := validResponse.VisitReencryptInstanceResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ListRemotes operation middleware
 func (sh *strictHandler) ListRemotes(w http.ResponseWriter, r *http.Request) {
 	var request ListRemotesRequestObject
@@ -41364,6 +42205,92 @@ func (sh *strictHandler) GetRetentionHealth(w http.ResponseWriter, r *http.Reque
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetRetentionHealthResponseObject); ok {
 		if err := validResponse.VisitGetRetentionHealthResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RotateDEK operation middleware
+func (sh *strictHandler) RotateDEK(w http.ResponseWriter, r *http.Request) {
+	var request RotateDEKRequestObject
+
+	var body RotateDEKJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RotateDEK(ctx, request.(RotateDEKRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RotateDEK")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RotateDEKResponseObject); ok {
+		if err := validResponse.VisitRotateDEKResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RotateMasterKey operation middleware
+func (sh *strictHandler) RotateMasterKey(w http.ResponseWriter, r *http.Request) {
+	var request RotateMasterKeyRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RotateMasterKey(ctx, request.(RotateMasterKeyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RotateMasterKey")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RotateMasterKeyResponseObject); ok {
+		if err := validResponse.VisitRotateMasterKeyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RotateRootKey operation middleware
+func (sh *strictHandler) RotateRootKey(w http.ResponseWriter, r *http.Request) {
+	var request RotateRootKeyRequestObject
+
+	var body RotateRootKeyJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RotateRootKey(ctx, request.(RotateRootKeyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RotateRootKey")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RotateRootKeyResponseObject); ok {
+		if err := validResponse.VisitRotateRootKeyResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -44863,6 +45790,33 @@ func (sh *strictHandler) RenameKey(w http.ResponseWriter, r *http.Request, org O
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RenameKeyResponseObject); ok {
 		if err := validResponse.VisitRenameKeyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ReencryptProject operation middleware
+func (sh *strictHandler) ReencryptProject(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
+	var request ReencryptProjectRequestObject
+
+	request.Org = org
+	request.Project = project
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ReencryptProject(ctx, request.(ReencryptProjectRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ReencryptProject")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ReencryptProjectResponseObject); ok {
+		if err := validResponse.VisitReencryptProjectResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

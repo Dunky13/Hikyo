@@ -81,6 +81,76 @@ func (r pgAdapters) Target(ctx context.Context, p authz.Proof, targetID string) 
 	return scanAdapterTarget(r.db.QueryRow(ctx, `SELECT `+adapterTargetColumns+` FROM adapter_targets t JOIN adapters a ON a.id=t.adapter_id AND a.org_id=t.org_id AND a.project_id=t.project_id WHERE t.id=$1 AND t.org_id=$2 AND t.project_id=$3`, targetID, chain.Org, chain.Project))
 }
 
+func (r sqliteAdapters) ListAdaptersForReencrypt(ctx context.Context, p authz.Proof, cursor string, limit int) ([]ReencryptFieldRow, error) {
+	chain, err := authz.Verify(p, authz.StoreAdaptersListForReencrypt, r.tok)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.db.QueryContext(ctx, `SELECT id, credential_ciphertext FROM adapters WHERE org_id=? AND project_id=? AND id>? ORDER BY id LIMIT ?`, chain.Org, chain.Project, cursor, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ReencryptFieldRow
+	for rows.Next() {
+		var id string
+		var ct []byte
+		if err := rows.Scan(&id, &ct); err != nil {
+			return nil, err
+		}
+		out = append(out, ReencryptFieldRow{ID: id, Owner: id, Ciphertext: ct})
+	}
+	return out, rows.Err()
+}
+
+func (r sqliteAdapters) ReencryptAdapter(ctx context.Context, p authz.Proof, id string, newCiphertext, oldCiphertext []byte) (bool, error) {
+	chain, err := authz.Verify(p, authz.StoreAdaptersReencrypt, r.tok)
+	if err != nil {
+		return false, err
+	}
+	res, err := r.db.ExecContext(ctx, `UPDATE adapters SET credential_ciphertext=? WHERE org_id=? AND project_id=? AND id=? AND credential_ciphertext=?`, newCiphertext, chain.Org, chain.Project, id, oldCiphertext)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n == 1, err
+}
+
+func (r sqliteAdapters) ListRouteMovesForReencrypt(ctx context.Context, p authz.Proof, cursor string, limit int) ([]ReencryptFieldRow, error) {
+	chain, err := authz.Verify(p, authz.StoreAdaptersListMovesForReencrypt, r.tok)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.db.QueryContext(ctx, `SELECT id, adapter_id, pending_credential_ciphertext FROM adapter_route_moves WHERE org_id=? AND project_id=? AND id>? ORDER BY id LIMIT ?`, chain.Org, chain.Project, cursor, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ReencryptFieldRow
+	for rows.Next() {
+		var id, adapterID string
+		var ct []byte
+		if err := rows.Scan(&id, &adapterID, &ct); err != nil {
+			return nil, err
+		}
+		out = append(out, ReencryptFieldRow{ID: id, Owner: adapterID, Ciphertext: ct})
+	}
+	return out, rows.Err()
+}
+
+func (r sqliteAdapters) ReencryptRouteMove(ctx context.Context, p authz.Proof, id string, newCiphertext, oldCiphertext []byte) (bool, error) {
+	chain, err := authz.Verify(p, authz.StoreAdaptersReencryptMove, r.tok)
+	if err != nil {
+		return false, err
+	}
+	res, err := r.db.ExecContext(ctx, `UPDATE adapter_route_moves SET pending_credential_ciphertext=? WHERE org_id=? AND project_id=? AND id=? AND pending_credential_ciphertext=?`, newCiphertext, chain.Org, chain.Project, id, oldCiphertext)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n == 1, err
+}
+
 func (r sqliteAdapters) Mapping(ctx context.Context, p authz.Proof, targetID string) ([]adapter.ManifestEntry, error) {
 	chain, err := authz.Verify(p, authz.StoreAdaptersMapping, r.tok)
 	if err != nil {
@@ -100,6 +170,74 @@ func (r sqliteAdapters) Mapping(ctx context.Context, p authz.Proof, targetID str
 		out = append(out, row)
 	}
 	return out, rows.Err()
+}
+
+func (r pgAdapters) ListAdaptersForReencrypt(ctx context.Context, p authz.Proof, cursor string, limit int) ([]ReencryptFieldRow, error) {
+	chain, err := authz.Verify(p, authz.StoreAdaptersListForReencrypt, r.tok)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.db.Query(ctx, `SELECT id, credential_ciphertext FROM adapters WHERE org_id=$1 AND project_id=$2 AND id>$3 ORDER BY id LIMIT $4`, chain.Org, chain.Project, cursor, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ReencryptFieldRow
+	for rows.Next() {
+		var id string
+		var ct []byte
+		if err := rows.Scan(&id, &ct); err != nil {
+			return nil, err
+		}
+		out = append(out, ReencryptFieldRow{ID: id, Owner: id, Ciphertext: ct})
+	}
+	return out, rows.Err()
+}
+
+func (r pgAdapters) ReencryptAdapter(ctx context.Context, p authz.Proof, id string, newCiphertext, oldCiphertext []byte) (bool, error) {
+	chain, err := authz.Verify(p, authz.StoreAdaptersReencrypt, r.tok)
+	if err != nil {
+		return false, err
+	}
+	tag, err := r.db.Exec(ctx, `UPDATE adapters SET credential_ciphertext=$1 WHERE org_id=$2 AND project_id=$3 AND id=$4 AND credential_ciphertext=$5`, newCiphertext, chain.Org, chain.Project, id, oldCiphertext)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+func (r pgAdapters) ListRouteMovesForReencrypt(ctx context.Context, p authz.Proof, cursor string, limit int) ([]ReencryptFieldRow, error) {
+	chain, err := authz.Verify(p, authz.StoreAdaptersListMovesForReencrypt, r.tok)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.db.Query(ctx, `SELECT id, adapter_id, pending_credential_ciphertext FROM adapter_route_moves WHERE org_id=$1 AND project_id=$2 AND id>$3 ORDER BY id LIMIT $4`, chain.Org, chain.Project, cursor, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ReencryptFieldRow
+	for rows.Next() {
+		var id, adapterID string
+		var ct []byte
+		if err := rows.Scan(&id, &adapterID, &ct); err != nil {
+			return nil, err
+		}
+		out = append(out, ReencryptFieldRow{ID: id, Owner: adapterID, Ciphertext: ct})
+	}
+	return out, rows.Err()
+}
+
+func (r pgAdapters) ReencryptRouteMove(ctx context.Context, p authz.Proof, id string, newCiphertext, oldCiphertext []byte) (bool, error) {
+	chain, err := authz.Verify(p, authz.StoreAdaptersReencryptMove, r.tok)
+	if err != nil {
+		return false, err
+	}
+	tag, err := r.db.Exec(ctx, `UPDATE adapter_route_moves SET pending_credential_ciphertext=$1 WHERE org_id=$2 AND project_id=$3 AND id=$4 AND pending_credential_ciphertext=$5`, newCiphertext, chain.Org, chain.Project, id, oldCiphertext)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
 }
 
 func (r pgAdapters) Mapping(ctx context.Context, p authz.Proof, targetID string) ([]adapter.ManifestEntry, error) {

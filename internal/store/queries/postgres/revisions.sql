@@ -251,3 +251,25 @@ WHERE org_id = sqlc.arg(org_id) AND project_id = sqlc.arg(project_id);
 -- name: CountPendingChangeForCell :one
 SELECT COUNT(*) FROM pending_changes
 WHERE org_id = sqlc.arg(org_id) AND project_id = sqlc.arg(project_id) AND environment_id = sqlc.arg(environment_id) AND key_id = sqlc.arg(key_id) AND owner_id = sqlc.arg(owner_id);
+-- Reencrypt walk (#75/#187): page and re-seal project_field ciphertext in place.
+-- name: ListSnapshotEntriesForReencrypt :many
+SELECT id, environment_id, snapshot_id, key_id, ciphertext FROM snapshot_entries
+WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id)
+  AND id > sqlc.arg(cursor) ORDER BY id LIMIT sqlc.arg(page_limit);
+
+-- name: ReencryptSnapshotEntry :execrows
+UPDATE snapshot_entries SET ciphertext = sqlc.arg(new_ciphertext)
+WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id)
+  AND id = sqlc.arg(id) AND ciphertext = sqlc.arg(old_ciphertext);
+
+-- pending_changes ciphertext is NULL for an `unset` draft; skip those rows.
+-- name: ListPendingForReencrypt :many
+SELECT id, environment_id, key_id, ciphertext FROM pending_changes
+WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id)
+  AND id > sqlc.arg(cursor)
+ORDER BY id LIMIT sqlc.arg(page_limit);
+
+-- name: ReencryptPendingChange :execrows
+UPDATE pending_changes SET ciphertext = sqlc.arg(new_ciphertext)
+WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id)
+  AND id = sqlc.arg(id) AND ciphertext = sqlc.arg(old_ciphertext);

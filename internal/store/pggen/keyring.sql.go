@@ -22,6 +22,142 @@ func (q *Queries) AcquireHierarchyGeneration(ctx context.Context) (int64, error)
 	return generation, err
 }
 
+const acquireScopeGeneration = `-- name: AcquireScopeGeneration :one
+SELECT generation FROM key_generations WHERE scope = $1 FOR UPDATE
+`
+
+// AcquireScopeGeneration takes the per-scope fence a version append or a
+// retirement runs inside. FOR UPDATE excludes concurrent scope-state changes
+// and the FOR SHARE writers hold, so a retirement's zero-reference check cannot
+// race a writer still sealing under the version it is about to retire.
+func (q *Queries) AcquireScopeGeneration(ctx context.Context, scope string) (int64, error) {
+	row := q.db.QueryRow(ctx, acquireScopeGeneration, scope)
+	var generation int64
+	err := row.Scan(&generation)
+	return generation, err
+}
+
+const allOpenableTier3 = `-- name: AllOpenableTier3 :many
+SELECT id, purpose, org_id, project_id, version, master_key_version, state, blob, created_at
+FROM tier3_keys WHERE state IN ('active', 'retiring') ORDER BY purpose, org_id, project_id, version
+`
+
+// AllOpenableTier3 returns every still-openable tier-3 key across every scope
+// (active + retiring), for `rotate-master-key` to re-wrap under a new master.
+// Retired rows are excluded: they hold zero live ciphertext, so their key
+// material is never unwrapped and re-wrapping it would be work with no reader.
+func (q *Queries) AllOpenableTier3(ctx context.Context) ([]Tier3Key, error) {
+	rows, err := q.db.Query(ctx, allOpenableTier3)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Tier3Key
+	for rows.Next() {
+		var i Tier3Key
+		if err := rows.Scan(
+			&i.ID,
+			&i.Purpose,
+			&i.OrgID,
+			&i.ProjectID,
+			&i.Version,
+			&i.MasterKeyVersion,
+			&i.State,
+			&i.Blob,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const assertActiveTier3Version = `-- name: AssertActiveTier3Version :one
+SELECT state FROM tier3_keys
+WHERE purpose = $1 AND org_id = $2 AND project_id = $3 AND version = $4
+FOR SHARE
+`
+
+type AssertActiveTier3VersionParams struct {
+	Purpose   string
+	OrgID     string
+	ProjectID string
+	Version   int64
+}
+
+// AssertActiveTier3Version is the writer fence: a ciphertext write reads the
+// state of the exact DEK version it sealed under, in its own transaction, and
+// proceeds only if that version is still 'active'. FOR SHARE locks the version
+// row so rotate-dek's demote and reencrypt's retire (which UPDATE it) block
+// until in-flight writers commit, closing the window where a write could land
+// under a version being retired. A stale sealer sealing under a now-retiring or
+// retired version reads a non-active state and is refused.
+func (q *Queries) AssertActiveTier3Version(ctx context.Context, arg AssertActiveTier3VersionParams) (string, error) {
+	row := q.db.QueryRow(ctx, assertActiveTier3Version,
+		arg.Purpose,
+		arg.OrgID,
+		arg.ProjectID,
+		arg.Version,
+	)
+	var state string
+	err := row.Scan(&state)
+	return state, err
+}
+
+const countOpenableTier3NotAtMaster = `-- name: CountOpenableTier3NotAtMaster :one
+SELECT COUNT(*) FROM tier3_keys
+WHERE state IN ('active', 'retiring') AND master_key_version != $1
+`
+
+// CountOpenableTier3NotAtMaster is rotate-master-key's zero-reference check,
+// run INSIDE the hierarchy fence: after re-wrapping, no still-openable tier-3
+// key may reference a master other than the new version. A non-zero count means
+// a tier-3 key was created or version-appended in the window before the fence,
+// under the old master, and is not in the re-wrapped set -- the rotation must
+// refuse and be retried rather than strand that key under the retired master.
+func (q *Queries) CountOpenableTier3NotAtMaster(ctx context.Context, masterKeyVersion int64) (int64, error) {
+	row := q.db.QueryRow(ctx, countOpenableTier3NotAtMaster, masterKeyVersion)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const demoteActiveTier3ToRetiring = `-- name: DemoteActiveTier3ToRetiring :execrows
+UPDATE tier3_keys SET state = 'retiring'
+WHERE purpose = $1 AND org_id = $2
+  AND project_id = $3 AND state = 'active'
+  AND version = $4
+`
+
+type DemoteActiveTier3ToRetiringParams struct {
+	Purpose   string
+	OrgID     string
+	ProjectID string
+	Version   int64
+}
+
+// DemoteActiveTier3ToRetiring is `rotate-dek`'s first half: the outgoing active
+// version steps down to 'retiring' -- no longer written, still openable until
+// reencrypt moves its ciphertext -- so the new active can take the one-active
+// index slot. Compare-and-swap on the predecessor version: zero rows means a
+// concurrent rotation already moved the active, and the caller must refuse.
+func (q *Queries) DemoteActiveTier3ToRetiring(ctx context.Context, arg DemoteActiveTier3ToRetiringParams) (int64, error) {
+	result, err := q.db.Exec(ctx, demoteActiveTier3ToRetiring,
+		arg.Purpose,
+		arg.OrgID,
+		arg.ProjectID,
+		arg.Version,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getActiveMasterKeys = `-- name: GetActiveMasterKeys :many
 SELECT version, root_key_epoch, state, blob, created_at
 FROM master_keys WHERE state = 'active' ORDER BY root_key_epoch DESC
@@ -79,6 +215,54 @@ func (q *Queries) GetActiveTier3Key(ctx context.Context, arg GetActiveTier3KeyPa
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const getTier3Versions = `-- name: GetTier3Versions :many
+SELECT id, purpose, org_id, project_id, version, master_key_version, state, blob, created_at
+FROM tier3_keys
+WHERE purpose = $1 AND org_id = $2 AND project_id = $3 AND state IN ('active', 'retiring')
+ORDER BY version DESC
+`
+
+type GetTier3VersionsParams struct {
+	Purpose   string
+	OrgID     string
+	ProjectID string
+}
+
+// GetTier3Versions returns every still-openable version of one scope's key --
+// the 'active' version new writes use plus every 'retiring' version whose
+// ciphertext a reencrypt has not yet moved. 'retired' rows are excluded: a
+// version reaches that state only when zero ciphertexts reference it, so
+// loading it would unwrap key material nothing can open. Newest version first.
+func (q *Queries) GetTier3Versions(ctx context.Context, arg GetTier3VersionsParams) ([]Tier3Key, error) {
+	rows, err := q.db.Query(ctx, getTier3Versions, arg.Purpose, arg.OrgID, arg.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Tier3Key
+	for rows.Next() {
+		var i Tier3Key
+		if err := rows.Scan(
+			&i.ID,
+			&i.Purpose,
+			&i.OrgID,
+			&i.ProjectID,
+			&i.Version,
+			&i.MasterKeyVersion,
+			&i.State,
+			&i.Blob,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const insertKeyGeneration = `-- name: InsertKeyGeneration :exec
@@ -142,6 +326,68 @@ func (q *Queries) InsertTier3Key(ctx context.Context, arg InsertTier3KeyParams) 
 	return err
 }
 
+const retireMasterAtVersion = `-- name: RetireMasterAtVersion :execrows
+UPDATE master_keys SET state = 'retired' WHERE version = $1 AND state = 'active'
+`
+
+// RetireMasterAtVersion retires the single active master as a compare-and-swap:
+// zero rows means a concurrent master rotation already moved it. Refused while
+// the root is dual-wrapped (two active masters) by the count check in the store.
+func (q *Queries) RetireMasterAtVersion(ctx context.Context, version int64) (int64, error) {
+	result, err := q.db.Exec(ctx, retireMasterAtVersion, version)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const retireMasterWrapperAtEpoch = `-- name: RetireMasterWrapperAtEpoch :execrows
+UPDATE master_keys SET state = 'retired'
+WHERE version = $1 AND root_key_epoch = $2 AND state = 'active'
+`
+
+type RetireMasterWrapperAtEpochParams struct {
+	Version      int64
+	RootKeyEpoch int64
+}
+
+// RetireMasterWrapperAtEpoch retires one wrapper of the dual-wrapped master by
+// its epoch (rotate-root-key --finalize dropping the old root's wrapper). The
+// other wrapper (same version, new epoch) stays active, so after finalize only
+// the new root boots and the old root fails with a root-mismatch.
+func (q *Queries) RetireMasterWrapperAtEpoch(ctx context.Context, arg RetireMasterWrapperAtEpochParams) (int64, error) {
+	result, err := q.db.Exec(ctx, retireMasterWrapperAtEpoch, arg.Version, arg.RootKeyEpoch)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const retireRetiringTier3ForScope = `-- name: RetireRetiringTier3ForScope :execrows
+UPDATE tier3_keys SET state = 'retired'
+WHERE purpose = $1 AND org_id = $2
+  AND project_id = $3 AND state = 'retiring'
+`
+
+type RetireRetiringTier3ForScopeParams struct {
+	Purpose   string
+	OrgID     string
+	ProjectID string
+}
+
+// RetireRetiringTier3ForScope completes a reencrypt: once the walk has moved
+// every ciphertext in the scope onto the active version, its retiring versions
+// reference nothing and are retired. Run inside the scope fence, which the
+// writer fence's FOR SHARE blocks against, so no write lands under a version
+// between the walk finishing and this retiring it.
+func (q *Queries) RetireRetiringTier3ForScope(ctx context.Context, arg RetireRetiringTier3ForScopeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, retireRetiringTier3ForScope, arg.Purpose, arg.OrgID, arg.ProjectID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const retireTier3Key = `-- name: RetireTier3Key :execrows
 UPDATE tier3_keys SET state = 'retired'
 WHERE purpose = $1 AND org_id = $2
@@ -189,6 +435,34 @@ func (q *Queries) RetireTier3KeyAtVersion(ctx context.Context, arg RetireTier3Ke
 		arg.Purpose,
 		arg.OrgID,
 		arg.ProjectID,
+		arg.Version,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const updateTier3Wrapping = `-- name: UpdateTier3Wrapping :execrows
+UPDATE tier3_keys SET blob = $1, master_key_version = $2
+WHERE id = $3 AND version = $4
+`
+
+type UpdateTier3WrappingParams struct {
+	Blob             []byte
+	MasterKeyVersion int64
+	ID               string
+	Version          int64
+}
+
+// UpdateTier3Wrapping re-points one tier-3 key at a new master: same key
+// material, re-sealed blob, new master_key_version. Addressed by (id, version)
+// because a scope has one row per version and the id is unique.
+func (q *Queries) UpdateTier3Wrapping(ctx context.Context, arg UpdateTier3WrappingParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateTier3Wrapping,
+		arg.Blob,
+		arg.MasterKeyVersion,
+		arg.ID,
 		arg.Version,
 	)
 	if err != nil {
