@@ -93,8 +93,10 @@ func runFactorLifecycle(t *testing.T, auth *service.Auth, ctx context.Context, u
 	if err != nil {
 		t.Fatalf("enrol start: %v", err)
 	}
-	// The confirming code must be a step strictly after enrolment's (single-use
-	// floored at the creation step, finding B19), so advance a window first.
+	// The confirming code may be the enrolment step's own — last_step seeds one
+	// below the creation step, so the creation step is not pre-consumed — but
+	// this lifecycle advances a window so the later step-up code is a distinct,
+	// unspent step from the one confirmation consumes.
 	clk = base.Add(30 * time.Second)
 	confirmed, err := auth.EnrolTOTPConfirm(ctx, relog.SessionToken, totpCode(t, uri, clk))
 	if err != nil {
@@ -264,6 +266,93 @@ func runStepUpElevates(t *testing.T, db *store.DB) {
 	// The elevated session now satisfies the MFA-mandatory rule.
 	if _, err := orgs.Create(ctx, service.Bearer(stepped.SessionToken), "now-elevated", true, []byte(`{}`)); err != nil {
 		t.Fatalf("a two-factor session was still refused: %v", err)
+	}
+}
+
+func TestTOTPConfirmSameStepSQLite(t *testing.T) {
+	runConfirmSameStep(t, seededDB(t, openSQLite))
+}
+
+func TestTOTPConfirmSameStepPostgres(t *testing.T) {
+	runConfirmSameStep(t, seededDB(t, openPostgres))
+}
+
+// runConfirmSameStep asserts the code shown in the SAME time step as enrolment
+// start confirms the enrolment (human-auth ADR §141: single-use is per step and
+// the creation step has consumed nothing yet, so it must not be pre-consumed),
+// and that a code from an earlier step is refused.
+func runConfirmSameStep(t *testing.T, db *store.DB) {
+	auth, _, password := bootstrapFactorAdmin(t, db)
+	base := time.Now().UTC()
+	clk := base
+	auth.Now = func() time.Time { return clk }
+	ctx := t.Context()
+
+	login, err := auth.LocalLogin(ctx, "factor-admin", password, service.ArtifactCLI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uri, err := auth.EnrolTOTPStart(ctx, login.SessionToken, password)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A code two steps before enrolment is refused: it does not validate in the
+	// skew window, so single-use never even weighs in.
+	if _, err := auth.EnrolTOTPConfirm(ctx, login.SessionToken, totpCode(t, uri, base.Add(-60*time.Second))); !errors.Is(err, domain.ErrUnauthenticated) {
+		t.Fatalf("confirm accepted a code two steps before enrolment: %v", err)
+	}
+	// The code of the enrolment step itself confirms — same 30-second window as
+	// start, no clock advance.
+	confirmed, err := auth.EnrolTOTPConfirm(ctx, login.SessionToken, totpCode(t, uri, base))
+	if err != nil {
+		t.Fatalf("confirm refused the enrolment-step code: %v", err)
+	}
+	if len(confirmed.Assurance.Factors) != 1 || confirmed.Assurance.Factors[0] != "password" {
+		t.Fatalf("reissued session carries %v, want exactly [password]", confirmed.Assurance.Factors)
+	}
+}
+
+func TestTOTPStepUpReplaySQLite(t *testing.T) {
+	runStepUpReplay(t, seededDB(t, openSQLite))
+}
+
+func TestTOTPStepUpReplayPostgres(t *testing.T) {
+	runStepUpReplay(t, seededDB(t, openPostgres))
+}
+
+// runStepUpReplay asserts single-use per (account, step): a code that stepped a
+// session up cannot step it up again in the SAME time step, and the replay is
+// refused by name with the already-used sentinel (human-auth ADR §141, §207 —
+// the user waits for the next code), not the uniform bad-code refusal.
+func runStepUpReplay(t *testing.T, db *store.DB) {
+	auth, _, password := bootstrapFactorAdmin(t, db)
+	base := time.Now().UTC()
+	clk := base
+	auth.Now = func() time.Time { return clk }
+	ctx := t.Context()
+
+	login, err := auth.LocalLogin(ctx, "factor-admin", password, service.ArtifactCLI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uri, err := auth.EnrolTOTPStart(ctx, login.SessionToken, password)
+	if err != nil {
+		t.Fatal(err)
+	}
+	confirmed, err := auth.EnrolTOTPConfirm(ctx, login.SessionToken, totpCode(t, uri, base))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	clk = base.Add(60 * time.Second)
+	code := totpCode(t, uri, clk)
+	stepped, err := auth.StepUpTOTP(ctx, confirmed.SessionToken, code)
+	if err != nil {
+		t.Fatalf("first step-up: %v", err)
+	}
+	// Same step, same code: single-use refuses, and by name.
+	if _, err := auth.StepUpTOTP(ctx, stepped.SessionToken, code); !errors.Is(err, service.ErrTOTPCodeAlreadyUsed) {
+		t.Fatalf("replayed step-up code was not refused as already-used: %v", err)
 	}
 }
 

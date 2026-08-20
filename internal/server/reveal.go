@@ -92,6 +92,14 @@ func (a *API) ReauthTotp(ctx context.Context, req apigen.ReauthTotpRequestObject
 			return apigen.ReauthTotp409JSONResponse{
 				ConflictJSONResponse: apigen.ConflictJSONResponse(errorBody(apigen.ErrorCodeConflict, "")),
 			}, nil
+		case errors.Is(err, service.ErrTOTPCodeAlreadyUsed):
+			// Single-use per (account, step): the code already opened its window,
+			// so the caller waits for the next one. Post-authentication on the
+			// caller's OWN factor, so it rides the SafeDetail channel errorBody
+			// honours for conflict rather than the uniform 401 a wrong code gets.
+			return apigen.ReauthTotp409JSONResponse{
+				ConflictJSONResponse: apigen.ConflictJSONResponse(errorBody(apigen.ErrorCodeConflict, safeDetailOf(err))),
+			}, nil
 		case errors.Is(err, service.ErrNoTOTPFactor):
 			return apigen.ReauthTotp400JSONResponse{
 				BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, "")),

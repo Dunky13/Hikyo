@@ -107,19 +107,23 @@ func (r *Resolver) PendingTOTP(ctx context.Context, accountID string) (TOTPCrede
 	return pgTOTP(row), nil
 }
 
-// CreateTOTP inserts a pending enrolment. last_step is seeded at created_step
-// so a confirming code can never predate the row.
+// CreateTOTP inserts a pending enrolment. last_step is the last CONSUMED step,
+// and at creation nothing is consumed yet, so it seeds one step BELOW
+// created_step: the confirming code shown in the SAME 30-second step as the
+// start is accepted once (last_step < created_step holds), and the ADR's
+// single-use-per-step invariant is untouched — the creation step is not
+// pre-consumed. created_step itself is kept as the separate provenance column.
 func (r *Resolver) CreateTOTP(ctx context.Context, c NewTOTPCredential) error {
 	if r.sq != nil {
 		return r.sq.InsertTOTP(ctx, sqlitegen.InsertTOTPParams{
 			ID: c.ID, AccountID: c.AccountID, Seed: c.Seed, DekVersion: c.DEKVersion,
-			CredentialEpoch: c.CredentialEpoch, LastStep: c.CreatedStep,
+			CredentialEpoch: c.CredentialEpoch, LastStep: c.CreatedStep - 1,
 			CreatedStep: c.CreatedStep, CreatedAt: encodeTime(c.CreatedAt),
 		})
 	}
 	return r.pg.InsertTOTP(ctx, pggen.InsertTOTPParams{
 		ID: c.ID, AccountID: c.AccountID, Seed: c.Seed, DekVersion: c.DEKVersion,
-		CredentialEpoch: c.CredentialEpoch, LastStep: c.CreatedStep,
+		CredentialEpoch: c.CredentialEpoch, LastStep: c.CreatedStep - 1,
 		CreatedStep: c.CreatedStep, CreatedAt: pgTime(c.CreatedAt),
 	})
 }

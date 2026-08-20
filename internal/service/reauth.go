@@ -524,6 +524,11 @@ func (s *Auth) reauthTOTP(ctx context.Context, presented string, environmentIDs 
 			return err
 		}
 		if !consumed {
+			// A step already spent on the same row is named; a moved row stays the
+			// uniform refusal.
+			if s.totpStepConsumed(ctx, az, account.ID, confirmed.ID, step) {
+				return totpStepAlreadyUsed()
+			}
 			return domain.ErrUnauthenticated
 		}
 		factorsJSON, err := json.Marshal(live.Assurance.Factors)
@@ -620,6 +625,13 @@ func (s *Auth) ConsumeReauthEvidence(ctx context.Context, az *authz.TxAuthorizer
 		return err
 	}
 	if !consumed {
+		// A code re-presented in the SAME step it was already spent in is named
+		// (the evidence carries no account id, so resolve it from the caller this
+		// transaction authenticated); a moved row stays the uniform refusal.
+		if account, aerr := az.AccountByPrincipal(ctx, caller); aerr == nil &&
+			s.totpStepConsumed(ctx, az, account.ID, ev.totpID, ev.step) {
+			return totpStepAlreadyUsed()
+		}
 		return domain.ErrUnauthenticated
 	}
 	return nil

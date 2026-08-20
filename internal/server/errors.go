@@ -109,6 +109,19 @@ func wireScanFindings(findings []service.Finding) []apigen.ScanFinding {
 	return out
 }
 
+// safeDetailOf lifts a caller-safe detail off an error that opts in via a
+// SafeDetail carrier, or "" when it carries none. It is the same extraction
+// writeHandlerError performs inline, for handlers that build a typed response
+// (not every route funnels through writeHandlerError) yet still need to honour a
+// SafeDetail on the codes errorBody carries it for (bad_request, conflict).
+func safeDetailOf(err error) string {
+	var sd interface{ SafeDetail() string }
+	if errors.As(err, &sd) {
+		return sd.SafeDetail()
+	}
+	return ""
+}
+
 // writeError renders a refusal. It never writes anything derived from the
 // cause beyond the code itself; the cause is the process log's business.
 func writeError(w http.ResponseWriter, code apigen.ErrorCode, detail string) {

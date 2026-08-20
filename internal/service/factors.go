@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/Hikyo-Org/hikyo/internal/admission"
@@ -61,7 +62,40 @@ var (
 	// ErrNoProofCredential refuses a mutation the account has no pre-existing
 	// credential to authorize.
 	ErrNoProofCredential = errors.New("service: no pre-existing credential to authorize this change")
+	// ErrTOTPCodeAlreadyUsed refuses a code whose (account, time step) was
+	// already consumed by an earlier proof — the SAME code presented twice in
+	// its 30-second window (human-auth ADR §141 single-use-per-step, §207 the
+	// second disclosure waits for the next step). It wraps domain.ErrConflict, a
+	// LOUD post-authentication state refusal on the caller's OWN factor that
+	// discloses nothing (a stolen session already knows it just spent the code):
+	// classify() maps it to 409 and the uniform writer carries its SafeDetail,
+	// unlike the uniform 401 a WRONG code returns.
+	ErrTOTPCodeAlreadyUsed = fmt.Errorf("%w: this TOTP code's time step was already used", domain.ErrConflict)
 )
+
+// totpCodeAlreadyUsedDetail is the caller-safe wire detail for
+// ErrTOTPCodeAlreadyUsed: it names the state and the recovery (wait for the next
+// code) without disclosing anything the caller could not already see.
+const totpCodeAlreadyUsedDetail = "this authenticator code was already used for its time step; wait for the next code"
+
+// totpStepAlreadyUsed builds the already-used refusal carrying its safe detail,
+// following the ProtectedDestinationRefusal pattern (a domain sentinel wrapped
+// with a SafeDetail the uniform writer honours for conflict).
+func totpStepAlreadyUsed() error {
+	return &detailErr{detail: totpCodeAlreadyUsedDetail, err: ErrTOTPCodeAlreadyUsed}
+}
+
+// totpStepConsumed reports whether a failed step CAS (ConfirmTOTP/AdvanceTOTPStep
+// returning false) was caused by the presented step already being spent, rather
+// than by the row moving underneath the CAS. It re-reads the account's confirmed
+// factor inside the same transaction: the SAME row id with last_step at or beyond
+// the presented step means this exact code was already used for its window. A row
+// that moved (a concurrent replace, finding HIGH-5) reads as a different id or is
+// gone and stays the uniform refusal — never the loud already-used sentinel.
+func (s *Auth) totpStepConsumed(ctx context.Context, az *authz.TxAuthorizer, accountID, rowID string, step int64) bool {
+	cur, err := az.ConfirmedTOTP(ctx, accountID)
+	return err == nil && cur.ID == rowID && cur.LastStep >= step
+}
 
 // totpSeedAAD binds a sealed seed to the row that owns it.
 func totpSeedAAD(totpRowID string) crypto.InstanceFieldAAD {
@@ -469,7 +503,12 @@ func (s *Auth) EnrolTOTPConfirm(ctx context.Context, presented, code string) (Lo
 			return err
 		}
 		if !promoted {
-			// The row moved or the step was already consumed: single-use holds.
+			// The row moved or the step was already consumed: single-use holds. A
+			// step already spent on the SAME row is named for the caller; a moved
+			// row (a concurrent replace) stays the uniform refusal.
+			if s.totpStepConsumed(ctx, az, account.ID, pending.ID, step) {
+				return totpStepAlreadyUsed()
+			}
 			return domain.ErrUnauthenticated
 		}
 		result, err = s.reissueSession(ctx, az, account, "password", MethodLocalPassword, Artifact(live.Artifact), now)
@@ -682,7 +721,12 @@ func (s *Auth) StepUpTOTP(ctx context.Context, presented, code string) (LoginRes
 			return err
 		}
 		if !consumed {
-			// The step was already spent or the row moved: single-use holds.
+			// The step was already spent or the row moved: single-use holds. A code
+			// re-presented in the SAME step it already elevated with is named; a
+			// moved row stays the uniform refusal.
+			if s.totpStepConsumed(ctx, az, account.ID, confirmed.ID, step) {
+				return totpStepAlreadyUsed()
+			}
 			return domain.ErrUnauthenticated
 		}
 		if err := az.RotateSessionFactors(ctx, live.SessionID, verifier, string(factorsJSON)); err != nil {
@@ -863,6 +907,11 @@ func (s *Auth) GenerateRecoveryCodes(ctx context.Context, presented, proof strin
 				return err
 			}
 			if !consumed {
+				// A step already spent on the same row is named; a moved row
+				// (a concurrent replace) stays the uniform refusal.
+				if s.totpStepConsumed(ctx, az, account.ID, confirmed.ID, totpStep) {
+					return totpStepAlreadyUsed()
+				}
 				return domain.ErrUnauthenticated
 			}
 		} else {
