@@ -2866,6 +2866,17 @@ export type PasskeyList = {
     passkeys: Array<Passkey>;
 };
 
+export type TotpStatus = {
+    /**
+     * True when a confirmed authenticator factor stands on the account.
+     */
+    confirmed: boolean;
+    /**
+     * True when an enrolment is staged but its first confirming code is not yet in.
+     */
+    pending: boolean;
+};
+
 export type Passkey = {
     id: Id;
     label: string;
@@ -4367,6 +4378,50 @@ export type RemoveTotpResponses = {
 };
 
 export type RemoveTotpResponse = RemoveTotpResponses[keyof RemoveTotpResponses];
+
+export type GetTotpStatusData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/auth/totp';
+};
+
+export type GetTotpStatusErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type GetTotpStatusError = GetTotpStatusErrors[keyof GetTotpStatusErrors];
+
+export type GetTotpStatusResponses = {
+    /**
+     * The caller's TOTP factor state.
+     */
+    200: TotpStatus;
+};
+
+export type GetTotpStatusResponse = GetTotpStatusResponses[keyof GetTotpStatusResponses];
 
 export type RegenerateRecoveryCodesData = {
     body: RecoveryProofRequest;

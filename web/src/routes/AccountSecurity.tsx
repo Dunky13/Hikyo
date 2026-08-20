@@ -1,4 +1,5 @@
-import { useEffect, useId, useState } from 'react';
+import qrcode from 'qrcode-generator';
+import { useId, useMemo, useState } from 'react';
 
 import {
   accountFailureText,
@@ -12,16 +13,12 @@ import {
   useRegenerateRecoveryCodes,
   useRemovePasskey,
   useRemoveTotp,
+  useTotpStatus,
   useUnlinkIdentity,
 } from '../api/account.ts';
 import { useRevokeSession, useSessions, type ActiveSession } from '../api/remotes.ts';
 import { useSession } from '../api/session.ts';
-import {
-  applyThemeChoice,
-  readThemeChoice,
-  themeLabel,
-  type ThemeChoice,
-} from '../app/theme.ts';
+import { themeLabel, useThemeChoice, type ThemeChoice } from '../app/theme.ts';
 import { Alert, Done, JumpIndex, Panel } from './Sections.tsx';
 import { useFeedback, useModalDialog } from './useModalDialog.ts';
 
@@ -55,6 +52,7 @@ import { useFeedback, useModalDialog } from './useModalDialog.ts';
 export function AccountSecurity() {
   const session = useSession();
   const passkeys = usePasskeys();
+  const totpStatus = useTotpStatus();
   const identities = useIdentities();
   const methods = useAuthMethods();
   const sessions = useSessions();
@@ -75,6 +73,21 @@ export function AccountSecurity() {
   const [codes, setCodes] = useState<readonly string[] | null>(null);
   const [totpCode, setTotpCode] = useState('');
   const codeId = useId();
+
+  // The locally-held seed is SPENT once the server no longer has a matching
+  // mid-flight enrolment: a settled status that reports a confirmed factor
+  // (done) or, with nothing pending, no factor at all (the window lapsed). The
+  // `!isFetching` guard scopes the "no factor" case to a SETTLED read, so the
+  // refetch a fresh start kicks off — which resolves to pending — does not count
+  // the still-cached previous value as spent.
+  const totpSeedSpent =
+    totpStatus.isSuccess &&
+    (totpStatus.data.confirmed || (!totpStatus.isFetching && !totpStatus.data.pending));
+
+  // A real enrolment is in progress exactly while we hold an unspent seed. The
+  // ceremony and the status line both read THIS rather than the query, so
+  // neither flashes the lagging cached status during the post-start refetch.
+  const totpEnrolmentInProgress = otpauth !== null && !totpSeedSpent;
 
   const runProof = (value: string) => {
     const request = proof;
@@ -246,20 +259,40 @@ export function AccountSecurity() {
         </p>
 
         <h3>Authenticator app</h3>
+        {totpStatus.isPending && otpauth === null ? (
+          <p role="status">Checking your authenticator…</p>
+        ) : null}
+        {totpStatus.isError ? (
+          <Alert>Your authenticator state could not be read. Reload to try again.</Alert>
+        ) : null}
+        {totpEnrolmentInProgress ? (
+          <p role="status">
+            An enrolment is staged — add it to your authenticator and confirm it with the code below.
+          </p>
+        ) : totpStatus.isSuccess ? (
+          <p role="status">
+            {totpStatus.data.confirmed
+              ? 'An authenticator is enrolled on this account.'
+              : totpStatus.data.pending
+                ? 'An enrolment is staged but its one-time seed is no longer shown. Start the enrolment again to get a fresh QR and code.'
+                : 'No authenticator is enrolled on this account.'}
+          </p>
+        ) : null}
         <p>
-          Whether a code factor stands is not readable anywhere in this API, so nothing here claims
-          to know. Starting an enrolment while one already stands is refused by name, and removing
-          one asks for your password — never for the code itself, so a stolen phone cannot drop the
-          factor it is.
+          Starting an enrolment while one already stands is refused by name, and removing one asks
+          for your password — never for the code itself, so a stolen phone cannot drop the factor it
+          is.
         </p>
-        {otpauth === null ? null : (
+        {otpauth !== null && totpEnrolmentInProgress ? (
           <div className="enrolment">
-            <p className="enrolment__uri mono">{otpauth}</p>
+            <QrCode value={otpauth} title="Authenticator setup QR code" />
             <p className="field__hint">
-              Shown exactly once: the seed is never retrievable again. Add it to your authenticator,
-              then confirm with a code — confirming completes the enrolment and reissues this
-              session carrying only the password class, so you present the new factor separately.
+              Scan this with your authenticator, or enter the secret below by hand. Shown exactly
+              once: the seed is never retrievable again. Confirming with a code completes the
+              enrolment and reissues this session carrying only the password class, so you present
+              the new factor separately.
             </p>
+            <p className="enrolment__uri mono">{otpauth}</p>
             <div className="field">
               <label htmlFor={codeId}>Code from the authenticator</label>
               <input
@@ -293,7 +326,7 @@ export function AccountSecurity() {
               </button>
             </div>
           </div>
-        )}
+        ) : null}
         <div className="panel__actions">
           <button
             type="button"
@@ -625,11 +658,51 @@ function RecoveryCodes({ codes, onClose }: { codes: readonly string[]; onClose: 
   );
 }
 
+/**
+ * QrCode renders `value` as a scannable QR built as inline SVG. It is inline
+ * and not an `<img src="data:…">` because the CSP's `img-src 'self'` forbids
+ * data-URL images. The modules are one `<path>`, painted black on white
+ * regardless of theme — a scanner needs the contrast, and `forced-color-adjust`
+ * keeps the OS from repainting it into an unscannable pair.
+ */
+function QrCode({ value, title }: { value: string; title: string }) {
+  const { path, count } = useMemo(() => {
+    const qr = qrcode(0, 'M');
+    qr.addData(value);
+    qr.make();
+    const modules = qr.getModuleCount();
+    let d = '';
+    for (let row = 0; row < modules; row += 1) {
+      for (let col = 0; col < modules; col += 1) {
+        if (qr.isDark(row, col)) {
+          d += `M${String(col)} ${String(row)}h1v1h-1z`;
+        }
+      }
+    }
+    return { path: d, count: modules };
+  }, [value]);
+
+  const quiet = 4; // the spec's four-module quiet zone
+  const box = count + quiet * 2;
+  return (
+    <svg
+      className="totp-qr"
+      viewBox={`0 0 ${String(box)} ${String(box)}`}
+      width="176"
+      height="176"
+      role="img"
+      aria-label={title}
+      shapeRendering="crispEdges"
+    >
+      <rect width={box} height={box} fill="#ffffff" />
+      <path d={path} transform={`translate(${String(quiet)} ${String(quiet)})`} fill="#000000" />
+    </svg>
+  );
+}
+
 function ThemePreference() {
   const id = useId();
-  const [choice, setChoice] = useState<ThemeChoice>(() => readThemeChoice());
-
-  useEffect(() => applyThemeChoice(choice), [choice]);
+  const [choice, setChoice] = useThemeChoice();
 
   return (
     <div className="field">

@@ -135,6 +135,10 @@ func (s stubAuth) RemoveTOTP(context.Context, string, string) (service.LoginResu
 	return s.reissued()
 }
 
+func (s stubAuth) TOTPStatus(context.Context, string) (service.TOTPStatusResult, error) {
+	return service.TOTPStatusResult{Confirmed: true}, nil
+}
+
 func (s stubAuth) GenerateRecoveryCodes(context.Context, string, string) ([]string, service.LoginResult, error) {
 	result, err := s.reissued()
 	return []string{"hik_1_rc_one", "hik_1_rc_two"}, result, err

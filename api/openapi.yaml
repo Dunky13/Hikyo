@@ -518,6 +518,35 @@ paths:
         "500": {$ref: "#/components/responses/Internal"}
 
   /api/v1/auth/totp:
+    get:
+      operationId: getTotpStatus
+      tags: [auth]
+      summary: Report whether the caller has a TOTP factor.
+      description: |
+        Reads the caller's OWN authenticator state: whether a confirmed factor
+        stands, and whether an enrolment is mid-flight (a staged seed awaiting
+        its first confirming code). It discloses nothing a caller could not
+        already learn by attempting an enrolment — a second start is refused by
+        name — so the account surface can state the fact rather than disclaim
+        knowledge of it.
+      x-hikyo-class: unauthenticated
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "200":
+          description: The caller's TOTP factor state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TotpStatus"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
     delete:
       operationId: removeTotp
       tags: [auth]
@@ -13241,6 +13270,18 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Passkey"
+
+    TotpStatus:
+      type: object
+      additionalProperties: false
+      required: [confirmed, pending]
+      properties:
+        confirmed:
+          type: boolean
+          description: True when a confirmed authenticator factor stands on the account.
+        pending:
+          type: boolean
+          description: True when an enrolment is staged but its first confirming code is not yet in.
 
     Passkey:
       type: object

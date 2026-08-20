@@ -5413,6 +5413,15 @@ type TotpReauthRequest struct {
 // TotpReauthRequestOperation defines model for TotpReauthRequest.Operation.
 type TotpReauthRequestOperation string
 
+// TotpStatus defines model for TotpStatus.
+type TotpStatus struct {
+	// Confirmed True when a confirmed authenticator factor stands on the account.
+	Confirmed bool `json:"confirmed"`
+
+	// Pending True when an enrolment is staged but its first confirming code is not yet in.
+	Pending bool `json:"pending"`
+}
+
 // UpdateAdapterOriginRequest defines model for UpdateAdapterOriginRequest.
 type UpdateAdapterOriginRequest struct {
 	// Credential Write-only credential for the pending origin.
@@ -6639,6 +6648,9 @@ type ServerInterface interface {
 	// RemoveTotp Remove the confirmed TOTP factor.
 	// (DELETE /api/v1/auth/totp)
 	RemoveTotp(w http.ResponseWriter, r *http.Request)
+	// GetTotpStatus Report whether the caller has a TOTP factor.
+	// (GET /api/v1/auth/totp)
+	GetTotpStatus(w http.ResponseWriter, r *http.Request)
 	// EnrolTotpConfirm Confirm TOTP enrolment with a code; reissues the session.
 	// (POST /api/v1/auth/totp/enrol/confirm)
 	EnrolTotpConfirm(w http.ResponseWriter, r *http.Request)
@@ -7386,6 +7398,12 @@ func (_ Unimplemented) SamlStart(w http.ResponseWriter, r *http.Request, provide
 // RemoveTotp Remove the confirmed TOTP factor.
 // (DELETE /api/v1/auth/totp)
 func (_ Unimplemented) RemoveTotp(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetTotpStatus Report whether the caller has a TOTP factor.
+// (GET /api/v1/auth/totp)
+func (_ Unimplemented) GetTotpStatus(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -9070,6 +9088,20 @@ func (siw *ServerInterfaceWrapper) RemoveTotp(w http.ResponseWriter, r *http.Req
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RemoveTotp(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetTotpStatus operation middleware
+func (siw *ServerInterfaceWrapper) GetTotpStatus(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetTotpStatus(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -16437,6 +16469,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Delete(options.BaseURL+"/api/v1/auth/totp", wrapper.RemoveTotp)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/auth/totp", wrapper.GetTotpStatus)
+	})
+	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/api/v1/auth/recovery-codes/regenerate", wrapper.RegenerateRecoveryCodes)
 	})
 	r.Group(func(r chi.Router) {
@@ -18839,6 +18874,84 @@ func (response RemoveTotp429JSONResponse) VisitRemoveTotpResponse(w http.Respons
 type RemoveTotp500JSONResponse struct{ InternalJSONResponse }
 
 func (response RemoveTotp500JSONResponse) VisitRemoveTotpResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetTotpStatusRequestObject struct {
+}
+
+type GetTotpStatusResponseObject interface {
+	VisitGetTotpStatusResponse(w http.ResponseWriter) error
+}
+
+type GetTotpStatus200JSONResponse TotpStatus
+
+func (response GetTotpStatus200JSONResponse) VisitGetTotpStatusResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetTotpStatus401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response GetTotpStatus401JSONResponse) VisitGetTotpStatusResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetTotpStatus404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetTotpStatus404JSONResponse) VisitGetTotpStatusResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetTotpStatus429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response GetTotpStatus429JSONResponse) VisitGetTotpStatusResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetTotpStatus500JSONResponse struct{ InternalJSONResponse }
+
+func (response GetTotpStatus500JSONResponse) VisitGetTotpStatusResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -38763,6 +38876,9 @@ type StrictServerInterface interface {
 	// RemoveTotp Remove the confirmed TOTP factor.
 	// (DELETE /api/v1/auth/totp)
 	RemoveTotp(ctx context.Context, request RemoveTotpRequestObject) (RemoveTotpResponseObject, error)
+	// GetTotpStatus Report whether the caller has a TOTP factor.
+	// (GET /api/v1/auth/totp)
+	GetTotpStatus(ctx context.Context, request GetTotpStatusRequestObject) (GetTotpStatusResponseObject, error)
 	// EnrolTotpConfirm Confirm TOTP enrolment with a code; reissues the session.
 	// (POST /api/v1/auth/totp/enrol/confirm)
 	EnrolTotpConfirm(ctx context.Context, request EnrolTotpConfirmRequestObject) (EnrolTotpConfirmResponseObject, error)
@@ -40038,6 +40154,30 @@ func (sh *strictHandler) RemoveTotp(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RemoveTotpResponseObject); ok {
 		if err := validResponse.VisitRemoveTotpResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetTotpStatus operation middleware
+func (sh *strictHandler) GetTotpStatus(w http.ResponseWriter, r *http.Request) {
+	var request GetTotpStatusRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetTotpStatus(ctx, request.(GetTotpStatusRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetTotpStatus")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetTotpStatusResponseObject); ok {
+		if err := validResponse.VisitGetTotpStatusResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

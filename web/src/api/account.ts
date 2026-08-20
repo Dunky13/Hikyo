@@ -4,6 +4,7 @@ import {
   enrolPasskeyStart,
   enrolTotpConfirm,
   enrolTotpStart,
+  getTotpStatus,
   listIdentities,
   listPasskeys,
   linkIdentity,
@@ -22,6 +23,7 @@ import {
   zRecoveryCodesResult,
   zSamlStartResult,
   zTotpEnrolStartResult,
+  zTotpStatus,
   zWebauthnOptions,
 } from '@hikyo/zod';
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
@@ -47,26 +49,42 @@ import { fromBase64URL, toBase64URL } from './values.ts';
  *     mutation carries is the PRE-EXISTING one: the password, or a confirmed
  *     TOTP code where one stands. The forms ask for that, and the copy says
  *     why.
- *  3. **Enrolment state is only partly readable.** Passkeys and linked
- *     identities have listings; whether a TOTP factor stands does NOT — there
- *     is no read operation for it anywhere in the contract. The panel
- *     therefore states what it can do rather than claiming a state it cannot
- *     observe, and a second enrolment is refused by the server with a named
- *     400 rather than hidden behind a disabled button that guessed.
+ *  3. **Enrolment state is readable.** Passkeys and linked identities have
+ *     listings, and a TOTP factor now reports its own state (confirmed, and
+ *     whether an enrolment is mid-flight) through `getTotpStatus` — a pure read
+ *     on the caller's own account. A second enrolment is still refused by the
+ *     server with a named 400, so the panel states the fact AND leaves the
+ *     server as the authority on whether a start is allowed.
  */
 
 type PasskeyList = z.infer<typeof zPasskeyList>;
 type IdentityList = z.infer<typeof zIdentityList>;
 type AuthMethods = z.infer<typeof zAuthMethods>;
+type TotpStatus = z.infer<typeof zTotpStatus>;
 
 const passkeysKey = ['passkeys'] as const;
 const identitiesKey = ['identities'] as const;
 const authMethodsKey = ['auth-methods'] as const;
+const totpStatusKey = ['totp-status'] as const;
 
 export function usePasskeys(): UseQueryResult<PasskeyList> {
   return useQuery({
     queryKey: passkeysKey,
     queryFn: () => parsed(listPasskeys(), zPasskeyList),
+    retry: false,
+  });
+}
+
+/**
+ * useTotpStatus reads whether an authenticator stands on this account. It is
+ * invalidated with everything else after an account-security mutation, so
+ * confirming or removing a factor updates the reported state without a bespoke
+ * cache poke.
+ */
+export function useTotpStatus(): UseQueryResult<TotpStatus> {
+  return useQuery({
+    queryKey: totpStatusKey,
+    queryFn: () => parsed(getTotpStatus(), zTotpStatus),
     retry: false,
   });
 }
@@ -102,9 +120,16 @@ function useAfterAccountMutation(): () => void {
 }
 
 export function useEnrolTotpStart() {
+  const queries = useQueryClient();
   return useMutation({
     mutationFn: (input: { password: string }) =>
       parsed(enrolTotpStart({ body: { password: input.password } }), zTotpEnrolStartResult),
+    // A start stages a pending row but reissues no session, so it does not go
+    // through the blanket invalidation — refresh only the factor state, which
+    // now reads as pending beside the freshly shown QR.
+    onSuccess: () => {
+      void queries.invalidateQueries({ queryKey: totpStatusKey });
+    },
   });
 }
 

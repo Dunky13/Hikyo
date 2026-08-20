@@ -3,13 +3,7 @@ import { generatePath, matchPath, NavLink, Outlet, useLocation, useNavigate } fr
 
 import { useLogout, useOrgs, type WhoAmI } from '../api/session.ts';
 import { retentionBanner, useRetentionHealth } from '../api/retention.ts';
-import {
-  applyThemeChoice,
-  nextThemeChoice,
-  readThemeChoice,
-  themeLabel,
-  type ThemeChoice,
-} from '../app/theme.ts';
+import { effectiveTheme, prefersDark, useThemeChoice, type Theme } from '../app/theme.ts';
 import { needsOrg, SECTIONS, SURFACES, surfaceById, type Surface } from '../app/navigation.ts';
 
 /**
@@ -257,22 +251,83 @@ function AccountEntry({ session }: { session: WhoAmI }) {
   );
 }
 
+/**
+ * The header theme toggle: a binary sun/moon that flips light↔dark. Choosing
+ * `system` is left to the account's Preferences panel; the quick control in the
+ * chrome is a two-state switch, which is what the polymorphing icon expresses.
+ *
+ * The icon shows the theme actually painted, so while the choice is `system` it
+ * tracks the OS preference live — otherwise a mid-session OS flip would leave a
+ * sun over a dark page.
+ */
 function ThemeToggle() {
-  const [choice, setChoice] = useState<ThemeChoice>(() => readThemeChoice());
+  const [choice, setChoice] = useThemeChoice();
+  const [systemDark, setSystemDark] = useState(() => prefersDark());
 
-  useEffect(() => applyThemeChoice(choice), [choice]);
+  useEffect(() => {
+    const query = globalThis.matchMedia?.('(prefers-color-scheme: dark)');
+    if (query === undefined) {
+      return;
+    }
+    const sync = () => setSystemDark(query.matches);
+    query.addEventListener('change', sync);
+    return () => query.removeEventListener('change', sync);
+  }, []);
+
+  const current = effectiveTheme(choice, systemDark);
+  const next: Theme = current === 'dark' ? 'light' : 'dark';
 
   return (
     <button
       type="button"
-      className="btn"
-      onClick={() => setChoice(nextThemeChoice(choice))}
-      // The label states the CURRENT setting, so the control is readable
-      // without seeing the colours it changes — which is the point.
-      aria-label={`${themeLabel(choice)}. Change theme.`}
+      className="btn btn--icon"
+      onClick={() => setChoice(next)}
+      // The label states the ACTION, and the icon the current theme by shape —
+      // so the state survives forced-colors, where the fills are repainted.
+      aria-label={`Switch to ${next} theme`}
     >
-      {themeLabel(choice)}
+      <ThemeIcon dark={current === 'dark'} />
     </button>
+  );
+}
+
+/**
+ * ThemeIcon is the polymorphing sun↔moon (author: Marc Went). The morph, the
+ * ray draw-in and the moon shimmer are CSS in app.css — the CSP forbids inline
+ * `<style>`, so nothing renders one here. The sun path is baked as an attribute
+ * so a browser without the CSS `d` property still shows a static sun rather
+ * than nothing; the CSS overrides it where supported.
+ */
+function ThemeIcon({ dark }: { dark: boolean }) {
+  return (
+    <svg
+      className={dark ? 'theme-icon theme-icon--dark' : 'theme-icon'}
+      viewBox="0 0 100 100"
+      width="24"
+      height="24"
+      fill="none"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path
+        className="theme-icon__shine"
+        d="M70 49.5C70 60.8218 60.8218 70 49.5 70C38.1782 70 29 60.8218 29 49.5C29 38.1782 38.1782 29 49.5 29C39 45 49.5 59.5 70 49.5Z"
+      />
+      <g className="theme-icon__rays">
+        <path d="M50 2V11" pathLength="1" />
+        <path d="M85 15L78 22" pathLength="1" />
+        <path d="M98 50H89" pathLength="1" />
+        <path d="M85 85L78 78" pathLength="1" />
+        <path d="M50 98V89" pathLength="1" />
+        <path d="M23 78L16 84" pathLength="1" />
+        <path d="M11 50H2" pathLength="1" />
+        <path d="M23 23L16 16" pathLength="1" />
+      </g>
+      <path
+        className="theme-icon__shape"
+        d="M70 49.5C70 60.8218 60.8218 70 49.5 70C38.1782 70 29 60.8218 29 49.5C29 38.1782 38.1782 29 49.5 29C60 29 69.5 38 70 49.5Z"
+      />
+    </svg>
   );
 }
 

@@ -63,16 +63,20 @@ test.describe('app chrome', () => {
     await expect(page.getByRole('heading', { name: 'Projects', level: 1 })).toBeVisible();
   });
 
-  test('switches theme and keeps the choice explicit', async ({ page }) => {
+  test('the binary toggle flips theme and keeps the choice explicit', async ({ page }) => {
+    // The header control is a two-state sun/moon; `system` lives in the account
+    // Preferences panel. Each click writes an explicit theme opposite the one
+    // currently painted, so two clicks land on opposite attributes.
     const toggle = page.getByRole('button', { name: /theme/i });
-    await expect(toggle).toHaveText('System theme');
     await toggle.click();
-    await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+    const first = await page.locator('html').getAttribute('data-theme');
+    expect(first === 'light' || first === 'dark', 'first click set an explicit theme').toBeTruthy();
     await toggle.click();
-    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+    const second = await page.locator('html').getAttribute('data-theme');
+    expect(second, 'the second click flipped to the other theme').not.toBe(first);
     // The choice survives a reload: it is a decision, not a session mood.
     await page.reload();
-    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+    await expect(page.locator('html')).toHaveAttribute('data-theme', second ?? '');
   });
 
   // The rail's zero state. The bootstrap administrator's grants are all
