@@ -431,8 +431,8 @@ func (s *Definitions) executeResolution(ctx context.Context, r store.Repos, az *
 	now := s.now()
 
 	// 1. Key deletes: clear the key's live values (so the foreign key admits the
-	// delete), drop its presence rows, then delete it. Adapter-pinned keys are
-	// refused, reusing the ceremony's own check.
+	// delete), drop its presence and scanning-dismissal rows, then delete it.
+	// Adapter-pinned keys are refused, reusing the ceremony's own check.
 	for _, del := range res.KeyDeletes {
 		key, err := r.Catalogue().Get(ctx, p, del.ID)
 		if err != nil {
@@ -448,6 +448,9 @@ func (s *Definitions) executeResolution(ctx context.Context, r store.Repos, az *
 			return err
 		}
 		if _, err := r.Pending().DiscardKey(ctx, p, del.ID); err != nil {
+			return err
+		}
+		if _, err := r.ScanningDismissals().DeleteByKey(ctx, p, del.ID); err != nil {
 			return err
 		}
 		if err := r.Catalogue().Delete(ctx, p, del.ID); err != nil {
@@ -843,6 +846,18 @@ func (s *Definitions) updateKey(ctx context.Context, r store.Repos, caller authz
 		}
 		if err := r.Catalogue().SetClassification(ctx, p, upd.ID, k.Classification); err != nil {
 			return err
+		}
+		if upd.PrevClassification == string(schema.Config) && k.Classification == string(schema.Secret) {
+			// Tightening config → secret makes the key's dismissals moot and drops
+			// them (ADR §4 lifecycle), so a later declassification re-fires.
+			if _, err := r.ScanningDismissals().DeleteByKey(ctx, p, upd.ID); err != nil {
+				return err
+			}
+		} else if upd.PrevClassification == string(schema.Secret) && k.Classification == string(schema.Config) {
+			// Definitions apply changes only the classification column: it does not
+			// read, decrypt, or re-seal existing value occurrences, so no plaintext is
+			// legitimately in process to scan. Do not scan ciphertext; ADR §6.1's
+			// no-retro-scan rule leaves those values to be scanned when next edited.
 		}
 		if err := insertDefinitionEvent(ctx, r, p, caller, audit.EventKeyReclassified, "key", upd.ID, audit.Payload{
 			"name": audit.SanitizeFreeText(k.Name), "previous_classification": upd.PrevClassification,

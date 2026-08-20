@@ -5,64 +5,48 @@ import (
 	"testing"
 
 	"github.com/Hikyo-Org/hikyo/internal/definitions"
-	"github.com/Hikyo-Org/hikyo/internal/schema"
 )
 
 // SS3 field-coverage matrix (#74, secret-scanning ADR §2). The Surface-2 scan is
 // defined STRUCTURALLY, not by enumeration: every author-controlled string leaf
 // of the canonical definitions model must be scanned, and adding a public string
-// field silently unscanned must be impossible. This test walks the definitions
-// model by reflection, sets ONE content leaf at a time to a unique sentinel, and
-// asserts the leaf extractor surfaces that sentinel — OR that the field is on the
-// closed exclusion list (a fixed schema keyword or a server-generated identifier,
-// content no author composes). A newly added string field that is neither
-// covered nor excluded fails here.
+// field silently unscanned must be impossible.
+//
+// The proof is by construction, not a maintained constant list: a RECURSIVE
+// reflection walk enumerates every content leaf reachable in the real Go types
+// — descending through nested structs, pointers, and slices (schema.Declaration
+// → schema.Rule, the Rule's pattern / enum members / url schemes / JSON Schema
+// blob, the any_of alternatives, and the same tree under a bundle Key) — sets
+// ONE leaf at a time to a unique sentinel, and asserts the leaf extractor
+// surfaces that sentinel. A leaf that is neither surfaced nor on the closed
+// exclusion list fails here, so a newly added string field anywhere in the
+// reachable tree cannot ship unscanned.
 //
 // The exclusion list is the ADR's "fixed schema keywords + server-generated
-// immutable identifiers", named field-by-field so a reviewer sees exactly what
-// is not scanned and why.
-var excludedDefinitionFields = map[string]string{
+// immutable identifiers", keyed by OwnerType.FieldName and named field-by-field
+// so a reviewer sees exactly what is not scanned and why. Excluding a field
+// stops the walk at that field (its whole subtree, if it has one) — a named
+// stop, never a silent skip.
+var excludedContentFields = map[string]string{
+	// --- direct-edit (service) model ---
 	"KeySpec.Classification": "closed enum secret|config, not author free-text",
 	"KeySpec.GroupID":        "server-generated group identifier, not composed content",
-	"Rule.Type":              "closed type enum, a fixed schema keyword",
+	"KeySpec.Presence": "schema.PresenceRules subtree: only PresenceMode (closed none|all|explicit enum) " +
+		"and server-issued environment ids — no author free-text",
+	"Rule.Type": "closed type enum, a fixed schema keyword",
+	// --- definitions bundle model ---
+	"Key.ID":             "server-generated key identifier, not composed content",
+	"Key.Classification": "closed enum secret|config, not author free-text",
+	"Key.Group": "key-group NAME reference; a dangling one is refused by definitions.Resolve " +
+		"(validateKeyReferences) before persist, and a real group's name is itself scanned via key_groups",
+	"Key.RequiredIn": "definitions.Presence subtree: Mode (closed enum) + presence env-NAME references; " +
+		"dangling ones refused by Resolve, real env names scanned via environments",
+	"Key.ForbiddenIn": "definitions.Presence subtree, as Key.RequiredIn",
+	"Environment.ID":  "server-generated environment identifier, not composed content",
+	"KeyGroup.ID":     "server-generated group identifier, not composed content",
 }
 
 const coverageSentinel = "AKIAIOSFODNN7EXAMPLE_sentinel"
-
-// isContentLeaf reports whether a reflect field is an author-controlled content
-// leaf the scanner must cover: a string, a []string, or a json.RawMessage
-// ([]byte). Numeric, boolean and pointer-to-numeric constraint fields are not
-// content, and nested structs (Declaration, Presence) are walked separately.
-func isContentLeaf(f reflect.StructField) bool {
-	t := f.Type
-	if t.Kind() == reflect.Pointer {
-		t = t.Elem()
-	}
-	switch t.Kind() {
-	case reflect.String:
-		return true
-	case reflect.Slice:
-		return t.Elem().Kind() == reflect.String || t.Elem().Kind() == reflect.Uint8
-	}
-	return false
-}
-
-// setSentinel populates a content-leaf field with the sentinel so the extractor
-// has exactly one non-empty leaf to surface.
-func setSentinel(v reflect.Value) {
-	t := v.Type()
-	switch {
-	case t.Kind() == reflect.Pointer && t.Elem().Kind() == reflect.String:
-		s := coverageSentinel
-		v.Set(reflect.ValueOf(&s))
-	case t.Kind() == reflect.String:
-		v.SetString(coverageSentinel)
-	case t.Kind() == reflect.Slice && t.Elem().Kind() == reflect.String:
-		v.Set(reflect.ValueOf([]string{coverageSentinel}))
-	case t.Kind() == reflect.Slice && t.Elem().Kind() == reflect.Uint8:
-		v.Set(reflect.ValueOf([]byte(coverageSentinel)))
-	}
-}
 
 func leafSetContains(leaves []scanLeaf, sentinel string) bool {
 	for _, l := range leaves {
@@ -73,75 +57,136 @@ func leafSetContains(leaves []scanLeaf, sentinel string) bool {
 	return false
 }
 
-func TestSurface2FieldCoverageMatrix(t *testing.T) {
-	// KeySpec: each top-level content leaf, in isolation.
-	specType := reflect.TypeOf(KeySpec{})
-	for i := 0; i < specType.NumField(); i++ {
-		field := specType.Field(i)
-		key := "KeySpec." + field.Name
-		if _, excluded := excludedDefinitionFields[key]; excluded {
-			continue
-		}
-		if field.Type == reflect.TypeOf(schema.Declaration{}) {
-			continue // walked below
-		}
-		// A nested struct that is neither the Declaration nor an explicitly
-		// excluded one must not slip through unchecked: Presence carries only
-		// server-issued environment ids (not author content), so it is excluded
-		// by name; any OTHER nested struct added later fails here until it is
-		// either walked for its leaves or added to this exclusion.
-		if field.Type.Kind() == reflect.Struct {
-			if field.Type == reflect.TypeOf(schema.PresenceRules{}) {
-				continue // env-id lists are server-issued, not author content
+// coverageLeaf is one author-controlled content leaf discovered by the walk: its
+// dotted path from the root type (for diagnostics and the anti-vacuity guard)
+// and a setter that plants the sentinel at exactly that leaf in a fresh,
+// addressable root value — allocating pointers and one-element slices along the
+// way so the containing entry actually exists for the extractor to see.
+type coverageLeaf struct {
+	path string
+	set  func(root reflect.Value)
+}
+
+// navFn returns the addressable slot for the current position, given the
+// addressable root. Composing navFns is how the walk threads pointer allocation
+// and slice materialisation down to a deep leaf.
+type navFn func(root reflect.Value) reflect.Value
+
+// collectContentLeaves recursively enumerates the author-controlled content
+// leaves of typ. It FAILS CLOSED: any reflect kind it does not recognise is a
+// t.Errorf, not a silent skip — "prove by construction" means an unhandled shape
+// cannot pass as a no-op. Numeric and boolean scalars are the only silent skips,
+// because a credential is a string and a number/bool field cannot carry one.
+func collectContentLeaves(t *testing.T, typ reflect.Type, path string, nav navFn) []coverageLeaf {
+	t.Helper()
+	switch typ.Kind() {
+	case reflect.String:
+		return []coverageLeaf{{path, func(root reflect.Value) {
+			nav(root).SetString(coverageSentinel)
+		}}}
+
+	case reflect.Pointer:
+		return collectContentLeaves(t, typ.Elem(), path, func(root reflect.Value) reflect.Value {
+			slot := nav(root)
+			if slot.IsNil() {
+				slot.Set(reflect.New(typ.Elem()))
 			}
-			t.Errorf("KeySpec.%s is a nested struct with no coverage walk; add it to the matrix or exclude it by name", field.Name)
-			continue
+			return slot.Elem()
+		})
+
+	case reflect.Slice:
+		elem := typ.Elem()
+		switch {
+		case elem.Kind() == reflect.Uint8:
+			// []byte / json.RawMessage is a NAMED TERMINAL-BLOB boundary: the
+			// scanner runs one rule pass over the whole blob (declarationLeaves
+			// emits it verbatim) and never parses its interior, so the walk stops
+			// here rather than descending into the JSON structure.
+			return []coverageLeaf{{path, func(root reflect.Value) {
+				nav(root).SetBytes([]byte(coverageSentinel))
+			}}}
+		case elem.Kind() == reflect.String:
+			return []coverageLeaf{{path, func(root reflect.Value) {
+				slot := nav(root)
+				slot.Set(reflect.MakeSlice(typ, 1, 1))
+				slot.Index(0).SetString(coverageSentinel)
+			}}}
+		case elem.Kind() == reflect.Struct || (elem.Kind() == reflect.Pointer && elem.Elem().Kind() == reflect.Struct):
+			// A slice of structs (e.g. any_of []Rule, bundle Keys []Key): recurse
+			// into element 0, materialising a one-element slice so it exists.
+			return collectContentLeaves(t, elem, path, func(root reflect.Value) reflect.Value {
+				slot := nav(root)
+				if slot.Len() == 0 {
+					slot.Set(reflect.MakeSlice(typ, 1, 1))
+				}
+				return slot.Index(0)
+			})
+		default:
+			t.Errorf("coverage walk: unhandled slice element kind %s at %s", elem.Kind(), path)
+			return nil
 		}
-		if !isContentLeaf(field) {
-			continue
+
+	case reflect.Struct:
+		var out []coverageLeaf
+		for i := 0; i < typ.NumField(); i++ {
+			f := typ.Field(i)
+			if _, excluded := excludedContentFields[typ.Name()+"."+f.Name]; excluded {
+				continue // named stop: this field (and its subtree) is not scanned, by justification above
+			}
+			idx := i
+			childNav := func(root reflect.Value) reflect.Value { return nav(root).Field(idx) }
+			out = append(out, collectContentLeaves(t, f.Type, path+"."+f.Name, childNav)...)
 		}
-		spec := KeySpec{}
-		setSentinel(reflect.ValueOf(&spec).Elem().Field(i))
-		if !leafSetContains(keySpecLeaves(spec), coverageSentinel) {
-			t.Errorf("author-controlled field %s is not scan-covered and is not on the exclusion list", key)
+		return out
+
+	case reflect.Bool,
+		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return nil // scalar constraint field: structurally cannot carry a credential string
+
+	default:
+		t.Errorf("coverage walk: unhandled kind %s at %s", typ.Kind(), path)
+		return nil
+	}
+}
+
+// rootLeaves walks a root type and returns its content leaves.
+func rootLeaves(t *testing.T, root any) []coverageLeaf {
+	t.Helper()
+	typ := reflect.TypeOf(root)
+	return collectContentLeaves(t, typ, typ.Name(), func(r reflect.Value) reflect.Value { return r })
+}
+
+// assertEachLeafScanned plants the sentinel at each leaf in a fresh root and
+// asserts the extractor surfaces it.
+func assertEachLeafScanned(t *testing.T, rootType any, leaves []coverageLeaf, extract func(root reflect.Value) []scanLeaf) {
+	t.Helper()
+	rt := reflect.TypeOf(rootType)
+	for _, leaf := range leaves {
+		root := reflect.New(rt).Elem()
+		leaf.set(root)
+		if !leafSetContains(extract(root), coverageSentinel) {
+			t.Errorf("author-controlled leaf %s is not scan-covered and is not on the exclusion list", leaf.path)
 		}
 	}
+}
 
-	// schema.Rule (the Declaration's leaves): each content field in isolation.
-	ruleType := reflect.TypeOf(schema.Rule{})
-	for i := 0; i < ruleType.NumField(); i++ {
-		field := ruleType.Field(i)
-		key := "Rule." + field.Name
-		if _, excluded := excludedDefinitionFields[key]; excluded {
-			continue
-		}
-		if !isContentLeaf(field) {
-			continue
-		}
-		rule := schema.Rule{Type: schema.TypeString}
-		setSentinel(reflect.ValueOf(&rule).Elem().Field(i))
-		spec := KeySpec{Declaration: schema.Declaration{Rule: &rule}}
-		if !leafSetContains(keySpecLeaves(spec), coverageSentinel) {
-			t.Errorf("author-controlled declaration field %s is not scan-covered and is not on the exclusion list", key)
-		}
-	}
+func TestSurface2FieldCoverageMatrix(t *testing.T) {
+	// KeySpec: every content leaf, recursively (including the whole
+	// Declaration → Rule / any_of tree), one sentinel at a time.
+	assertEachLeafScanned(t, KeySpec{}, rootLeaves(t, KeySpec{}), func(root reflect.Value) []scanLeaf {
+		return keySpecLeaves(root.Interface().(KeySpec))
+	})
 
-	// KeyMetadataUpdate: the PATCH members.
-	metaType := reflect.TypeOf(KeyMetadataUpdate{})
-	for i := 0; i < metaType.NumField(); i++ {
-		field := metaType.Field(i)
-		if !isContentLeaf(field) {
-			continue // Deprecated is *bool, not content
-		}
-		m := KeyMetadataUpdate{}
-		setSentinel(reflect.ValueOf(&m).Elem().Field(i))
-		if !leafSetContains(keyMetadataLeaves(m), coverageSentinel) {
-			t.Errorf("author-controlled metadata field KeyMetadataUpdate.%s is not scan-covered", field.Name)
-		}
-	}
+	// KeyMetadataUpdate: the PATCH members (pointer content leaves).
+	assertEachLeafScanned(t, KeyMetadataUpdate{}, rootLeaves(t, KeyMetadataUpdate{}), func(root reflect.Value) []scanLeaf {
+		return keyMetadataLeaves(root.Interface().(KeyMetadataUpdate))
+	})
 
-	// The hierarchy name inputs are single-string leaves; assert each locator
-	// constant is present and distinct so a coverage gap there is visible too.
+	// The hierarchy name inputs are single-string ingresses handled directly by
+	// the Folders/Environments/KeyGroups services (not a struct field), so assert
+	// each locator constant is present and distinct — a coverage gap there is
+	// visible too.
 	for _, loc := range []string{locEnvironmentName, locEnvironmentNote, locFolderPath, locGroupName} {
 		if loc == "" {
 			t.Error("a hierarchy locator constant is empty")
@@ -149,88 +194,51 @@ func TestSurface2FieldCoverageMatrix(t *testing.T) {
 	}
 }
 
-// excludedBundleFields is the closed exclusion list for the definitions-bundle
-// leaf walk (#74 SS3): fixed schema keywords + server-generated ids + name
-// references that definitions.Resolve refuses before a plan persists. Named
-// field-by-field so a reviewer sees exactly what bundleLeaves does not scan.
-var excludedBundleFields = map[string]string{
-	"Key.ID":             "server-generated key identifier, not composed content",
-	"Key.Classification": "closed enum secret|config, not author free-text",
-	"Key.Deprecated":     "boolean flag, not content",
-	"Key.Group":          "key-group NAME reference; a dangling one is refused by definitions.Resolve (validateKeyReferences) before persist, and a real group's name is itself scanned via key_groups",
-	"Key.RequiredIn":     "presence env-NAME references; dangling ones refused by Resolve, real env names scanned via environments",
-	"Key.ForbiddenIn":    "presence env-NAME references; dangling ones refused by Resolve, real env names scanned via environments",
-	"Key.Declaration":    "walked via declarationLeaves below (same helper the direct-edit path uses)",
-	"Environment.ID":     "server-generated environment identifier, not composed content",
-	"KeyGroup.ID":        "server-generated group identifier, not composed content",
+// TestBundleLeafCoverageMatrix is SS3.e extended to the definitions bundle model
+// (#74 SS3): definitions.Bundle carries its own Key/Environment/KeyGroup structs,
+// distinct from the service KeySpec, scanned by bundleLeaves on plan/apply/check.
+// It walks the whole Bundle recursively — Environments/KeyGroups names, and each
+// Key's leaves INCLUDING its Declaration → Rule / any_of tree — sets one leaf at
+// a time, and asserts bundleLeaves surfaces it. A newly added bundle string leaf
+// that is neither covered nor excluded fails here, so it cannot ship unscanned
+// through the Git flow.
+func TestBundleLeafCoverageMatrix(t *testing.T) {
+	assertEachLeafScanned(t, definitions.Bundle{}, rootLeaves(t, definitions.Bundle{}), func(root reflect.Value) []scanLeaf {
+		return bundleLeaves(root.Interface().(definitions.Bundle))
+	})
 }
 
-// TestBundleLeafCoverageMatrix is SS3.e extended to the definitions bundle model
-// (#74 SS3): definitions.Key/Environment/KeyGroup are distinct structs from the
-// service KeySpec, with their own leaf walk (bundleLeaves) that plan/apply/check
-// scan. It reflection-walks each, sets one content leaf at a time to a sentinel,
-// and asserts bundleLeaves surfaces it — OR that the field is on the closed
-// exclusion list. A newly added bundle string field that is neither covered nor
-// excluded fails here, so it cannot ship unscanned through the Git flow.
-func TestBundleLeafCoverageMatrix(t *testing.T) {
-	surfaced := func(b definitions.Bundle) bool {
-		return leafSetContains(bundleLeaves(b), coverageSentinel)
+// TestCoverageWalkReachesDeepLeaves is the anti-vacuity guard: it pins that the
+// recursive walk actually reaches the deepest author-controlled leaves under a
+// nested Declaration, so a walker bug that collected zero (or only shallow)
+// leaves — which would make the two matrices above pass on an empty set — trips
+// here. It also stands in for "a syntactically-new deep string field": if the
+// declaration tree gains a scanned field, the walk must reach it, and these
+// anchors prove the descent through pointer (Rule), slice-of-struct (any_of),
+// and terminal-blob (JSON Schema) shapes all work.
+func TestCoverageWalkReachesDeepLeaves(t *testing.T) {
+	paths := map[string]bool{}
+	for _, l := range rootLeaves(t, KeySpec{}) {
+		paths[l.path] = true
 	}
-
-	// definitions.Key: each top-level content leaf, in isolation.
-	keyType := reflect.TypeOf(definitions.Key{})
-	for i := 0; i < keyType.NumField(); i++ {
-		field := keyType.Field(i)
-		name := "Key." + field.Name
-		if _, excluded := excludedBundleFields[name]; excluded {
-			continue
-		}
-		if field.Type.Kind() == reflect.Struct {
-			t.Errorf("definitions.Key.%s is a nested struct with no coverage walk; add it to the matrix or exclude it by name", field.Name)
-			continue
-		}
-		if !isContentLeaf(field) {
-			continue
-		}
-		k := definitions.Key{}
-		setSentinel(reflect.ValueOf(&k).Elem().Field(i))
-		if !surfaced(definitions.Bundle{Keys: []definitions.Key{k}}) {
-			t.Errorf("author-controlled bundle field %s is not scan-covered and is not on the exclusion list", name)
+	for _, l := range rootLeaves(t, definitions.Bundle{}) {
+		paths[l.path] = true
+	}
+	for _, want := range []string{
+		"KeySpec.Declaration.Rule.Pattern",        // pointer → struct → string
+		"KeySpec.Declaration.Rule.Members",        // pointer → struct → []string (enum members)
+		"KeySpec.Declaration.Rule.JSONSchema",     // pointer → struct → []byte blob
+		"KeySpec.Declaration.AnyOf.Pattern",       // slice-of-struct alternative → string
+		"KeySpec.Declaration.AnyOf.Members",       // slice-of-struct alternative → []string
+		"Bundle.Keys.Declaration.Rule.Pattern",    // bundle key declaration, direct rule
+		"Bundle.Keys.Declaration.AnyOf.Pattern",   // bundle key declaration, any_of alternative
+		"Bundle.Keys.Declaration.Rule.JSONSchema", // bundle key declaration, JSON blob
+	} {
+		if !paths[want] {
+			t.Errorf("the coverage walk never reached %q; the recursive descent is broken and the matrices would pass vacuously", want)
 		}
 	}
-
-	// The declaration's own leaves reach bundleLeaves through declarationLeaves —
-	// assert one flows through the bundle path, so Key.Declaration's exclusion is
-	// "walked elsewhere", not "unscanned".
-	declKey := definitions.Key{Declaration: schema.Declaration{Rule: &schema.Rule{Type: schema.TypeString, Pattern: coverageSentinel}}}
-	if !surfaced(definitions.Bundle{Keys: []definitions.Key{declKey}}) {
-		t.Error("a declaration leaf (pattern) does not flow through bundleLeaves")
-	}
-
-	// Environment and KeyGroup: the portable name is the only author content; the
-	// id is server-issued.
-	envType := reflect.TypeOf(definitions.Environment{})
-	for i := 0; i < envType.NumField(); i++ {
-		field := envType.Field(i)
-		if _, excluded := excludedBundleFields["Environment."+field.Name]; excluded || !isContentLeaf(field) {
-			continue
-		}
-		e := definitions.Environment{}
-		setSentinel(reflect.ValueOf(&e).Elem().Field(i))
-		if !surfaced(definitions.Bundle{Environments: []definitions.Environment{e}}) {
-			t.Errorf("author-controlled bundle field Environment.%s is not scan-covered", field.Name)
-		}
-	}
-	groupType := reflect.TypeOf(definitions.KeyGroup{})
-	for i := 0; i < groupType.NumField(); i++ {
-		field := groupType.Field(i)
-		if _, excluded := excludedBundleFields["KeyGroup."+field.Name]; excluded || !isContentLeaf(field) {
-			continue
-		}
-		g := definitions.KeyGroup{}
-		setSentinel(reflect.ValueOf(&g).Elem().Field(i))
-		if !surfaced(definitions.Bundle{KeyGroups: []definitions.KeyGroup{g}}) {
-			t.Errorf("author-controlled bundle field KeyGroup.%s is not scan-covered", field.Name)
-		}
+	if len(paths) == 0 {
+		t.Fatal("the coverage walk collected zero leaves")
 	}
 }

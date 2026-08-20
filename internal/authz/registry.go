@@ -1014,7 +1014,7 @@ var operations = map[Operation]opSpec{
 		level:    domain.LevelOrg,
 		formula:  Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
 		storeOps: map[StoreOp]bool{StoreOrgsGet: true, StoreOrgsRename: true, StoreAuditTenantInsert: true},
-		events: []audit.EventType{audit.EventOrgRenamed}, // org names not scanned (#74)
+		events:   []audit.EventType{audit.EventOrgRenamed}, // org names not scanned (#74)
 	},
 	OpOrgDelete: {
 		class:    ClassTenant,
@@ -1164,7 +1164,7 @@ var operations = map[Operation]opSpec{
 		level:    domain.LevelOrg,
 		formula:  Formula{{Cap: domain.CapManageProjects, At: domain.LevelOrg}},
 		storeOps: map[StoreOp]bool{StoreProjectsCreate: true, StoreAuditTenantInsert: true},
-		events: []audit.EventType{audit.EventProjectCreated}, // project names not scanned (#74)
+		events:   []audit.EventType{audit.EventProjectCreated}, // project names not scanned (#74)
 	},
 	OpProjectGet: {
 		class:       ClassTenant,
@@ -1185,7 +1185,7 @@ var operations = map[Operation]opSpec{
 		level:    domain.LevelProject,
 		formula:  Formula{{Cap: domain.CapManageProjects, At: domain.LevelOrg}},
 		storeOps: map[StoreOp]bool{StoreProjectsGet: true, StoreProjectsRename: true, StoreAuditTenantInsert: true},
-		events: []audit.EventType{audit.EventProjectRenamed}, // project names not scanned (#74)
+		events:   []audit.EventType{audit.EventProjectRenamed}, // project names not scanned (#74)
 	},
 	OpProjectDelete: {
 		class:   ClassTenant,
@@ -1601,9 +1601,10 @@ var operations = map[Operation]opSpec{
 			StoreCatalogueGroupCreate: true, StoreCatalogueGroupRename: true,
 			StoreCatalogueGroupDelete: true, StoreCatalogueGroupClearMembers: true,
 			StoreValuesCountEnvironment: true, StoreValuesEnvironmentsWithValue: true,
-			StoreValuesClearKey:            true,
-			StorePendingDiscardKey:         true,
-			StoreSnapshotsProjectRevisions: true, StoreSnapshotsDeleteEnvironment: true,
+			StoreValuesClearKey:                true,
+			StorePendingDiscardKey:             true,
+			StoreScanningDismissalsDeleteByKey: true,
+			StoreSnapshotsProjectRevisions:     true, StoreSnapshotsDeleteEnvironment: true,
 			StorePinsDeleteEnvironment: true,
 			StoreDefinitionsPlanGet:    true, StoreDefinitionsPlanApply: true,
 			StoreAuditTenantInsert: true,

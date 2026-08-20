@@ -202,3 +202,80 @@ func runScanningDefinitionsApplySkew(t *testing.T, db *store.DB) {
 		t.Fatal("SS3.apply: the override event does not carry ingress apply")
 	}
 }
+
+func seedDefinitionDismissal(t *testing.T, db *store.DB, f definitionsFixture) {
+	t.Helper()
+	execRaw(t, db, "INSERT INTO scanning_dismissals "+
+		"(id, org_id, project_id, environment_id, key_id, rule_digest, value_fingerprint, created_at, created_by) VALUES "+
+		"('dismiss_"+f.key+"', 'org_a', '"+string(f.project)+"', '"+f.env+"', '"+f.key+"', "+
+		"'test-rule-digest', 'test-fingerprint', '2026-08-20T12:00:00Z', '"+string(alice)+"')")
+}
+
+func definitionDismissalCount(t *testing.T, db *store.DB, f definitionsFixture) int64 {
+	t.Helper()
+	return queryInt(t, db, "SELECT COUNT(*) FROM scanning_dismissals WHERE project_id = '"+
+		string(f.project)+"' AND key_id = '"+f.key+"'")
+}
+
+func runScanningDefinitionsApplyLifecycle(t *testing.T, db *store.DB) {
+	t.Helper()
+
+	t.Run("key delete drops dismissals before catalogue row", func(t *testing.T) {
+		f := seedDefinitionsProject(t, db, "scandismissdelete", true)
+		svc := definitionsScanningService(t, db)
+		seedDefinitionDismissal(t, db, f)
+
+		bundle := parseDefinitions(t, exportDefinitions(t, svc, f))
+		bundle.Keys = nil
+		plan := planDefinitions(t, svc, f, encodeDefinitions(t, bundle))
+		if _, err := svc.Apply(t.Context(), service.LocalPrincipal(alice), f.scope(), plan.ID, service.ApplyOptions{AllowDelete: true}); err != nil {
+			t.Fatalf("apply key delete with dismissal: %v", err)
+		}
+		if got := definitionDismissalCount(t, db, f); got != 0 {
+			t.Fatalf("dismissals after key delete = %d, want 0", got)
+		}
+		if got := queryInt(t, db, "SELECT COUNT(*) FROM keys WHERE id = '"+f.key+"'"); got != 0 {
+			t.Fatalf("key rows after delete = %d, want 0", got)
+		}
+	})
+
+	t.Run("config to secret drops dismissals", func(t *testing.T) {
+		f := seedDefinitionsProject(t, db, "scandismisstighten", true)
+		svc := definitionsScanningService(t, db)
+		seedDefinitionDismissal(t, db, f)
+
+		bundle := parseDefinitions(t, exportDefinitions(t, svc, f))
+		bundle.Keys[0].Classification = "secret"
+		plan := planDefinitions(t, svc, f, encodeDefinitions(t, bundle))
+		if _, err := svc.Apply(t.Context(), service.LocalPrincipal(alice), f.scope(), plan.ID, service.ApplyOptions{}); err != nil {
+			t.Fatalf("apply config to secret: %v", err)
+		}
+		if got := definitionDismissalCount(t, db, f); got != 0 {
+			t.Fatalf("dismissals after config to secret = %d, want 0", got)
+		}
+		if got := queryInt(t, db, "SELECT COUNT(*) FROM keys WHERE id = '"+f.key+"' AND classification = 'secret'"); got != 1 {
+			t.Fatalf("secret key rows after reclassification = %d, want 1", got)
+		}
+	})
+
+	t.Run("secret to config does not scan sealed occurrences", func(t *testing.T) {
+		f := seedDefinitionsProject(t, db, "scandeclassnoop", true)
+		execRaw(t, db, "UPDATE keys SET classification = 'secret' WHERE id = '"+f.key+"'")
+		publishDefinitionValue(t, db, f, "BASE_KEY", ptr(plantedCredential))
+		svc := definitionsScanningService(t, db)
+
+		bundle := parseDefinitions(t, exportDefinitions(t, svc, f))
+		bundle.Keys[0].Classification = "config"
+		plan := planDefinitions(t, svc, f, encodeDefinitions(t, bundle))
+		warnedBefore := scanEventCount(t, db, "scanning.finding_warned")
+		if _, err := svc.Apply(t.Context(), service.LocalPrincipal(custodian), f.scope(), plan.ID, service.ApplyOptions{}); err != nil {
+			t.Fatalf("apply secret to config: %v", err)
+		}
+		if got := scanEventCount(t, db, "scanning.finding_warned"); got != warnedBefore {
+			t.Fatalf("finding_warned count after ciphertext-only apply = %d, want unchanged %d", got, warnedBefore)
+		}
+		if got := queryInt(t, db, "SELECT COUNT(*) FROM keys WHERE id = '"+f.key+"' AND classification = 'config'"); got != 1 {
+			t.Fatalf("config key rows after declassification = %d, want 1", got)
+		}
+	})
+}

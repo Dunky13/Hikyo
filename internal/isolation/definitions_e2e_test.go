@@ -36,6 +36,7 @@ func runDefinitions(t *testing.T, db *store.DB) {
 	t.Run("apply emits constituent audit events", func(t *testing.T) { definitionsConstituentAudit(t, db) })
 	t.Run("scanning blocks plan before persist", func(t *testing.T) { runScanningDefinitionsPlanBlock(t, db) })
 	t.Run("scanning re-scans apply on ruleset skew", func(t *testing.T) { runScanningDefinitionsApplySkew(t, db) })
+	t.Run("scanning dismissal lifecycle on apply", func(t *testing.T) { runScanningDefinitionsApplyLifecycle(t, db) })
 }
 
 // runDefinitionsAuditLifecycle drives every #70 audit type through its real

@@ -132,8 +132,8 @@ NOT scan** (ADR §6.1 no-retro-scan: values are scanned at entry, not re-scanned
 publish). "SAVING IS FREE" is preserved — warn never blocks a save.
 
 Surface 2 (block): every existing declaration ingress — key Create/Rename/UpdateMetadata/
-UpdateDeclaration/SetGroup (`internal/service/keys.go`), key-group naming, folder/env/
-project/org naming (`internal/service/hierarchy.go`), and the definitions Git-flow chokepoints
+UpdateDeclaration/SetGroup (`internal/service/keys.go`), key-group naming, folder and
+environment naming (`internal/service/hierarchy.go`), and the definitions Git-flow chokepoints
 `definitions plan` (before the immutable plan persists) and `definitions apply` (re-scan on ruleset
 snapshot skew) (`internal/service/definitions_apply*.go`) — refused **before any pending/plan state
 persists**, per-finding locator + rule ID + short-lived content-bound ack token;

@@ -95,8 +95,8 @@ var scanningCriteria = map[string]scanClause{
 		Fixtures: []string{"runScanningLifecycle"}},
 	"SS3.d": {Text: "per-request finding-count cap fails closed naming the cap (no silent truncation)",
 		Fixtures: []string{"TestFindingCapFailsClosed"}},
-	"SS3.e": {Text: "[CI] generated field-coverage matrix: every author-controlled string leaf has a scan-coverage fixture; a new public field without one fails (direct-edit model and the definitions bundle model)",
-		Fixtures: []string{"TestSurface2FieldCoverageMatrix", "TestBundleLeafCoverageMatrix"}},
+	"SS3.e": {Text: "[CI] recursive field-coverage matrix: the reflection walk descends every nested struct/pointer/slice of the canonical model, so every author-controlled string leaf (including under Key.Declaration) has a scan-coverage fixture proven by construction; a new public field without one fails (direct-edit model and the definitions bundle model), and an anti-vacuity guard pins the deep leaves are reached",
+		Fixtures: []string{"TestSurface2FieldCoverageMatrix", "TestBundleLeafCoverageMatrix", "TestCoverageWalkReachesDeepLeaves"}},
 	"SS3.f": {Text: "[CI] API schema + CLI flag-namespace sweep proves no blanket ignore-all input exists",
 		Fixtures: []string{"TestNoBlanketScanOverrideFlag"}},
 	"SS3.plan": {Text: "[E2E] `definitions plan` refused before a plan persists; acknowledged resubmission commits with finding_overridden",
@@ -107,8 +107,8 @@ var scanningCriteria = map[string]scanClause{
 		Blocked: "no SPA declaration-editing surface (docs/handoff/60-chrome-surfaces.md); block presentation ships CLI/API and the dialog lands with that surface"},
 
 	// --- SS4: non-disclosure invariants (ADR §2, §4, §5, §6) -----------------
-	"SS4.a": {Text: "planted-canary sweep: the credential appears in no wire response, audit row, or import output — and neither does any match offset/length/excerpt (redacted DTO by construction)",
-		Fixtures: []string{"runScanningLifecycle"}},
+	"SS4.a": {Text: "planted-canary sweep: the credential appears in no real HTTP response body (value warn + declaration block), CLI table/JSON/stderr, audit export stream, or import output — and neither does any match offset/length/excerpt, proven on the closed redacted key set (redacted DTO by construction)",
+		Fixtures: []string{"runScanningLifecycle", "runScanningCanarySweep"}},
 	"SS4.b": {Text: "audit fixtures assert `scanning.*` payloads carry exactly the §5 schema (no fingerprint field exists)",
 		Fixtures: []string{"runScanningLifecycle"}},
 	"SS4.c": {Text: "fingerprint construction asserted executably: HMAC known-answer vectors through the envelope-package API; scope separation",
@@ -153,6 +153,7 @@ var scanningCrossPackageFixtures = map[string]bool{
 	// internal/service
 	"TestSurface2FieldCoverageMatrix":          true,
 	"TestBundleLeafCoverageMatrix":             true,
+	"TestCoverageWalkReachesDeepLeaves":        true,
 	"TestAckSetStaleContentAndVersionRejected": true,
 	"TestAckSetSurplusReported":                true,
 	"TestFindingCapFailsClosed":                true,
