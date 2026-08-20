@@ -268,7 +268,8 @@ for compose_path in \
 	'install/compose/demo/compose.yaml' \
 	'scripts/compose-demo.sh' \
 	'internal/cli/compose.go' \
-	'internal/compose/config.go' \
+	'internal/cli/run.go' \
+	'internal/compose/doctor.go' \
 	'internal/service/delivery.go'; do
 	compose_actual=$(printf '%s\n' "$compose_path" | "$classifier" --files)
 	if ! printf '%s\n' "$compose_actual" | jq -e '.compose_demo == true' >/dev/null; then

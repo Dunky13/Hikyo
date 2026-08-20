@@ -424,10 +424,20 @@ DEMO_REAL_DOCKER="$real_docker" PATH="$docker_wrapper_dir:$PATH" \
 doctor_code=$?
 set -e
 [[ $doctor_code -eq 0 || $doctor_code -eq 4 ]] || fail "doctor exited $doctor_code"
-jq -e '.status == "ok" or .status == "error" or .status == "warn"' "$work_dir/doctor.json" >/dev/null
-jq -e 'all(.findings[]?; .code == "runtime_not_tmpfs")' "$work_dir/doctor.json" >/dev/null || {
+jq -e '
+	(.status == "ok" or .status == "error" or .status == "warning") and
+	(.findings | type == "array") and
+	all(.findings[];
+		(has("check") and (.check | type == "string")) and
+		(has("status") and (.status | type == "string")) and
+		(
+			(.check == "runtime_not_tmpfs" and .status == "error") or
+			(.check == "systemd_plain_token_file" and .status == "warn")
+		)
+	)
+' "$work_dir/doctor.json" >/dev/null || {
 	jq . "$work_dir/doctor.json" >&2
-	fail 'doctor returned a finding other than runtime_not_tmpfs'
+	fail 'doctor returned a finding outside the environmental allowlist'
 }
 
 printf '%s' 'hello after sync' >"$work_dir/value-GREETING-updated"

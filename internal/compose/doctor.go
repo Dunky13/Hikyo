@@ -245,7 +245,10 @@ func checkServiceForTarget(in DoctorInput, rawSvcs map[string]rawService, svcNam
 			f = append(f, Finding{SeverityError, "format_raw_missing",
 				fmt.Sprintf("service %q target %q: env_file must use `format: raw`, got %q", svcName, target, fmtVal)})
 		}
-		if resolved := resolvedEnvFilePath(in.Config, svcName, target); resolved != wantResolved {
+		if resolved, ok := resolvedEnvFilePath(in.Config, rs, svcName, target, v, rawPath); !ok {
+			f = append(f, Finding{SeverityWarn, "compose_env_file_resolution_unavailable",
+				fmt.Sprintf("service %q target %q: Compose %q omitted env_file from config JSON and did not expose the same %s value through %s; this Compose version cannot prove the resolved env_file path", svcName, target, in.ComposeVersion, v, stampLabel)})
+		} else if resolved != wantResolved {
 			f = append(f, Finding{SeverityError, "stamp_mismatch",
 				fmt.Sprintf("service %q target %q: env_file resolves to %q, want %q", svcName, target, resolved, wantResolved)})
 		}
@@ -506,18 +509,43 @@ func rawPathReferencesVar(raw, varName string) bool {
 }
 
 // resolvedEnvFilePath returns the resolved env_file path for svc whose basename
-// is <target>.env, from the resolved config.
-func resolvedEnvFilePath(cfg *ComposeConfig, svcName, target string) string {
+// is <target>.env. Compose 2.38 folds env_file into environment and omits the
+// env_file node from config JSON. In that shape we deliberately choose the raw
+// source-path fallback: interpolate it with Docker's resolved hikyo.stamp label,
+// which is required to reference the same variable. This loses only proof that
+// Docker parsed the env_file node; the raw structural check and resolved label
+// still prove the entry and actual variable value. If either proof is absent,
+// the caller emits an explicit version-limitation warning rather than silently
+// skipping the check or fabricating stamp_mismatch.
+func resolvedEnvFilePath(cfg *ComposeConfig, raw rawService, svcName, target, varName, rawPath string) (string, bool) {
 	if cfg == nil {
-		return ""
+		return "", false
 	}
 	base := target + ".env"
 	for _, ef := range cfg.Services[svcName].EnvFile {
 		if path.Base(ef.Path) == base {
-			return ef.Path
+			return ef.Path, true
 		}
 	}
-	return ""
+	rawLabel, hasLabel := raw.labels[stampLabel]
+	if !hasLabel || !rawLabelRequiredForm(rawLabel, varName) {
+		return "", false
+	}
+	value := resolvedLabel(cfg, svcName)
+	if value == "" {
+		return "", false
+	}
+	prefix := "${" + varName + ":?"
+	start := strings.Index(rawPath, prefix)
+	if start < 0 {
+		return "", false
+	}
+	end := strings.IndexByte(rawPath[start+len(prefix):], '}')
+	if end < 0 {
+		return "", false
+	}
+	end += start + len(prefix)
+	return rawPath[:start] + value + rawPath[end+1:], true
 }
 
 // resolvedLabel returns the resolved hikyo.stamp label for svc.

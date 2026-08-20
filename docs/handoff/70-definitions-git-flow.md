@@ -130,6 +130,10 @@ Project settings calls `GET /definitions/settings` and `PUT /definitions/setting
 
 There is no browser plan/apply or authoring surface. If one is added, consume the contract shapes directly: check returns `state/base_revision?/current_revision/differences`; plan returns id/digest/base/current/additive/expiry/protected environments/diff/deletion flag/reveal-required; apply sends explicit `allow_delete` plus optional provenance and returns revision/published environments/plan id. Render `key_deletions[].live_in` and `env_deletions[].occurrences` before enabling deletion acknowledgement.
 
+## Folded main-CI repair (#63 compose-demo)
+
+Main run 32332585828 exposed three #63 compose-demo defects while PR #179 carried #70. Compose 2.38.2 omits resolved `env_file` from config JSON, so doctor now falls back to the structurally verified source path plus Docker's resolved stamp-label value and emits a dedicated warning if that proof is unavailable. The demo now validates the golden `check` field and admits only the exact environmental severity pairs. The changed-path classifier explicitly schedules compose-demo for its compose/run implementation, script, and demo-fixture surfaces; the existing unknown-path all-jobs fallback that scheduled PR #179 remains fail-closed.
+
 ## Verification record
 
 - P1/P2/P3/P4: definitions, service, store, API/server/app/authz/audit touched-package suites passed; catalogue conformance passed SQLite and PostgreSQL; generated TypeScript client generate/typecheck/test passed 4/4.
