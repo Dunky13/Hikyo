@@ -1,0 +1,9 @@
+services:
+  app:
+    image: alpine:3.21
+    env_file:
+      - path: /tmp/hikyo-demo-runtime/${HIKYO_GEN_APP:?run 'hikyo compose render' first}/app.env
+        format: raw
+    labels:
+      hikyo.stamp: "${HIKYO_GEN_APP:?run 'hikyo compose render' first}"
+    command: ["sh", "-c", "for k in $$(env | cut -d= -f1 | sort); do printf '%s=' \"$$k\"; eval \"printf '%s' \\\"\\$$$$k\\\"\" | base64 -w0; echo; done"]

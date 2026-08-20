@@ -289,7 +289,8 @@ var wireRegistry = map[string]Class{
 	// caller who cannot read the environment gets exactly what a caller
 	// addressing an environment that does not exist gets, which is what makes
 	// the conditional answer safe to give.
-	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/delivery": ClassTenant,
+	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/delivery":                  ClassTenant,
+	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/delivery/offline-records": ClassTenant,
 
 	"http:GET /api/v1/orgs/{org}/projects/{project}/grants":                                      ClassTenant,
 	"http:POST /api/v1/orgs/{org}/projects/{project}/grants":                                     ClassTenant,
@@ -475,11 +476,23 @@ var wireRegistry = map[string]Class{
 	// affected-environment checks happen behind those tenant routes.
 	"cli:adapter": ClassTenant,
 
-	"cli:run":         ClassStub,
-	"cli:render":      ClassStub,
-	"cli:sync":        ClassStub,
+	// The Compose delivery verbs (#63). `run` and `compose` both reach the
+	// tenant-scoped delivery routes (GET .../delivery and its offline-records
+	// reconciliation POST) and nothing wider, so both carry ClassTenant: a
+	// caller who cannot read the environment gets what an environment that does
+	// not exist gives. `compose` dispatches render|sync|doctor internally; the
+	// class is the verb's, and every sub-verb reaches only those two routes.
+	"cli:run":     ClassTenant,
+	"cli:compose": ClassTenant,
+	// `adopt` and `definitions` remain not-yet-implemented (they depend on the
+	// definitions flow, #70): still stubs, still in app.ClientVerbs.
 	"cli:adopt":       ClassStub,
 	"cli:definitions": ClassStub,
+	// `render` and `sync` are no longer top-level verbs — they are `compose`
+	// sub-verbs — but the scaffolded top-level entries stay stubs until removed
+	// with the help surface, so a bare `hikyo render` still refuses cleanly.
+	"cli:render": ClassStub,
+	"cli:sync":   ClassStub,
 	// `import` (#68) reaches the tenant-scoped phase-1 presence route and the
 	// tenant-scoped phase-2 import route, and nothing else. Its class flipped
 	// off ClassStub in the same change that registered its operations — the
@@ -741,6 +754,10 @@ var wireEvents = map[string][]audit.EventType{
 		audit.EventFederationRefused,
 		audit.EventJWKSRefreshFailed,
 	},
+	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/delivery/offline-records": {
+		audit.EventFederationRefused,
+		audit.EventJWKSRefreshFailed,
+	},
 }
 
 // wireRoutes maps an HTTP entry point to the registered operation(s) it reaches.
@@ -817,12 +834,13 @@ var wireRoutes = map[string][]Operation{
 	"http:PUT /api/v1/instance/credential-policy":           {OpCredentialPolicyUpdate},
 
 	// OIDC federation (#62). One route, one operation.
-	"http:GET /api/v1/instance/federation-issuers":                                               {OpFederationIssuerList},
-	"http:POST /api/v1/instance/federation-issuers":                                              {OpFederationIssuerCreate},
-	"http:PATCH /api/v1/instance/federation-issuers/{issuer}":                                    {OpFederationIssuerUpdate},
-	"http:DELETE /api/v1/instance/federation-issuers/{issuer}":                                   {OpFederationIssuerDelete},
-	"http:POST /api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}/bindings": {OpBindingCreate},
-	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/delivery":         {OpDeliveryFetch},
+	"http:GET /api/v1/instance/federation-issuers":                                                        {OpFederationIssuerList},
+	"http:POST /api/v1/instance/federation-issuers":                                                       {OpFederationIssuerCreate},
+	"http:PATCH /api/v1/instance/federation-issuers/{issuer}":                                             {OpFederationIssuerUpdate},
+	"http:DELETE /api/v1/instance/federation-issuers/{issuer}":                                            {OpFederationIssuerDelete},
+	"http:POST /api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}/bindings":          {OpBindingCreate},
+	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/delivery":                  {OpDeliveryFetch},
+	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/delivery/offline-records": {OpDeliveryReconcileOffline},
 
 	"http:GET /api/v1/orgs/{org}/projects/{project}/grants":                                      {OpGrantListProject},
 	"http:POST /api/v1/orgs/{org}/projects/{project}/grants":                                     {OpGrantCreateProject},

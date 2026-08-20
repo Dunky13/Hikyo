@@ -197,6 +197,14 @@
     ]
   },
   {
+    "operation": "delivery.reconcile-offline",
+    "class": "tenant",
+    "level": "environment",
+    "formula": [
+      "read@environment"
+    ]
+  },
+  {
     "operation": "environment.create",
     "class": "tenant",
     "level": "project",

@@ -1,0 +1,51 @@
+{
+  "name": "unrepresentable values and bad names refused by name",
+  "rows": [
+    {
+      "name": "OK",
+      "value": "fine"
+    },
+    {
+      "name": "EMBEDDED_NL",
+      "value": "line1\nline2"
+    },
+    {
+      "name": "CRLF",
+      "value": "line1\r\nline2"
+    },
+    {
+      "name": "LONE_CR",
+      "value": "a\rb"
+    },
+    {
+      "name": "1BAD",
+      "value": "digit-leading name"
+    },
+    {
+      "name": "BAD-DASH",
+      "value": "dash in name"
+    }
+  ],
+  "expectRefusals": [
+    {
+      "key": "EMBEDDED_NL",
+      "reason": "embedded newline"
+    },
+    {
+      "key": "CRLF",
+      "reason": "embedded newline"
+    },
+    {
+      "key": "LONE_CR",
+      "reason": "embedded newline"
+    },
+    {
+      "key": "1BAD",
+      "reason": "invalid name"
+    },
+    {
+      "key": "BAD-DASH",
+      "reason": "invalid name"
+    }
+  ]
+}

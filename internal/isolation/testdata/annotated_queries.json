@@ -55,6 +55,12 @@
   },
   {
     "engine": "postgres",
+    "name": "ClaimOfflineRecord",
+    "annotation": "authn-resolution",
+    "hash": "2fb742b62db4102003c6622b2ffe62e0764bb4d63a0d2a6ca9d83219a4ea2b58"
+  },
+  {
+    "engine": "postgres",
     "name": "ClampCredentialExpiry",
     "annotation": "authn-resolution",
     "hash": "ed703941013bc663185b53f60243d9fd6e1d77d7678d113d089098975e80b74e"
@@ -1390,6 +1396,12 @@
     "name": "CLIReauthHandoffByState",
     "annotation": "authn-resolution",
     "hash": "1b3a00de6cd65a774e90cfbc7575ef3935a644ae28cd204ffefce4f14b32bd50"
+  },
+  {
+    "engine": "sqlite",
+    "name": "ClaimOfflineRecord",
+    "annotation": "authn-resolution",
+    "hash": "65e2c44df6d8fbed9a33afa32477dc59c30a799d159c79bc8a4822393a89b600"
   },
   {
     "engine": "sqlite",

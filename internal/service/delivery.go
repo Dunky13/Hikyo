@@ -77,12 +77,24 @@ type FetchResult struct {
 	// PinExpired is a loud status condition only. Expiry ends retention
 	// protection; it never changes delivery while the payload survives.
 	PinExpired bool
+	// CredentialID is the authenticated caller's immutable credential id. It is
+	// returned on BOTH dispositions because clients bind it into snapshot AAD
+	// and offline disclosure records rather than guessing their wire identity.
+	CredentialID string
+	// IssuedAt and SnapshotExpiresAt are server assertions bound into the
+	// client's offline-snapshot AAD. They are present on both dispositions;
+	// SnapshotExpiresAt is IssuedAt + delivery.SnapshotMaxAge.
+	IssuedAt          time.Time
+	SnapshotExpiresAt time.Time
 }
 
 // DeliveredKey is one key as the machine surface delivers it: its name, its
 // classification, its presence, and — iff the caller was authorized to receive
 // it — its plaintext Value.
 type DeliveredKey struct {
+	// KeyID is the immutable key id (entry.KeyID), delivered so a client can
+	// bind per-key offline disclosure records to a stable identity.
+	KeyID          string
 	Name           string
 	Classification string
 	Presence       delivery.Presence
@@ -107,6 +119,25 @@ type FetchOptions struct {
 	// fetch audit record AS PRESENTED and otherwise ignored — the server filters
 	// nothing and refuses nothing on it (k8s ADR § Loader-control).
 	AcknowledgedKeys []string
+}
+
+// OfflineRecord is one client-durable disclosure record produced before an
+// offline snapshot released plaintext.
+type OfflineRecord struct {
+	RecordID       string
+	KeyID          string
+	KeyName        string
+	Classification string
+	OccurredAt     time.Time
+	CredentialID   string
+	Generation     string
+	ServedFrom     time.Time
+}
+
+// ReconcileResult reports the idempotent outcome of one bounded batch.
+type ReconcileResult struct {
+	Accepted   int
+	Duplicates int
 }
 
 var (
@@ -244,7 +275,11 @@ func (s *Delivery) FetchAs(ctx context.Context, actor Actor, scope domain.Scope,
 		// can take real time, and a credential whose idle, absolute or expiry
 		// deadline passes during it must be refused by the authentication this
 		// delivery actually rides, not admitted on a stale instant.
-		caller, err := actor.resolve(ctx, az, s.now())
+		// issuedAt is captured ONCE here so the credential-liveness clock, the
+		// pin-expiry check, and the server-asserted snapshot issuance/expiry all
+		// name the same instant.
+		issuedAt := s.now()
+		caller, err := actor.resolve(ctx, az, issuedAt)
 		if err != nil {
 			return err
 		}
@@ -300,7 +335,7 @@ func (s *Delivery) FetchAs(ctx context.Context, actor Actor, scope domain.Scope,
 			}
 			selected = &snapshot
 			out.PinnedRevision = pin.Revision
-			out.PinExpired = !pin.ExpiresAt.After(s.now())
+			out.PinExpired = !pin.ExpiresAt.After(issuedAt)
 		}
 
 		// The caller's grant rows, loaded BEFORE the projection because the
@@ -368,7 +403,10 @@ func (s *Delivery) FetchAs(ctx context.Context, actor Actor, scope domain.Scope,
 			Current: current, Cursor: computed, ChangeToken: changeToken,
 			CredentialExpiresAt: caller.CredentialExpiresAt,
 			SchemaRevision:      revision, PinnedRevision: out.PinnedRevision,
-			PinExpired: out.PinExpired,
+			PinExpired:        out.PinExpired,
+			CredentialID:      caller.CredentialID,
+			IssuedAt:          issuedAt,
+			SnapshotExpiresAt: issuedAt.Add(delivery.SnapshotMaxAge),
 		}
 		if !current {
 			out.Keys = rows
@@ -455,6 +493,116 @@ func (s *Delivery) FetchAs(ctx context.Context, actor Actor, scope domain.Scope,
 		// transaction has ended — a nested one would deadlock sqlite's single
 		// writer until the retry deadline elapsed.
 		return FetchResult{}, s.recordUnbound(ctx, actor, err)
+	}
+	return out, nil
+}
+
+// ReconcileOfflineRecords authenticates a live presenter and persists the
+// client-side disclosure facts that were fsynced before offline plaintext was
+// released. Dedupe is scoped to the presenting principal, so retries are safe.
+//
+// The per-key event stays audit.EventValueRevealed (disclosure.value_revealed,
+// surface: offline-serve) rather than #64's audit.EventDisclosure: that event
+// requires a snapshot `revision` an offline record does not carry, references a
+// fetch envelope this path has no equivalent for, and lacks the served_credential
+// _id/generation/served_from fields the offline disclosure records. Extending
+// EventValueRevealed's schema with those (optional) fields is the clean home.
+func (s *Delivery) ReconcileOfflineRecords(ctx context.Context, presented string, scope domain.Scope, records []OfflineRecord) (ReconcileResult, error) {
+	actor, err := s.callerActor(ctx, presented)
+	if err != nil {
+		return ReconcileResult{}, err
+	}
+	return s.ReconcileOfflineRecordsAs(ctx, actor, scope, records)
+}
+
+// ReconcileOfflineRecordsAs is ReconcileOfflineRecords with the caller decided.
+func (s *Delivery) ReconcileOfflineRecordsAs(ctx context.Context, actor Actor, scope domain.Scope, records []OfflineRecord) (ReconcileResult, error) {
+	if len(records) == 0 || len(records) > 1000 {
+		return ReconcileResult{}, invalidDetail("offline reconciliation requires between 1 and 1000 records")
+	}
+	for _, record := range records {
+		if record.RecordID == "" || len(record.RecordID) > 64 || record.KeyID == "" || len(record.KeyID) > 64 ||
+			record.KeyName == "" || len(record.KeyName) > 256 || record.CredentialID == "" || len(record.CredentialID) > 64 ||
+			record.Generation == "" || len(record.Generation) > 64 || record.OccurredAt.IsZero() || record.ServedFrom.IsZero() ||
+			(record.Classification != string(schema.Config) && record.Classification != string(schema.Secret)) {
+			return ReconcileResult{}, invalidDetail("offline reconciliation record %q is invalid", record.RecordID)
+		}
+	}
+
+	var out ReconcileResult
+	err := tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+		out = ReconcileResult{}
+		caller, err := actor.resolve(ctx, az, s.now())
+		if err != nil {
+			return err
+		}
+		p, err := az.Authorize(ctx, caller, authz.OpDeliveryReconcileOffline, scope)
+		if err != nil {
+			return err
+		}
+		// A production presenter is a machine credential. Resolve every credential
+		// row for its service account without applying liveness: the served one may
+		// have been revoked since the offline disclosure, but it must still belong
+		// to the SAME account. LocalPrincipal remains the below-network authority
+		// seam used by conformance and carries no credential to compare.
+		servedCredentials := map[string]bool{}
+		if caller.CredentialID != "" {
+			sa, err := az.ServiceAccountByPrincipal(ctx, caller.Principal)
+			if err != nil {
+				return err
+			}
+			credentials, err := az.MachineCredentialsFor(ctx, sa.ID)
+			if err != nil {
+				return err
+			}
+			for _, credential := range credentials {
+				servedCredentials[credential.ID] = true
+			}
+		}
+		for _, record := range records {
+			if caller.CredentialID != "" && !servedCredentials[record.CredentialID] {
+				return invalidDetail("offline record %q names a credential outside the presenting service account", record.RecordID)
+			}
+			claimed, err := r.Audit().ClaimOfflineRecord(ctx, p, string(caller.Principal), record.RecordID, s.now())
+			if err != nil {
+				return err
+			}
+			if !claimed {
+				out.Duplicates++
+				continue
+			}
+			ev, err := newAuditEvent(ctx, audit.EventValueRevealed, caller.Principal,
+				audit.Object{Type: "key", ID: record.KeyID}, audit.OutcomeSuccess, "", audit.Payload{
+					"key_id": record.KeyID, "name": audit.SanitizeFreeText(record.KeyName),
+					"classification": record.Classification, "surface": "offline-serve",
+					"served_credential_id": record.CredentialID, "generation": record.Generation,
+					"served_from": audit.FormatTime(record.ServedFrom),
+				})
+			if err != nil {
+				return err
+			}
+			ev.OccurredAt = record.OccurredAt.UTC()
+			ev.OccurredAsserted = true
+			ev.Actor.CredentialID = caller.CredentialID
+			ev.SourceIP, ev.UserAgent, ev.Origin = "", "", audit.OriginOfflineRecon
+			if err := r.Audit().InsertTenant(ctx, p, ev); err != nil {
+				return err
+			}
+			out.Accepted++
+		}
+		ev, err := domainEvent(ctx, audit.EventOfflineRecordsReconciled, caller.Principal,
+			audit.Object{Type: "environment", ID: string(scope.Env)}, audit.Payload{
+				"accepted": out.Accepted, "duplicates": out.Duplicates,
+				"credential_id": caller.CredentialID, "scope": renderScope(scope),
+			})
+		if err != nil {
+			return err
+		}
+		ev.Actor.CredentialID = caller.CredentialID
+		return r.Audit().InsertTenant(ctx, p, ev)
+	})
+	if err != nil {
+		return ReconcileResult{}, s.recordUnbound(ctx, actor, err)
 	}
 	return out, nil
 }
@@ -587,7 +735,7 @@ func deliveryRows(ctx context.Context, r store.Repos, p authz.Proof, sealer *cry
 			return nil, nil, 0, 0, fmt.Errorf("service: snapshot entry %s: %w", entry.ID, err)
 		}
 		key := DeliveredKey{
-			Name: entry.KeyName, Classification: entry.Classification,
+			KeyID: entry.KeyID, Name: entry.KeyName, Classification: entry.Classification,
 			Presence: delivery.PresenceSet,
 		}
 		// Config crosses under the read the operation already required; a secret

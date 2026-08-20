@@ -14,7 +14,13 @@ import (
 	"encoding/binary"
 	"slices"
 	"strings"
+	"time"
 )
+
+// SnapshotMaxAge is the server-asserted maximum age of an offline delivery
+// snapshot (ops-spec § 6). Clients bind both timestamps into snapshot AAD and
+// refuse the ciphertext after this interval.
+const SnapshotMaxAge = 7 * 24 * time.Hour
 
 // MaxAcknowledgedKeys bounds the loader-control acknowledgement list a machine
 // fetch may present (k8s ADR § 0.9). It is the single source of truth for that

@@ -1,0 +1,38 @@
+{
+  "name": "shell metacharacters pass through raw",
+  "rows": [
+    {
+      "name": "DOLLAR",
+      "value": "$"
+    },
+    {
+      "name": "BRACE_REF",
+      "value": "${FOO}"
+    },
+    {
+      "name": "SINGLE_Q",
+      "value": "it's"
+    },
+    {
+      "name": "DOUBLE_Q",
+      "value": "say \"hi\""
+    },
+    {
+      "name": "BACKSLASH_N",
+      "value": "\\n"
+    },
+    {
+      "name": "BACKSLASH_BACKSLASH",
+      "value": "\\\\"
+    },
+    {
+      "name": "EQUALS_INSIDE",
+      "value": "a=b=c"
+    },
+    {
+      "name": "MIXED",
+      "value": "$USER=${x}\\t'q'\"q\""
+    }
+  ],
+  "expectRefusals": []
+}

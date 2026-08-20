@@ -33,6 +33,7 @@ expect_reject() {
 
 all_plan='{
 	"client":true,
+	"compose_demo":true,
 	"docs":true,
 	"fuzz":true,
 	"generated":true,
@@ -49,6 +50,7 @@ all_plan='{
 all_success='{
 	"changes":{"result":"success"},
 	"client":{"result":"success"},
+	"compose-demo":{"result":"success"},
 	"dco":{"result":"success"},
 	"docs":{"result":"success"},
 	"fuzz":{"result":"success"},
@@ -66,6 +68,7 @@ all_success='{
 docs_plan=$(printf '%s' "$all_plan" | jq 'map_values(false) | .docs = true')
 docs_success=$(printf '%s' "$all_success" | jq '
 	.client.result = "skipped" |
+	.["compose-demo"].result = "skipped" |
 	.fuzz.result = "skipped" |
 	.generated.result = "skipped" |
 	.["headline-guarantee"].result = "skipped" |
@@ -90,7 +93,7 @@ done
 expect_accept 'main push with skipped DCO' push \
 	"$(printf '%s' "$all_success" | jq '.dco.result = "skipped"')" "$all_plan"
 
-for job in client fuzz race; do
+for job in client compose-demo fuzz race; do
 	for result in failure cancelled skipped; do
 		expect_reject "selected $job with $result result" pull_request \
 			"$(printf '%s' "$all_success" | jq --arg job "$job" --arg result "$result" '.[ $job ].result = $result')" \

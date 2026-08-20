@@ -2414,7 +2414,10 @@ type DeliveredKey struct {
 	// ceremony. Closed, deliberately: a third value would be a third
 	// disclosure regime.
 	Classification KeyClassification `json:"classification"`
-	Name           string            `json:"name"`
+
+	// KeyId A prefixed UUIDv7, e.g. `org_0198…`.
+	KeyId ID     `json:"key_id"`
+	Name  string `json:"name"`
 
 	// Presence What the fetch reports about this key in the addressed
 	// environment. `set` is a key the committed snapshot actually
@@ -2456,6 +2459,11 @@ type DeliveryResponse struct {
 	// ahead-of-time expiry condition and event.
 	CredentialExpiresAt *Timestamp `json:"credential_expires_at,omitempty"`
 
+	// CredentialId The authenticated caller's credential identifier, returned on both
+	// dispositions so clients can bind snapshots and offline records to
+	// the server-asserted identity rather than infer it locally.
+	CredentialId ID `json:"credential_id"`
+
 	// Current True when the presented cursor named the state the server was about
 	// to serve.
 	Current bool `json:"current"`
@@ -2471,6 +2479,9 @@ type DeliveryResponse struct {
 	// produces a full authorized delivery rather than a "current" answer.
 	Cursor string `json:"cursor"`
 
+	// IssuedAt RFC 3339 UTC, microsecond precision.
+	IssuedAt Timestamp `json:"issued_at"`
+
 	// Keys Empty when `current` is true.
 	Keys []DeliveredKey `json:"keys"`
 
@@ -2482,6 +2493,9 @@ type DeliveryResponse struct {
 
 	// SchemaRevision The project's monotonic key-catalogue revision.
 	SchemaRevision int `json:"schema_revision"`
+
+	// SnapshotExpiresAt RFC 3339 UTC, microsecond precision.
+	SnapshotExpiresAt Timestamp `json:"snapshot_expires_at"`
 }
 
 // DirectoryListing What a connection credential authorizes, exhaustively. There is no field
@@ -3530,6 +3544,26 @@ type MyOrgList struct {
 	Items []MyOrg `json:"items"`
 }
 
+// OfflineDeliveryRecord defines model for OfflineDeliveryRecord.
+type OfflineDeliveryRecord struct {
+	// Classification Classification IS the sensitivity boundary. A matrix row is uniformly
+	// secret or config; it changes only through the reclassification
+	// ceremony. Closed, deliberately: a third value would be a third
+	// disclosure regime.
+	Classification KeyClassification `json:"classification"`
+	CredentialId   string            `json:"credential_id"`
+	Generation     string            `json:"generation"`
+	KeyId          string            `json:"key_id"`
+	KeyName        string            `json:"key_name"`
+
+	// OccurredAt RFC 3339 UTC, microsecond precision.
+	OccurredAt Timestamp `json:"occurred_at"`
+	RecordId   string    `json:"record_id"`
+
+	// ServedFrom RFC 3339 UTC, microsecond precision.
+	ServedFrom Timestamp `json:"served_from"`
+}
+
 // OidcProvider defines model for OidcProvider.
 type OidcProvider struct {
 	AssurancePolicy *string `json:"assurance_policy,omitempty"`
@@ -3837,6 +3871,17 @@ type ReclassifyKeyRequest struct {
 	// ceremony. Closed, deliberately: a third value would be a third
 	// disclosure regime.
 	Classification KeyClassification `json:"classification"`
+}
+
+// ReconcileOfflineRecordsRequest defines model for ReconcileOfflineRecordsRequest.
+type ReconcileOfflineRecordsRequest struct {
+	Records []OfflineDeliveryRecord `json:"records"`
+}
+
+// ReconcileOfflineRecordsResponse defines model for ReconcileOfflineRecordsResponse.
+type ReconcileOfflineRecordsResponse struct {
+	Accepted   int `json:"accepted"`
+	Duplicates int `json:"duplicates"`
 }
 
 // RecoveryBeginRequest defines model for RecoveryBeginRequest.
@@ -5797,6 +5842,9 @@ type ReorderEnvironmentsJSONRequestBody = EnvironmentOrderRequest
 // RenameEnvironmentJSONRequestBody defines body for RenameEnvironment for application/json ContentType.
 type RenameEnvironmentJSONRequestBody = RenameRequest
 
+// ReconcileOfflineRecordsJSONRequestBody defines body for ReconcileOfflineRecords for application/json ContentType.
+type ReconcileOfflineRecordsJSONRequestBody = ReconcileOfflineRecordsRequest
+
 // CreateEnvGrantJSONRequestBody defines body for CreateEnvGrant for application/json ContentType.
 type CreateEnvGrantJSONRequestBody = CreateGrantRequest
 
@@ -6365,6 +6413,9 @@ type ServerInterface interface {
 	// FetchDelivery Fetch the authorized projection, conditionally.
 	// (GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/delivery)
 	FetchDelivery(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID, params FetchDeliveryParams)
+	// ReconcileOfflineRecords Reconcile client-durable offline disclosure records.
+	// (POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/delivery/offline-records)
+	ReconcileOfflineRecords(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID)
 	// RevokeEnvGrant Revoke one capability on one environment.
 	// (DELETE /api/v1/orgs/{org}/projects/{project}/environments/{environment}/grants)
 	RevokeEnvGrant(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID, params RevokeEnvGrantParams)
@@ -7388,6 +7439,12 @@ func (_ Unimplemented) RenameEnvironment(w http.ResponseWriter, r *http.Request,
 // FetchDelivery Fetch the authorized projection, conditionally.
 // (GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/delivery)
 func (_ Unimplemented) FetchDelivery(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID, params FetchDeliveryParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ReconcileOfflineRecords Reconcile client-durable offline disclosure records.
+// (POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/delivery/offline-records)
+func (_ Unimplemented) ReconcileOfflineRecords(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -11132,6 +11189,50 @@ func (siw *ServerInterfaceWrapper) FetchDelivery(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.FetchDelivery(w, r, org, project, environment, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ReconcileOfflineRecords operation middleware
+func (siw *ServerInterfaceWrapper) ReconcileOfflineRecords(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "environment" -------------
+	var environment EnvironmentID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "environment", chi.URLParam(r, "environment"), &environment, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "environment", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ReconcileOfflineRecords(w, r, org, project, environment)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -15790,6 +15891,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/environments/{environment}/delivery", wrapper.FetchDelivery)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/environments/{environment}/delivery/offline-records", wrapper.ReconcileOfflineRecords)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/api/v1/orgs/{org}/scim-bindings", wrapper.ListScimBindings)
@@ -27423,6 +27527,116 @@ func (response FetchDelivery500JSONResponse) VisitFetchDeliveryResponse(w http.R
 	return err
 }
 
+type ReconcileOfflineRecordsRequestObject struct {
+	Org         OrgID         `json:"org"`
+	Project     ProjectID     `json:"project"`
+	Environment EnvironmentID `json:"environment"`
+	Body        *ReconcileOfflineRecordsJSONRequestBody
+}
+
+type ReconcileOfflineRecordsResponseObject interface {
+	VisitReconcileOfflineRecordsResponse(w http.ResponseWriter) error
+}
+
+type ReconcileOfflineRecords200JSONResponse ReconcileOfflineRecordsResponse
+
+func (response ReconcileOfflineRecords200JSONResponse) VisitReconcileOfflineRecordsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReconcileOfflineRecords400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response ReconcileOfflineRecords400JSONResponse) VisitReconcileOfflineRecordsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReconcileOfflineRecords401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ReconcileOfflineRecords401JSONResponse) VisitReconcileOfflineRecordsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReconcileOfflineRecords404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ReconcileOfflineRecords404JSONResponse) VisitReconcileOfflineRecordsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReconcileOfflineRecords409JSONResponse struct{ ConflictJSONResponse }
+
+func (response ReconcileOfflineRecords409JSONResponse) VisitReconcileOfflineRecordsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReconcileOfflineRecords429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ReconcileOfflineRecords429JSONResponse) VisitReconcileOfflineRecordsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReconcileOfflineRecords500JSONResponse struct{ InternalJSONResponse }
+
+func (response ReconcileOfflineRecords500JSONResponse) VisitReconcileOfflineRecordsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type RevokeEnvGrantRequestObject struct {
 	Org         OrgID         `json:"org"`
 	Project     ProjectID     `json:"project"`
@@ -37188,6 +37402,9 @@ type StrictServerInterface interface {
 	// FetchDelivery Fetch the authorized projection, conditionally.
 	// (GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/delivery)
 	FetchDelivery(ctx context.Context, request FetchDeliveryRequestObject) (FetchDeliveryResponseObject, error)
+	// ReconcileOfflineRecords Reconcile client-durable offline disclosure records.
+	// (POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/delivery/offline-records)
+	ReconcileOfflineRecords(ctx context.Context, request ReconcileOfflineRecordsRequestObject) (ReconcileOfflineRecordsResponseObject, error)
 	// RevokeEnvGrant Revoke one capability on one environment.
 	// (DELETE /api/v1/orgs/{org}/projects/{project}/environments/{environment}/grants)
 	RevokeEnvGrant(ctx context.Context, request RevokeEnvGrantRequestObject) (RevokeEnvGrantResponseObject, error)
@@ -41039,6 +41256,41 @@ func (sh *strictHandler) FetchDelivery(w http.ResponseWriter, r *http.Request, o
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(FetchDeliveryResponseObject); ok {
 		if err := validResponse.VisitFetchDeliveryResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ReconcileOfflineRecords operation middleware
+func (sh *strictHandler) ReconcileOfflineRecords(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID) {
+	var request ReconcileOfflineRecordsRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Environment = environment
+
+	var body ReconcileOfflineRecordsJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ReconcileOfflineRecords(ctx, request.(ReconcileOfflineRecordsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ReconcileOfflineRecords")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ReconcileOfflineRecordsResponseObject); ok {
+		if err := validResponse.VisitReconcileOfflineRecordsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

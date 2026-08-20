@@ -18,6 +18,7 @@ import (
 	"github.com/Hikyo-Org/hikyo/internal/domain"
 	"github.com/Hikyo-Org/hikyo/internal/oidcfed"
 	"github.com/Hikyo-Org/hikyo/internal/oidctest"
+	"github.com/Hikyo-Org/hikyo/internal/schema"
 	"github.com/Hikyo-Org/hikyo/internal/service"
 	"github.com/Hikyo-Org/hikyo/internal/store"
 )
@@ -334,6 +335,9 @@ func runFederationPerIssuerType(t *testing.T, db *store.DB) {
 			if res.Current {
 				t.Fatal("a cursor-less federated fetch answered `current`")
 			}
+			if res.CredentialID != binding.CredentialID {
+				t.Fatalf("credential id = %q, want binding %q", res.CredentialID, binding.CredentialID)
+			}
 			// credential_expires_at is the BINDING's finite expiry, never the
 			// presented JWT's `exp`. §0.1 fixes the source as the federated
 			// binding, and the two differ here on purpose: the binding lives its
@@ -357,6 +361,9 @@ func runFederationPerIssuerType(t *testing.T, db *store.DB) {
 			presence := map[string]delivery.Presence{}
 			values := map[string]*string{}
 			for _, k := range res.Keys {
+				if k.KeyID == "" {
+					t.Fatalf("delivered key %q has no immutable key id", k.Name)
+				}
 				presence[k.Name] = k.Presence
 				values[k.Name] = k.Value
 			}
@@ -1571,6 +1578,15 @@ func runFederationLifecycle(t *testing.T, db *store.DB) {
 	}
 	if _, err := r.del.FetchAs(t.Context(), human, scopeEnv(orgA, prjA1, envA1), res.Cursor, service.FetchOptions{}); err != nil {
 		t.Fatalf("identity.delivery_fetched (current): %v", err)
+	}
+	if _, err := r.del.ReconcileOfflineRecordsAs(t.Context(), human,
+		scopeEnv(orgA, prjA1, envA1), []service.OfflineRecord{{
+			RecordID: "audit-offline-001", KeyID: "key_fed_pw", KeyName: "DATABASE_PASSWORD",
+			Classification: string(schema.Secret), OccurredAt: time.Now().UTC(),
+			CredentialID: binding.CredentialID, Generation: "v1-0123456789abcdef0123456789abcdef",
+			ServedFrom: time.Now().UTC().Add(-time.Minute),
+		}}); err != nil {
+		t.Fatalf("identity.offline_records_reconciled: %v", err)
 	}
 
 	// A federated refusal and a JWKS event, so both wire-declared types have an

@@ -24,11 +24,13 @@ import (
 // neither builds nor parses, the projection and acknowledgement are opaque
 // terms the service authorizes and records, and the scope is the path. A
 // delivered value is present iff the service authorized it; the handler renders
-// the pointer through unchanged.
+// the pointer through unchanged. Values and snapshot assertions are mapped from
+// the service's authorized result.
 
 // DeliveryService is the domain surface this transport exposes.
 type DeliveryService interface {
 	Fetch(ctx context.Context, presented string, scope domain.Scope, cursor string, opts service.FetchOptions) (service.FetchResult, error)
+	ReconcileOfflineRecords(ctx context.Context, presented string, scope domain.Scope, records []service.OfflineRecord) (service.ReconcileResult, error)
 }
 
 func (a *API) FetchDelivery(ctx context.Context, req apigen.FetchDeliveryRequestObject) (apigen.FetchDeliveryResponseObject, error) {
@@ -57,6 +59,7 @@ func (a *API) FetchDelivery(ctx context.Context, req apigen.FetchDeliveryRequest
 	keys := make([]apigen.DeliveredKey, 0, len(res.Keys))
 	for _, k := range res.Keys {
 		keys = append(keys, apigen.DeliveredKey{
+			KeyId:          k.KeyID,
 			Name:           k.Name,
 			Classification: apigen.KeyClassification(k.Classification),
 			Presence:       apigen.DeliveredKeyPresence(k.Presence),
@@ -66,12 +69,15 @@ func (a *API) FetchDelivery(ctx context.Context, req apigen.FetchDeliveryRequest
 		})
 	}
 	out := apigen.FetchDelivery200JSONResponse{
-		Current:        res.Current,
-		Cursor:         res.Cursor,
-		ChangeToken:    res.ChangeToken,
-		SchemaRevision: int(res.SchemaRevision),
-		Keys:           keys,
-		PinExpired:     res.PinExpired,
+		CredentialId:      res.CredentialID,
+		Current:           res.Current,
+		Cursor:            res.Cursor,
+		ChangeToken:       res.ChangeToken,
+		SchemaRevision:    int(res.SchemaRevision),
+		Keys:              keys,
+		PinExpired:        res.PinExpired,
+		IssuedAt:          res.IssuedAt,
+		SnapshotExpiresAt: res.SnapshotExpiresAt,
 	}
 	// Finite credential expiry surfaces as the optional member; the zero time
 	// is an indefinite credential and stays absent.
@@ -84,4 +90,27 @@ func (a *API) FetchDelivery(ctx context.Context, req apigen.FetchDeliveryRequest
 		out.PinnedRevision = &revision
 	}
 	return out, nil
+}
+
+func (a *API) ReconcileOfflineRecords(ctx context.Context, req apigen.ReconcileOfflineRecordsRequestObject) (apigen.ReconcileOfflineRecordsResponseObject, error) {
+	scope := domain.Scope{
+		Org: domain.OrgID(req.Org), Project: domain.ProjectID(req.Project),
+		Env: domain.EnvID(req.Environment),
+	}
+	records := make([]service.OfflineRecord, 0, len(req.Body.Records))
+	for _, record := range req.Body.Records {
+		records = append(records, service.OfflineRecord{
+			RecordID: record.RecordId, KeyID: record.KeyId, KeyName: record.KeyName,
+			Classification: string(record.Classification), OccurredAt: record.OccurredAt,
+			CredentialID: record.CredentialId, Generation: record.Generation,
+			ServedFrom: record.ServedFrom,
+		})
+	}
+	res, err := a.Delivery.ReconcileOfflineRecords(ctx, bearer(ctx), scope, records)
+	if err != nil {
+		return nil, err
+	}
+	return apigen.ReconcileOfflineRecords200JSONResponse{
+		Accepted: res.Accepted, Duplicates: res.Duplicates,
+	}, nil
 }

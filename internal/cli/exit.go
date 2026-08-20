@@ -43,6 +43,23 @@ const (
 	ExitUnavailable = 6
 )
 
+// 126 and 127 are the ONLY exits outside the closed set above, and they are
+// used by `hikyo run --` alone (verbs/compose.go). They are NOT hikyo's own
+// codes: they are the child-side shell convention that `run` borrows because it
+// stands in for the command it execs.
+//
+//	127  the command named after `--` was not found on PATH (exec.LookPath).
+//	126  the command was found but could not be executed (Exec returned).
+//
+// On a successful exec there is no hikyo process at all (unix syscall.Exec;
+// windows spawn-wait-and-exit-with-the-child-code), so the child's own exit
+// status and signals are the invocation's, untouched — hikyo never overwrites
+// them with a code of its own.
+const (
+	ExitCommandNotExecutable = 126
+	ExitCommandNotFound      = 127
+)
+
 // Error carries an exit code out of a verb.
 type Error struct {
 	Code int

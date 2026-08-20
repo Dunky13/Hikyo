@@ -34,6 +34,11 @@ const (
 	SourceEnv     Source = "environment"
 	SourcePinFile Source = "pin file"
 	SourceContext Source = "context"
+	// SourceConfig is the hikyo-compose.yaml project file, which the compose
+	// verbs fold into resolution AFTER the standard chain: it fills a dimension
+	// the chain left unresolved and a disagreement with a resolved one is a hard
+	// error naming both.
+	SourceConfig Source = "hikyo-compose.yaml"
 )
 
 // Resolved is the assembled target with provenance.

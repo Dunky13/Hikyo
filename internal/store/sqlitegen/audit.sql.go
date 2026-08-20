@@ -10,6 +10,26 @@ import (
 	"database/sql"
 )
 
+const claimOfflineRecord = `-- name: ClaimOfflineRecord :execrows
+INSERT OR IGNORE INTO offline_records (principal_id, record_id, created_at)
+VALUES (?, ?, ?)
+`
+
+type ClaimOfflineRecordParams struct {
+	PrincipalID string
+	RecordID    string
+	CreatedAt   string
+}
+
+// hikyo:authn-resolution
+func (q *Queries) ClaimOfflineRecord(ctx context.Context, arg ClaimOfflineRecordParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, claimOfflineRecord, arg.PrincipalID, arg.RecordID, arg.CreatedAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const insertInstanceAuditEvent = `-- name: InsertInstanceAuditEvent :exec
 INSERT INTO audit_instance_events (
     id, type, schema_version, occurred_at, occurred_asserted, recorded_at,

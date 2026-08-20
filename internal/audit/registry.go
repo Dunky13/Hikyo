@@ -474,6 +474,10 @@ const (
 	// delivered nothing — never aggregated, never a counter, never a mutable
 	// last-seen field.
 	EventDeliveryFetched EventType = "identity.delivery_fetched"
+	// identity.offline_records_reconciled is one access-class envelope per
+	// reconciliation call; per-key disclosures remain separate immutable events.
+	EventOfflineRecordsReconciled EventType = "identity.offline_records_reconciled"
+
 	// identity.disclosure is the per-VALUE disclosure event on a machine fetch
 	// (#64, machine-identities ADR § Audit attribution). #15's locked
 	// cardinality holds: one immutable event per delivered value, never
@@ -1276,15 +1280,18 @@ var registry = map[EventType]TypeSpec{
 		"name":           {Kind: KindFreeText, Required: true},
 		"classification": {Kind: KindString, Required: true},
 	}),
-	// cell | diff | copy | clone | export — where the plaintext went. Never
-	// what it was. `revision` is present only on the export surface, which is
-	// the one disclosure that reads a snapshot rather than the live cell, and
-	// an investigator needs to know WHICH revision was opened.
+	// cell | diff | copy | clone | export | delivery | offline-serve — where
+	// the plaintext went. Never what it was. Offline-only provenance fields
+	// preserve the serving credential even when it has since been revoked.
 	EventValueRevealed: hierarchyEvent(Schema{
-		"key_id":   {Kind: KindString, Required: true},
-		"name":     {Kind: KindFreeText, Required: true},
-		"surface":  {Kind: KindString, Required: true},
-		"revision": {Kind: KindInt},
+		"key_id":               {Kind: KindString, Required: true},
+		"name":                 {Kind: KindFreeText, Required: true},
+		"surface":              {Kind: KindString, Required: true},
+		"revision":             {Kind: KindInt},
+		"classification":       {Kind: KindString},
+		"served_credential_id": {Kind: KindString},
+		"generation":           {Kind: KindString},
+		"served_from":          {Kind: KindString},
 	}),
 	// Drafts and publishing (#51).
 	EventValueStaged: hierarchyEvent(Schema{
@@ -2126,6 +2133,18 @@ var registry = map[EventType]TypeSpec{
 			// derivable from the disposition: a stale cursor and no cursor both
 			// produce a full delivery.
 			"cursor_presented": {Kind: KindBool, Required: true},
+		},
+	},
+	EventOfflineRecordsReconciled: {
+		SchemaVersion: 1,
+		Retention:     RetentionAccess,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailTenant: true},
+		Schema: Schema{
+			"accepted":      {Kind: KindInt, Required: true},
+			"duplicates":    {Kind: KindInt, Required: true},
+			"credential_id": {Kind: KindString, Required: true},
+			"scope":         {Kind: KindString, Required: true},
 		},
 	},
 	EventDisclosure: {

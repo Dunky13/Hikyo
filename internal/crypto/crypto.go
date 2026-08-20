@@ -28,6 +28,11 @@ const (
 	KindWrappedTokenKey Kind = 4
 	KindProjectField    Kind = 5
 	KindInstanceField   Kind = 6
+	// KindComposeSnapshot is the client-side offline snapshot container added
+	// by declared amendment 5 to the encryption-model ADR (compose-integration
+	// ADR § Offline behaviour). It is outside the server key hierarchy but uses
+	// the same envelope primitive; its AAD schema is SnapshotAAD in client.go.
+	KindComposeSnapshot Kind = 7
 )
 
 const (

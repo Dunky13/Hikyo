@@ -1,0 +1,14 @@
+version: 1
+instance: http://127.0.0.1:1
+org: __HIKYO_ORG__
+project: __HIKYO_PROJECT__
+environment: __HIKYO_ENVIRONMENT__
+slug: compose-demo
+runtime_dir: /tmp/hikyo-demo-runtime
+snapshot:
+  offline_serve: false
+  max_age: 168h
+targets:
+  app:
+    keys: [__HIKYO_KEYS__]
+    services: [app]

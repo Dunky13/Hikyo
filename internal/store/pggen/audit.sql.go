@@ -11,6 +11,27 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const claimOfflineRecord = `-- name: ClaimOfflineRecord :execrows
+INSERT INTO offline_records (principal_id, record_id, created_at)
+VALUES ($1, $2, $3)
+ON CONFLICT (principal_id, record_id) DO NOTHING
+`
+
+type ClaimOfflineRecordParams struct {
+	PrincipalID string
+	RecordID    string
+	CreatedAt   pgtype.Timestamptz
+}
+
+// hikyo:authn-resolution
+func (q *Queries) ClaimOfflineRecord(ctx context.Context, arg ClaimOfflineRecordParams) (int64, error) {
+	result, err := q.db.Exec(ctx, claimOfflineRecord, arg.PrincipalID, arg.RecordID, arg.CreatedAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const insertInstanceAuditEvent = `-- name: InsertInstanceAuditEvent :exec
 INSERT INTO audit_instance_events (
     id, type, schema_version, occurred_at, occurred_asserted,

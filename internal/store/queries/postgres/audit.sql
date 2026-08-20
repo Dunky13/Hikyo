@@ -38,6 +38,12 @@ INSERT INTO audit_instance_events (
     sqlc.arg(source_ip), sqlc.arg(user_agent), sqlc.arg(origin), sqlc.arg(payload)
 );
 
+-- hikyo:authn-resolution
+-- name: ClaimOfflineRecord :execrows
+INSERT INTO offline_records (principal_id, record_id, created_at)
+VALUES (sqlc.arg(principal_id), sqlc.arg(record_id), sqlc.arg(created_at))
+ON CONFLICT (principal_id, record_id) DO NOTHING;
+
 -- name: PageTenantAuditOrg :many
 SELECT seq, id, type, schema_version, occurred_at, occurred_asserted, recorded_at,
     actor_id, actor_class, actor_credential_id, authority_id,

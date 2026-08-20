@@ -125,6 +125,9 @@ type AuditRepo interface {
 	InsertTenant(ctx context.Context, p authz.Proof, e audit.Event) error
 	// InsertInstance writes one instance-trail event.
 	InsertInstance(ctx context.Context, p authz.Proof, e audit.Event) error
+	// ClaimOfflineRecord atomically claims the principal-scoped client record id.
+	// False means a prior reconciliation already inserted it.
+	ClaimOfflineRecord(ctx context.Context, p authz.Proof, principalID, recordID string, at time.Time) (bool, error)
 }
 
 // --- sqlite ---
@@ -167,6 +170,16 @@ func (a sqliteAudit) InsertInstance(ctx context.Context, p authz.Proof, e audit.
 		return err
 	}
 	return a.q.InsertInstanceAuditEvent(ctx, auditrow.SQLiteInstance(row))
+}
+
+func (a sqliteAudit) ClaimOfflineRecord(ctx context.Context, p authz.Proof, principalID, recordID string, at time.Time) (bool, error) {
+	if _, err := authz.Verify(p, authz.StoreAuditClaimOfflineRecord, a.tok); err != nil {
+		return false, err
+	}
+	n, err := a.q.ClaimOfflineRecord(ctx, sqlitegen.ClaimOfflineRecordParams{
+		PrincipalID: principalID, RecordID: recordID, CreatedAt: CanonTime(at).Format(timeFormat),
+	})
+	return n == 1, err
 }
 
 func (a sqliteAudit) PageTenant(ctx context.Context, p authz.Proof, f AuditFilter) ([]AuditEvent, error) {
@@ -355,6 +368,17 @@ func (a pgAudit) InsertInstance(ctx context.Context, p authz.Proof, e audit.Even
 		return err
 	}
 	return a.q.InsertInstanceAuditEvent(ctx, auditrow.PGInstance(row))
+}
+
+func (a pgAudit) ClaimOfflineRecord(ctx context.Context, p authz.Proof, principalID, recordID string, at time.Time) (bool, error) {
+	if _, err := authz.Verify(p, authz.StoreAuditClaimOfflineRecord, a.tok); err != nil {
+		return false, err
+	}
+	n, err := a.q.ClaimOfflineRecord(ctx, pggen.ClaimOfflineRecordParams{
+		PrincipalID: principalID, RecordID: recordID,
+		CreatedAt: pgtype.Timestamptz{Time: CanonTime(at), Valid: true},
+	})
+	return n == 1, err
 }
 
 func (a pgAudit) PageTenant(ctx context.Context, p authz.Proof, f AuditFilter) ([]AuditEvent, error) {

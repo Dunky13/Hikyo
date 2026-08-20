@@ -1650,6 +1650,7 @@ export type FederatedBinding = {
  *
  */
 export type DeliveredKey = {
+    key_id: Id;
     name: string;
     classification: KeyClassification;
     /**
@@ -1677,6 +1678,13 @@ export type DeliveredKey = {
  *
  */
 export type DeliveryResponse = {
+    /**
+     * The authenticated caller's credential identifier, returned on both
+     * dispositions so clients can bind snapshots and offline records to
+     * the server-asserted identity rather than infer it locally.
+     *
+     */
+    credential_id: Id;
     /**
      * True when the presented cursor named the state the server was about
      * to serve.
@@ -1732,6 +1740,28 @@ export type DeliveryResponse = {
      * Empty when `current` is true.
      */
     keys: Array<DeliveredKey>;
+    issued_at: Timestamp;
+    snapshot_expires_at: Timestamp;
+};
+
+export type OfflineDeliveryRecord = {
+    record_id: string;
+    key_id: string;
+    key_name: string;
+    classification: KeyClassification;
+    occurred_at: Timestamp;
+    credential_id: string;
+    generation: string;
+    served_from: Timestamp;
+};
+
+export type ReconcileOfflineRecordsRequest = {
+    records: Array<OfflineDeliveryRecord>;
+};
+
+export type ReconcileOfflineRecordsResponse = {
+    accepted: number;
+    duplicates: number;
 };
 
 export type CredentialPolicy = {
@@ -11954,6 +11984,79 @@ export type FetchDeliveryResponses = {
 };
 
 export type FetchDeliveryResponse = FetchDeliveryResponses[keyof FetchDeliveryResponses];
+
+export type ReconcileOfflineRecordsData = {
+    body: ReconcileOfflineRecordsRequest;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        /**
+         * Environment identifier.
+         */
+        environment: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/environments/{environment}/delivery/offline-records';
+};
+
+export type ReconcileOfflineRecordsErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type ReconcileOfflineRecordsError = ReconcileOfflineRecordsErrors[keyof ReconcileOfflineRecordsErrors];
+
+export type ReconcileOfflineRecordsResponses = {
+    /**
+     * The idempotent batch outcome.
+     */
+    200: ReconcileOfflineRecordsResponse;
+};
+
+export type ReconcileOfflineRecordsResponse2 = ReconcileOfflineRecordsResponses[keyof ReconcileOfflineRecordsResponses];
 
 export type ListScimBindingsData = {
     body?: never;

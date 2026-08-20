@@ -381,6 +381,9 @@ const (
 	// the ADR requires one immutable access record per fetch, including the
 	// conditional fetch that delivers nothing.
 	OpDeliveryFetch Operation = "delivery.fetch"
+	// Offline disclosure records are accepted only through a live machine
+	// presentation holding the same environment read authority as delivery.
+	OpDeliveryReconcileOffline Operation = "delivery.reconcile-offline"
 	// SCIM provisioning (#73, scim-provisioning ADR). Two families, two
 	// formulas, one depth.
 	//
@@ -692,10 +695,11 @@ const (
 	StoreRemoteSnapshotsWrite StoreOp = "remotes.WriteSnapshot"
 	StoreRemoteSnapshotsFail  StoreOp = "remotes.RecordFetchFailure"
 
-	StoreAuditTenantInsert   StoreOp = "audit.InsertTenant"
-	StoreAuditInstanceInsert StoreOp = "audit.InsertInstance"
-	StoreAuditTenantPage     StoreOp = "audit.PageTenant"
-	StoreAuditInstancePage   StoreOp = "audit.PageInstance"
+	StoreAuditTenantInsert       StoreOp = "audit.InsertTenant"
+	StoreAuditInstanceInsert     StoreOp = "audit.InsertInstance"
+	StoreAuditClaimOfflineRecord StoreOp = "audit.ClaimOfflineRecord"
+	StoreAuditTenantPage         StoreOp = "audit.PageTenant"
+	StoreAuditInstancePage       StoreOp = "audit.PageInstance"
 
 	// SCIM provisioning (#73). One StoreOp per method on store.SCIMRepo, as
 	// invariant 6 requires: the registry is reflected against the repository
@@ -2417,6 +2421,18 @@ var operations = map[Operation]opSpec{
 			StoreAuditTenantInsert:     true,
 		},
 		events: []audit.EventType{audit.EventDeliveryFetched, audit.EventDisclosure},
+	},
+	OpDeliveryReconcileOffline: {
+		class:   ClassTenant,
+		level:   domain.LevelEnv,
+		formula: Formula{{Cap: domain.CapRead, At: domain.LevelEnv}},
+		storeOps: map[StoreOp]bool{
+			StoreAuditClaimOfflineRecord: true,
+			StoreAuditTenantInsert:       true,
+		},
+		events: []audit.EventType{
+			audit.EventOfflineRecordsReconciled, audit.EventValueRevealed,
+		},
 	},
 	// --- SCIM provisioning (#73) ---------------------------------------------
 	//

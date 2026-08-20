@@ -462,6 +462,12 @@ type MasterKey struct {
 	CreatedAt    pgtype.Timestamptz
 }
 
+type OfflineRecord struct {
+	PrincipalID string
+	RecordID    string
+	CreatedAt   pgtype.Timestamptz
+}
+
 type OidcProvider struct {
 	ID              string
 	Slug            string

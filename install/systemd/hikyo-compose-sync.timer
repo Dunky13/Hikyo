@@ -1,0 +1,10 @@
+[Unit]
+Description=Synchronize Hikyo Compose values every five minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+Unit=hikyo-compose-sync.service
+
+[Install]
+WantedBy=timers.target

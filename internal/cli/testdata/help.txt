@@ -120,6 +120,20 @@ adapters:
   adapter credentials are read with terminal echo disabled, from stdin, or
   from --value-file. There is no credential-value argv flag.
 
+delivery:                                          machine credential only
+  hikyo run [--config-only] [--allow-override KEY,KEY] [--project-directory DIR]
+      [--token-file PATH] -- <command> [args...]   fetch, merge, exec
+
+compose:                                           machine credential only
+  hikyo compose render [--project-directory DIR] [--config-only] [--token-file PATH]
+  hikyo compose sync [--project-directory DIR] [--token-file PATH]
+  hikyo compose doctor [--project-directory DIR] [-o table|json] [--token-file PATH]
+
+  run and compose accept ONLY a machine credential (--token-file or HIKYO_TOKEN);
+  the stored human session is never used. run execs the command after '--' with
+  the fetched values merged in (fetched wins; a differing collision is refused
+  unless named in --allow-override). exit 127 is command-not-found, 126 is
+  command-not-executable - the child's own convention, not hikyo's.
 
 instance configuration:
   hikyo instance-config provider create --kind saml --name <name> --entity-id <entityID> \

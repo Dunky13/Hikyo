@@ -105,6 +105,29 @@ interactive terminal, or explicit `--dangerously-print`.
 The shared dimensions are `--instance`, `--org`, `--project`, `--env`, and
 `--context`. Resolution is documented in [contexts and targets](/docs/contexts/).
 
+## Workload delivery
+
+`run` and `compose` accept machine credentials only, through `--token-file` or
+`HIKYO_TOKEN`; a stored human session is refused.
+
+```text
+hikyo run [--config-only] [--allow-override KEY,KEY] [--project-directory DIR] [--token-file PATH] -- <command> [args...]
+hikyo compose render [--project-directory DIR] [--config-only] [--token-file PATH]
+hikyo compose sync [--project-directory DIR] [--token-file PATH]
+hikyo compose doctor [--project-directory DIR] [-o table|json] [--token-file PATH]
+```
+
+`run` fetches, merges, checks the composite `ARG_MAX`, and replaces itself with
+the command. Fetched values win; a differing inherited value is refused unless
+its key is named in `--allow-override`. Command-not-found exits 127 and a found
+but non-executable command exits 126.
+
+`compose render` atomically writes raw-dotenv generations and the managed `.env`
+stamp block. `compose sync` renders conditionally and runs
+`docker compose up -d` only when a stamp moved. `compose doctor` checks the
+2.30.0 floor and config/stamp/generation/server agreement; findings go to
+stdout and an error exits 4. See [Docker Compose delivery](/docs/compose/).
+
 ## Exit codes
 
 | Code | Meaning | Typical response |
@@ -133,5 +156,6 @@ you to the available modes. Completion is tracked by
 
 ## Commands not yet implemented
 
-`run`, `render`, `sync`, `adopt`, and `definitions` are reserved but not
-implemented in the current 0.x build. The binary refuses them explicitly.
+`render`, `sync`, `adopt`, and `definitions` remain reserved top-level stubs.
+Compose delivery uses `compose render` and `compose sync`; `adopt` and
+`definitions` are not implemented in the current 0.x build.

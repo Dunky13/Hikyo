@@ -5077,6 +5077,50 @@ paths:
         "500":
           $ref: "#/components/responses/Internal"
 
+  /api/v1/orgs/{org}/projects/{project}/environments/{environment}/delivery/offline-records:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+      - $ref: "#/components/parameters/EnvironmentID"
+    post:
+      operationId: reconcileOfflineRecords
+      tags: [delivery]
+      summary: Reconcile client-durable offline disclosure records.
+      description: |
+        Accepts records fsynced by a client before offline plaintext release.
+        Idempotency is scoped to the presenting principal and record id. A live
+        credential may reconcile records served by a credential since revoked.
+      x-hikyo-class: tenant
+      x-hikyo-operation: delivery.reconcile-offline
+      x-hikyo-formula: [read@environment]
+      x-hikyo-artifacts: [machine-credential]
+      x-hikyo-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReconcileOfflineRecordsRequest"
+      responses:
+        "200":
+          description: The idempotent batch outcome.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReconcileOfflineRecordsResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
   # ---------------------------------------------------------------------------
   # SCIM administration (#73, scim-provisioning ADR §8; spellings §1).
   #
@@ -11064,7 +11108,7 @@ components:
     DeliveredKey:
       type: object
       additionalProperties: false
-      required: [name, classification, presence]
+      required: [key_id, name, classification, presence]
       description: |
         One key as the machine surface delivers it. `value` is present IFF the
         plaintext was actually delivered to this caller; its absence means
@@ -11075,6 +11119,8 @@ components:
         `read ∧ reveal` (or `read ∧ reveal-history` for a pinned non-current
         revision).
       properties:
+        key_id:
+          $ref: "#/components/schemas/ID"
         name:
           type: string
           maxLength: 256
@@ -11100,12 +11146,19 @@ components:
     DeliveryResponse:
       type: object
       additionalProperties: false
-      required: [current, cursor, change_token, schema_revision, keys, pin_expired]
+      required: [current, cursor, change_token, schema_revision, keys, pin_expired, issued_at, snapshot_expires_at, credential_id]
       description: |
         Either the authorized projection, or the statement that the presented
         cursor is current — in which case `keys` is empty and NOTHING was
         disclosed. Only a fetch that actually delivers values is a disclosure.
       properties:
+        credential_id:
+          allOf:
+            - $ref: "#/components/schemas/ID"
+          description: |
+            The authenticated caller's credential identifier, returned on both
+            dispositions so clients can bind snapshots and offline records to
+            the server-asserted identity rather than infer it locally.
         current:
           type: boolean
           description: |
@@ -11160,6 +11213,66 @@ components:
           items:
             $ref: "#/components/schemas/DeliveredKey"
           description: Empty when `current` is true.
+        issued_at:
+          $ref: "#/components/schemas/Timestamp"
+        snapshot_expires_at:
+          $ref: "#/components/schemas/Timestamp"
+
+    OfflineDeliveryRecord:
+      type: object
+      additionalProperties: false
+      required: [record_id, key_id, key_name, classification, occurred_at, credential_id, generation, served_from]
+      properties:
+        record_id:
+          type: string
+          minLength: 1
+          maxLength: 64
+        key_id:
+          type: string
+          minLength: 1
+          maxLength: 64
+        key_name:
+          type: string
+          minLength: 1
+          maxLength: 256
+        classification:
+          $ref: "#/components/schemas/KeyClassification"
+        occurred_at:
+          $ref: "#/components/schemas/Timestamp"
+        credential_id:
+          type: string
+          minLength: 1
+          maxLength: 64
+        generation:
+          type: string
+          minLength: 1
+          maxLength: 64
+        served_from:
+          $ref: "#/components/schemas/Timestamp"
+
+    ReconcileOfflineRecordsRequest:
+      type: object
+      additionalProperties: false
+      required: [records]
+      properties:
+        records:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items:
+            $ref: "#/components/schemas/OfflineDeliveryRecord"
+
+    ReconcileOfflineRecordsResponse:
+      type: object
+      additionalProperties: false
+      required: [accepted, duplicates]
+      properties:
+        accepted:
+          type: integer
+          minimum: 0
+        duplicates:
+          type: integer
+          minimum: 0
 
     CredentialPolicy:
       type: object

@@ -366,16 +366,17 @@ var pinnedContractSurface = map[string]bool{
 	"PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/name":                                               true,
 
 	// OIDC federation and the delivery surface (#62). The issuer rows are THIS
-	// instance's own configuration; `delivery` hands the caller a token minted
-	// here for the caller's own binding. Neither fetches anything on the
-	// caller's behalf: a federated assertion arrives IN the request, it is not
-	// gone and got.
-	"GET /api/v1/instance/federation-issuers":                                               true,
-	"POST /api/v1/instance/federation-issuers":                                              true,
-	"PATCH /api/v1/instance/federation-issuers/{issuer}":                                    true,
-	"DELETE /api/v1/instance/federation-issuers/{issuer}":                                   true,
-	"GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/delivery":         true,
-	"POST /api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}/bindings": true,
+	// instance's own configuration; delivery returns this instance's stored
+	// snapshot, and offline reconciliation writes records into this instance's
+	// own trail. Neither fetches anything on the caller's behalf: a federated
+	// assertion and offline records arrive IN the request, they are not gone and got.
+	"GET /api/v1/instance/federation-issuers":                                                        true,
+	"POST /api/v1/instance/federation-issuers":                                                       true,
+	"PATCH /api/v1/instance/federation-issuers/{issuer}":                                             true,
+	"DELETE /api/v1/instance/federation-issuers/{issuer}":                                            true,
+	"GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/delivery":                  true,
+	"POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/delivery/offline-records": true,
+	"POST /api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}/bindings":          true,
 
 	// The reveal ceremony's TOTP opener (#58). It opens a window on THIS
 	// instance's own session; nothing crosses a network.

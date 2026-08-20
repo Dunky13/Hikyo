@@ -42,6 +42,8 @@ func runDeliveryCursorRoundTrip(t *testing.T, db *store.DB) {
 	identityFixtures(t, db)
 	seedDeliveryCatalogue(t, db)
 	del := deliverySvc(t, db)
+	issuedAt := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
+	del.Now = func() time.Time { return issuedAt }
 	caller := service.LocalPrincipal(identAdmin)
 	env := scopeEnv(orgA, prjA1, envA1)
 
@@ -65,8 +67,20 @@ func runDeliveryCursorRoundTrip(t *testing.T, db *store.DB) {
 		t.Fatalf("delivered %d keys, want the snapshot's %d", len(first.Keys), want)
 	}
 	presence := map[string]delivery.Presence{}
+	values := map[string]*string{}
 	for _, k := range first.Keys {
 		presence[k.Name] = k.Presence
+		values[k.Name] = k.Value
+	}
+	if values["DATABASE_URL"] == nil || *values["DATABASE_URL"] == "" {
+		t.Fatal("read-only delivery omitted the config plaintext")
+	}
+	if values["DATABASE_PASSWORD"] != nil {
+		t.Fatal("read-only delivery exposed secret plaintext")
+	}
+	if !first.IssuedAt.Equal(issuedAt) || !first.SnapshotExpiresAt.Equal(issuedAt.Add(delivery.SnapshotMaxAge)) {
+		t.Fatalf("snapshot timestamps = (%s, %s), want issued_at %s and +7d expiry",
+			first.IssuedAt, first.SnapshotExpiresAt, issuedAt)
 	}
 	// Every delivered key is `set`: it is in the snapshot because it resolved.
 	// The declared presence RULE is no longer what the fetch reports, and it is
@@ -121,6 +135,66 @@ func runDeliveryCursorRoundTrip(t *testing.T, db *store.DB) {
 	if n := queryInt(t, db,
 		"SELECT COUNT(*) FROM audit_tenant_events WHERE type = 'identity.delivery_fetched' AND payload LIKE '%\"cursor_presented\":false%'"); n != 1 {
 		t.Errorf("cursor-less access records = %d, want exactly 1", n)
+	}
+	// Config-only projection + per-value disclosure coverage lives in the
+	// dedicated runDeliveryConfigOnlyProjection / runDeliveryDeliversValues (#64's
+	// winning surface): the reconciled shape omits secrets ENTIRELY under
+	// config-only and emits identity.disclosure per delivered value.
+}
+
+func TestOfflineRecordReconciliationSQLite(t *testing.T) {
+	runOfflineRecordReconciliation(t, seededDB(t, openSQLite))
+}
+
+func TestOfflineRecordReconciliationPostgres(t *testing.T) {
+	runOfflineRecordReconciliation(t, seededDB(t, openPostgres))
+}
+
+func runOfflineRecordReconciliation(t *testing.T, db *store.DB) {
+	identityFixtures(t, db)
+	ident := identitySvc(db)
+	sa, err := ident.CreateServiceAccount(t.Context(), service.LocalPrincipal(identAdmin),
+		prjScope(), "offline-workload", domain.ClassWorkload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	served, err := ident.MintCredential(t.Context(), service.LocalPrincipal(identAdmin), prjScope(), sa.ID, service.MintRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	presenter, err := ident.MintCredential(t.Context(), service.LocalPrincipal(identAdmin), prjScope(), sa.ID, service.MintRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	grantMachineRead(t, db, sa.Principal, envA1)
+	if err := ident.RevokeCredential(t.Context(), service.LocalPrincipal(identAdmin), prjScope(), sa.ID, served.Credential.ID); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
+	record := service.OfflineRecord{
+		RecordID: "offline-001", KeyID: "key_fed_pw", KeyName: "DATABASE_PASSWORD",
+		Classification: string(schema.Secret), OccurredAt: now.Add(-time.Minute),
+		CredentialID: served.Credential.ID, Generation: "v1-0123456789abcdef0123456789abcdef",
+		ServedFrom: now.Add(-time.Hour),
+	}
+	del := deliverySvc(t, db)
+	first, err := del.ReconcileOfflineRecords(t.Context(), presenter.Value,
+		scopeEnv(orgA, prjA1, envA1), []service.OfflineRecord{record})
+	if err != nil || first.Accepted != 1 || first.Duplicates != 0 {
+		t.Fatalf("first reconciliation = (%+v, %v)", first, err)
+	}
+	second, err := del.ReconcileOfflineRecords(t.Context(), presenter.Value,
+		scopeEnv(orgA, prjA1, envA1), []service.OfflineRecord{record})
+	if err != nil || second.Accepted != 0 || second.Duplicates != 1 {
+		t.Fatalf("duplicate reconciliation = (%+v, %v)", second, err)
+	}
+	asserted := "occurred_asserted = 1"
+	if db.Engine() == store.EnginePostgres {
+		asserted = "occurred_asserted"
+	}
+	if got := queryInt(t, db, `SELECT COUNT(*) FROM audit_tenant_events
+		WHERE type = 'disclosure.value_revealed' AND origin = 'offline-reconciled' AND `+asserted); got != 1 {
+		t.Fatalf("offline disclosure events = %d, want 1", got)
 	}
 }
 

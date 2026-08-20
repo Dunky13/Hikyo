@@ -9,6 +9,7 @@ fi
 mode=$1
 
 client=false
+compose_demo=false
 docs=false
 fuzz=false
 generated=false
@@ -24,6 +25,7 @@ saw_path=false
 
 all_jobs() {
 	client=true
+	compose_demo=true
 	docs=true
 	fuzz=true
 	generated=true
@@ -44,6 +46,11 @@ else
 	while IFS= read -r path; do
 		[ -n "$path" ] || continue
 		saw_path=true
+		case "$path" in
+		install/compose/* | scripts/compose-demo.sh | internal/cli/* | internal/compose/* | internal/service/delivery.go | api/* | go.mod)
+			compose_demo=true
+			;;
+		esac
 		case "$path" in
 		.github/workflows/*)
 			all_jobs
@@ -151,6 +158,7 @@ fi
 
 jq -cn \
 	--argjson client "$client" \
+	--argjson compose_demo "$compose_demo" \
 	--argjson docs "$docs" \
 	--argjson fuzz "$fuzz" \
 	--argjson generated "$generated" \
@@ -164,6 +172,7 @@ jq -cn \
 	--argjson web "$web" \
 	'{
 		client: $client,
+		compose_demo: $compose_demo,
 		docs: $docs,
 		fuzz: $fuzz,
 		generated: $generated,

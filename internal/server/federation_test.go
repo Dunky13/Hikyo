@@ -54,19 +54,33 @@ func (s stubDelivery) Fetch(_ context.Context, presented string, scope domain.Sc
 		return service.FetchResult{}, domain.ErrUnauthenticated
 	}
 	if cursor == s.cursor && cursor != "" {
-		return service.FetchResult{Current: true, Cursor: s.cursor, ChangeToken: "v1:token", SchemaRevision: 7}, nil
+		return service.FetchResult{Current: true, Cursor: s.cursor, ChangeToken: "v1:token", SchemaRevision: 7,
+			CredentialID: "mcr_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f16",
+			IssuedAt:     time.Unix(1_800_000_000, 0).UTC(), SnapshotExpiresAt: time.Unix(1_800_604_800, 0).UTC()}, nil
 	}
 	// A delivered value carries plaintext; a presence-only secret carries none,
 	// so the render half is exercised on both a non-nil and a nil `value`.
 	delivered := "postgres://render-test"
 	return service.FetchResult{
 		Cursor: s.cursor, ChangeToken: "v1:token", SchemaRevision: 7,
+		CredentialID:        "mcr_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f16",
 		CredentialExpiresAt: s.credentialExpiresAt,
 		Keys: []service.DeliveredKey{
-			{Name: "DATABASE_URL", Classification: "config", Presence: delivery.PresenceSet, Value: &delivered},
-			{Name: "DATABASE_PASSWORD", Classification: "secret", Presence: delivery.PresenceSet},
+			{KeyID: "key_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f17", Name: "DATABASE_URL", Classification: "config", Presence: delivery.PresenceSet, Value: &delivered},
+			{KeyID: "key_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f18", Name: "DATABASE_PASSWORD", Classification: "secret", Presence: delivery.PresenceSet},
 		},
+		IssuedAt: time.Unix(1_800_000_000, 0).UTC(), SnapshotExpiresAt: time.Unix(1_800_604_800, 0).UTC(),
 	}, nil
+}
+
+func (s stubDelivery) ReconcileOfflineRecords(_ context.Context, presented string, _ domain.Scope, records []service.OfflineRecord) (service.ReconcileResult, error) {
+	if s.err != nil {
+		return service.ReconcileResult{}, s.err
+	}
+	if presented == "" {
+		return service.ReconcileResult{}, domain.ErrUnauthenticated
+	}
+	return service.ReconcileResult{Accepted: len(records)}, nil
 }
 
 type stubFederation struct{ err error }
@@ -140,6 +154,19 @@ func TestDeliveryRouteRendersBothDispositions(t *testing.T) {
 	if full.SchemaRevision != 7 {
 		t.Errorf("schema_revision = %d, want 7", full.SchemaRevision)
 	}
+	if full.CredentialId != "mcr_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f16" {
+		t.Errorf("credential_id = %q, want the authenticated credential", full.CredentialId)
+	}
+	if full.Keys[0].KeyId != "key_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f17" ||
+		full.Keys[1].KeyId != "key_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f18" {
+		t.Fatalf("key ids rendered %+v", full.Keys)
+	}
+	if full.Keys[0].Value == nil || *full.Keys[0].Value != "postgres://render-test" || full.Keys[1].Value != nil {
+		t.Fatalf("value projection rendered %+v", full.Keys)
+	}
+	if full.SnapshotExpiresAt.Sub(full.IssuedAt) != delivery.SnapshotMaxAge {
+		t.Fatalf("snapshot lifetime = %s, want %s", full.SnapshotExpiresAt.Sub(full.IssuedAt), delivery.SnapshotMaxAge)
+	}
 
 	resp, payload = call(t, srv, http.MethodGet, deliveryPath+"?cursor=v1:cursor", "hik_1_wl_abc", nil)
 	if resp.StatusCode != http.StatusOK {
@@ -152,11 +179,36 @@ func TestDeliveryRouteRendersBothDispositions(t *testing.T) {
 	if !current.Current {
 		t.Fatal("presenting the served cursor did not answer `current`")
 	}
+	if current.CredentialId != full.CredentialId {
+		t.Fatalf("current credential_id = %q, want %q", current.CredentialId, full.CredentialId)
+	}
 	if current.Keys == nil {
 		t.Fatal("`current` rendered keys as JSON null; it must be an empty array")
 	}
 	if len(current.Keys) != 0 {
 		t.Fatalf("`current` carried %d keys, want none", len(current.Keys))
+	}
+}
+
+func TestOfflineRecordReconciliationRoute(t *testing.T) {
+	srv := federationServer(t, stubFederation{}, stubDelivery{})
+	now := time.Unix(1_800_000_000, 0).UTC()
+	body := apigen.ReconcileOfflineRecordsRequest{Records: []apigen.OfflineDeliveryRecord{{
+		RecordId: "offline-001", KeyId: "key_001", KeyName: "DATABASE_PASSWORD",
+		Classification: apigen.KeyClassificationSecret, OccurredAt: now,
+		CredentialId: "cred_revoked", Generation: "v1-0123456789abcdef0123456789abcdef",
+		ServedFrom: now.Add(-time.Hour),
+	}}}
+	resp, payload := call(t, srv, http.MethodPost, deliveryPath+"/offline-records", "hik_1_wl_abc", body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("offline reconciliation -> %d: %s", resp.StatusCode, payload)
+	}
+	var result apigen.ReconcileOfflineRecordsResponse
+	if err := json.Unmarshal(payload, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Accepted != 1 || result.Duplicates != 0 {
+		t.Fatalf("offline reconciliation rendered %+v", result)
 	}
 }
 
