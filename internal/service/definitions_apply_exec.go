@@ -73,7 +73,7 @@ func (s *Definitions) Apply(ctx context.Context, actor Actor, scope domain.Scope
 			return err
 		}
 
-		if err := s.recheckPins(ctx, r, az, caller, scope, plan, cur, opts); err != nil {
+		if err := s.recheckPins(ctx, r, az, caller, p, scope, plan, bundle, cur, opts); err != nil {
 			return err
 		}
 
@@ -84,15 +84,22 @@ func (s *Definitions) Apply(ctx context.Context, actor Actor, scope domain.Scope
 		if err != nil {
 			return err
 		}
-
-		if err := s.guardDeletions(ctx, r, az, caller, scope, plan, res, opts); err != nil {
+		if err := validateFinalDefinitions(cur, res); err != nil {
 			return err
 		}
-		if err := s.enforceReveal(ctx, r, az, caller, scope, res); err != nil {
+		if res.Empty() {
+			result = ApplyResult{Revision: cur.SchemaRevision, Published: []string{}, PlanID: planID}
+			return nil
+		}
+
+		if err := s.guardDeletions(ctx, r, az, caller, p, scope, plan, res, opts); err != nil {
+			return err
+		}
+		if err := s.enforceReveal(ctx, r, az, caller, p, scope, res); err != nil {
 			return err
 		}
 
-		if err := s.executeResolution(ctx, r, az, caller, p, scope, res, cur); err != nil {
+		if err := s.executeResolution(ctx, r, az, caller, p, scope, res, cur, cur.SchemaRevision+1); err != nil {
 			return err
 		}
 		if err := r.Catalogue().BumpSchemaRevision(ctx, p); err != nil {
@@ -152,11 +159,7 @@ func (s *Definitions) Apply(ctx context.Context, actor Actor, scope domain.Scope
 // since the plan (#70, ADR § Plan and apply). Each refusal names what moved and
 // records the rollback-surviving apply_rejected_stale event.
 func (s *Definitions) recheckPins(ctx context.Context, r store.Repos, az *authz.TxAuthorizer, caller authz.Identity,
-	scope domain.Scope, plan store.DefinitionsPlan, cur definitions.CurrentState, opts ApplyOptions) error {
-	p, err := az.Authorize(ctx, caller, authz.OpDefinitionsApply, scope)
-	if err != nil {
-		return err
-	}
+	p authz.Proof, scope domain.Scope, plan store.DefinitionsPlan, bundle definitions.Bundle, cur definitions.CurrentState, opts ApplyOptions) error {
 	moved := func(what string) error {
 		ev, evErr := newAuditEvent(ctx, audit.EventDefinitionsApplyRejectedStale, caller.Principal,
 			audit.Object{Type: "definitions-plan", ID: plan.ID}, audit.OutcomeDenied, "",
@@ -171,7 +174,11 @@ func (s *Definitions) recheckPins(ctx context.Context, r store.Repos, az *authz.
 		}
 	}
 
-	if opts.Digest != "" && opts.Digest != plan.Digest {
+	storedDigest, err := definitions.Digest(bundle)
+	if err != nil {
+		return fmt.Errorf("service: plan %s: stored bundle digest: %w", plan.ID, err)
+	}
+	if storedDigest != plan.Digest || (opts.Digest != "" && opts.Digest != plan.Digest) {
 		return moved("bundle digest")
 	}
 	curRevs, err := s.envRevisions(ctx, r, p, cur)
@@ -221,11 +228,7 @@ func (s *Definitions) recheckPins(ctx context.Context, r store.Repos, az *authz.
 // needs --allow-delete, and an environment holding any live occurrence is
 // refused unconditionally.
 func (s *Definitions) guardDeletions(ctx context.Context, r store.Repos, az *authz.TxAuthorizer, caller authz.Identity,
-	scope domain.Scope, plan store.DefinitionsPlan, res definitions.Resolution, opts ApplyOptions) error {
-	p, err := az.Authorize(ctx, caller, authz.OpDefinitionsApply, scope)
-	if err != nil {
-		return err
-	}
+	p authz.Proof, scope domain.Scope, plan store.DefinitionsPlan, res definitions.Resolution, opts ApplyOptions) error {
 	refuse := func(detail string) error {
 		ev, evErr := newAuditEvent(ctx, audit.EventDefinitionsDeletionRefused, caller.Principal,
 			audit.Object{Type: "definitions-plan", ID: plan.ID}, audit.OutcomeDenied, "",
@@ -257,13 +260,9 @@ func (s *Definitions) guardDeletions(ctx context.Context, r store.Repos, az *aut
 // requires reveal: a value-dependent rule change on a secret key, and
 // declassification. A CI identity without reveal fails here, naming the entry.
 func (s *Definitions) enforceReveal(ctx context.Context, r store.Repos, az *authz.TxAuthorizer, caller authz.Identity,
-	scope domain.Scope, res definitions.Resolution) error {
-	p, err := az.Authorize(ctx, caller, authz.OpDefinitionsApply, scope)
-	if err != nil {
-		return err
-	}
+	p authz.Proof, scope domain.Scope, res definitions.Resolution) error {
 	for _, upd := range res.KeyUpdates {
-		if !revealNeeded(upd) {
+		if !definitions.NeedsReveal(upd) {
 			continue
 		}
 		key, err := r.Catalogue().Get(ctx, p, upd.ID)
@@ -291,28 +290,11 @@ func (s *Definitions) enforceReveal(ctx context.Context, r store.Repos, az *auth
 	return nil
 }
 
-func revealNeeded(upd definitions.KeyUpdate) bool {
-	wasSecret := upd.PrevClassification == string(schema.Secret)
-	return (wasSecret && upd.DeclChanged) || (wasSecret && upd.Desired.Classification == string(schema.Config))
-}
-
 func jsonUnmarshal(s string, v any) error {
 	if err := json.Unmarshal([]byte(s), v); err != nil {
 		return fmt.Errorf("service: definitions plan: unreadable pin: %w", err)
 	}
 	return nil
-}
-
-func sameRevisions(a, b map[string]int64) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for k, v := range a {
-		if bv, ok := b[k]; !ok || bv != v {
-			return false
-		}
-	}
-	return true
 }
 
 func sameRevisionKeys(a, b map[string]int64) bool {
@@ -362,7 +344,7 @@ func protectedSetGrew(pinned, current []string) bool {
 // and the two-phase rename resolve swaps, and key creates/updates resolve their
 // group and presence references against the final topology.
 func (s *Definitions) executeResolution(ctx context.Context, r store.Repos, az *authz.TxAuthorizer, caller authz.Identity,
-	p authz.Proof, scope domain.Scope, res definitions.Resolution, cur definitions.CurrentState) error {
+	p authz.Proof, scope domain.Scope, res definitions.Resolution, cur definitions.CurrentState, finalRevision int64) error {
 	now := s.now()
 
 	// 1. Key deletes: clear the key's live values (so the foreign key admits the
@@ -382,17 +364,38 @@ func (s *Definitions) executeResolution(ctx context.Context, r store.Repos, az *
 		if err := r.Catalogue().ReplacePresence(ctx, p, del.ID, nil); err != nil {
 			return err
 		}
+		if _, err := r.Pending().DiscardKey(ctx, p, del.ID); err != nil {
+			return err
+		}
 		if err := r.Catalogue().Delete(ctx, p, del.ID); err != nil {
+			return err
+		}
+		if err := insertDefinitionEvent(ctx, r, p, caller, audit.EventKeyDeleted, "key", del.ID,
+			audit.Payload{"name": audit.SanitizeFreeText(del.Name)}); err != nil {
 			return err
 		}
 	}
 
 	// 2. Group deletes: release members, then delete.
 	for _, del := range res.GroupDeletes {
+		members, err := r.Catalogue().List(ctx, p)
+		if err != nil {
+			return err
+		}
+		released := 0
+		for _, key := range members {
+			if key.GroupID == del.ID {
+				released++
+			}
+		}
 		if err := r.Catalogue().ClearGroupMembers(ctx, p, del.ID); err != nil {
 			return err
 		}
 		if err := r.Catalogue().DeleteGroup(ctx, p, del.ID); err != nil {
+			return err
+		}
+		if err := insertDefinitionEvent(ctx, r, p, caller, audit.EventKeyGroupDeleted, "key_group", del.ID,
+			audit.Payload{"name": audit.SanitizeFreeText(del.Name), "members_released": released}); err != nil {
 			return err
 		}
 	}
@@ -404,9 +407,20 @@ func (s *Definitions) executeResolution(ctx context.Context, r store.Repos, az *
 		if err := s.deleteEnvironment(ctx, r, az, caller, scope, del.ID); err != nil {
 			return err
 		}
+		if err := insertDefinitionEvent(ctx, r, p, caller, audit.EventEnvDeleted, "environment", del.ID,
+			audit.Payload{"name": audit.SanitizeFreeText(del.Name)}); err != nil {
+			return err
+		}
 	}
 
-	// 4. Environment creates: append at the next display position.
+	// 4. Park every renamed identity first. This frees old names before a
+	// create claims one of them, while retaining the two-phase swap guarantee.
+	parked, err := s.parkRenames(ctx, r, az, caller, p, scope, res, cur)
+	if err != nil {
+		return err
+	}
+
+	// 5. Environment creates: append at the next display position.
 	envIDByName := make(map[string]string, len(cur.Environments)+len(res.EnvCreates))
 	for _, e := range cur.Environments {
 		envIDByName[e.Name] = e.ID
@@ -434,9 +448,13 @@ func (s *Definitions) executeResolution(ctx context.Context, r store.Repos, az *
 			return err
 		}
 		envIDByName[name] = id
+		if err := insertDefinitionEvent(ctx, r, p, caller, audit.EventEnvCreated, "environment", id,
+			audit.Payload{"name": audit.SanitizeFreeText(name)}); err != nil {
+			return err
+		}
 	}
 
-	// 5. Group creates.
+	// 6. Group creates.
 	groupIDByName := make(map[string]string, len(cur.KeyGroups)+len(res.GroupCreates))
 	for _, g := range cur.KeyGroups {
 		groupIDByName[g.Name] = g.ID
@@ -457,27 +475,39 @@ func (s *Definitions) executeResolution(ctx context.Context, r store.Repos, az *
 			return err
 		}
 		groupIDByName[name] = id
+		if err := insertDefinitionEvent(ctx, r, p, caller, audit.EventKeyGroupCreated, "key_group", id,
+			audit.Payload{"name": audit.SanitizeFreeText(name)}); err != nil {
+			return err
+		}
 	}
 
-	// 6. Renames — two-phase so a swap resolves. Envs, groups, and the renamed
-	// keys each rename to a fresh temporary name, then to their final name.
-	if err := s.applyRenames(ctx, r, az, caller, p, scope, res, cur, envIDByName, groupIDByName); err != nil {
+	// 7. Finalize parked renames after creates have claimed any old names.
+	if err := s.finishRenames(ctx, r, az, caller, p, scope, res, parked, envIDByName, groupIDByName); err != nil {
 		return err
 	}
 
-	// 7. Key creates and updates, resolving group and presence names to the
+	// 8. Key creates and updates, resolving group and presence names to the
 	// final topology's ids.
 	for _, k := range res.KeyCreates {
-		if err := s.createKey(ctx, r, p, k, envIDByName, groupIDByName); err != nil {
+		if err := s.createKey(ctx, r, caller, p, k, envIDByName, groupIDByName); err != nil {
 			return err
 		}
 	}
 	for _, upd := range res.KeyUpdates {
-		if err := s.updateKey(ctx, r, p, upd, envIDByName, groupIDByName); err != nil {
+		if err := s.updateKey(ctx, r, caller, p, upd, envIDByName, groupIDByName, finalRevision); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func insertDefinitionEvent(ctx context.Context, r store.Repos, p authz.Proof, caller authz.Identity,
+	typeName audit.EventType, objectType, objectID string, payload audit.Payload) error {
+	event, err := domainEvent(ctx, typeName, caller.Principal, audit.Object{Type: objectType, ID: objectID}, payload)
+	if err != nil {
+		return err
+	}
+	return r.Audit().InsertTenant(ctx, p, event)
 }
 
 // deleteEnvironment authorizes an env-scoped OpEnvDelete and cascades the
@@ -505,10 +535,13 @@ func (s *Definitions) deleteEnvironment(ctx context.Context, r store.Repos, az *
 	return r.Environments().Delete(ctx, ep)
 }
 
-// applyRenames performs the two-phase rename over envs, groups, and keys.
-func (s *Definitions) applyRenames(ctx context.Context, r store.Repos, az *authz.TxAuthorizer, caller authz.Identity,
-	p authz.Proof, scope domain.Scope, res definitions.Resolution, cur definitions.CurrentState,
-	envIDByName, groupIDByName map[string]string) error {
+type parkedRenames struct {
+	keys []struct{ id, to string }
+}
+
+// parkRenames moves every renamed identity to a reserved temporary name.
+func (s *Definitions) parkRenames(ctx context.Context, r store.Repos, az *authz.TxAuthorizer, caller authz.Identity,
+	p authz.Proof, scope domain.Scope, res definitions.Resolution, cur definitions.CurrentState) (parkedRenames, error) {
 	used := map[string]bool{}
 	for _, e := range cur.Environments {
 		used[e.Name] = true
@@ -518,6 +551,24 @@ func (s *Definitions) applyRenames(ctx context.Context, r store.Repos, az *authz
 	}
 	for _, k := range cur.Keys {
 		used[k.Name] = true
+	}
+	for _, name := range res.EnvCreates {
+		used[name] = true
+	}
+	for _, name := range res.GroupCreates {
+		used[name] = true
+	}
+	for _, key := range res.KeyCreates {
+		used[key.Name] = true
+	}
+	for _, rename := range res.EnvRenames {
+		used[rename.To] = true
+	}
+	for _, rename := range res.GroupRenames {
+		used[rename.To] = true
+	}
+	for _, update := range res.KeyUpdates {
+		used[update.Desired.Name] = true
 	}
 	counter := 0
 	temp := func() string {
@@ -531,11 +582,10 @@ func (s *Definitions) applyRenames(ctx context.Context, r store.Repos, az *authz
 		}
 	}
 
-	type keyRename struct{ id, to string }
-	var keyRenames []keyRename
+	var parked parkedRenames
 	for _, upd := range res.KeyUpdates {
 		if upd.Renamed {
-			keyRenames = append(keyRenames, keyRename{id: upd.ID, to: upd.Desired.Name})
+			parked.keys = append(parked.keys, struct{ id, to string }{id: upd.ID, to: upd.Desired.Name})
 		}
 	}
 
@@ -543,34 +593,59 @@ func (s *Definitions) applyRenames(ctx context.Context, r store.Repos, az *authz
 	for i := range res.EnvRenames {
 		t := temp()
 		if err := s.renameEnv(ctx, r, az, caller, scope, res.EnvRenames[i].ID, t); err != nil {
-			return err
+			return parkedRenames{}, err
 		}
 	}
 	for i := range res.GroupRenames {
 		if err := r.Catalogue().RenameGroup(ctx, p, res.GroupRenames[i].ID, temp()); err != nil {
-			return err
+			return parkedRenames{}, err
 		}
 	}
-	for _, kr := range keyRenames {
+	for _, kr := range parked.keys {
 		if err := r.Catalogue().Rename(ctx, p, kr.id, temp()); err != nil {
-			return err
+			return parkedRenames{}, err
 		}
 	}
-	// Phase 2: temp → final.
+	return parked, nil
+}
+
+// finishRenames moves parked identities to their final names.
+func (s *Definitions) finishRenames(ctx context.Context, r store.Repos, az *authz.TxAuthorizer, caller authz.Identity,
+	p authz.Proof, scope domain.Scope, res definitions.Resolution, parked parkedRenames,
+	envIDByName, groupIDByName map[string]string) error {
 	for i := range res.EnvRenames {
 		if err := s.renameEnv(ctx, r, az, caller, scope, res.EnvRenames[i].ID, res.EnvRenames[i].To); err != nil {
 			return err
 		}
 		envIDByName[res.EnvRenames[i].To] = res.EnvRenames[i].ID
+		if err := insertDefinitionEvent(ctx, r, p, caller, audit.EventEnvRenamed, "environment", res.EnvRenames[i].ID,
+			audit.Payload{"previous_name": audit.SanitizeFreeText(res.EnvRenames[i].From), "name": audit.SanitizeFreeText(res.EnvRenames[i].To)}); err != nil {
+			return err
+		}
 	}
 	for i := range res.GroupRenames {
 		if err := r.Catalogue().RenameGroup(ctx, p, res.GroupRenames[i].ID, res.GroupRenames[i].To); err != nil {
 			return err
 		}
 		groupIDByName[res.GroupRenames[i].To] = res.GroupRenames[i].ID
+		if err := insertDefinitionEvent(ctx, r, p, caller, audit.EventKeyGroupRenamed, "key_group", res.GroupRenames[i].ID,
+			audit.Payload{"previous_name": audit.SanitizeFreeText(res.GroupRenames[i].From), "name": audit.SanitizeFreeText(res.GroupRenames[i].To)}); err != nil {
+			return err
+		}
 	}
-	for _, kr := range keyRenames {
+	for _, kr := range parked.keys {
 		if err := r.Catalogue().Rename(ctx, p, kr.id, kr.to); err != nil {
+			return err
+		}
+		from := ""
+		for _, upd := range res.KeyUpdates {
+			if upd.ID == kr.id {
+				from = upd.PrevName
+				break
+			}
+		}
+		if err := insertDefinitionEvent(ctx, r, p, caller, audit.EventKeyRenamed, "key", kr.id,
+			audit.Payload{"previous_name": audit.SanitizeFreeText(from), "name": audit.SanitizeFreeText(kr.to)}); err != nil {
 			return err
 		}
 	}
@@ -587,13 +662,13 @@ func (s *Definitions) renameEnv(ctx context.Context, r store.Repos, az *authz.Tx
 	return r.Environments().Rename(ctx, ep, name)
 }
 
-func (s *Definitions) createKey(ctx context.Context, r store.Repos, p authz.Proof, k definitions.Key,
+func (s *Definitions) createKey(ctx context.Context, r store.Repos, caller authz.Identity, p authz.Proof, k definitions.Key,
 	envIDByName, groupIDByName map[string]string) error {
 	presence, err := resolvePresence(k, envIDByName)
 	if err != nil {
 		return err
 	}
-	if err := checkDeclaration(k.Declaration, presence); err != nil {
+	if err := checkClassifiedDeclaration(k.Classification, k.Declaration, presence); err != nil {
 		return err
 	}
 	canonical, err := schema.Canonical(k.Declaration)
@@ -617,17 +692,27 @@ func (s *Definitions) createKey(ctx context.Context, r store.Repos, p authz.Proo
 	}); err != nil {
 		return err
 	}
-	return r.Catalogue().ReplacePresence(ctx, p, id, presenceRowsFor(id, presence))
+	if err := r.Catalogue().ReplacePresence(ctx, p, id, presenceRowsFor(id, presence)); err != nil {
+		return err
+	}
+	return insertDefinitionEvent(ctx, r, p, caller, audit.EventKeyCreated, "key", id, audit.Payload{
+		"name": audit.SanitizeFreeText(k.Name), "classification": k.Classification,
+		"namespace": audit.SanitizeFreeText(k.FolderPath),
+	})
 }
 
-func (s *Definitions) updateKey(ctx context.Context, r store.Repos, p authz.Proof, upd definitions.KeyUpdate,
-	envIDByName, groupIDByName map[string]string) error {
+func (s *Definitions) updateKey(ctx context.Context, r store.Repos, caller authz.Identity, p authz.Proof, upd definitions.KeyUpdate,
+	envIDByName, groupIDByName map[string]string, finalRevision int64) error {
 	k := upd.Desired
+	before, err := r.Catalogue().Get(ctx, p, upd.ID)
+	if err != nil {
+		return err
+	}
 	presence, err := resolvePresence(k, envIDByName)
 	if err != nil {
 		return err
 	}
-	if err := checkDeclaration(k.Declaration, presence); err != nil {
+	if err := checkClassifiedDeclaration(k.Classification, k.Declaration, presence); err != nil {
 		return err
 	}
 	// Rename was already applied in the two-phase pass; metadata, declaration,
@@ -637,6 +722,10 @@ func (s *Definitions) updateKey(ctx context.Context, r store.Repos, p authz.Proo
 			FolderPath: k.FolderPath, Description: k.Description,
 			Deprecated: k.Deprecated, DeprecationNote: k.DeprecationNote,
 		}); err != nil {
+			return err
+		}
+		if err := insertDefinitionEvent(ctx, r, p, caller, audit.EventKeyMetadataChanged, "key", upd.ID,
+			audit.Payload{"name": audit.SanitizeFreeText(k.Name), "namespace": audit.SanitizeFreeText(k.FolderPath)}); err != nil {
 			return err
 		}
 	}
@@ -654,6 +743,12 @@ func (s *Definitions) updateKey(ctx context.Context, r store.Repos, p authz.Proo
 		if err := r.Catalogue().ReplacePresence(ctx, p, upd.ID, presenceRowsFor(upd.ID, presence)); err != nil {
 			return err
 		}
+		if err := insertDefinitionEvent(ctx, r, p, caller, audit.EventKeyDeclarationChanged, "key", upd.ID, audit.Payload{
+			"name": audit.SanitizeFreeText(k.Name), "schema_revision": finalRevision,
+			"rules_changed": upd.DeclChanged, "presence_changed": upd.PresenceChanged,
+		}); err != nil {
+			return err
+		}
 	}
 	if upd.Reclassified {
 		key, err := r.Catalogue().Get(ctx, p, upd.ID)
@@ -666,6 +761,12 @@ func (s *Definitions) updateKey(ctx context.Context, r store.Repos, p authz.Proo
 		if err := r.Catalogue().SetClassification(ctx, p, upd.ID, k.Classification); err != nil {
 			return err
 		}
+		if err := insertDefinitionEvent(ctx, r, p, caller, audit.EventKeyReclassified, "key", upd.ID, audit.Payload{
+			"name": audit.SanitizeFreeText(k.Name), "previous_classification": upd.PrevClassification,
+			"classification": k.Classification,
+		}); err != nil {
+			return err
+		}
 	}
 	if upd.GroupChanged {
 		groupID := ""
@@ -673,6 +774,11 @@ func (s *Definitions) updateKey(ctx context.Context, r store.Repos, p authz.Proo
 			groupID = groupIDByName[k.Group]
 		}
 		if err := r.Catalogue().SetGroup(ctx, p, upd.ID, groupID); err != nil {
+			return err
+		}
+		if err := insertDefinitionEvent(ctx, r, p, caller, audit.EventKeyGroupMembershipChanged, "key", upd.ID, audit.Payload{
+			"name": audit.SanitizeFreeText(k.Name), "previous_group_id": before.GroupID, "group_id": groupID,
+		}); err != nil {
 			return err
 		}
 	}

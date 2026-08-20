@@ -12,14 +12,14 @@ import (
 	"github.com/Hikyo-Org/hikyo/internal/authz"
 	"github.com/Hikyo-Org/hikyo/internal/definitions"
 	"github.com/Hikyo-Org/hikyo/internal/domain"
+	"github.com/Hikyo-Org/hikyo/internal/schema"
 	"github.com/Hikyo-Org/hikyo/internal/store"
 	"github.com/Hikyo-Org/hikyo/internal/store/tx"
 )
 
-// gitModeRefusal is the exact SafeDetail every git-mode-guarded definition
-// write returns (#70, ADR § Git-governed projects). It is a constant so the UI
-// banner and the API refusal cannot drift apart.
-const gitModeRefusal = "definitions for this project are managed in Git — changes arrive through definitions plan / definitions apply"
+// gitModeRefusal is normative in docs/spec/ui-spec.md § Git-mode. Server
+// SafeDetail and the web banner intentionally copy those bytes exactly.
+const gitModeRefusal = "Definitions for this project are managed in Git — changes arrive through `definitions plan` / `definitions apply`."
 
 // requireDBManagedDefinitions is the git-mode write guard. Every
 // `definitions-edit` write path calls it inside its transaction, AFTER
@@ -38,12 +38,15 @@ func requireDBManagedDefinitions(ctx context.Context, r store.Repos, p authz.Pro
 	return nil
 }
 
-var bearerShapedRe = regexp.MustCompile(`^[A-Za-z0-9_\-]{32,}$`)
+var bearerShapedRe = regexp.MustCompile(`[A-Za-z0-9_\-]{32,}`)
 
 // sanitizeProvenance bounds and screens one provenance label. Provenance is a
 // display-only label, never an input to any decision (#70, ADR § Provenance),
 // but a live token typed into `--actor` would land in the audit trail, so a
-// bearer-token-shaped value is refused loudly rather than stored.
+// bearer-token-shaped value is refused loudly rather than stored. Two matchers
+// compose: the canonical hikyo token grammar (audit's redaction filter, which
+// catches short-bodied tokens the generic run-length heuristic cannot) and the
+// generic long-base64ish run for foreign credentials with no known grammar.
 func sanitizeProvenance(field, s string) (string, error) {
 	if s == "" {
 		return "", nil
@@ -56,7 +59,7 @@ func sanitizeProvenance(field, s string) (string, error) {
 			return "", fmt.Errorf("%w: %s contains a control character", domain.ErrInvalid, field)
 		}
 	}
-	if bearerShapedRe.MatchString(s) {
+	if audit.RedactTokens(s) != s || bearerShapedRe.MatchString(s) {
 		return "", fmt.Errorf("%w: %s looks like a credential; provenance is a label, not a secret", domain.ErrInvalid, field)
 	}
 	return s, nil
@@ -109,6 +112,9 @@ func (s *Definitions) Plan(ctx context.Context, actor Actor, scope domain.Scope,
 			}
 			return err
 		}
+		if err := validateFinalDefinitions(cur, res); err != nil {
+			return err
+		}
 		// Open-plan quota.
 		open, err := r.Definitions().CountOpenPlans(ctx, p, s.now())
 		if err != nil {
@@ -122,6 +128,85 @@ func (s *Definitions) Plan(ctx context.Context, actor Actor, scope domain.Scope,
 		return err
 	})
 	return view, err
+}
+
+func validateFinalDefinitions(cur definitions.CurrentState, res definitions.Resolution) error {
+	environments := make(map[string]string, len(cur.Environments)+len(res.EnvCreates))
+	for _, env := range cur.Environments {
+		environments[env.ID] = env.Name
+	}
+	for _, deleted := range res.EnvDeletes {
+		delete(environments, deleted.ID)
+	}
+	for _, renamed := range res.EnvRenames {
+		environments[renamed.ID] = renamed.To
+	}
+	for _, name := range res.EnvCreates {
+		environments["new:"+name] = name
+	}
+	if len(environments) > MaxEnvironmentsPerProject {
+		return definitionLimit("final definitions contain %d environments; a project holds at most %d", len(environments), MaxEnvironmentsPerProject)
+	}
+	for _, name := range environments {
+		if err := checkName("environment name", name); err != nil {
+			return definitionInvalid("environment %q has an invalid name: %v", name, err)
+		}
+	}
+
+	groups := make(map[string]string, len(cur.KeyGroups)+len(res.GroupCreates))
+	for _, group := range cur.KeyGroups {
+		groups[group.ID] = group.Name
+	}
+	for _, deleted := range res.GroupDeletes {
+		delete(groups, deleted.ID)
+	}
+	for _, renamed := range res.GroupRenames {
+		groups[renamed.ID] = renamed.To
+	}
+	for _, name := range res.GroupCreates {
+		groups["new:"+name] = name
+	}
+	if len(groups) > schema.MaxKeyGroupsPerProject {
+		return definitionLimit("final definitions contain %d key groups; a project declares at most %d", len(groups), schema.MaxKeyGroupsPerProject)
+	}
+	for _, name := range groups {
+		if err := schema.CheckGroupName(name); err != nil {
+			return definitionInvalid("key group %q has an invalid name: %v", name, err)
+		}
+	}
+
+	keys := make(map[string]string, len(cur.Keys)+len(res.KeyCreates))
+	for _, key := range cur.Keys {
+		keys[key.ID] = key.Name
+	}
+	for _, deleted := range res.KeyDeletes {
+		delete(keys, deleted.ID)
+	}
+	for _, updated := range res.KeyUpdates {
+		keys[updated.ID] = updated.Desired.Name
+	}
+	for _, key := range res.KeyCreates {
+		keys["new:"+key.Name] = key.Name
+	}
+	if len(keys) > schema.MaxKeysPerProject {
+		return definitionLimit("final definitions contain %d keys; a project declares at most %d", len(keys), schema.MaxKeysPerProject)
+	}
+	for _, name := range keys {
+		if err := schema.CheckKeyName(name); err != nil {
+			return definitionInvalid("key %q has an invalid name: %v", name, err)
+		}
+	}
+	return nil
+}
+
+func definitionInvalid(format string, args ...any) error {
+	detail := fmt.Sprintf(format, args...)
+	return &detailErr{detail: detail, err: fmt.Errorf("%w: %s", domain.ErrInvalid, detail)}
+}
+
+func definitionLimit(format string, args ...any) error {
+	detail := fmt.Sprintf(format, args...)
+	return &detailErr{detail: detail, err: fmt.Errorf("%w: %s", domain.ErrLimitExceeded, detail)}
 }
 
 // persistPlan enriches the diff with live-occurrence impact, computes the pins,

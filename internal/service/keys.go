@@ -216,6 +216,13 @@ func checkDeclaration(d schema.Declaration, p schema.PresenceRules) error {
 	return nil
 }
 
+func checkClassifiedDeclaration(classification string, d schema.Declaration, p schema.PresenceRules) error {
+	if err := schema.CheckDeclarationClassification(schema.Classification(classification), d); err != nil {
+		return fmt.Errorf("%w: %s", domain.ErrInvalid, err)
+	}
+	return checkDeclaration(d, p)
+}
+
 // keyOf converts a store row plus its presence rows into the service key.
 func keyOf(row store.CatalogueKey, presence []store.KeyPresence) (Key, error) {
 	decl, err := schema.ParseDeclaration([]byte(row.Declaration))
@@ -527,7 +534,7 @@ func (s *Keys) Create(ctx context.Context, actor Actor, scope domain.Scope, spec
 	if err := checkKeySpec(spec); err != nil {
 		return Key{}, err
 	}
-	if err := checkDeclaration(spec.Declaration, spec.Presence); err != nil {
+	if err := checkClassifiedDeclaration(spec.Classification, spec.Declaration, spec.Presence); err != nil {
 		return Key{}, err
 	}
 	canonical, err := schema.Canonical(spec.Declaration)
@@ -971,7 +978,7 @@ func (s *Keys) UpdateDeclaration(ctx context.Context, actor Actor, scope domain.
 		}
 
 		// Only now is the new declaration examined at all.
-		if err := checkDeclaration(u.Declaration, u.Presence); err != nil {
+		if err := checkClassifiedDeclaration(before.Classification, u.Declaration, u.Presence); err != nil {
 			return err
 		}
 		canonical, err := schema.Canonical(u.Declaration)
@@ -1104,6 +1111,15 @@ func (s *Keys) Reclassify(ctx context.Context, actor Actor, scope domain.Scope, 
 			// would write a disclosure-class audit record for an act that never
 			// happened.
 			return fmt.Errorf("%w: the key is already classified %q", domain.ErrInvalid, classification)
+		}
+		if classification == string(schema.Secret) {
+			decl, err := schema.ParseDeclaration([]byte(before.Declaration))
+			if err != nil {
+				return fmt.Errorf("service: key %s: stored declaration unreadable: %w", id, err)
+			}
+			if err := schema.CheckDeclarationClassification(schema.Secret, decl); err != nil {
+				return fmt.Errorf("%w: key %q cannot be classified secret: %s", domain.ErrInvalid, before.Name, err)
+			}
 		}
 		if classification == string(schema.Config) {
 			// The ATTEMPT record rides the rollback-surviving settlement path;

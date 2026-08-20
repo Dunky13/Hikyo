@@ -82,36 +82,8 @@ const (
 // bundle changes anything. An additive bundle has no base, so it is file_ahead
 // when it would create or change anything and equal otherwise.
 func Classify(b Bundle, cur CurrentState) (DriftState, error) {
-	res, err := resolve(b, cur, false)
-	if err != nil {
-		return "", err
-	}
-	diff := !res.Empty()
-
-	if b.Additive() {
-		if diff {
-			return DriftFileAhead, nil
-		}
-		return DriftEqual, nil
-	}
-
-	base := *b.BaseRevision
-	switch {
-	case base > cur.SchemaRevision:
-		return "", invalidDetail(
-			"bundle base revision %d is ahead of the current definitions revision %d — impossible or foreign bundle",
-			base, cur.SchemaRevision)
-	case base == cur.SchemaRevision:
-		if diff {
-			return DriftFileAhead, nil
-		}
-		return DriftEqual, nil
-	default: // base < current
-		if diff {
-			return DriftDiverged, nil
-		}
-		return DriftDBAhead, nil
-	}
+	state, _, err := Compare(b, cur)
+	return state, err
 }
 
 // Compare classifies drift and renders the diff in one pass, for the diagnostic

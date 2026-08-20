@@ -30,6 +30,10 @@ func runDefinitions(t *testing.T, db *store.DB) {
 	t.Run("stale base check classification", func(t *testing.T) { definitionsStaleBase(t, db) })
 	t.Run("reveal inheritance", func(t *testing.T) { definitionsReveal(t, db) })
 	t.Run("quota expiry and garbage collection", func(t *testing.T) { definitionsPlanLifecycle(t, db) })
+	t.Run("secret declaration literal boundary", func(t *testing.T) { definitionsSecretDeclarationBoundary(t, db) })
+	t.Run("stored digest tamper", func(t *testing.T) { definitionsStoredDigestTamper(t, db) })
+	t.Run("key deletion discards pending drafts", func(t *testing.T) { definitionsPendingDraftDeletion(t, db) })
+	t.Run("apply emits constituent audit events", func(t *testing.T) { definitionsConstituentAudit(t, db) })
 }
 
 // runDefinitionsAuditLifecycle drives every #70 audit type through its real
@@ -47,7 +51,9 @@ func runDefinitionsAuditLifecycle(t *testing.T, db *store.DB) {
 		t.Fatalf("restore definitions source: %v", err)
 	}
 
-	plan := planDefinitions(t, svc, f, exportDefinitions(t, svc, f))
+	bundle := parseDefinitions(t, exportDefinitions(t, svc, f))
+	bundle.Keys = append(bundle.Keys, definitionKey("AUDIT_CREATED", "config"))
+	plan := planDefinitions(t, svc, f, encodeDefinitions(t, bundle))
 	if _, err := svc.Apply(t.Context(), service.LocalPrincipal(alice), f.scope(), plan.ID, service.ApplyOptions{}); err != nil {
 		t.Fatalf("emit definitions applied: %v", err)
 	}
@@ -60,7 +66,7 @@ func runDefinitionsAuditLifecycle(t *testing.T, db *store.DB) {
 		t.Fatalf("emit stale apply refusal: %v", err)
 	}
 
-	bundle := parseDefinitions(t, exportDefinitions(t, svc, f))
+	bundle = parseDefinitions(t, exportDefinitions(t, svc, f))
 	bundle.Keys = nil
 	deletion := planDefinitions(t, svc, f, encodeDefinitions(t, bundle))
 	if _, err := svc.Apply(t.Context(), service.LocalPrincipal(alice), f.scope(), deletion.ID, service.ApplyOptions{}); err == nil || !strings.Contains(safeError(err), "pass --allow-delete") {
@@ -90,12 +96,20 @@ func definitionsRoundTrip(t *testing.T, db *store.DB) {
 	if plan.Digest != digest || plan.CurrentRevision != 0 || plan.BaseRevision == nil || *plan.BaseRevision != 0 {
 		t.Fatalf("plan pins = digest %q revision %d base %v", plan.Digest, plan.CurrentRevision, plan.BaseRevision)
 	}
+	beforeApply := captureDefinitionsState(t, db, f.project)
 	result, err := svc.Apply(t.Context(), service.LocalPrincipal(alice), f.scope(), plan.ID, service.ApplyOptions{Digest: digest})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Revision != 1 || result.PlanID != plan.ID || strings.Join(result.Published, ",") != "dev" {
+	if result.Revision != 0 || result.PlanID != plan.ID || len(result.Published) != 0 {
 		t.Fatalf("apply result = %+v", result)
+	}
+	afterApply := captureDefinitionsState(t, db, f.project)
+	if !reflect.DeepEqual(afterApply, beforeApply) {
+		t.Fatalf("no-op apply changed state\nbefore=%+v\nafter=%+v", beforeApply, afterApply)
+	}
+	if got := queryInt(t, db, "SELECT COUNT(*) FROM audit_tenant_events WHERE project_id = '"+string(f.project)+"' AND type = 'definitions.applied'"); got != 0 {
+		t.Fatalf("no-op apply emitted definitions.applied = %d", got)
 	}
 	after := exportDefinitions(t, svc, f)
 	check, err := svc.Check(t.Context(), service.LocalPrincipal(alice), f.scope(), after)
@@ -276,7 +290,7 @@ func definitionsGitMode(t *testing.T, db *store.DB) {
 	for _, check := range checks {
 		t.Run(check.name, func(t *testing.T) {
 			err := check.call()
-			assertSafeDetail(t, err, "definitions for this project are managed in Git — changes arrive through definitions plan / definitions apply")
+			assertSafeDetail(t, err, "Definitions for this project are managed in Git — changes arrive through `definitions plan` / `definitions apply`.")
 			if got := captureDefinitionsState(t, db, f.project); !reflect.DeepEqual(got, baseline) {
 				t.Fatalf("guarded write changed state\nbefore=%+v\nafter=%+v", baseline, got)
 			}
@@ -341,9 +355,19 @@ func definitionsMatching(t *testing.T, db *store.DB) {
 	bundle := parseDefinitions(t, exportDefinitions(t, svc, f))
 	bundle.Keys[0].Name = "RENAMED_KEY"
 	bundle.Keys = append(bundle.Keys, definitionKey("BASE_KEY", "config"))
+	bundle.Environments[0].Name = "renamed-env"
+	bundle.Environments = append(bundle.Environments, definitions.Environment{Name: "dev"})
+	bundle.KeyGroups[0].Name = "renamed-group"
+	bundle.KeyGroups = append(bundle.KeyGroups, definitions.KeyGroup{Name: "base-group"})
 	plan := planDefinitions(t, svc, f, encodeDefinitions(t, bundle))
 	if _, err := svc.Apply(t.Context(), service.LocalPrincipal(alice), f.scope(), plan.ID, service.ApplyOptions{}); err != nil {
 		t.Fatal(err)
+	}
+	if got := queryInt(t, db, "SELECT COUNT(*) FROM environments WHERE project_id = '"+string(f.project)+"' AND name IN ('dev','renamed-env')"); got != 2 {
+		t.Fatalf("environment rename+replacement = %d rows", got)
+	}
+	if got := queryInt(t, db, "SELECT COUNT(*) FROM key_groups WHERE project_id = '"+string(f.project)+"' AND name IN ('base-group','renamed-group')"); got != 2 {
+		t.Fatalf("group rename+replacement = %d rows", got)
 	}
 
 	bundle = parseDefinitions(t, exportDefinitions(t, svc, f))
@@ -390,8 +414,13 @@ func definitionsStaleBase(t *testing.T, db *store.DB) {
 	f := seedDefinitionsProject(t, db, "stalebase", true)
 	svc := definitionsService(t, db)
 	old := exportDefinitions(t, svc, f)
-	plan := planDefinitions(t, svc, f, old)
-	if _, err := svc.Apply(t.Context(), service.LocalPrincipal(alice), f.scope(), plan.ID, service.ApplyOptions{}); err != nil {
+	temporary, restored := "temporary", ""
+	if _, err := keySvc(t, db).UpdateMetadata(t.Context(), service.LocalPrincipal(alice), f.scope(), f.key,
+		service.KeyMetadataUpdate{Description: &temporary}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := keySvc(t, db).UpdateMetadata(t.Context(), service.LocalPrincipal(alice), f.scope(), f.key,
+		service.KeyMetadataUpdate{Description: &restored}); err != nil {
 		t.Fatal(err)
 	}
 	before := captureDefinitionsState(t, db, f.project)
@@ -407,6 +436,134 @@ func definitionsStaleBase(t *testing.T, db *store.DB) {
 	check, err = svc.Check(t.Context(), service.LocalPrincipal(alice), f.scope(), old)
 	if err != nil || check.State != string(definitions.DriftDiverged) {
 		t.Fatalf("stale changed-content check = %+v, %v", check, err)
+	}
+}
+
+func definitionsSecretDeclarationBoundary(t *testing.T, db *store.DB) {
+	literal := schema.Declaration{Rule: &schema.Rule{Type: schema.TypeEnum, Members: []string{"live-value"}}}
+
+	t.Run("create", func(t *testing.T) {
+		f := seedDefinitionsProject(t, db, "literalcreate", false)
+		spec := keySpec("SECRET_ENUM", "secret")
+		spec.Declaration = literal
+		_, err := keySvc(t, db).Create(t.Context(), service.LocalPrincipal(alice), f.scope(), spec)
+		assertSafeContains(t, err, "use `pattern`, or declassify the key")
+	})
+
+	t.Run("update declaration", func(t *testing.T) {
+		f := seedDefinitionsProject(t, db, "literalupdate", true)
+		execRaw(t, db, "UPDATE keys SET classification = 'secret' WHERE id = '"+f.key+"'")
+		_, err := keySvc(t, db).UpdateDeclaration(t.Context(), service.LocalPrincipal(custodian), f.scope(), f.key,
+			service.KeyDeclarationUpdate{Declaration: literal, Presence: schema.DefaultPresenceRules()})
+		assertSafeContains(t, err, "use `pattern`, or declassify the key")
+	})
+
+	t.Run("reclassify", func(t *testing.T) {
+		f := seedDefinitionsProject(t, db, "literalreclassify", true)
+		if _, err := keySvc(t, db).UpdateDeclaration(t.Context(), service.LocalPrincipal(alice), f.scope(), f.key,
+			service.KeyDeclarationUpdate{Declaration: literal, Presence: schema.DefaultPresenceRules()}); err != nil {
+			t.Fatal(err)
+		}
+		_, err := keySvc(t, db).Reclassify(t.Context(), service.LocalPrincipal(alice), f.scope(), f.key, "secret")
+		assertSafeContains(t, err, "use `pattern`, or declassify the key")
+	})
+
+	t.Run("plan nested const", func(t *testing.T) {
+		f := seedDefinitionsProject(t, db, "literalplan", true)
+		execRaw(t, db, "UPDATE keys SET classification = 'secret' WHERE id = '"+f.key+"'")
+		svc := definitionsService(t, db)
+		bundle := parseDefinitions(t, exportDefinitions(t, svc, f))
+		bundle.Keys[0].Declaration = schema.Declaration{Rule: &schema.Rule{Type: schema.TypeJSON,
+			JSONSchema: []byte(`{"properties":{"nested":{"const":"live-value"}}}`)}}
+		raw, err := definitions.Encode(bundle)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = svc.Plan(t.Context(), service.LocalPrincipal(alice), f.scope(), raw)
+		assertSafeContains(t, err, "BASE_KEY")
+		assertSafeContains(t, err, "use `pattern`, or declassify the key")
+	})
+}
+
+func definitionsStoredDigestTamper(t *testing.T, db *store.DB) {
+	f := seedDefinitionsProject(t, db, "digesttamper", true)
+	svc := definitionsService(t, db)
+	bundle := parseDefinitions(t, exportDefinitions(t, svc, f))
+	bundle.Keys = append(bundle.Keys, definitionKey("DIGEST_CREATED", "config"))
+	plan := planDefinitions(t, svc, f, encodeDefinitions(t, bundle))
+	execRaw(t, db, "UPDATE definitions_plans SET digest = '"+strings.Repeat("0", 64)+"' WHERE id = '"+plan.ID+"'")
+	before := captureDefinitionsState(t, db, f.project)
+	_, err := svc.Apply(t.Context(), service.LocalPrincipal(alice), f.scope(), plan.ID, service.ApplyOptions{})
+	assertRefusalUnchanged(t, db, f, before, err, "bundle digest")
+}
+
+func definitionsPendingDraftDeletion(t *testing.T, db *store.DB) {
+	f := seedDefinitionsProject(t, db, "pendingdelete", true)
+	svc := definitionsService(t, db)
+	if _, err := valueSvc(t, db).Set(t.Context(), service.LocalPrincipal(custodian), f.envScope(), "BASE_KEY", "draft"); err != nil {
+		t.Fatal(err)
+	}
+	if got := queryInt(t, db, "SELECT COUNT(*) FROM pending_changes WHERE project_id = '"+string(f.project)+"'"); got != 1 {
+		t.Fatalf("pending drafts before apply = %d", got)
+	}
+	bundle := parseDefinitions(t, exportDefinitions(t, svc, f))
+	bundle.Keys = nil
+	plan := planDefinitions(t, svc, f, encodeDefinitions(t, bundle))
+	if _, err := svc.Apply(t.Context(), service.LocalPrincipal(alice), f.scope(), plan.ID, service.ApplyOptions{AllowDelete: true}); err != nil {
+		t.Fatal(err)
+	}
+	if got := queryInt(t, db, "SELECT COUNT(*) FROM pending_changes WHERE project_id = '"+string(f.project)+"'"); got != 0 {
+		t.Fatalf("pending drafts after apply = %d", got)
+	}
+}
+
+func definitionsConstituentAudit(t *testing.T, db *store.DB) {
+	f := seedDefinitionsProject(t, db, "constituentaudit", false)
+	svc := definitionsService(t, db)
+	created := definitions.Bundle{
+		FormatVersion: definitions.FormatVersion,
+		Environments:  []definitions.Environment{{Name: "dev"}},
+		KeyGroups:     []definitions.KeyGroup{{Name: "database"}},
+		Keys:          []definitions.Key{definitionKey("AUDIT_KEY", "config")},
+	}
+	created.Keys[0].Group = "database"
+	plan := planDefinitions(t, svc, f, encodeDefinitions(t, created))
+	if _, err := svc.Apply(t.Context(), service.LocalPrincipal(alice), f.scope(), plan.ID, service.ApplyOptions{}); err != nil {
+		t.Fatal(err)
+	}
+
+	updated := parseDefinitions(t, exportDefinitions(t, svc, f))
+	updated.Environments[0].Name = "production"
+	updated.KeyGroups[0].Name = "runtime"
+	updated.Keys[0].Name = "RENAMED_KEY"
+	updated.Keys[0].Description = "renamed metadata"
+	updated.Keys[0].Classification = "secret"
+	updated.Keys[0].Group = ""
+	minimum := 2
+	updated.Keys[0].Declaration = schema.Declaration{Rule: &schema.Rule{Type: schema.TypeString, MinLength: &minimum}}
+	updated.Keys[0].ForbiddenIn = definitions.Presence{Mode: "explicit", Environments: []string{"production"}}
+	plan = planDefinitions(t, svc, f, encodeDefinitions(t, updated))
+	if _, err := svc.Apply(t.Context(), service.LocalPrincipal(alice), f.scope(), plan.ID, service.ApplyOptions{}); err != nil {
+		t.Fatal(err)
+	}
+
+	deleted := parseDefinitions(t, exportDefinitions(t, svc, f))
+	deleted.Environments, deleted.KeyGroups, deleted.Keys = nil, nil, nil
+	plan = planDefinitions(t, svc, f, encodeDefinitions(t, deleted))
+	if _, err := svc.Apply(t.Context(), service.LocalPrincipal(alice), f.scope(), plan.ID, service.ApplyOptions{AllowDelete: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, eventType := range []string{
+		"settings.environment_created", "settings.environment_renamed", "settings.environment_deleted",
+		"settings.key_group_created", "settings.key_group_renamed", "settings.key_group_deleted",
+		"settings.key_created", "settings.key_renamed", "settings.key_deleted",
+		"settings.key_metadata_changed", "settings.key_declaration_changed",
+		"settings.key_reclassified", "settings.key_group_membership_changed",
+	} {
+		if got := queryInt(t, db, "SELECT COUNT(*) FROM audit_tenant_events WHERE project_id = '"+string(f.project)+"' AND type = '"+eventType+"'"); got == 0 {
+			t.Fatalf("apply did not emit %s", eventType)
+		}
 	}
 }
 
@@ -615,6 +772,13 @@ func assertSafeDetail(t *testing.T, err error, want string) {
 	var carrier interface{ SafeDetail() string }
 	if !errors.As(err, &carrier) || carrier.SafeDetail() != want {
 		t.Fatalf("safe detail = %q from %v, want %q", safeError(err), err, want)
+	}
+}
+
+func assertSafeContains(t *testing.T, err error, want string) {
+	t.Helper()
+	if err == nil || !strings.Contains(safeError(err), want) {
+		t.Fatalf("safe error = %q, want %q", safeError(err), want)
 	}
 }
 

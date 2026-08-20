@@ -13,6 +13,7 @@ import { parsed } from './client.ts';
  * parsed at this boundary before settings UI can rely on it.
  */
 
+// Normative text: docs/spec/ui-spec.md § Git-mode.
 export const GIT_DEFINITIONS_NOTICE =
   'Definitions for this project are managed in Git — changes arrive through `definitions plan` / `definitions apply`.';
 

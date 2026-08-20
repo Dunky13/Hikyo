@@ -116,10 +116,6 @@ func resolve(b Bundle, cur CurrentState, strict bool) (Resolution, error) {
 			groupIdentityByName[g.Name] = "new:" + g.Name
 		}
 	}
-	curEnvName := make(map[string]string, len(cur.Environments)) // id -> name (unused but symmetric)
-	for _, e := range cur.Environments {
-		curEnvName[e.ID] = e.Name
-	}
 	curKeyByID := make(map[string]CurrentKey, len(cur.Keys))
 	for _, k := range cur.Keys {
 		curKeyByID[k.ID] = k
@@ -128,7 +124,7 @@ func resolve(b Bundle, cur CurrentState, strict bool) (Resolution, error) {
 	// Environments.
 	for i, e := range b.Environments {
 		if envMatch.bound(i) {
-			from := entityName(cur.Environments, envMatch.boundDBID[i])
+			from := nameFor(cur.Environments, envMatch.boundDBID[i], func(e Environment) string { return e.ID }, func(e Environment) string { return e.Name })
 			if from != e.Name {
 				res.EnvRenames = append(res.EnvRenames, Rename{ID: envMatch.boundDBID[i], From: from, To: e.Name})
 			}
@@ -136,12 +132,12 @@ func resolve(b Bundle, cur CurrentState, strict bool) (Resolution, error) {
 		}
 		res.EnvCreates = append(res.EnvCreates, e.Name)
 	}
-	res.EnvDeletes = refsFor(cur.Environments, envMatch.deletes)
+	res.EnvDeletes = refsFor(cur.Environments, envMatch.deletes, func(e Environment) string { return e.ID }, func(e Environment) string { return e.Name })
 
 	// Key groups.
 	for i, g := range b.KeyGroups {
 		if groupMatch.bound(i) {
-			from := entityName(groupEntities(cur.KeyGroups), groupMatch.boundDBID[i])
+			from := nameFor(cur.KeyGroups, groupMatch.boundDBID[i], func(g KeyGroup) string { return g.ID }, func(g KeyGroup) string { return g.Name })
 			if from != g.Name {
 				res.GroupRenames = append(res.GroupRenames, Rename{ID: groupMatch.boundDBID[i], From: from, To: g.Name})
 			}
@@ -149,7 +145,7 @@ func resolve(b Bundle, cur CurrentState, strict bool) (Resolution, error) {
 		}
 		res.GroupCreates = append(res.GroupCreates, g.Name)
 	}
-	res.GroupDeletes = refsForGroups(cur.KeyGroups, groupMatch.deletes)
+	res.GroupDeletes = refsFor(cur.KeyGroups, groupMatch.deletes, func(g KeyGroup) string { return g.ID }, func(g KeyGroup) string { return g.Name })
 
 	// Keys.
 	for i, k := range b.Keys {
@@ -173,11 +169,11 @@ func resolve(b Bundle, cur CurrentState, strict bool) (Resolution, error) {
 			}
 		}
 		res.KeyUpdates = append(res.KeyUpdates, upd)
-		if upd.needsReveal() {
+		if NeedsReveal(upd) {
 			res.RevealKeys = append(res.RevealKeys, k.Name)
 		}
 	}
-	res.KeyDeletes = refsForKeys(cur.Keys, keyMatch.deletes)
+	res.KeyDeletes = refsFor(cur.Keys, keyMatch.deletes, func(k CurrentKey) string { return k.ID }, func(k CurrentKey) string { return k.Name })
 	sort.Strings(res.RevealKeys)
 
 	return res, nil
@@ -221,12 +217,12 @@ func (u KeyUpdate) changed() bool {
 	return u.Renamed || u.MetaChanged || u.DeclChanged || u.Reclassified || u.GroupChanged || u.PresenceChanged
 }
 
-// needsReveal mirrors the two locked reveal gates: a value-dependent rule change
+// NeedsReveal mirrors the two locked reveal gates: a value-dependent rule change
 // on a currently-secret key (schema ADR), and declassification secret→config
 // (reclassification ceremony). Presence-driven reveal — an environment begins
 // delivering a secret the publisher did not supply — is enforced by the publish
 // pipeline itself at apply, not previewed here.
-func (u KeyUpdate) needsReveal() bool {
+func NeedsReveal(u KeyUpdate) bool {
 	wasSecret := u.PrevClassification == string(schema.Secret)
 	declRuleChange := wasSecret && u.DeclChanged
 	declassify := wasSecret && u.Desired.Classification == string(schema.Config)
@@ -280,52 +276,19 @@ func validateKeyReferences(k Key, envNames, groupNames map[string]struct{}) erro
 	return nil
 }
 
-func entityName(list any, id string) string {
-	switch v := list.(type) {
-	case []Environment:
-		for _, e := range v {
-			if e.ID == id {
-				return e.Name
-			}
-		}
-	case []entity:
-		for _, e := range v {
-			if e.id == id {
-				return e.name
-			}
+func nameFor[T any](items []T, id string, idOf, nameOf func(T) string) string {
+	for _, item := range items {
+		if idOf(item) == id {
+			return nameOf(item)
 		}
 	}
 	return ""
 }
 
-func refsFor(envs []Environment, ids []string) []Ref {
+func refsFor[T any](items []T, ids []string, idOf, nameOf func(T) string) []Ref {
 	out := make([]Ref, 0, len(ids))
 	for _, id := range ids {
-		out = append(out, Ref{ID: id, Name: entityName(envs, id)})
-	}
-	return out
-}
-
-func refsForGroups(gs []KeyGroup, ids []string) []Ref {
-	byID := make(map[string]string, len(gs))
-	for _, g := range gs {
-		byID[g.ID] = g.Name
-	}
-	out := make([]Ref, 0, len(ids))
-	for _, id := range ids {
-		out = append(out, Ref{ID: id, Name: byID[id]})
-	}
-	return out
-}
-
-func refsForKeys(keys []CurrentKey, ids []string) []Ref {
-	byID := make(map[string]string, len(keys))
-	for _, k := range keys {
-		byID[k.ID] = k.Name
-	}
-	out := make([]Ref, 0, len(ids))
-	for _, id := range ids {
-		out = append(out, Ref{ID: id, Name: byID[id]})
+		out = append(out, Ref{ID: id, Name: nameFor(items, id, idOf, nameOf)})
 	}
 	return out
 }

@@ -80,14 +80,14 @@ Expired definitions plans remain in the hourly retention/GC run and startup catc
 6. Matching is id first, then name, independently per kind, with final-state validation. Swaps work; stale ids and duplicate bindings/final names refuse.
 7. A base means desired state and omissions delete. No base means additive: creates and unchanged name matches only; modifications refuse; `allow_delete` is invalid.
 8. Plans persist for 24h, at most 20 open per project. Applied rows remain as provenance. Apply is atomic, reauthorizes publication per final environment, bumps once, and never retries/merges stale input.
-9. `definitions_source` defaults to `db`. In `git`, direct definition edits refuse with exact detail: `definitions for this project are managed in Git — changes arrive through definitions plan / definitions apply`. Apply remains allowed.
+9. `definitions_source` defaults to `db`. In `git`, direct definition edits refuse with the exact ui-spec sentence: ``Definitions for this project are managed in Git — changes arrive through `definitions plan` / `definitions apply`.`` Apply remains allowed. Environment reorder and folder create/rename/delete are frozen too, even though bundles cannot express them: they are still definitions-edit acts. The consequence is that Git mode intentionally has no route for those cosmetic changes until the project returns to DB mode.
 10. Values import keeps `definitions_revision` informational. Definitions apply does not set run-manifest `phase_completion.applied`; no manifest-plan linkage exists.
 11. The importer emits the canonical additive bundle type directly: no ids/base/project, no environments/groups, and `none` presence for both rules; artifact name remains `definitions-bundle.json`.
 12. `definitions scaffold` is not built and has no ticket in this slice.
 13. Direct `Environments.Delete` retains its existing value-clearing semantics. The unconditional live-occurrence refusal exists only on definitions apply.
 14. Check uses its ADR-locked 0/1/2 contract despite 1/2 meaning internal/usage globally. This exception is isolated to check and stated in help.
 
-Additional implementation pins: digest has no `sha256:` prefix; protected pins persist id+plan-time name so identity is rename-safe and GET returns stable impact text; expiry is inclusive; topology is checked before schema revision; metadata no-ops do not bump; provenance fields are printable, at most 256 bytes, and bearer-shaped labels refuse; reveal-denied apply preserves its authorization sentinel but carries SafeDetail naming the plan-previewed key.
+Additional implementation pins: digest has no `sha256:` prefix; protected pins persist id+plan-time name so identity is rename-safe and GET returns stable impact text; expiry is inclusive; topology is checked before schema revision; metadata no-ops do not bump; provenance fields are printable, at most 256 bytes, and labels containing bearer-shaped runs refuse; reveal-denied apply preserves its authorization sentinel but carries SafeDetail naming the plan-previewed key. The classification-aware declaration validator lives once in `internal/schema`; bundle parse calls it because each bundle key carries its classification, and direct key ingresses call the same helper. No-op apply mirrors identical declaration updates: it succeeds with the current revision and no plan stamp, audit, revision bump, publication, or snapshot.
 
 ## Test map
 
@@ -102,9 +102,11 @@ Additional implementation pins: digest has no `sha256:` prefix; protected pins p
 | Formula/class/audit closure | focused isolation contract/invariant tests |
 | Both-engine workflow and refusal rollback | `TestDefinitionsSQLite`, `TestDefinitionsPostgres` |
 
-## Known gaps / deferred
+## Web surface and known gaps
 
-- Web UI is slice B and is not implemented here.
+- The project settings UI implements the `definitions_source` selector, the persistent Git-mode banner, last-apply provenance labels, and Playwright coverage in `web/e2e/flows/settings.spec.ts`.
+- No definitions-authoring UI exists anywhere in the repository. Git-mode read-only behavior is therefore carried by the settings surface plus server-side guard refusals on every existing key/group/environment/folder mutation route.
+- The S3 closure registry proves those existing router surfaces are guarded, but cannot flag a future authoring surface that is added without being registered. That is a deliberate gate-blindness to keep visible in review.
 - `definitions scaffold` is unbuilt and unticketed.
 - Run-manifest `phase_completion.applied` remains false; manifest-to-plan linkage is unticketed.
 - Direct environment deletion still clears live values; only definitions apply requires explicit emptying.
@@ -116,9 +118,9 @@ Additional implementation pins: digest has no `sha256:` prefix; protected pins p
 3. Human disposition needed: ticket `definitions scaffold`, or remove it from future-facing documentation.
 4. Human disposition needed: define whether/how a definitions plan/apply links to run-manifest `phase_completion.applied`.
 
-## Slice B (web) needs
+## Implemented web contract
 
-Project settings should call `GET /definitions/settings` and `PUT /definitions/settings` with `{definitions_source:"db"|"git"}`. The read may include:
+Project settings calls `GET /definitions/settings` and `PUT /definitions/settings` with `{definitions_source:"db"|"git"}`. The read may include:
 
 ```json
 {"definitions_source":"git","last_apply":{"plan_id":"dpl_…","applied_at":"…","applied_by":"usr_…","commit":"…","ref":"…","actor":"…","revision":42}}
@@ -126,7 +128,7 @@ Project settings should call `GET /definitions/settings` and `PUT /definitions/s
 
 `commit`, `ref`, `actor`, and `last_apply` are optional. The selector is a project-settings act, not a definitions-edit act. After switching to Git, direct key/group/folder/environment definition writes answer conflict with the exact SafeDetail above; show that detail verbatim and render those editors read-only. Values and environment policy controls remain writable according to their own permissions. A definitions apply remains the one admitted definition write and refreshes `last_apply`.
 
-If slice B exposes plan/apply, consume the contract shapes directly: check returns `state/base_revision?/current_revision/differences`; plan returns id/digest/base/current/additive/expiry/protected environments/diff/deletion flag/reveal-required; apply sends explicit `allow_delete` plus optional provenance and returns revision/published environments/plan id. Render `key_deletions[].live_in` and `env_deletions[].occurrences` before enabling deletion acknowledgement.
+There is no browser plan/apply or authoring surface. If one is added, consume the contract shapes directly: check returns `state/base_revision?/current_revision/differences`; plan returns id/digest/base/current/additive/expiry/protected environments/diff/deletion flag/reveal-required; apply sends explicit `allow_delete` plus optional provenance and returns revision/published environments/plan id. Render `key_deletions[].live_in` and `env_deletions[].occurrences` before enabling deletion acknowledgement.
 
 ## Verification record
 
@@ -141,4 +143,17 @@ If slice B exposes plan/apply, consume the contract shapes directly: check retur
 
 ## Review record
 
-No model CLI or subprocess review was invoked; the continuation brief forbids it. The implementation was reviewed through TDD red/green seams, golden diff inspection, focused invariants, both-engine E2E, and the final compiler/vet/format/package gates.
+R1 contained 13 findings. Confirmed C1-C8 are fixed: secret value-literal declaration enforcement at every ingress; final-state grammar/caps; rename/create ordering; constituent apply audits; pending-draft discard; no-op short-circuit; substring provenance filtering; and stored-digest recomputation. Standards S1-S9 are fixed, including one reveal predicate and the ui-spec sentence as the normative Git-mode text.
+
+Rejected findings and binding rationale:
+
+- R-a protected ceremony: the immutable plan field is the permission ADR's explicit machine confirmation; publish fan-out has no additional ceremony on any schema path.
+- R-b environment-delete publish authorization: topology deletion is definitions-edit / `OpEnvDelete`; the deleted environment is not republished.
+- R-c per-environment reveal: apply uses the same reveal gate, operations, and scope as direct key paths; widening would change the specification.
+- R-d sealer outside the transaction: `prepareSchemaPublish` follows the documented SQLite deadlock-avoidance pattern shared by every schema path.
+
+Open question R-e: add cross-engine canonical golden vectors when a second producer exists. Go is currently the only canonical encoder/digest producer; the TypeScript client does not re-encode bundles.
+
+Cross-model review (Codex gpt-5.6-sol, high effort, 3-round cap): R1 13 findings (0 critical / 5 high / 7 medium / 1 low) — dispositioned as above. R2 verified 16 of 17 fixes; C7 (provenance token filtering) was incomplete because the generic 32-char run misses short-bodied canonical tokens — closed by also refusing any label `audit.RedactTokens` would alter. R3: CLEAN. In-session Standards and Spec axes ran in parallel with R1; the Spec axis confirmed the matching algorithm, pin re-check, unconditional environment-deletion refusal, git-mode guard coverage, and check's 0/1/2 exit contract against the ADR text.
+
+Verification: TDD seams, focused invariants, both-engine E2E, full dual-engine `go test ./...` (38 packages, PG leg on a fresh per-issue database), web typecheck/vitest/build, and the settings Playwright flow (40 passed; one org-deletion disarm timing flake under parallel full-suite load passed 8/8 on isolated re-runs).

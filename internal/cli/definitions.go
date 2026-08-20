@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Hikyo-Org/hikyo/api/apigen"
 	"github.com/Hikyo-Org/hikyo/internal/definitions"
@@ -39,11 +41,7 @@ func runDefinitions(ctx context.Context, ios IO, args []string) error {
 }
 
 func asSilentExit(err error, out **silentExit) bool {
-	status, ok := err.(*silentExit)
-	if ok {
-		*out = status
-	}
-	return ok
+	return errors.As(err, out)
 }
 
 func runDefinitionsVerb(ctx context.Context, ios IO, sub string, args []string) error {
@@ -208,7 +206,7 @@ func definitionsPlanTable(result apigen.DefinitionsPlanResponse) Table {
 	rows := [][]string{
 		{"plan_id", p.Id}, {"digest", p.Digest}, {"base_revision", revisionPointer(p.BaseRevision)},
 		{"current_revision", strconv.FormatInt(p.CurrentRevision, 10)}, {"additive", strconv.FormatBool(p.Additive)},
-		{"expires_at", p.ExpiresAt.Format("2006-01-02T15:04:05Z")},
+		{"expires_at", p.ExpiresAt.Format(time.RFC3339)},
 		{"protected_environments", strings.Join(p.ProtectedEnvironments, ",")},
 		{"deletions_present", strconv.FormatBool(p.DeletionsPresent)},
 	}

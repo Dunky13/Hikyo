@@ -115,6 +115,9 @@ func normalize(b Bundle) (Bundle, error) {
 			return Bundle{}, invalidDetail(
 				"key %q declares classification %q, which is neither `secret` nor `config`", k.Name, k.Classification)
 		}
+		if err := schema.CheckDeclarationClassification(schema.Classification(k.Classification), k.Declaration); err != nil {
+			return Bundle{}, invalidDetail("key %q has an invalid declaration: %v", k.Name, err)
+		}
 		canonicalDecl, err := schema.Canonical(k.Declaration)
 		if err != nil {
 			return Bundle{}, invalidDetail("key %q has an invalid declaration: %v", k.Name, err)

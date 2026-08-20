@@ -87,6 +87,44 @@ func TestDeclarationRefusals(t *testing.T) {
 	}
 }
 
+func TestSecretDeclarationRefusesValueLiteralsRecursively(t *testing.T) {
+	cases := []struct {
+		name string
+		decl schema.Declaration
+		want string
+	}{
+		{"enum rule", rule(schema.Rule{Type: schema.TypeEnum, Members: []string{"live-value"}}), "members"},
+		{"any_of enum alternative", schema.Declaration{AnyOf: []schema.Rule{
+			{Type: schema.TypeString},
+			{Type: schema.TypeEnum, Members: []string{"live-value"}},
+		}}, "members"},
+		{"nested json schema const", rule(schema.Rule{Type: schema.TypeJSON, JSONSchema: json.RawMessage(
+			`{"properties":{"nested":{"allOf":[{"const":"live-value"}]}}}`)}), "const"},
+		{"nested json schema enum", rule(schema.Rule{Type: schema.TypeJSON, JSONSchema: json.RawMessage(
+			`{"$defs":{"nested":{"enum":["live-value"]}}}`)}), "enum"},
+		{"nested json schema examples", rule(schema.Rule{Type: schema.TypeJSON, JSONSchema: json.RawMessage(
+			`{"items":{"examples":["live-value"]}}`)}), "examples"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := schema.CheckDeclarationClassification(schema.Secret, tc.decl)
+			if err == nil || !strings.Contains(err.Error(), tc.want) ||
+				!strings.Contains(err.Error(), "use `pattern`, or declassify the key") {
+				t.Fatalf("secret declaration refusal = %v", err)
+			}
+		})
+	}
+
+	allowed := rule(schema.Rule{Type: schema.TypeJSON, JSONSchema: json.RawMessage(
+		`{"properties":{"nested":{"type":"string","pattern":"^[A-Z]+$"}}}`)})
+	if err := schema.CheckDeclarationClassification(schema.Secret, allowed); err != nil {
+		t.Fatalf("pattern-only secret declaration refused: %v", err)
+	}
+	if err := schema.CheckDeclarationClassification(schema.Config, cases[0].decl); err != nil {
+		t.Fatalf("config enum declaration refused: %v", err)
+	}
+}
+
 func manyMembers(n int) []string {
 	out := make([]string, 0, n)
 	for i := range n {

@@ -156,6 +156,23 @@ func TestParseBoundsRefused(t *testing.T) {
 	}
 }
 
+func TestParseRefusesNestedLiteralOnSecretKey(t *testing.T) {
+	b := sampleBundle()
+	b.Keys[0].Declaration = schema.Declaration{Rule: &schema.Rule{
+		Type:       schema.TypeJSON,
+		JSONSchema: []byte(`{"properties":{"password":{"const":"live-value"}}}`),
+	}}
+	raw, err := Encode(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = Parse(raw)
+	if !errors.Is(err, domain.ErrInvalid) || !strings.Contains(err.Error(), "DB_URL") ||
+		!strings.Contains(err.Error(), "use `pattern`, or declassify the key") {
+		t.Fatalf("secret literal parse refusal = %v", err)
+	}
+}
+
 func mustNormalize(t *testing.T, b Bundle) Bundle {
 	t.Helper()
 	n, err := Normalize(b)
