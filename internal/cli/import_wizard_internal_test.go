@@ -112,7 +112,7 @@ func TestValuesImportRefusesMismatchedManifestProject(t *testing.T) {
 	}
 	manifestBody, err := importer.Encode(importer.Manifest{
 		FormatVersion: importer.FormatVersion, ConnectorContractVersion: importer.ConnectorContractVersion,
-		Target: importer.Target{Project: "prj_Q", Environments: []string{"env_staging"}},
+		Target:          importer.Target{Project: "prj_Q", Environments: []string{"env_staging"}},
 		PhaseCompletion: importer.PhaseCompletion{Authored: true, Imported: map[string]bool{"env_staging": false}},
 	})
 	if err != nil {

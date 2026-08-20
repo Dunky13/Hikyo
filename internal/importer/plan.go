@@ -518,6 +518,27 @@ func BuildProjectPlan(in ProjectPlanInput) (*ProjectPlan, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Bind each environment's values file to this run by content digest, so a
+	// values file cannot be imported under a different run's manifest even when
+	// both target the same (project, environment). Only environments that write a
+	// values file get a digest; the reference is the id for existing environments
+	// and the name for created ones, matching the values file's own addressing.
+	for _, env := range plan.Envs {
+		if !env.HasValues {
+			continue
+		}
+		body, err := Encode(env.Values)
+		if err != nil {
+			return nil, err
+		}
+		ref := env.EnvID
+		if env.Create {
+			ref = env.EnvName
+		}
+		plan.Manifest.ValuesDigests = append(plan.Manifest.ValuesDigests,
+			ValuesDigest{Environment: ref, Digest: Digest(body)})
+	}
+	plan.Manifest.ValuesDigests = nonNil(plan.Manifest.ValuesDigests)
 	// Created environments are explicit, reviewable bundle lines (ADR § Targeting
 	// and hierarchy creation): `definitions apply` creates them. Deduped and
 	// sorted so the bundle is byte-stable.

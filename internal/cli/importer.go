@@ -718,6 +718,39 @@ func runValuesImport(ctx context.Context, ios IO, args []string) error {
 		}
 	}
 
+	// Bind the values file to THIS run by content. Project and environment alone
+	// do not distinguish two runs targeting the same target: without this, run B's
+	// values could import under run A's manifest (its occurrence tokens bind the
+	// reviewed STATE, not the plaintext), and for a tokenless created environment
+	// there is no token at all. A digest mismatch means the file is not the one
+	// this manifest reviewed.
+	if manifest != nil && len(manifest.ValuesDigests) > 0 {
+		ref := env
+		if createdEnvFile {
+			ref = values.EnvironmentName
+		}
+		reencoded, err := importer.Encode(values)
+		if err != nil {
+			return err
+		}
+		var recorded string
+		found := false
+		for _, d := range manifest.ValuesDigests {
+			if d.Environment == ref {
+				recorded, found = d.Digest, true
+				break
+			}
+		}
+		if !found {
+			return failf(ExitRefused,
+				"the run manifest records no values digest for %s; pair the values file with the manifest from the same run", ref)
+		}
+		if importer.Digest(reencoded) != recorded {
+			return failf(ExitRefused,
+				"the values file does not match the run manifest's recorded digest for %s; it is not the values file this manifest reviewed", ref)
+		}
+	}
+
 	var result apigen.ImportValuesResult
 	if err := client.Do(ctx, http.MethodPost,
 		project+"/environments/"+url.PathEscape(env)+"/values/import", body, &result); err != nil {

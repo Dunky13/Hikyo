@@ -173,6 +173,19 @@ type ManifestOccurrence struct {
 	Token       string `json:"token"`
 }
 
+// ValuesDigest binds one environment's values file to THIS run by content. The
+// occurrence tokens bind the reviewed STATE (that it has not moved), not the
+// plaintext an operator is about to write; without this, two runs targeting the
+// same (project, environment) could be mispaired — run B's values imported under
+// run A's manifest, or run A's completion marker stamped for run B — because
+// project and environment alone do not distinguish runs. The digest is over the
+// canonical values-file serialization, so it is deterministic: a wizard session
+// and a flag run with coinciding choices produce the same digest.
+type ValuesDigest struct {
+	Environment string `json:"environment"`
+	Digest      string `json:"digest"`
+}
+
 // PhaseCompletion records how far a run got, so a resumed migration knows where
 // it stopped.
 type PhaseCompletion struct {
@@ -191,6 +204,7 @@ type Manifest struct {
 	Target                   Target               `json:"target"`
 	DefinitionsRevision      int64                `json:"definitions_revision"`
 	Occurrences              []ManifestOccurrence `json:"occurrences"`
+	ValuesDigests            []ValuesDigest       `json:"values_digests"`
 	PhaseCompletion          PhaseCompletion      `json:"phase_completion"`
 }
 

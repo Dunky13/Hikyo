@@ -223,6 +223,48 @@ func TestProjectPlanFansOutAcrossEnvironments(t *testing.T) {
 	}
 }
 
+// TestManifestBindsEachValuesFileByDigest: the manifest records, per writing
+// environment, the digest of that environment's canonical values file — the
+// binding that stops a values file being imported under a different run's
+// manifest. The recorded digest must equal the digest the CLI recomputes from
+// the parsed values file at import.
+func TestManifestBindsEachValuesFileByDigest(t *testing.T) {
+	prod := envFrom(t, "k8s-multi.yaml", "env_prod", nil, nil)
+	staging := envFrom(t, "k8s-multi.yaml", "env_staging", nil, nil)
+	plan, err := BuildProjectPlan(ProjectPlanInput{
+		Source: k8sSource, Project: "prj_1", DefinitionsRevision: 7,
+		Envs: []EnvInput{prod, staging},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	byRef := map[string]string{}
+	for _, d := range plan.Manifest.ValuesDigests {
+		byRef[d.Environment] = d.Digest
+	}
+	for _, env := range plan.Envs {
+		if !env.HasValues {
+			continue
+		}
+		body, err := Encode(env.Values)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := byRef[env.EnvID]; got != Digest(body) {
+			t.Errorf("env %s digest = %q, want %q (the values file's own digest)", env.EnvID, got, Digest(body))
+		}
+	}
+	// A tampered values file (a changed value) no longer matches — the property
+	// the CLI relies on when it refuses a mispaired file.
+	tampered := plan.Envs[0].Values
+	tampered.Entries = append([]ValuesEntry{}, tampered.Entries...)
+	tampered.Entries[0].Value += "X"
+	body, _ := Encode(tampered)
+	if Digest(body) == byRef[plan.Envs[0].EnvID] {
+		t.Error("a changed value produced the same digest")
+	}
+}
+
 // TestProjectPlanRefusesFolderConflict: a key that reconciles to two different
 // folders across environments cannot be declared once (the bundle carries one
 // folder_path per key), so the run refuses. Multi-folder records defeat the k8s
