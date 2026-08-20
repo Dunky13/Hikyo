@@ -64,7 +64,7 @@ func runImportWizard(ctx context.Context, ios IO, c commonFlags, outDir string) 
 	if err != nil {
 		return err
 	}
-	return reportProject(ios, plan, outDir, valuesPaths)
+	return reportProject(ios, plan, outDir, host.sourceFiles, valuesPaths)
 }
 
 // cliWizardHost is the impure WizardHost the engine calls. It never prints an
@@ -75,6 +75,9 @@ type cliWizardHost struct {
 	ctx         context.Context
 	client      *Client
 	projectBase string
+	// sourceFiles are the export files read this session, for the
+	// plaintext-still-on-disk warning. Live reads contribute none.
+	sourceFiles []string
 }
 
 // ReadSource performs one connector read for a gathered selector, mapping the
@@ -99,6 +102,7 @@ func (h *cliWizardHost) ReadSource(source string, sel importer.Selector) (import
 	if err != nil {
 		return importer.SourceRead{}, err
 	}
+	h.sourceFiles = append(h.sourceFiles, sel.File)
 	return importer.SourceRead{Result: res, FileDigest: importer.Digest(in.Data), EnvSlug: sel.EnvSlug}, nil
 }
 
@@ -195,7 +199,11 @@ func runReplayMultiEnv(ctx context.Context, ios IO, client *Client, projectBase,
 	if err != nil {
 		return err
 	}
-	return reportProject(ios, plan, outDir, valuesPaths)
+	var sources []string
+	if sourcePath != "" {
+		sources = []string{sourcePath}
+	}
+	return reportProject(ios, plan, outDir, sources, valuesPaths)
 }
 
 // ---------------------------------------------------------------------------
@@ -399,7 +407,7 @@ func writeProjectArtifacts(ios IO, outDir string, plan *importer.ProjectPlan) ([
 
 // reportProject prints the session summary: renames, near misses, per-environment
 // buckets, the artifact table, and the plaintext-still-on-disk warning.
-func reportProject(ios IO, plan *importer.ProjectPlan, outDir string, valuesPaths []string) error {
+func reportProject(ios IO, plan *importer.ProjectPlan, outDir string, sourceFiles, valuesPaths []string) error {
 	w := ios.Stderr
 	for _, r := range plan.Renames {
 		fmt.Fprintf(w, "rename: %s -> %s (%s)\n",
@@ -447,6 +455,8 @@ func reportProject(ios IO, plan *importer.ProjectPlan, outDir string, valuesPath
 
 	fmt.Fprintf(w, "\nnext: review the bundle, apply it with `definitions plan|apply`, then run\n"+
 		"`hikyo values import` once per environment with its values file and the run manifest.\n\n")
-	fmt.Fprintln(w, importer.PlaintextWarning("", valuesPaths))
+	// Every plaintext file this session left on disk — the source exports it read
+	// and the values files it emitted — is named so the human deletes them all.
+	fmt.Fprintln(w, importer.PlaintextWarning("", append(append([]string{}, sourceFiles...), valuesPaths...)))
 	return nil
 }

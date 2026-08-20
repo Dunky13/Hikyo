@@ -59,6 +59,40 @@ residual, stated openly: that movement is skipped, not rejected-by-name.
    session → replay of its own template), multi-env conformance, no-TTY regression, aggregate
    bound.
 
+## Status (all landed on this branch)
+
+1. ✅ `BuildProjectPlan` multi-env planner; `BuildPlan` is the N=1 wrapper (byte-identity structural).
+2. ✅ Reconciliation: one class/type/classification/folder per key; folder conflict refused.
+3. ✅ Multi-env replay refusal lifted; routed through the planner.
+4. ✅ Wizard engine (nine states) + `SuggestType`; scripted-prompter tests incl. byte-identity.
+5. ✅ CLI TTY entry, terminal prompter, WizardHost, aggregate session bound (decoded bytes in
+   the engine; wall clock via the session context).
+6. ✅ Created environments: `create environment` bundle lines, `target.created_environments`,
+   `environment_name` values file, tokenless phase-2 path in `values import`.
+7. ✅ Conformance `import_multi_environment_fan_out`; no-TTY regression; prompter tests.
+
+Two presence reads in the wizard: the first (default intent) discovers which keys are already
+declared so classification/type review skips them; the second (final intent) mints the
+occurrence tokens the manifest records, so a downgrade or an accepted type suggestion cannot
+leave a stale token.
+
+`values import` slices the run-manifest precondition to the target environment: a manifest spans
+every environment a session touched, but each `values import` is per environment, and importing
+B must not present A's occurrences (A's own import already advanced them).
+
+## Known limitations (for the reviewer / future work)
+
+- **Per-environment source slices in replay.** The wizard reads a source per target environment
+  (so type suggestions can span differing per-env values). The mapping template records ONE
+  `scope` (the first environment's read); a multi-environment REPLAY fans that one recorded source
+  over every environment it names (presence varies, values are the one read's). A template whose
+  environments used genuinely different per-env source files (e.g. Infisical per-slug exports) is
+  not fully reproducible from the single recorded scope. The regenerated manifest is a different
+  run manifest, which the ADR already treats as visible, not silent.
+- **Plaintext-on-disk warning** names the emitted values files but not the wizard's per-environment
+  source export files (flag mode names its single `--file`). A follow-up could thread the read
+  source paths into `reportProject`.
+
 ## Note: ops-catalogue vs code bound divergence (pre-existing, do not fix here)
 
 `docs/spec/ops-catalogue.md` lists 10 MiB / 50 MiB / 50 000 / 10 min where
