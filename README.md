@@ -54,32 +54,29 @@ are planning/parent trackers rather than missing features.
 | Multi-instance workspaces | Directory-tier remotes and browser-direct workspace sessions ([#71]) |
 | Enterprise identity protocols | SAML service-provider support and SCIM provisioning, fully open-source ([#72], [#73]) |
 | Backup and restore | Encrypted export/restore plus the cross-engine recovery drill ([#76]) |
+| Revision lifecycle | Drafts, snapshots, selective publish, rollback, durable pins, retention, GC, and the history drawer with restore and pin lifecycle ([#51]–[#53], [#59]) |
+| Administration UI | Members, organisation and project settings, account security, instance administration, browser step-up ([#60]) |
+| Imports and onboarding | File imports for Kubernetes, SOPS, and Infisical, live Kubernetes and Vault/OpenBao connectors, the interactive wizard, and `definitions scaffold --from .env` for an existing dotenv project ([#68], [#69], [#70], [#112]) |
+| Delivery | Docker Compose `env_file` render/sync/doctor and `hikyo run` ([#63]); Kubernetes operator and CRDs ([#64]); Forgejo and GitHub Actions deployment adapters ([#65], [#66]); the per-project machine-reveal opt-in that admits secret delivery to workloads |
+| Key rotation | Root, master, DEK, token and scanning key rotation plus the resumable re-encrypt walk ([#43], [#75]) |
+| Secret scanning | Surface-1 warnings and Surface-2 blocks on every value ingress, CLI and API ([#74]) |
+| Production operations | Bounds, doctor, upgrade path, no-egress posture, and the Pi-class floor ([#53], [#76], [#77]) |
 | Supply chain and project site | Signed release pipeline and SBOMs ([#46]); documentation/governance site ([#78]); matching brand icons and an [offline-capable PWA](./docs/site/public/manifest.webmanifest) |
 
 ### Partially implemented
 
 | Feature | What works now | Needed for complete implementation |
 | --- | --- | --- |
-| Revision lifecycle | Drafts, snapshots, selective publish, rollback, durable pins, retention, and garbage collection work through API/CLI ([#51]–[#53]) | History drawer, restore, and pin lifecycle UI: [#59] |
-| Administration UI | Authentication, grants, retention, sessions, and administration APIs exist; the shell exposes the current session surface ([#53]–[#55]) | Members, settings, account security, retention/danger zones, and instance-admin screens: [#60] |
-| Imports | File imports for Kubernetes, SOPS, and Infisical plus live Kubernetes and Vault/OpenBao connectors work in flag/replay mode ([#68], [#69]) | Interactive multi-environment wizard: [#112]; final definitions apply/phase advancement: [#70] |
-| Key rotation | Versioned keyrings and token-key rotation exist ([#43], [#51]) | All live-data rotations and crash-safe root-key rotation: [#75] |
-| Production operations | Backup/restore, retention health, and basic `doctor` checks exist ([#53], [#76]) | Compose delivery prerequisite: [#63]; complete bounds, upgrade, no-egress, doctor, and Pi-floor conformance: [#77] |
-| Public release and distribution | Cosign trust, SBOM generation, GoReleaser/Helm packaging, and installer verification exist ([#46]) | Complete all remaining implementation blockers, run full acceptance, freeze the API/CLI, and publish 1.0: [#79] |
+| Public release and distribution | Cosign trust, SBOM generation, GoReleaser/Helm packaging, and installer verification exist ([#46]) | Run the full acceptance pass, freeze the API/CLI, and publish 1.0: [#79] |
+| Secret scanning in the browser | CLI/API Surface-1 warnings and Surface-2 blocks ship ([#74]) | The SPA block dialog, which waits on a declaration-editing surface: [#183] |
+| Ops-spec bounds | Every registered bound refuses by name except three registered as enforcement-pending ([#77]) | Per-project storage high-water: [#185]; schema-revision rate and audit-export budget: [#186] |
 
-### Not started yet
-
-| Feature | Tracking ticket |
-| --- | --- |
-| Docker Compose delivery (`hikyo run`, rendered `env_file`, offline snapshots) | [#63] |
-| Kubernetes operator and CRDs | [#64] |
-| Deployment adapter outbox plus Forgejo and GitHub Actions adapters | [#65], [#66] |
-| Git-managed definitions (`export`, `check`, `plan`, `apply`) | [#70] |
-| Secret scanning | [#74] |
-
-The remaining 1.0 implementation blockers are [#59], [#60], [#63]–[#66],
-[#70], [#74], [#75], [#77], and [#112]. Once they close, [#79] performs the
-full acceptance run and cuts the freeze/release tag.
+Everything else in the 1.0 capability inventory — Compose delivery, the
+Kubernetes operator, deployment adapters, Git-managed definitions, key
+rotation, the import wizard, the history drawer, and the administration UI —
+is implemented. The remaining blockers of [#79] are [#183], [#185] and [#186];
+once they close, [#79] performs the full acceptance run and cuts the
+freeze/release tag.
 
 </details>
 
@@ -125,6 +122,9 @@ full acceptance run and cuts the freeze/release tag.
 [#79]: https://github.com/Hikyo-Org/Hikyo/issues/79
 [#84]: https://github.com/Hikyo-Org/Hikyo/issues/84
 [#112]: https://github.com/Hikyo-Org/Hikyo/issues/112
+[#183]: https://github.com/Hikyo-Org/Hikyo/issues/183
+[#185]: https://github.com/Hikyo-Org/Hikyo/issues/185
+[#186]: https://github.com/Hikyo-Org/Hikyo/issues/186
 
 ## One matrix. No hidden inheritance.
 
