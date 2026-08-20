@@ -7,7 +7,7 @@ import "sort"
 
 // HarnessVersion is bumped when the measurement method or the artifact schema
 // changes, so a stale artifact fails the version match in the validation test.
-const HarnessVersion = "1"
+const HarnessVersion = "2"
 
 // Result is the JSON artifact emitted by cmd/bench-scan. Durations are in
 // milliseconds. PeakRSSBytes is 0 when not cheaply obtainable; PeakRSSUnit
@@ -16,6 +16,7 @@ type Result struct {
 	HarnessVersion    string  `json:"harness_version"`
 	SnapshotVersion   string  `json:"snapshot_version"`
 	Host              string  `json:"host"`
+	MachineModel      string  `json:"machine_model"`
 	Items             int     `json:"items"`
 	ItemBytes         int     `json:"item_bytes"`
 	BootCompileMillis float64 `json:"boot_compile_millis"`

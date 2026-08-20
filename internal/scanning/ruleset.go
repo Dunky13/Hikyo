@@ -23,34 +23,54 @@ const maxCompiledRules = 64
 // genRule is the generated, embedded form of one compiled rule. The generator
 // (internal/scanning/gen) is the single writer of the generatedRules table.
 type genRule struct {
-	id       string
-	regex    string
-	keywords []string
-	digest   string
+	id          string
+	regex       string
+	keywords    []string
+	coverage    keywordCoverage
+	specialFold []string
+	digest      string
 }
+
+type keywordCoverage string
+
+const (
+	keywordCoverageComplete       keywordCoverage = "complete"
+	keywordCoverageFoldIncomplete keywordCoverage = "foldIncomplete"
+	keywordCoverageIncomplete     keywordCoverage = "incomplete"
+)
 
 // compiledRule is the runtime form: a compiled RE2 regex and a lowercased
 // keyword prefilter. hik marks the Hikyo-owned rule, whose regex match is only
 // a candidate — matchHik adds the procedural CRC stage.
 type compiledRule struct {
-	id       string
-	re       *regexp.Regexp
-	keywords []string // lowercased; prefilter only, never verdict-changing
-	hik      bool
+	id          string
+	re          *regexp.Regexp
+	keywords    []string // ASCII-lowercased; prefilter only, never verdict-changing
+	coverage    keywordCoverage
+	specialFold [][]byte // non-ASCII UTF-8 sequences in the keyword's RE2 fold classes
+	hik         bool
 }
 
 // scanStart returns the earliest safe offset at which to start scanning the
 // (already-lowercased) content. A rule with no keywords scans from the start.
 //
-// The existing prefilter already assumes every detectable match contains a
-// keyword occurrence, matching upstream gitleaks' keyword semantics. For every
-// allowlisted rule, that occurrence starts at the match start (the regexes are
-// literal-prefix token grammars, with at most a word boundary before it).
-// Therefore no match can begin more than 64 bytes before the earliest keyword;
-// retaining that lead also preserves the context byte used by a word boundary
-// at the cut. The suffix can neither miss a match nor mint a spurious boundary,
-// so keywords remain an optimisation and do not change committed verdicts.
-func (c *compiledRule) scanStart(lowerContent []byte) (int, bool) {
+// Complete rules always use the keyword window. Fold-incomplete rules do too
+// unless content contains a non-ASCII rune from a relevant RE2 simple-fold
+// class; those rare items scan in full. Incomplete rules always scan in full.
+// For windowed literal-prefix token grammars the keyword starts at the match
+// start (with at most a word boundary before it), so retaining 64 lead bytes
+// also preserves boundary context at the cut.
+func (c *compiledRule) scanStart(content, lowerContent []byte) (int, bool) {
+	switch c.coverage {
+	case keywordCoverageIncomplete:
+		return 0, true
+	case keywordCoverageFoldIncomplete:
+		for _, special := range c.specialFold {
+			if bytes.Contains(content, special) {
+				return 0, true
+			}
+		}
+	}
 	if len(c.keywords) == 0 {
 		return 0, true
 	}
@@ -115,15 +135,29 @@ func load(rules []genRule, manifest []string, snapshot string) (*Ruleset, error)
 		if r.digest == "" {
 			return nil, fmt.Errorf("scanning: rule %q has empty semantic digest", r.id)
 		}
+		switch r.coverage {
+		case keywordCoverageComplete, keywordCoverageIncomplete:
+			if len(r.specialFold) != 0 {
+				return nil, fmt.Errorf("scanning: rule %q has special folds with %s keyword coverage", r.id, r.coverage)
+			}
+		case keywordCoverageFoldIncomplete:
+			if len(r.specialFold) == 0 {
+				return nil, fmt.Errorf("scanning: rule %q has fold-incomplete keyword coverage without special folds", r.id)
+			}
+		default:
+			return nil, fmt.Errorf("scanning: rule %q has invalid keyword coverage %q", r.id, r.coverage)
+		}
 		re, err := regexp.Compile(r.regex)
 		if err != nil {
 			return nil, fmt.Errorf("scanning: rule %q regex does not compile: %w", r.id, err)
 		}
 		compiled = append(compiled, &compiledRule{
-			id:       r.id,
-			re:       re,
-			keywords: lowerAll(r.keywords),
-			hik:      r.id == hikRuleID,
+			id:          r.id,
+			re:          re,
+			keywords:    lowerAll(r.keywords),
+			coverage:    r.coverage,
+			specialFold: bytesAll(r.specialFold),
+			hik:         r.id == hikRuleID,
 		})
 		digests[r.id] = r.digest
 		seen[r.id] = true
@@ -162,13 +196,13 @@ func load(rules []genRule, manifest []string, snapshot string) (*Ruleset, error)
 // only. ctx cancellation/deadline is honoured between rules — the scan shares
 // the enclosing operation's clock (ADR §7).
 func (r *Ruleset) Scan(ctx context.Context, content []byte) ([]Finding, error) {
-	lower := bytes.ToLower(content)
+	lower := asciiFold(content)
 	var findings []Finding
 	for _, cr := range r.rules {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		start, ok := cr.scanStart(lower)
+		start, ok := cr.scanStart(content, lower)
 		if !ok {
 			continue
 		}
@@ -212,7 +246,30 @@ func lowerAll(in []string) []string {
 	}
 	out := make([]string, len(in))
 	for i, s := range in {
-		out[i] = string(bytes.ToLower([]byte(s)))
+		out[i] = string(asciiFold([]byte(s)))
+	}
+	return out
+}
+
+func bytesAll(in []string) [][]byte {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([][]byte, len(in))
+	for i, s := range in {
+		out[i] = []byte(s)
+	}
+	return out
+}
+
+// asciiFold lowercases ASCII letters byte-wise. Every other byte is preserved,
+// so keyword offsets remain valid offsets into the original UTF-8 content.
+func asciiFold(in []byte) []byte {
+	out := append([]byte(nil), in...)
+	for i, b := range out {
+		if b >= 'A' && b <= 'Z' {
+			out[i] = b + ('a' - 'A')
+		}
 	}
 	return out
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/Hikyo-Org/hikyo/internal/scanning/bench"
@@ -34,7 +35,10 @@ func TestPiBenchArtifact(t *testing.T) {
 	}
 
 	if res.HarnessVersion != bench.HarnessVersion {
-		t.Errorf("harness version %q != current %q — regenerate the artifact", res.HarnessVersion, bench.HarnessVersion)
+		t.Fatalf("re-produce with cmd/bench-scan on Pi-class hardware, harness %s", bench.HarnessVersion)
+	}
+	if !strings.Contains(res.MachineModel, "Raspberry Pi 4") {
+		t.Errorf("machine_model %q does not identify Raspberry Pi 4 hardware", res.MachineModel)
 	}
 	if want := mustLoad(t).SnapshotVersion(); res.SnapshotVersion != want {
 		t.Errorf("artifact snapshot %q != current ruleset %q — regenerate the artifact", res.SnapshotVersion, want)

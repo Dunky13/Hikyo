@@ -92,10 +92,15 @@ func measure(host string) (bench.Result, error) {
 	if host == "" {
 		host = runtime.GOOS + "/" + runtime.GOARCH
 	}
+	machine, err := machineModel()
+	if err != nil {
+		return bench.Result{}, err
+	}
 	return bench.Result{
 		HarnessVersion:    bench.HarnessVersion,
 		SnapshotVersion:   rs.SnapshotVersion(),
 		Host:              host,
+		MachineModel:      machine,
 		Items:             len(items),
 		ItemBytes:         itemBytes,
 		BootCompileMillis: bootMillis,
@@ -104,6 +109,42 @@ func measure(host string) (bench.Result, error) {
 		P99Millis:         bench.Percentile(latencies, 99),
 		PeakRSSBytes:      peakRSSBytes(),
 	}, nil
+}
+
+// machineModel captures hardware provenance from the running machine. Host is
+// intentionally separate: it is only a caller-supplied label.
+func machineModel() (string, error) {
+	if runtime.GOOS != "linux" {
+		return "", nil
+	}
+	if data, err := os.ReadFile("/proc/device-tree/model"); err == nil {
+		if model := strings.Trim(string(data), "\x00 \t\r\n"); model != "" {
+			return model, nil
+		}
+	}
+	data, err := os.ReadFile("/proc/cpuinfo")
+	if err != nil {
+		return "", fmt.Errorf("read Linux machine model: %w", err)
+	}
+	var modelName string
+	for _, line := range strings.Split(string(data), "\n") {
+		parts := strings.SplitN(line, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		key := strings.TrimSpace(parts[0])
+		value := strings.TrimSpace(parts[1])
+		if strings.EqualFold(key, "model") && value != "" {
+			return value, nil
+		}
+		if strings.EqualFold(key, "model name") && modelName == "" {
+			modelName = value
+		}
+	}
+	if modelName == "" {
+		return "", fmt.Errorf("read Linux machine model: no model field in /proc/cpuinfo")
+	}
+	return modelName, nil
 }
 
 // corpusItems pads every corpus TP and FP to the size cap, planting the

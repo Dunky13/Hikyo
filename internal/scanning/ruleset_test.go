@@ -71,7 +71,7 @@ func readAllowlistFile(t *testing.T) []string {
 // refuses to start rather than silently scanning with less than it claims.
 func TestLoadRejectsCorruptRuleset(t *testing.T) {
 	digest := "0000000000000000000000000000000000000000000000000000000000000000"
-	good := genRule{id: "aws-access-token", regex: "AKIA[A-Z0-9]{16}", digest: digest}
+	good := genRule{id: "aws-access-token", regex: "AKIA[A-Z0-9]{16}", coverage: keywordCoverageComplete, digest: digest}
 
 	cases := []struct {
 		name     string
@@ -80,13 +80,13 @@ func TestLoadRejectsCorruptRuleset(t *testing.T) {
 		snapshot string
 	}{
 		{"empty snapshot", []genRule{good}, []string{"aws-access-token"}, ""},
-		{"uncompilable regex", []genRule{{id: "x", regex: "(", digest: digest}}, []string{"x"}, "s"},
-		{"empty digest", []genRule{{id: "x", regex: "a", digest: ""}}, []string{"x"}, "s"},
-		{"empty id", []genRule{{id: "", regex: "a", digest: digest}}, nil, "s"},
+		{"uncompilable regex", []genRule{{id: "x", regex: "(", coverage: keywordCoverageComplete, digest: digest}}, []string{"x"}, "s"},
+		{"empty digest", []genRule{{id: "x", regex: "a", coverage: keywordCoverageComplete, digest: ""}}, []string{"x"}, "s"},
+		{"empty id", []genRule{{id: "", regex: "a", coverage: keywordCoverageComplete, digest: digest}}, nil, "s"},
 		{"duplicate id", []genRule{good, good}, []string{"aws-access-token"}, "s"},
 		{"manifest names uncompiled rule", []genRule{good}, []string{"ghost"}, "s"},
 		{"compiled rule absent from manifest", []genRule{good}, nil, "s"},
-		{"manifest lists the hik rule", []genRule{{id: hikRuleID, regex: "a", digest: digest}}, []string{hikRuleID}, "s"},
+		{"manifest lists the hik rule", []genRule{{id: hikRuleID, regex: "a", coverage: keywordCoverageComplete, digest: digest}}, []string{hikRuleID}, "s"},
 		{"over ceiling", overCeiling(digest), nil, "s"},
 	}
 	for _, tc := range cases {
@@ -101,7 +101,7 @@ func TestLoadRejectsCorruptRuleset(t *testing.T) {
 func overCeiling(digest string) []genRule {
 	rules := make([]genRule, maxCompiledRules+1)
 	for i := range rules {
-		rules[i] = genRule{id: string(rune('a'+i%26)) + string(rune('0'+i/26)), regex: "a", digest: digest}
+		rules[i] = genRule{id: string(rune('a'+i%26)) + string(rune('0'+i/26)), regex: "a", coverage: keywordCoverageComplete, digest: digest}
 	}
 	return rules
 }
@@ -135,8 +135,8 @@ func TestSemanticDigest(t *testing.T) {
 // TestScanEmptyKeywordRuleRunsRegex proves the seam contract that a rule with no
 // keywords still runs its regex (prefilter is optimisation only).
 func TestScanEmptyKeywordRuleRunsRegex(t *testing.T) {
-	cr := &compiledRule{id: "kwless", re: regexp.MustCompile("SECRETVALUE"), keywords: nil}
-	if start, ok := cr.scanStart([]byte("nothing here")); !ok || start != 0 {
+	cr := &compiledRule{id: "kwless", re: regexp.MustCompile("SECRETVALUE"), keywords: nil, coverage: keywordCoverageIncomplete}
+	if start, ok := cr.scanStart([]byte("nothing here"), []byte("nothing here")); !ok || start != 0 {
 		t.Fatalf("keyword-less rule scanStart = (%d, %v); want (0, true)", start, ok)
 	}
 	rs := &Ruleset{rules: []*compiledRule{cr}}
