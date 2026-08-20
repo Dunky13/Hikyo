@@ -41,7 +41,7 @@ This handoff records the Forgejo portion only. The GitHub adapter remains #66.
   fencing and no implicit converge; proof-gated target/adapter teardown. Default
   teardown tombstones and queues one scrub per target. Keep-remote immediately
   releases and loudly enumerates names. Dead credentials complete scrub
-  Wenv-side with released custody and an orphan warning. Adapter credentials
+  Hikyo-side with released custody and an orphan warning. Adapter credentials
   survive until every target scrub is terminal.
 - **Authorization, audit, crypto, and restore boundaries** — closed adapter
   authz/store-op mappings; all 14 adapter audit actions and exact outcome sets;

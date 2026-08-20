@@ -14,7 +14,7 @@ import (
 	"unicode/utf8"
 )
 
-const SentinelName = "MANAGED_BY_WENV"
+const SentinelName = "MANAGED_BY_HIKYO"
 
 type Surface string
 

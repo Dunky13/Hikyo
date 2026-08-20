@@ -213,7 +213,7 @@ for icon_path in /pwa-192x192.png /pwa-512x512.png; do
 done
 
 security_txt=$(fetch "$docs_origin/.well-known/security.txt")
-require_response_text "$security_txt" 'Contact: https://github.com/Hikyo-Org/hikyo/security/advisories/new'
+require_response_text "$security_txt" 'Contact: https://github.com/Hikyo-Org/Hikyo/security/advisories/new'
 require_response_text "$security_txt" "Contact: mailto:$fallback_email"
 require_response_text "$security_txt" "Canonical: $docs_origin/.well-known/security.txt"
 expires=$(printf '%s\n' "$security_txt" | awk -F ': ' '$1 == "Expires" {print $2}')

@@ -83,7 +83,7 @@ case "$url" in
 			expires=2099-08-09T00:00:00Z
 		fi
 		printf '%s\n' \
-			'Contact: https://github.com/Hikyo-Org/hikyo/security/advisories/new' \
+			'Contact: https://github.com/Hikyo-Org/Hikyo/security/advisories/new' \
 			'Contact: mailto:security@developwent.io' \
 			"Expires: $expires" \
 			'Canonical: https://hikyo.app/.well-known/security.txt'

@@ -1,6 +1,6 @@
 # Handoff: #55 permission model, full — grants, role templates, protected environments
 
-Issue: https://github.com/Hikyo-Org/hikyo/issues/55 (parent #41, blocked by #48 and
+Issue: https://github.com/Hikyo-Org/Hikyo/issues/55 (parent #41, blocked by #48 and
 #54 — both merged). Governing spec: `docs/adr/permission-model.md` on
 `wayfinder-docs` (locked 2026-07-31, plus the SCIM, flat-model and
 multi-instance amendments), acceptance row A2 in `docs/adr/mvp-boundary.md`.
@@ -706,7 +706,7 @@ disconnected.
   BOTH `internal/isolation/harness_test.go` and
   `internal/conformance/conformance_test.go`. A missing entry fails only on
   postgres, with SQLSTATE 2BP01 on the NEXT run's re-migration.
-- **Run the postgres leg.** `HIKYO_TEST_POSTGRES_DSN=postgres://hikyo:hikyo@127.0.0.1:5432/wenv_test go test ./... -count=1`.
+- **Run the postgres leg.** `HIKYO_TEST_POSTGRES_DSN=postgres://hikyo:hikyo@127.0.0.1:5432/hikyo_test go test ./... -count=1`.
   A sqlite-only run is structurally blind to drop-order, FK-restrict and
   isolation-level behaviour.
 - **`seedOrigins`** in the isolation harness attaches a `manual` origin to every
@@ -719,7 +719,7 @@ disconnected.
 - `gofmt -l .` clean; `go vet ./...` clean.
 - `go test ./... -count=1` on **sqlite**: **616 passed, 0 failed, 30 packages**.
 - `go test ./... -count=1` with
-  `HIKYO_TEST_POSTGRES_DSN=postgres://hikyo:hikyo@127.0.0.1:5432/wenv_test`
+  `HIKYO_TEST_POSTGRES_DSN=postgres://hikyo:hikyo@127.0.0.1:5432/hikyo_test`
   (**both engines**): **958 passed, 0 failed, 30 packages**.
 - The A2 matrix contributes 163 subtests per engine (one grant case plus one
   deny case per atom, per proof-minting operation).

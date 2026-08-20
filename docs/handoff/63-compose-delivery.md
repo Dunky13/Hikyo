@@ -1,6 +1,6 @@
 # Handoff: #63 Compose delivery — `hikyo run --`, rendered `env_file`, offline snapshot, `compose doctor`
 
-Issue: https://github.com/Hikyo-Org/hikyo/issues/63 (parent #41; mvp-boundary row
+Issue: https://github.com/Hikyo-Org/Hikyo/issues/63 (parent #41; mvp-boundary row
 **M2**). Binds [compose-integration.md](../adr/compose-integration.md) (the
 locked Compose ADR), [system-architecture.md § Client local state](../adr/system-architecture.md),
 [ops-spec.md § 6](../adr/ops-spec.md) (7 d snapshot age, current+3 generations,
@@ -208,7 +208,7 @@ Client-library half of #63. No `internal/cli`, `api/`, `internal/service`,
    uses `flock()` (per-open-description) on linux/darwin — the two-Writer test
    confirms the second `BeginRender` fails fast.
 2. **`HIKYO_*` naming throughout** (env var `HIKYO_GEN_<TARGET>`, state file names,
-   HKDF/stamp domain labels). The ADR text says `WENV_*`; the repo is renamed
+   HKDF/stamp domain labels). The ADR text says `HIKYO_*`; the repo is renamed
    hikyo and the brief specifies `HIKYO_*`. Branding, not an ADR conflict.
 3. **Managed-block line endings.** Foreign lines in `.env` preserved byte-for-byte
    including CRLF; the managed block's *own* lines always written LF (it is

@@ -1027,7 +1027,7 @@ func AsError(err error) (*Error, bool) {
 func ServiceProviderConfig(maxResults int) map[string]any {
 	return map[string]any{
 		"schemas":          []string{SchemaSPConfig},
-		"documentationUri": "https://github.com/Hikyo-Org/hikyo",
+		"documentationUri": "https://github.com/Hikyo-Org/Hikyo",
 		"patch":            map[string]any{"supported": true},
 		"bulk": map[string]any{
 			"supported": false, "maxOperations": 0, "maxPayloadSize": 0,

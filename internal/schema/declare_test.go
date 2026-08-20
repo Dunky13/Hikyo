@@ -168,7 +168,7 @@ func TestJSONSchemaProfileRefusals(t *testing.T) {
 		// out, the declaration-time work budget is a genuine step cap rather
 		// than a size bound wearing its name.
 		{"uniqueItems excluded", `{"type":"array","uniqueItems":true}`, "uniqueItems"},
-		{"unknown keyword refused", `{"wenvSpecial":1}`, "wenvSpecial"},
+		{"unknown keyword refused", `{"hikyoSpecial":1}`, "hikyoSpecial"},
 		{"remote ref refused", `{"$ref":"https://example.test/s.json"}`, "$ref"},
 		{"file ref refused", `{"$ref":"file:///etc/passwd"}`, "$ref"},
 		{"dangling ref refused", `{"$ref":"#/$defs/missing"}`, "$ref"},

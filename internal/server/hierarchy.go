@@ -74,7 +74,7 @@ func (a *API) writeRequestError(w http.ResponseWriter, r *http.Request, _ error)
 	// ranked BEHIND authentication: an identity provider presenting no
 	// credential, or the wrong one, gets the uniform 401 and learns nothing
 	// about the shape of what it sent. Only an authenticated caller is told the
-	// body was malformed, and then in the RFC 7644 shape rather than Wenv's.
+	// body was malformed, and then in the RFC 7644 shape rather than Hikyo's.
 	if operation, ok := api.OperationIDFor(r); ok && api.IsSCIMWireOperation(operation) {
 		a.writeSCIMRequestError(w, r,
 			scimproto.ErrInvalidSyntax("The request body is not a valid SCIM resource."))

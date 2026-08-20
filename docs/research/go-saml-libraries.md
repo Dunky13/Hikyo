@@ -1,7 +1,7 @@
 # Go SAML Service Provider libraries — landscape research
 
 **Date:** 2026-08-06
-**Context:** Wenv 1.0 promotes SAML SP support. The human-auth ADR mandates composed single-purpose *proven* libraries ("known library means proven, not conveniently shaped"). Named attack class: XML signature wrapping (XSW). This document is research input for the build-vs-scope-reduce decision; it ranks options and deliberately makes no decision.
+**Context:** Hikyo 1.0 promotes SAML SP support. The human-auth ADR mandates composed single-purpose *proven* libraries ("known library means proven, not conveniently shaped"). Named attack class: XML signature wrapping (XSW). This document is research input for the build-vs-scope-reduce decision; it ranks options and deliberately makes no decision.
 **Method:** Primary sources only — GitHub repos/API (release dates, commit history, contributor stats, go.mod of consuming products), GitHub Security Advisories, library source code (validation paths read directly), the Dec 2020 Mattermost coordinated disclosure, and Russell Haering's March 2026 SAML vulnerability research report.
 
 ---
@@ -13,7 +13,7 @@
 - **Both major libraries have critical signature-bypass CVE history**, and gosaml2 shipped security fixes as recently as **March 2026** (unsigned LogoutRequest acceptance; CBC padding panic) and **August 2026** (unsigned LogoutResponse acceptance; XML token-flood cap). The v0.11.0 release notes admit assertion signatures inside a signed Response envelope "were skipped entirely, which could allow XML wrapping attacks" — an XSW-class fix landing in year 10 of the library's life.
 - **Every serious Go product that ships SAML forks its library**: Grafana → `grafana/saml` (fork of crewjam), Teleport → `gravitational/saml` (fork of crewjam) + upstream gosaml2, Mattermost → `mattermost/gosaml2`. This is the ecosystem's revealed preference: upstream alone is not trusted at face value; vendors pin, patch, and self-audit.
 - A meaningful set of respected Go products **refuse in-process SAML entirely** and tell users to bridge via an IdP broker: Pomerium, MinIO, oauth2-proxy (all OIDC-only), Gitea/Forgejo (no SAML shipped), Argo CD (embeds Dex as its bridge). This posture is normal and accepted in the self-hosted/k8s ecosystem.
-- **Honest verdict up front:** by Wenv's "proven" standard, no Go SAML SP library qualifies unconditionally. crewjam/saml has the strongest *default* validation posture but a bus factor of 1 and slow cadence; gosaml2 has the most active 2026 security maintenance but a permissive-by-default API whose validation gaps are the integrator's problem. Both are viable only with a hardened wrapper, pinned versions, and independent review — or the ticket returns the scope-reduction (bridge) proposal.
+- **Honest verdict up front:** by Hikyo's "proven" standard, no Go SAML SP library qualifies unconditionally. crewjam/saml has the strongest *default* validation posture but a bus factor of 1 and slow cadence; gosaml2 has the most active 2026 security maintenance but a permissive-by-default API whose validation gaps are the integrator's problem. Both are viable only with a hardened wrapper, pinned versions, and independent review — or the ticket returns the scope-reduction (bridge) proposal.
 
 ---
 
@@ -130,11 +130,11 @@ Additionally fixed without advisories: v0.11.0 verified assertion signatures ins
 - HashiCorp's SP-only SAML package, built **on gosaml2 v0.11.0 + goxmldsig v1.6.0** (crewjam v0.4.14 used for metadata types) — go.mod verified. It exists precisely because raw gosaml2 defaults are insufficient: it wraps it with policy options (`ValidateResponseSignature()` / `ValidateAssertionSignature()`), follows the Kantara interoperable SAML deployment profile, Web Browser SSO profile only, HTTP-POST + HTTP-Redirect bindings.
 - **No SLO at all** (verified: no logout code in the package) — deliberate subset.
 - Backing: HashiCorp identity team; underpins Vault's SAML auth method (the consuming `vault-plugin-auth-saml` repo is not public — Vault Enterprise). MPL-2.0.
-- Assessment: the best public example of the "hardened wrapper over gosaml2" pattern, and prior art for the exact subset Wenv would need. Still inherits the gosaml2/goxmldsig foundation and its March/August 2026 fix cadence (cap pinned v0.11.0 as of this research, i.e. without the v0.12.0 hardening).
+- Assessment: the best public example of the "hardened wrapper over gosaml2" pattern, and prior art for the exact subset Hikyo would need. Still inherits the gosaml2/goxmldsig foundation and its March/August 2026 fix cadence (cap pinned v0.11.0 as of this research, i.e. without the v0.12.0 hardening).
 
 ### 3.5 zitadel/saml
 
-- **IdP-side implementation, not an SP** ("A SAML 2.0 server (IdP) implementation written for Go"). Backed by ZITADEL, active (v0.4.1 Oct 2025, pushed Jul 2026), uses goxmldsig + amdonov/xmlsig. No response encryption, no artifact binding. **Not a candidate for Wenv's SP role** — listed to close the question.
+- **IdP-side implementation, not an SP** ("A SAML 2.0 server (IdP) implementation written for Go"). Backed by ZITADEL, active (v0.4.1 Oct 2025, pushed Jul 2026), uses goxmldsig + amdonov/xmlsig. No response encryption, no artifact binding. **Not a candidate for Hikyo's SP role** — listed to close the question.
 
 ### 3.6 RobotsAndPencils/go-saml
 
@@ -200,10 +200,10 @@ No serious Go product was found consuming an unpatched upstream at current versi
 
 ## 6. The alternative: no in-process SAML (IdP-bridge posture)
 
-Delegate SAML to a broker the customer already runs (or deploys alongside), so Wenv speaks only OIDC:
+Delegate SAML to a broker the customer already runs (or deploys alongside), so Hikyo speaks only OIDC:
 
 - **Keycloak** — mature SAML↔OIDC brokering (Java; the most battle-tested SAML implementation available to self-hosters). The standard recommendation for Grafana OSS, MinIO, oauth2-proxy users needing SAML.
-- **ZITADEL, Authentik** — actively maintained self-hostable brokers with SAML federation; fit Wenv's self-hosting audience.
+- **ZITADEL, Authentik** — actively maintained self-hostable brokers with SAML federation; fit Hikyo's self-hosting audience.
 - **Dex** — the canonical embed (Argo CD ships it for exactly this purpose), **but its SAML connector is unmaintained and a deprecation candidate; Dex's own docs steer users to OIDC/LDAP**. Dex is prior art for the *pattern*, not a recommendable SAML bridge in 2026.
 
 Prior art for refusing native SAML: Pomerium, MinIO, oauth2-proxy, Boundary, Gitea/Forgejo (§5). Reception: fully normalized in the self-hosted/k8s world — the friction is not technical but commercial (the enterprise "SAML support" checkbox). Argo CD's Dex-embed shows a middle road: ship a bridge as a deployment detail rather than linking SAML into the trusted process. For a secrets manager specifically, keeping XML parsing and signature validation out of the trusted process entirely is a defensible security argument, not a cop-out — the March/August 2026 fix stream demonstrates the attack surface is still yielding bugs.
@@ -229,27 +229,27 @@ If built in-process, the defensible 1.0 subset is:
 
 ## 8. Verdicts (per option, no decision)
 
-**Ranking for Wenv's standard — "proven, not conveniently shaped", XSW as the named threat:**
+**Ranking for Hikyo's standard — "proven, not conveniently shaped", XSW as the named threat:**
 
 ### Option A — crewjam/saml, pinned fork, hardened config — *best in-process option*
 - **For:** strongest secure-by-default validation of any Go lib (hard errors on Destination, InResponseTo, audience, freshness; IdP-initiated refused by default); xrv since 2020; complete advisory history with credible fixes; the library Grafana and Teleport chose to fork rather than abandon.
 - **Against:** bus factor 1; no formal releases (bare tags); last substantive commit May 2025; 84 open issues; a namespace-handling fix reverted in 2025; SHA-1 accepted; no replay cache; the fork-first behavior of its biggest users is itself the verdict on consuming upstream directly.
-- **Honest posture:** viable **only** as a pinned fork (Wenv-owned or tracking grafana/saml), with a wrapper adding SHA-1 rejection + C14N pinning + replay cache, and an adversarial review of the response-parsing path before 1.0.
+- **Honest posture:** viable **only** as a pinned fork (Hikyo-owned or tracking grafana/saml), with a wrapper adding SHA-1 rejection + C14N pinning + replay cache, and an adversarial review of the response-parsing path before 1.0.
 
 ### Option B — gosaml2 + goxmldsig behind a cap/saml-style strict wrapper — *most active, most footguns*
 - **For:** only Go SAML project with 2026 security releases, fuzzing, and a maintainer who published a 60-CVE adversarial self-review; Mattermost/Teleport/Vault sit on it; cap/saml is a public blueprint for the hardened wrapper.
 - **Against:** permissive-by-default API is disqualifying without a wrapper (audience/time violations are *warnings*; Destination optional; InResponseTo unvalidated; IdP-initiated implicitly accepted); XSW-class and unsigned-SLO fixes landing in **2026** show validation logic was still wrong ten years in; issue #219 still open; bus factor ~1.
-- **Honest posture:** use only via hashicorp/cap/saml or an equivalent Wenv wrapper that turns every warning into an error and adds InResponseTo tracking + replay cache. Raw gosaml2 fails Wenv's bar outright.
+- **Honest posture:** use only via hashicorp/cap/saml or an equivalent Hikyo wrapper that turns every warning into an error and adds InResponseTo tracking + replay cache. Raw gosaml2 fails Hikyo's bar outright.
 
 ### Option C — hashicorp/cap/saml directly
-- **For:** HashiCorp-backed hardened wrapper, deployment-profile-driven, Vault-adjacent pedigree, exactly the SP-only/no-SLO subset Wenv needs.
+- **For:** HashiCorp-backed hardened wrapper, deployment-profile-driven, Vault-adjacent pedigree, exactly the SP-only/no-SLO subset Hikyo needs.
 - **Against:** thin public track record outside Vault; inherits the entire gosaml2/goxmldsig risk surface (and lagged on v0.12.0 hardening at research time); signature policy is options-driven — misconfiguration is still possible; MPL-2.0 to note.
 - **Honest posture:** the strongest "composed single-purpose library" story on paper; still transitively rests on a single-maintainer DSIG core.
 
 ### Option D — no in-process SAML: OIDC-only + documented IdP-bridge (scope reduction)
 - **For:** removes XML parsing, DSIG, and canonicalization from a secrets manager's trusted process entirely; the only option with no unproven dependency; strong prior art (Pomerium, MinIO, oauth2-proxy, Boundary, Gitea; Argo CD's embedded-bridge variant); aligns with the ADR's rejection of conveniently-shaped dependencies.
 - **Against:** enterprise-checkbox friction; pushes a Keycloak/ZITADEL/Authentik deployment onto customers; Dex — the lightest embed — has an unmaintained SAML connector, so the bridge recommendation must name heavier brokers.
-- **Honest posture:** the only option that is unambiguously *proven* by Wenv's standard.
+- **Honest posture:** the only option that is unambiguously *proven* by Hikyo's standard.
 
 ### Disqualified
 - **zitadel/saml** — IdP-side, not an SP.

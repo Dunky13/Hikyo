@@ -1,6 +1,6 @@
 # Handoff — #57 Environment matrix UI + row editor + problems filter
 
-Ticket: [#57](https://github.com/Dunky13/hikyo/issues/57) (parent #41). Blocked-by #51
+Ticket: [#57](https://github.com/Hikyo-Org/Hikyo/issues/57) (parent #41). Blocked-by #51
 (revisions/publish) and #56 (UI shell / flow registry) — both merged before this work
 started. Authored by Codex `gpt-5.6-sol` (high) under a Claude orchestrator, per the
 ticket's model routing; reviewed two-axis (standards + spec) and through the native

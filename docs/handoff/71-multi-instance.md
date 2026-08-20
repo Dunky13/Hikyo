@@ -1,6 +1,6 @@
 # Handoff: #71 multi-instance — directory tier + workspace tier
 
-Issue: https://github.com/Hikyo-Org/hikyo/issues/71. ADR: `.xreview/multi-instance-adr.md`
+Issue: https://github.com/Hikyo-Org/Hikyo/issues/71. ADR: `.xreview/multi-instance-adr.md`
 (locked 2026-08-06). MVP gate: M6 in `.xreview/mvp-boundary.md`.
 
 Status: **IN PROGRESS.** Foundation, store, service, audit, API, CORS/CSP, CLI,
@@ -146,7 +146,7 @@ Serving: `remote.credential_minted`, `remote.credential_revoked`,
 
 ## Repo facts a resumer needs (verified, not assumed)
 
-- PG test DSN env var is **`HIKYO_TEST_POSTGRES_DSN`**, not `WENV_*`. Working
+- PG test DSN env var is **`HIKYO_TEST_POSTGRES_DSN`**, not `HIKYO_*`. Working
   value: `postgres://hikyo:hikyo@127.0.0.1:5432/hikyo_71`. Everything below is
   verified on **both** engines. If a run hits SQLSTATE 2BP01 or "relation
   already exists", the DB is carrying another branch's schema — create a fresh

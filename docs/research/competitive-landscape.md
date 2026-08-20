@@ -1,4 +1,4 @@
-# Wenv — Competitive Landscape Survey
+# Hikyo — Competitive Landscape Survey
 
 **Date: 2026-07-29.** Research performed against live official docs, GitHub repos (README/LICENSE/ee directories), and pricing pages on this date. Primary sources only; every claim carries its source inline.
 
@@ -381,7 +381,7 @@ Sourcing notes: all claims above are from project-owned sources (getsops/sops re
 - Closed-source multi-tenant SaaS; public claims: AES-256-GCM encryption plus tokenization so "internet-exposed infrastructure never accesses encryption keys or ciphertext"; encryption ops on isolated infrastructure; Enterprise customer-managed keys on AWS/GCP ("we encrypt your data with an additional key you control"); SOC 2 and ISO 27001 certified; "75B+ secrets read every month" ([doppler.com/security](https://www.doppler.com/security)).
 - Open pieces: the CLI (Go, Apache 2.0 — [github.com/DopplerHQ/cli](https://github.com/DopplerHQ/cli)), the Kubernetes operator, and the ESO provider integration; everything else (dashboard, API server, storage) is closed.
 
-### 9. What Doppler gets right / weaknesses (Wenv takeaways)
+### 9. What Doppler gets right / weaknesses (Hikyo takeaways)
 
 **Right (worth replicating in OSS):**
 - The **root-config → branch-config inheritance model**: one master secret list per environment, cheap overlays for per-cloud/per-feature/per-developer variation, automatic propagation with override-wins semantics, plus auto-generated private personal configs ([docs.doppler.com/docs/branch-configs](https://docs.doppler.com/docs/branch-configs)).
@@ -391,11 +391,11 @@ Sourcing notes: all claims above are from project-owned sources (getsops/sops re
 - **Ergonomic CLI**: directory-scoped `doppler setup` + one universal `doppler run` injection verb + single-config read-only service tokens ([docs.doppler.com/docs/cli](https://docs.doppler.com/docs/cli)).
 - Per-secret visibility (masked/restricted), commit-style rollback log, and change-request approval flow as a coherent governance story ([docs.doppler.com/docs/secret-visibility](https://docs.doppler.com/docs/secret-visibility), [docs.doppler.com/docs/versioning](https://docs.doppler.com/docs/versioning), [docs.doppler.com/docs/change-requests](https://docs.doppler.com/docs/change-requests)).
 
-**Weaknesses (Wenv's opening):**
+**Weaknesses (Hikyo's opening):**
 - SaaS lock-in with closed server; self-hosting exists only as an Enterprise-priced on-prem product since June 2026 — nothing self-hostable at indie/homelab scale ([community.doppler.com](https://community.doppler.com/t/we-re-excited-to-announce-doppler-on-prem/1987)).
 - Per-seat pricing that gates table-stakes features: RBAC, change requests, config inheritance, and rotation all start at $21/user/mo Team; custom roles and user groups are paid add-ons on top ([doppler.com/pricing](https://www.doppler.com/pricing)).
 - Restricted visibility is leaky by design — service-token minting bypasses it ([docs.doppler.com/docs/secret-visibility](https://docs.doppler.com/docs/secret-visibility)).
-- No true side-by-side multi-environment compare/edit grid in the dashboard (only mirroring + missing-secret warnings) — a gap Wenv could exceed, not just match ([docs.doppler.com/docs/root-configs](https://docs.doppler.com/docs/root-configs)).
+- No true side-by-side multi-environment compare/edit grid in the dashboard (only mirroring + missing-secret warnings) — a gap Hikyo could exceed, not just match ([docs.doppler.com/docs/root-configs](https://docs.doppler.com/docs/root-configs)).
 - 3-day activity log retention on the free tier makes auditability effectively paid ([doppler.com/pricing](https://www.doppler.com/pricing)).
 
 ---
@@ -418,7 +418,7 @@ Sourcing notes: all claims above are from project-owned sources (getsops/sops re
 | Kubernetes delivery | Operator + CSI + ESO provider ([k8s](https://infisical.com/docs/integrations/platforms/kubernetes/overview)) | Own operator (poll); **no ESO provider** ([k8s](https://docs.phase.dev/integrations/platforms/kubernetes)) | Injector + CSI + VSO ([k8s](https://developer.hashicorp.com/vault/docs/platform/k8s)) | Injector + CSI; **no operator** ([k8s](https://openbao.org/docs/platform/k8s/)) | Flux sops decryption, sops-secrets-operator, helm-secrets ([Flux](https://fluxcd.io/flux/guides/mozilla-sops/)) | Is the delivery layer ([README](https://github.com/external-secrets/external-secrets)) | Operator + ESO provider ([operator](https://docs.doppler.com/docs/kubernetes-operator)) |
 | License | MIT + proprietary `/ee` (audit, PIT, approvals, custom roles, …) ([LICENSE](https://github.com/Infisical/infisical/blob/main/LICENSE), [ee](https://github.com/Infisical/infisical/tree/main/backend/src/ee/services)) | MIT + proprietary `ee/`; CLI & operator GPL-3.0; in-app tier gates via `PHASE_LICENSE` ([LICENSE](https://raw.githubusercontent.com/phasehq/console/main/LICENSE), [envars](https://docs.phase.dev/self-hosting/configuration/envars)) | **BUSL 1.1** (licensor IBM) ([LICENSE](https://github.com/hashicorp/vault/blob/main/LICENSE)) | **MPL 2.0**, no paid tier ([LICENSE](https://github.com/openbao/openbao/blob/main/LICENSE)) | MPL 2.0 (SOPS) + BSD-3 (age), nothing paywalled ([LICENSE](https://github.com/getsops/sops/blob/main/LICENSE)) | Apache 2.0 ([repo](https://github.com/external-secrets/external-secrets)) | Proprietary SaaS; CLI Apache 2.0 ([LICENSE](https://github.com/DopplerHQ/cli/blob/master/LICENSE)) |
 
-### Gap analysis — the Wenv wedge
+### Gap analysis — the Hikyo wedge
 
 No surveyed product offers, fully open-source and self-hostable, the combination of:
 
@@ -428,19 +428,19 @@ No surveyed product offers, fully open-source and self-hostable, the combination
 4. **No paywall on production-required features** (audit, rollback, custom roles, approvals). Only OpenBao and SOPS clear this bar — and neither has environments, schema, or a usable env UI. Both open-core apps (Infisical, Phase) fence exactly these features into `/ee` with in-production license enforcement.
 5. **First-class Docker Compose** (documented run/export/agent flow for non-K8s deployment). Everyone treats Compose as an afterthought except CLI-run vendors; nobody targets "self-hosted homelab/SMB Compose stack" as the primary deployment.
 
-The wedge is the *conjunction*: Doppler's environment model (1, 2) + Infisical's matrix UI (3) + OpenBao/SOPS's licensing posture (4) + a Compose-native delivery story (5). Every incumbent is missing at least two of the five, and the two products closest on UX (Infisical, Doppler) both monetize the exact features Wenv would ship free.
+The wedge is the *conjunction*: Doppler's environment model (1, 2) + Infisical's matrix UI (3) + OpenBao/SOPS's licensing posture (4) + a Compose-native delivery story (5). Every incumbent is missing at least two of the five, and the two products closest on UX (Infisical, Doppler) both monetize the exact features Hikyo would ship free.
 
 Secondary observations for positioning:
-- ESO is complementary, not competitive: an Wenv ESO provider (like Infisical's and Doppler's; Phase has none) is the cheapest credible K8s story, alongside or before a native operator ([provider table](https://external-secrets.io/latest/)). Its 2025 maintainer pause ([cncf/toc#1819](https://github.com/cncf/toc/issues/1819)) argues for not making it the *only* K8s path.
-- SOPS is the migration source to target: its pain points (updatekeys toil, no drift view, no read audit, merge conflicts) are Wenv's demo script ([README](https://github.com/getsops/sops/blob/v3.9.0/README.rst)).
+- ESO is complementary, not competitive: an Hikyo ESO provider (like Infisical's and Doppler's; Phase has none) is the cheapest credible K8s story, alongside or before a native operator ([provider table](https://external-secrets.io/latest/)). Its 2025 maintainer pause ([cncf/toc#1819](https://github.com/cncf/toc/issues/1819)) argues for not making it the *only* K8s path.
+- SOPS is the migration source to target: its pain points (updatekeys toil, no drift view, no read audit, merge conflicts) are Hikyo's demo script ([README](https://github.com/getsops/sops/blob/v3.9.0/README.rst)).
 - Phase's E2EE-vs-sync mutual exclusion ([docs](https://docs.phase.dev/console/secrets)) is a cautionary design lesson: server-side features and client-side encryption must be reconciled up front.
 
 ### License precedents
 
-- **HashiCorp Vault: MPL 2.0 → BUSL 1.1 (2023-08-10), licensor now IBM** ([announcement](https://www.hashicorp.com/blog/hashicorp-adopts-business-source-license), [LICENSE](https://github.com/hashicorp/vault/blob/main/LICENSE)) → community forked the last MPL branch as **OpenBao** under Linux Foundation governance (LF Edge, 2024-04-30; 2.0 GA 2024-07-16), which then shipped formerly Enterprise-only namespaces for free ([timeline above](#license-capture-case-study-busl--openbao-timeline)). The canonical capture-and-fork arc; single-vendor CLA + permissive-to-BUSL is the exact risk Wenv's license choice must preclude.
+- **HashiCorp Vault: MPL 2.0 → BUSL 1.1 (2023-08-10), licensor now IBM** ([announcement](https://www.hashicorp.com/blog/hashicorp-adopts-business-source-license), [LICENSE](https://github.com/hashicorp/vault/blob/main/LICENSE)) → community forked the last MPL branch as **OpenBao** under Linux Foundation governance (LF Edge, 2024-04-30; 2.0 GA 2024-07-16), which then shipped formerly Enterprise-only namespaces for free ([timeline above](#license-capture-case-study-busl--openbao-timeline)). The canonical capture-and-fork arc; single-vendor CLA + permissive-to-BUSL is the exact risk Hikyo's license choice must preclude.
 - **Infisical: MIT + `/ee` proprietary carve-out** with production-use restriction in [ee/LICENSE.md](https://github.com/Infisical/infisical/blob/main/backend/src/ee/LICENSE.md); governance/ops features (audit logs, PIT recovery, approvals, custom roles, SCIM, groups) land in `/ee` from day one ([ee/services](https://github.com/Infisical/infisical/tree/main/backend/src/ee/services)). **Features have also demonstrably migrated upward between paid tiers**: Infisical's own pricing blog describes a former $18/id/mo Pro including PIT recovery, RBAC, rotation and 90-day audit retention ([vendor blog](https://infisical.com/blog/secrets-manager-pricing)); on the current 4-tier page, PIT and rotation sit in Advanced ($40) and Pro audit retention dropped to 30 days ([pricing](https://infisical.com/pricing)) — the PIT docs still saying "Pro Tier" corroborate the recent move ([PIT docs](https://infisical.com/docs/documentation/platform/pit-recovery)). The README's "MIT" badge understates the dual license ([README](https://github.com/Infisical/infisical/blob/main/README.md)). Building on an open-core vendor's paid feature carries repricing risk even without a relicense.
 - **Phase: same open-core shape** (MIT console + commercial `ee/`, GPL-3.0 CLI/operator) plus **runtime license-key gating in the self-hosted binary** (`PHASE_LICENSE`) ([envars](https://docs.phase.dev/self-hosting/configuration/envars)) — "open source" with in-app feature flags.
 - **Clean precedents**: SOPS MPL 2.0 (Mozilla → CNCF sandbox, community maintainers) ([cncf.io](https://www.cncf.io/projects/sops/)), age BSD-3 ([LICENSE](https://github.com/FiloSottile/age/blob/main/LICENSE)), ESO Apache 2.0 under CNCF ([cncf.io](https://www.cncf.io/projects/external-secrets/)), OpenBao MPL 2.0 under LF.
-- **Implication for Wenv**: a copyleft-leaning OSI license (MPL 2.0 as the pragmatic middle: file-level copyleft, fork-proofs the core, no BUSL path without unanimous contributor consent) plus foundation-style or DCO governance — and an explicit public commitment of "no /ee directory": audit, rollback, RBAC, approvals in the free core, since that boundary is precisely where every commercial competitor monetizes.
+- **Implication for Hikyo**: a copyleft-leaning OSI license (MPL 2.0 as the pragmatic middle: file-level copyleft, fork-proofs the core, no BUSL path without unanimous contributor consent) plus foundation-style or DCO governance — and an explicit public commitment of "no /ee directory": audit, rollback, RBAC, approvals in the free core, since that boundary is precisely where every commercial competitor monetizes.
 
 *Research performed 2026-07-29 against live documentation; primary sources only (official docs, LICENSE files, ee directories, pricing pages, release notes, foundation announcements).*

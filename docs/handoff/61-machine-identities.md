@@ -1,6 +1,6 @@
 # Handoff: #61 machine identities — service accounts, tokens, display-once mint
 
-Issue: https://github.com/Hikyo-Org/hikyo/issues/61 (parent #41; M1 token portion
+Issue: https://github.com/Hikyo-Org/Hikyo/issues/61 (parent #41; M1 token portion
 of the machine-identities ADR, `docs/adr/machine-identities.md` on the
 `wayfinder-docs` branch). Blocked-by #55 (permission model) is merged.
 
@@ -145,5 +145,5 @@ these two post-R3 fixes are presented for human disposition at the merge
 gate rather than re-reviewed.
 
 Verification: `go build ./... && go vet ./...` clean; full suite green on
-both engines (`HIKYO_TEST_POSTGRES_DSN` set, dedicated `wenv_61` database —
-the shared `wenv_test` DB carried another branch's SCIM schema).
+both engines (`HIKYO_TEST_POSTGRES_DSN` set, dedicated `hikyo_61` database —
+the shared `hikyo_test` DB carried another branch's SCIM schema).
