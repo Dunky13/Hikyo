@@ -107,8 +107,14 @@ export function InstanceAdmin() {
     {done !== null ? <Done>{done}</Done> : null}
 
     <Panel id="instance-orgs" title="Organisations">
+      <p className="machine__lede">
+        Creating an organisation grants nobody anything, including its creator. To work inside one,
+        add a grant under Instance grants below (your principal ID is on Account &amp; security; the
+        admin template covers the organisation) or in the organisation&apos;s Members page once you
+        hold manage-members there. A grant on your own account ends the current session.
+      </p>
       {orgs.isPending ? <p role="status">Loading organisations…</p> : null}
-      {secondFactor(orgs.error) ? <Alert>Listing every organisation on this instance needs a second factor. This session does not have sufficient second-factor assurance; sign in again and present a passkey or authenticator code.</Alert> : null}
+      {secondFactor(orgs.error) ? <Alert>Listing every organisation on this instance needs a second factor. This session does not have sufficient second-factor assurance; present your authenticator code or passkey in the banner above.</Alert> : null}
       {nondisclosed(orgs.error) ? <p role="status">The organisation directory is not disclosed to this session.</p> : null}
       {orgs.isError && !secondFactor(orgs.error) && !nondisclosed(orgs.error) ? <Alert>{settingsFailureText(orgs.error, 'list-instance-orgs')}</Alert> : null}
       {orgs.isSuccess ? <>

@@ -5,6 +5,7 @@ import { useLogout, useOrgs, type WhoAmI } from '../api/session.ts';
 import { retentionBanner, useRetentionHealth } from '../api/retention.ts';
 import { effectiveTheme, prefersDark, useThemeChoice, type Theme } from '../app/theme.ts';
 import { needsOrg, SECTIONS, SURFACES, surfaceById, type Surface } from '../app/navigation.ts';
+import { StepUpBanner } from './StepUpBanner.tsx';
 
 /**
  * The application chrome skeleton (prototype/app-chrome iteration 15, sidebar
@@ -127,8 +128,9 @@ export function Shell({ session }: { session: WhoAmI }) {
           // them membership — their enumeration surface is elsewhere and
           // behind its own second factor.
           <p className="sidebar__empty" role="status">
-            No organisations yet. You will see one here once you are granted
-            access to it.
+            No organisations yet. An instance administrator creates one under Instance
+            administration (a second factor is required), or with{' '}
+            <code>hikyo org create</code>; you will see it here once you are granted access.
           </p>
         ) : null}
         {orgs.isError ? (
@@ -206,6 +208,7 @@ export function Shell({ session }: { session: WhoAmI }) {
             </span>
           </p>
         ) : null}
+        <StepUpBanner session={session} />
         <main className="content" id="content" tabIndex={-1}>
           <Outlet context={{ activeOrgId }} />
         </main>

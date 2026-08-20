@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 
 import { loginFailureText, useLogin } from '../api/session.ts';
+import { passkeysAvailable, stepUpFailureText, usePasskeyLogin } from '../api/stepup.ts';
 
 /**
  * The local password login page.
@@ -17,6 +18,7 @@ import { loginFailureText, useLogin } from '../api/session.ts';
  */
 export function Login() {
   const login = useLogin();
+  const passkey = usePasskeyLogin();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
 
@@ -68,6 +70,29 @@ export function Login() {
         <button className="btn btn--primary" type="submit" disabled={login.isPending}>
           {login.isPending ? 'Signing in…' : 'Sign in'}
         </button>
+        {passkeysAvailable() ? (
+          <>
+            <p className="login__or" aria-hidden="true">
+              or
+            </p>
+            <button
+              className="btn"
+              type="button"
+              onClick={() => passkey.mutate()}
+              disabled={login.isPending || passkey.isPending}
+            >
+              {passkey.isPending ? 'Waiting for the passkey…' : 'Sign in with a passkey'}
+            </button>
+            {passkey.isError ? (
+              <p className="alert" role="alert">
+                <span className="alert__glyph" aria-hidden="true">
+                  !
+                </span>
+                <span>{stepUpFailureText(passkey.error)}</span>
+              </p>
+            ) : null}
+          </>
+        ) : null}
       </form>
     </main>
   );

@@ -289,7 +289,7 @@ export async function runAdapterTOTPCeremony(
  * wire shape and then every field would still need converting, so the check
  * and the conversion live together and neither can be skipped.
  */
-function requestOptions(blob: unknown): PublicKeyCredentialRequestOptions {
+export function requestOptions(blob: unknown): PublicKeyCredentialRequestOptions {
   if (typeof blob !== 'object' || blob === null) {
     throw new Error('the reauth options were not an object');
   }

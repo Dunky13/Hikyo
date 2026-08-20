@@ -1,5 +1,7 @@
 import {
+  createEnvironment,
   createOrg,
+  createProject,
   deleteOrg,
   deleteProject,
   getEnvironmentSettings,
@@ -18,6 +20,7 @@ import {
   setProjectRetention,
 } from '@hikyo/client';
 import {
+  zEnvironment,
   zEnvironmentList,
   zEnvironmentSettings,
   zOrg,
@@ -431,6 +434,97 @@ export function useDeleteProject(org: string) {
       ok(deleteProject({ path: { org, project: input.project } })),
     onSettled: () => queries.invalidateQueries(),
   });
+}
+
+// --- authoring --------------------------------------------------------------
+
+/**
+ * useCreateProject writes one project into an organisation.
+ *
+ * On success it invalidates only the project list for this org — the exact key
+ * every chrome surface reads through `useProjects` — so the new row appears
+ * without a reload and nothing else refetches.
+ */
+export function useCreateProject(org: string) {
+  const queries = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { name: string }) =>
+      parsed(createProject({ path: { org }, body: { name: input.name } }), zProject),
+    onSuccess: () => queries.invalidateQueries({ queryKey: projectsKey(org) }),
+  });
+}
+
+/**
+ * useCreateEnvironment writes one environment into a project.
+ *
+ * The invalidated key is `['environments', org, project]`, which is the single
+ * key both this page's `useEnvironments` and the matrix's own read share, so a
+ * created environment surfaces in the settings list AND the matrix at once.
+ */
+export function useCreateEnvironment(org: string, project: string) {
+  const queries = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { name: string }) =>
+      parsed(
+        createEnvironment({ path: { org, project }, body: { name: input.name } }),
+        zEnvironment,
+      ),
+    onSuccess: () => queries.invalidateQueries({ queryKey: environmentsKey(org, project) }),
+  });
+}
+
+/**
+ * createProjectRefusalText names the capability the act needs.
+ *
+ * A 403 and a 404 are deliberately the same sentence: whether the organisation
+ * is unreachable or merely does not exist is a distinction the server refuses
+ * to draw, and either way creating a project needs `manage-projects` at the
+ * organisation scope.
+ */
+export function createProjectRefusalText(error: unknown): string {
+  if (error instanceof ApiError) {
+    switch (error.status) {
+      case 400:
+        return error.detail ?? 'The project name is invalid.';
+      case 401:
+        return 'Your session ended. Sign in again to continue.';
+      case 403:
+      case 404:
+        return 'You are not permitted to create a project here — that needs manage-projects at the organisation scope.';
+      case 409:
+        return error.detail ?? 'This project name is already in use.';
+      case 429:
+        return 'Too many attempts right now. Wait a moment and try again.';
+      default:
+        return 'The server failed; whether the project was created is unknown — reload to check.';
+    }
+  }
+  return 'The server failed; whether the project was created is unknown — reload to check.';
+}
+
+/**
+ * createEnvironmentRefusalText is the environment counterpart: the same uniform
+ * 403/404, and the capability it names is `definitions-edit` on the project.
+ */
+export function createEnvironmentRefusalText(error: unknown): string {
+  if (error instanceof ApiError) {
+    switch (error.status) {
+      case 400:
+        return error.detail ?? 'The environment name is invalid.';
+      case 401:
+        return 'Your session ended. Sign in again to continue.';
+      case 403:
+      case 404:
+        return 'You are not permitted to create an environment here — that needs definitions-edit on the project.';
+      case 409:
+        return error.detail ?? 'This environment name is already in use.';
+      case 429:
+        return 'Too many attempts right now. Wait a moment and try again.';
+      default:
+        return 'The server failed; whether the environment was created is unknown — reload to check.';
+    }
+  }
+  return 'The server failed; whether the environment was created is unknown — reload to check.';
 }
 
 /**
