@@ -8,7 +8,7 @@ Granularity note: this ADR fixes process and structure, not artifact content. Th
 
 ## Canonical home — GitHub, in an organization, no public mirror
 
-**The canonical repository is Hikyo's GitHub organization repository.** The repository currently sits in a personal namespace (`Dunky13/hikyo`); **transfer into a dedicated GitHub organization is a fixed implementation step of this ADR**, because a load-bearing enforcement claim depends on it: GitHub cannot enforce collaborator 2FA on a personal repository — only an organization can require 2FA of all members. GitHub redirects the old URL after transfer, so the move is cheap now and only gets more expensive.
+**The canonical repository is [`Hikyo-Org/Hikyo`](https://github.com/Hikyo-Org/Hikyo), in Hikyo's GitHub organization.** The transfer from the original personal namespace is complete. This placement is load-bearing: GitHub cannot enforce collaborator 2FA on a personal repository — only an organization can require 2FA of all members.
 
 The owner's standing bias is self-hosted Forgejo — and it does not apply, because the bias is about *his* infrastructure and this decision is about *contributors'*. A public project lives where its contributors, issue reports, and security researchers already are. GitHub supplies, at zero build cost, three things this ADR depends on by name: Private Vulnerability Reporting (§ Disclosure), CVE assignment via GitHub-as-CNA, and the Actions runners that build (but never sign — § Ceremony) the artifacts.
 
