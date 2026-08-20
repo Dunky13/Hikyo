@@ -57,3 +57,10 @@ WHERE org_id = ? AND project_id = ? AND id = ?;
 UPDATE environments SET protected = ?, reauth_window_seconds = ?
 WHERE org_id = ? AND project_id = ? AND id = ?;
 
+-- ListEnvironmentProtection reads every environment's protected flag under a
+-- PROJECT proof - the definitions plan/apply path pins the project's protected
+-- set and refuses if it grew (#70, permission-model ADR section 84). GetEnvironmentSettings
+-- is environment-addressed and cannot serve a project-scoped read.
+-- name: ListEnvironmentProtection :many
+SELECT id, protected FROM environments
+WHERE org_id = ? AND project_id = ? ORDER BY id;

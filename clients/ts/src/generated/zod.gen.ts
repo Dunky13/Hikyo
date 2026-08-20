@@ -651,6 +651,121 @@ export const zRevealDiffRequest = z.object({
     right: zId
 });
 
+export const zDefinitionsBundleEntity = z.object({
+    id: zId.optional(),
+    name: z.string().min(1).max(128)
+});
+
+export const zDefinitionsBundlePresence = z.object({
+    mode: z.enum([
+        'all',
+        'none',
+        'explicit'
+    ]),
+    environments: z.array(z.string().min(1).max(128)).max(50)
+});
+
+export const zDefinitionsRename = z.object({
+    id: z.string(),
+    from: z.string(),
+    to: z.string()
+});
+
+export const zDefinitionsKindDiff = z.object({
+    creates: z.array(z.string()),
+    updates: z.array(z.string()),
+    renames: z.array(zDefinitionsRename),
+    deletes: z.array(z.string())
+});
+
+export const zDefinitionsDiff = z.object({
+    environments: zDefinitionsKindDiff,
+    key_groups: zDefinitionsKindDiff,
+    keys: zDefinitionsKindDiff,
+    reveal_required: z.array(z.string())
+});
+
+export const zDefinitionsCheckResult = z.object({
+    state: z.enum([
+        'equal',
+        'file_ahead',
+        'db_ahead',
+        'diverged'
+    ]),
+    base_revision: z.coerce.bigint().gte(BigInt(0)).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }).optional(),
+    current_revision: z.coerce.bigint().gte(BigInt(0)).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }),
+    differences: zDefinitionsDiff
+});
+
+export const zDefinitionsKeyDeletion = z.object({
+    name: z.string(),
+    live_in: z.array(z.string())
+});
+
+export const zDefinitionsEnvironmentDeletion = z.object({
+    name: z.string(),
+    occurrences: z.coerce.bigint().gte(BigInt(0)).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' })
+});
+
+export const zDefinitionsPlanDiff = z.object({
+    environments: zDefinitionsKindDiff,
+    key_groups: zDefinitionsKindDiff,
+    keys: zDefinitionsKindDiff,
+    key_deletions: z.array(zDefinitionsKeyDeletion),
+    env_deletions: z.array(zDefinitionsEnvironmentDeletion),
+    reveal_required: z.array(z.string())
+});
+
+export const zDefinitionsPlan = z.object({
+    id: zId,
+    digest: z.string().length(64).regex(/^[0-9a-f]{64}$/),
+    base_revision: z.coerce.bigint().gte(BigInt(0)).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }).optional(),
+    current_revision: z.coerce.bigint().gte(BigInt(0)).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }),
+    additive: z.boolean(),
+    expires_at: zTimestamp,
+    protected_environments: z.array(z.string()),
+    diff: zDefinitionsPlanDiff,
+    deletions_present: z.boolean(),
+    reveal_required: z.array(z.string())
+});
+
+export const zDefinitionsPlanResponse = z.object({
+    plan: zDefinitionsPlan
+});
+
+export const zApplyDefinitionsPlanRequest = z.object({
+    allow_delete: z.boolean(),
+    digest: z.string().max(64).optional(),
+    commit: z.string().max(256).optional(),
+    ref: z.string().max(256).optional(),
+    actor: z.string().max(256).optional()
+});
+
+export const zApplyDefinitionsPlanResult = z.object({
+    revision: z.coerce.bigint().gte(BigInt(0)).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }),
+    published: z.array(z.string()),
+    plan_id: zId
+});
+
+export const zDefinitionsLastApply = z.object({
+    plan_id: zId,
+    applied_at: zTimestamp,
+    applied_by: z.string(),
+    commit: z.string().max(256).optional(),
+    ref: z.string().max(256).optional(),
+    actor: z.string().max(256).optional(),
+    revision: z.coerce.bigint().gte(BigInt(0)).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' })
+});
+
+export const zDefinitionsSettings = z.object({
+    definitions_source: z.enum(['db', 'git']),
+    last_apply: zDefinitionsLastApply.optional()
+});
+
+export const zSetDefinitionsSettingsRequest = z.object({
+    definitions_source: z.enum(['db', 'git'])
+});
+
 /**
  * An environment carries NO `base` pointer and no defaults layer, here or
  * anywhere: the flat-model ADR deleted both, and every value is explicit
@@ -1500,6 +1615,28 @@ export const zKeyRule = z.object({
 export const zKeyDeclaration = z.object({
     rule: zKeyRule.optional(),
     any_of: z.array(zKeyRule).min(2).max(8).optional()
+});
+
+export const zDefinitionsBundleKey = z.object({
+    id: zId.optional(),
+    name: zKeyName,
+    folder_path: zKeyFolderPath,
+    classification: zKeyClassification,
+    description: z.string().max(4096),
+    deprecated: z.boolean(),
+    deprecation_note: z.string().max(4096),
+    group: z.string().max(128),
+    declaration: zKeyDeclaration,
+    required_in: zDefinitionsBundlePresence,
+    forbidden_in: zDefinitionsBundlePresence
+});
+
+export const zDefinitionsBundle = z.object({
+    format_version: z.literal(1),
+    base_revision: z.coerce.bigint().gte(BigInt(0)).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }).optional(),
+    environments: z.array(zDefinitionsBundleEntity).max(10000),
+    key_groups: z.array(zDefinitionsBundleEntity).max(10000),
+    keys: z.array(zDefinitionsBundleKey).max(10000)
 });
 
 /**
@@ -2368,6 +2505,11 @@ export const zGrantCapability = zCapability;
 export const zKeyId = zId;
 
 /**
+ * Immutable definitions-plan identifier.
+ */
+export const zDefinitionsPlanId = zId;
+
+/**
  * The key's NAME, not its id. Values are addressed the way an operator
  * holds them - `values set DATABASE_URL` - and the id is server
  * vocabulary that appears only in responses and audit records.
@@ -3099,6 +3241,90 @@ export const zSetEnvironmentSettingsPath = z.object({
  * The settings as stored.
  */
 export const zSetEnvironmentSettingsResponse = zEnvironmentSettings;
+
+export const zExportDefinitionsPath = z.object({
+    org: zId,
+    project: zId
+});
+
+export const zExportDefinitionsQuery = z.object({
+    portable: z.boolean().optional().default(false)
+});
+
+/**
+ * Canonical definitions bundle bytes.
+ */
+export const zExportDefinitionsResponse = zDefinitionsBundle;
+
+export const zCheckDefinitionsBody = zDefinitionsBundle;
+
+export const zCheckDefinitionsPath = z.object({
+    org: zId,
+    project: zId
+});
+
+/**
+ * Drift classification and structural differences.
+ */
+export const zCheckDefinitionsResponse = zDefinitionsCheckResult;
+
+export const zCreateDefinitionsPlanBody = zDefinitionsBundle;
+
+export const zCreateDefinitionsPlanPath = z.object({
+    org: zId,
+    project: zId
+});
+
+/**
+ * The immutable impact plan.
+ */
+export const zCreateDefinitionsPlanResponse = zDefinitionsPlanResponse;
+
+export const zGetDefinitionsPlanPath = z.object({
+    org: zId,
+    project: zId,
+    plan: zId
+});
+
+/**
+ * The immutable impact plan.
+ */
+export const zGetDefinitionsPlanResponse = zDefinitionsPlanResponse;
+
+export const zApplyDefinitionsPlanBody = zApplyDefinitionsPlanRequest;
+
+export const zApplyDefinitionsPlanPath = z.object({
+    org: zId,
+    project: zId,
+    plan: zId
+});
+
+/**
+ * The committed schema revision and published environments.
+ */
+export const zApplyDefinitionsPlanResponse = zApplyDefinitionsPlanResult;
+
+export const zGetDefinitionsSettingsPath = z.object({
+    org: zId,
+    project: zId
+});
+
+/**
+ * Definitions governance settings.
+ */
+export const zGetDefinitionsSettingsResponse = zDefinitionsSettings;
+
+export const zSetDefinitionsSettingsBody = zSetDefinitionsSettingsRequest;
+
+export const zSetDefinitionsSettingsPath = z.object({
+    org: zId,
+    project: zId
+});
+
+/**
+ * Updated definitions governance settings.
+ */
+export const zSetDefinitionsSettingsResponse = zDefinitionsSettings;
 
 export const zListKeysPath = z.object({
     org: zId,

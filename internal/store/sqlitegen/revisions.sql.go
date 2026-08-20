@@ -967,6 +967,48 @@ func (q *Queries) ListSnapshots(ctx context.Context, arg ListSnapshotsParams) ([
 	return items, nil
 }
 
+const projectSnapshotRevisions = `-- name: ProjectSnapshotRevisions :many
+SELECT environment_id, revision FROM snapshots
+WHERE org_id = ? AND project_id = ?
+`
+
+type ProjectSnapshotRevisionsParams struct {
+	OrgID     string
+	ProjectID string
+}
+
+type ProjectSnapshotRevisionsRow struct {
+	EnvironmentID string
+	Revision      int64
+}
+
+// ProjectSnapshotRevisions returns the project-confined revision rows used to
+// build the definitions plan/apply pin (#70). The repository folds the maximum
+// per environment; keeping aggregation out of SQL leaves the chain predicate in
+// the conservative analyzer's provable shape.
+func (q *Queries) ProjectSnapshotRevisions(ctx context.Context, arg ProjectSnapshotRevisionsParams) ([]ProjectSnapshotRevisionsRow, error) {
+	rows, err := q.db.QueryContext(ctx, projectSnapshotRevisions, arg.OrgID, arg.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ProjectSnapshotRevisionsRow
+	for rows.Next() {
+		var i ProjectSnapshotRevisionsRow
+		if err := rows.Scan(&i.EnvironmentID, &i.Revision); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const recordSecretValueOccurrence = `-- name: RecordSecretValueOccurrence :exec
 INSERT INTO secret_value_occurrences (
     value_entry_id, org_id, project_id, environment_id

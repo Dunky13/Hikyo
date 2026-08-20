@@ -1,5 +1,6 @@
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import {
+  zDefinitionsSettings,
   zEnvironment,
   zEnvironmentSettings,
   zOrg,
@@ -323,8 +324,76 @@ test.describe('project settings', () => {
     await expect(readBack.getByLabel('Protected environment')).not.toBeChecked();
     await expect(readBack.getByLabel('Reveal reauthentication window')).toHaveValue('300');
 
-    // The definitions source belongs in this panel and is absent by name.
-    await expect(policy).toContainText('nothing on this branch stores it');
+    await expect(policy.getByLabel('Definitions source')).toHaveValue('db');
+  });
+
+  test('persists Git-governed definitions and explains the read-only boundary', async () => {
+    await page.emulateMedia({ colorScheme: 'dark' });
+    try {
+      await browserApi(page, 'PUT', `${base()}/definitions/settings`, zDefinitionsSettings, {
+        definitions_source: 'db',
+      });
+      await page.goto(`/orgs/${seed.org}/projects/${drillProject}/settings`);
+      const policy = page.locator('#project-policy');
+      const source = policy.getByLabel('Definitions source');
+      await expect(source).toHaveValue('db');
+
+      // Select by contract value: labels are presentation and may be localised.
+      await source.selectOption('git');
+      const gitNotice = policy.getByRole('alert').filter({
+        hasText:
+          'Definitions for this project are managed in Git — changes arrive through `definitions plan` / `definitions apply`.',
+      });
+      await expect(gitNotice.locator('span').last()).toHaveText(
+        'Definitions for this project are managed in Git — changes arrive through `definitions plan` / `definitions apply`.',
+      );
+      await expect(source).toHaveValue('git');
+
+      await page.reload();
+      const persistedPolicy = page.locator('#project-policy');
+      const persistedSource = persistedPolicy.getByLabel('Definitions source');
+      await expect(persistedSource).toHaveValue('git');
+      const persistedNotice = persistedPolicy.getByRole('alert').filter({
+        hasText:
+          'Definitions for this project are managed in Git — changes arrive through `definitions plan` / `definitions apply`.',
+      });
+      await expect(persistedNotice).toBeVisible();
+      await expect(persistedPolicy).toContainText('Values remain editable in either mode.');
+
+      const heading = page.getByRole('heading', { name: 'Project settings', level: 1 });
+      await expectPinnedAssertionSet(page, {
+        flow: 'chrome-settings',
+        surface: 'project-settings',
+        theme: 'dark',
+        text: [heading, persistedNotice, persistedPolicy.getByText(/Values remain editable/)],
+        radii: [
+          [persistedPolicy, 'container'],
+          [persistedSource, 'control'],
+        ],
+        fonts: [
+          [heading, 'ui'],
+          [page.locator('#project-identity .kv dd').first(), 'mono'],
+        ],
+        colours: [
+          [heading, 'color', '--tx'],
+          [persistedPolicy, 'backgroundColor', '--bg-raise'],
+          [persistedPolicy, 'borderTopColor', '--line'],
+        ],
+        hairlines: [persistedPolicy],
+        density: [[persistedSource, '--touch']],
+      });
+
+      // project-settings remains capable of changing its own governance mode.
+      await persistedSource.selectOption('db');
+      await expect(persistedSource).toHaveValue('db');
+      await expect(persistedNotice).toHaveCount(0);
+      await page.reload();
+      await expect(page.locator('#project-policy').getByLabel('Definitions source')).toHaveValue(
+        'db',
+      );
+    } finally {
+      await page.emulateMedia({ colorScheme: null });
+    }
   });
 
   test('keeps save disabled while an environment policy is unreadable', async () => {

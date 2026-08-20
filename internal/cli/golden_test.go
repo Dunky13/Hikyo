@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"flag"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -193,6 +196,12 @@ func TestExitCodeMatrix(t *testing.T) {
 		{"replay with an overriding project", []string{"import", "--mapping", "m.json", "--file", "x.yaml", "--project", "prj_x"}, cli.ExitUsage},
 		{"replay with an overriding environment", []string{"import", "--mapping", "m.json", "--file", "x.yaml", "--environment", "env_x"}, cli.ExitUsage},
 		{"values import with an unknown output format", []string{"values", "import", "--file", "v.json", "-o", "yaml", "--instance", "unknown-ref"}, cli.ExitUsage},
+		{"definitions without a subverb", []string{"definitions"}, cli.ExitUsage},
+		{"unknown definitions subverb", []string{"definitions", "warp"}, cli.ExitUsage},
+		{"definitions check without a file", []string{"definitions", "check"}, cli.ExitUsage},
+		{"definitions plan without a file", []string{"definitions", "plan"}, cli.ExitUsage},
+		{"definitions apply without a plan", []string{"definitions", "apply"}, cli.ExitUsage},
+		{"stray positional on definitions export", []string{"definitions", "export", "stray"}, cli.ExitUsage},
 	}
 	var report strings.Builder
 	for _, tc := range cases {
@@ -583,3 +592,177 @@ func strptr(s string) *string { return &s }
 
 func classptr(c apigen.KeyClassification) *apigen.KeyClassification { return &c }
 func boolptr(b bool) *bool                                          { return &b }
+
+func TestDefinitionsGoldenOutputs(t *testing.T) {
+	bundle := []byte("{\n  \"base_revision\": 7,\n  \"environments\": [],\n  \"format_version\": 1,\n  \"key_groups\": [],\n  \"keys\": []\n}\n")
+	file := filepath.Join(t.TempDir(), "definitions.json")
+	if err := os.WriteFile(file, bundle, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/definitions/export"):
+			_, _ = w.Write(bundle)
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/definitions/check"):
+			_, _ = fmt.Fprint(w, `{"state":"diverged","base_revision":7,"current_revision":9,"differences":{"environments":{"creates":["preview"],"updates":[],"renames":[],"deletes":[]},"key_groups":{"creates":[],"updates":[],"renames":[],"deletes":[]},"keys":{"creates":[],"updates":["DATABASE_URL"],"renames":[],"deletes":[]},"reveal_required":[]}}`)
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/definitions/plans"):
+			w.WriteHeader(http.StatusCreated)
+			_, _ = fmt.Fprint(w, `{"plan":{"id":"pln_70","digest":"abc123","base_revision":7,"current_revision":9,"additive":false,"expires_at":"2030-01-02T03:04:05Z","protected_environments":["production"],"diff":{"environments":{"creates":["preview"],"updates":[],"renames":[],"deletes":[]},"key_groups":{"creates":[],"updates":[],"renames":[],"deletes":[]},"keys":{"creates":[],"updates":[],"renames":[],"deletes":["OLD_KEY"]},"key_deletions":[{"name":"OLD_KEY","live_in":["production","staging"]}],"env_deletions":[],"reveal_required":["DATABASE_URL"]},"deletions_present":true,"reveal_required":["DATABASE_URL"]}}`)
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/definitions/plans/pln_70/apply"):
+			var body apigen.ApplyDefinitionsPlanRequest
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode apply: %v", err)
+			}
+			if body.Digest == nil || *body.Digest == "" {
+				t.Error("apply --file did not send a digest pin")
+			}
+			_, _ = fmt.Fprint(w, `{"revision":10,"published":["production","staging"],"plan_id":"pln_70"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	for _, tc := range []struct {
+		name    string
+		args    []string
+		fixture string
+	}{
+		{"export", []string{"definitions", "export", "--portable"}, "definitions-export.json"},
+		{"check table", []string{"definitions", "check", "--file", file}, "definitions-check-table.txt"},
+		{"check json", []string{"definitions", "check", "--file", file, "-o", "json"}, "definitions-check.json"},
+		{"plan table", []string{"definitions", "plan", "--file", file}, "definitions-plan-table.txt"},
+		{"plan json", []string{"definitions", "plan", "--file", file, "-o", "json"}, "definitions-plan.json"},
+		{"apply table", []string{"definitions", "apply", "--plan", "pln_70", "--file", file, "--allow-delete"}, "definitions-apply-table.txt"},
+		{"apply json", []string{"definitions", "apply", "--plan", "pln_70", "--file", file, "--allow-delete", "-o", "json"}, "definitions-apply.json"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ios, stdout, _ := definitionsTestIO(t, handler)
+			args := append(tc.args, "--instance", "local", "--org", "org_70", "--project", "prj_70")
+			code := cli.Run(t.Context(), ios, args)
+			want := cli.ExitOK
+			if strings.HasPrefix(tc.name, "check ") {
+				want = cli.ExitInternal // definitions check reserves 1 for "different".
+			}
+			if code != want {
+				t.Fatalf("exit %d, want %d", code, want)
+			}
+			golden(t, tc.fixture, stdout.Bytes())
+		})
+	}
+}
+
+func TestDefinitionsCheckExitContract(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "definitions.json")
+	if err := os.WriteFile(file, []byte(`{"format_version":1,"environments":[],"key_groups":[],"keys":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name   string
+		status int
+		body   string
+		want   int
+	}{
+		{"equal", http.StatusOK, `{"state":"equal","current_revision":0,"differences":{"environments":{"creates":[],"updates":[],"renames":[],"deletes":[]},"key_groups":{"creates":[],"updates":[],"renames":[],"deletes":[]},"keys":{"creates":[],"updates":[],"renames":[],"deletes":[]},"reveal_required":[]}}`, 0},
+		{"different", http.StatusOK, `{"state":"file_ahead","current_revision":0,"differences":{"environments":{"creates":["production"],"updates":[],"renames":[],"deletes":[]},"key_groups":{"creates":[],"updates":[],"renames":[],"deletes":[]},"keys":{"creates":[],"updates":[],"renames":[],"deletes":[]},"reveal_required":[]}}`, 1},
+		{"error", http.StatusBadRequest, `{"error":{"code":"bad_request","message":"invalid bundle"}}`, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tc.status)
+				_, _ = fmt.Fprint(w, tc.body)
+			})
+			ios, _, stderr := definitionsTestIO(t, handler)
+			code := cli.Run(t.Context(), ios, []string{"definitions", "check", "--file", file, "--instance", "local", "--org", "org_70", "--project", "prj_70"})
+			if code != tc.want {
+				t.Fatalf("exit %d, want %d; stderr=%s", code, tc.want, stderr.String())
+			}
+			if tc.want == 1 && strings.Contains(stderr.String(), "hikyo:") {
+				t.Fatalf("different is an outcome, not a diagnostic: %s", stderr.String())
+			}
+		})
+	}
+}
+
+func TestDefinitionsExportOutputFileWarnsInsideGitWorktree(t *testing.T) {
+	bundle := []byte("{\n  \"base_revision\": 0,\n  \"environments\": [],\n  \"format_version\": 1,\n  \"key_groups\": [],\n  \"keys\": []\n}\n")
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(bundle)
+	})
+	ios, stdout, stderr := definitionsTestIO(t, handler)
+	if err := os.Mkdir(filepath.Join(ios.Workdir, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(ios.Workdir, "definitions-bundle.json")
+	code := cli.Run(t.Context(), ios, []string{"definitions", "export", "--output-file", target, "--instance", "local", "--org", "org_70", "--project", "prj_70"})
+	if code != cli.ExitOK {
+		t.Fatalf("exit %d: %s", code, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("output-file also wrote stdout: %q", stdout.String())
+	}
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, bundle) {
+		t.Fatalf("output bytes changed:\n%s", got)
+	}
+	if !strings.Contains(stderr.String(), "Git worktree") {
+		t.Fatalf("missing Git-worktree warning: %s", stderr.String())
+	}
+}
+
+func TestDefinitionsRefusalExitMappings(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "definitions.json")
+	if err := os.WriteFile(file, []byte(`{"format_version":1,"environments":[],"key_groups":[],"keys":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name   string
+		args   []string
+		status int
+		code   string
+		want   int
+	}{
+		{"plan conflict", []string{"definitions", "plan", "--file", file}, http.StatusConflict, "conflict", cli.ExitRefused},
+		{"apply hidden", []string{"definitions", "apply", "--plan", "pln_missing"}, http.StatusNotFound, "not_found", cli.ExitNotFound},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tc.status)
+				_, _ = fmt.Fprintf(w, `{"error":{"code":%q,"message":"refused"}}`, tc.code)
+			})
+			ios, _, _ := definitionsTestIO(t, handler)
+			args := append(tc.args, "--instance", "local", "--org", "org_70", "--project", "prj_70")
+			if got := cli.Run(t.Context(), ios, args); got != tc.want {
+				t.Fatalf("exit %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+func definitionsTestIO(t *testing.T, handler http.Handler) (cli.IO, *bytes.Buffer, *bytes.Buffer) {
+	t.Helper()
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+	ios, stdout, stderr := testIO(t, nil)
+	state, err := cli.NewState(ios.Env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := state.Trust().Put(cli.TrustEntry{Name: "local", Origin: server.URL}); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.PutSession(cli.SessionArtifact{
+		Instance: "local", Origin: server.URL, Token: "test-token", SessionID: "ses_70",
+		Principal: "usr_70", ExpiresAt: "2030-01-01T00:00:00Z",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return ios, stdout, stderr
+}

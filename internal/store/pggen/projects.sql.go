@@ -56,7 +56,7 @@ func (q *Queries) DeleteProject(ctx context.Context, arg DeleteProjectParams) (i
 
 const getProject = `-- name: GetProject :one
 SELECT id, org_id, name, created_at,
-       retention_revision_count, retention_age_seconds
+       retention_revision_count, retention_age_seconds, definitions_source
 FROM projects
 WHERE org_id = $1 AND id = $2
 `
@@ -76,6 +76,7 @@ func (q *Queries) GetProject(ctx context.Context, arg GetProjectParams) (Project
 		&i.CreatedAt,
 		&i.RetentionRevisionCount,
 		&i.RetentionAgeSeconds,
+		&i.DefinitionsSource,
 	)
 	return i, err
 }
@@ -119,7 +120,7 @@ func (q *Queries) ListAllProjects(ctx context.Context) ([]ListAllProjectsRow, er
 
 const listProjects = `-- name: ListProjects :many
 SELECT id, org_id, name, created_at,
-       retention_revision_count, retention_age_seconds
+       retention_revision_count, retention_age_seconds, definitions_source
 FROM projects
 WHERE org_id = $1 ORDER BY name
 `
@@ -140,6 +141,7 @@ func (q *Queries) ListProjects(ctx context.Context, chainOrgID string) ([]Projec
 			&i.CreatedAt,
 			&i.RetentionRevisionCount,
 			&i.RetentionAgeSeconds,
+			&i.DefinitionsSource,
 		); err != nil {
 			return nil, err
 		}
@@ -185,6 +187,28 @@ type RenameProjectParams struct {
 
 func (q *Queries) RenameProject(ctx context.Context, arg RenameProjectParams) (int64, error) {
 	result, err := q.db.Exec(ctx, renameProject, arg.Name, arg.ChainOrgID, arg.ChainProjectID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const setProjectDefinitionsSource = `-- name: SetProjectDefinitionsSource :execrows
+UPDATE projects SET definitions_source = $1
+WHERE org_id = $2 AND id = $3
+`
+
+type SetProjectDefinitionsSourceParams struct {
+	DefinitionsSource string
+	ChainOrgID        string
+	ChainProjectID    string
+}
+
+// SetProjectDefinitionsSource flips a project between db- and git-managed
+// definitions (#70). It is a project-settings write, deliberately off the
+// definitions-edit path so a blocked editor cannot disable its own guard.
+func (q *Queries) SetProjectDefinitionsSource(ctx context.Context, arg SetProjectDefinitionsSourceParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setProjectDefinitionsSource, arg.DefinitionsSource, arg.ChainOrgID, arg.ChainProjectID)
 	if err != nil {
 		return 0, err
 	}

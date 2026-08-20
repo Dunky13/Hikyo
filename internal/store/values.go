@@ -59,6 +59,12 @@ type ValueReader interface {
 	// it, and that answer cannot be assembled one authorized environment at a
 	// time without becoming a different (and racier) question.
 	EnvironmentsWithValue(ctx context.Context, p authz.Proof, keyID string) ([]string, error)
+	// CountEnvironmentValues counts one environment's live occurrences under a
+	// PROJECT proof — environment_id is an ordinary column, so the
+	// definitions-apply path (project-scoped) can ask it of an environment it is
+	// about to delete. Any count above zero is the unconditional
+	// environment-delete refusal (#70).
+	CountEnvironmentValues(ctx context.Context, p authz.Proof, environmentID string) (int64, error)
 }
 
 // ValueRepo is the full value aggregate.
@@ -78,4 +84,8 @@ type ValueRepo interface {
 	// ClearEnvironment removes the proof's environment's whole set, in the
 	// transaction that deletes the environment itself.
 	ClearEnvironment(ctx context.Context, p authz.Proof) error
+	// ClearKey removes a key's occurrences across every environment under a
+	// PROJECT proof, in the definitions-apply transaction that deletes the key
+	// with --allow-delete (#70). Returns the number of occurrences removed.
+	ClearKey(ctx context.Context, p authz.Proof, keyID string) (int64, error)
 }

@@ -42,10 +42,9 @@ var SpecYAML []byte
 // unsupported verbs naming the server version — a bare version string is not
 // the mechanism, the per-operation registry is.
 //
-// Pre-freeze the revision is 1 and stays there: it advances only when an
-// operation is added after the freeze, which is the only moment a client can
-// legitimately outrun a server.
-const Revision = 1
+// Revision 2 introduces the definitions Git-flow operations. Every pre-existing
+// operation remains revision 1; clients gate only the new verbs on revision 2.
+const Revision = 2
 
 // PathPrefix is the URL version prefix. A future break gets `/api/v2`; v1
 // explicitly does not plan one.

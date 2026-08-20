@@ -284,6 +284,7 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 	adapterService := &service.Adapters{DB: db, Auth: authSvc, Keyring: kr, ProviderModule: func(provider, origin, credential string) (adapter.Module, func(), error) {
 		return deploymentModule(provider, origin, credential, cfg.AdapterEgressPolicy[origin])
 	}}
+	definitionsService := &service.Definitions{DB: db, Keyring: kr, Advisory: advisory}
 
 	api := &server.API{
 		Auth:     authSvc,
@@ -296,6 +297,7 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 		Environments: &service.Environments{DB: db, Keyring: kr, Auth: authSvc, Advisory: advisory},
 		Folders:      &service.Folders{DB: db},
 		Keys:         &service.Keys{DB: db, Keyring: kr, Advisory: advisory},
+		Definitions:  definitionsService,
 		// The reveal ceremony (#58): the value surface's disclosure routes
 		// consume the SAME reauthentication window machinery the passkey and
 		// TOTP reauth endpoints open, so both sides take the one Auth. A

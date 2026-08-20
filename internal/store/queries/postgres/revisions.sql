@@ -114,6 +114,14 @@ FROM snapshots
 WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id)
   AND environment_id = sqlc.arg(chain_env_id) AND revision = sqlc.arg(revision);
 
+-- ProjectSnapshotRevisions returns the project-confined revision rows used to
+-- build the definitions plan/apply pin (#70). The repository folds the maximum
+-- per environment; keeping aggregation out of SQL leaves the chain predicate in
+-- the conservative analyzer's provable shape.
+-- name: ProjectSnapshotRevisions :many
+SELECT environment_id, revision FROM snapshots
+WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id);
+
 -- name: ListSnapshots :many
 SELECT id, org_id, project_id, environment_id, revision, schema_revision,
        published_by, published_at, payload_present, collected_at, collected_policy

@@ -80,6 +80,10 @@ func Report(stderr io.Writer, err error) int {
 	if err == nil {
 		return ExitOK
 	}
+	var status *silentExit
+	if errors.As(err, &status) {
+		return status.Code
+	}
 	var e *Error
 	if errors.As(err, &e) {
 		fmt.Fprintln(stderr, "hikyo:", e.Err)
@@ -88,6 +92,13 @@ func Report(stderr io.Writer, err error) int {
 	fmt.Fprintln(stderr, "hikyo:", err)
 	return ExitInternal
 }
+
+// silentExit is a successful command outcome with a non-zero status. The
+// definitions check contract reserves 1 for "different"; it is not an error
+// diagnostic and therefore must not print the ordinary `hikyo:` prefix.
+type silentExit struct{ Code int }
+
+func (e *silentExit) Error() string { return fmt.Sprintf("exit %d", e.Code) }
 
 // Verbs is the closed set of client verbs this build serves. main dispatches
 // on it, and the classification-totality invariant enumerates it against the

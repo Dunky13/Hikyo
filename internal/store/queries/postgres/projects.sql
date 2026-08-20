@@ -8,13 +8,13 @@ VALUES (sqlc.arg(id), sqlc.arg(chain_org_id), sqlc.arg(name), sqlc.arg(created_a
 
 -- name: GetProject :one
 SELECT id, org_id, name, created_at,
-       retention_revision_count, retention_age_seconds
+       retention_revision_count, retention_age_seconds, definitions_source
 FROM projects
 WHERE org_id = sqlc.arg(chain_org_id) AND id = sqlc.arg(chain_project_id);
 
 -- name: ListProjects :many
 SELECT id, org_id, name, created_at,
-       retention_revision_count, retention_age_seconds
+       retention_revision_count, retention_age_seconds, definitions_source
 FROM projects
 WHERE org_id = sqlc.arg(chain_org_id) ORDER BY name;
 
@@ -37,6 +37,13 @@ WHERE org_id = sqlc.arg(chain_org_id) AND id = sqlc.arg(chain_project_id);
 UPDATE projects
 SET retention_age_seconds = sqlc.narg(retention_age_seconds),
     retention_revision_count = sqlc.narg(retention_revision_count)
+WHERE org_id = sqlc.arg(chain_org_id) AND id = sqlc.arg(chain_project_id);
+
+-- SetProjectDefinitionsSource flips a project between db- and git-managed
+-- definitions (#70). It is a project-settings write, deliberately off the
+-- definitions-edit path so a blocked editor cannot disable its own guard.
+-- name: SetProjectDefinitionsSource :execrows
+UPDATE projects SET definitions_source = sqlc.arg(definitions_source)
 WHERE org_id = sqlc.arg(chain_org_id) AND id = sqlc.arg(chain_project_id);
 
 -- name: DeleteProject :execrows

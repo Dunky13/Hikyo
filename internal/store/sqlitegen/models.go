@@ -310,6 +310,28 @@ type CredentialPolicy struct {
 	UpdatedBy                sql.NullString
 }
 
+type DefinitionsPlan struct {
+	ID                 string
+	OrgID              string
+	ProjectID          string
+	CreatedBy          string
+	CreatedAt          string
+	ExpiresAt          string
+	Bundle             string
+	Digest             string
+	BaseSchemaRevision int64
+	EnvRevisions       string
+	ProtectedEnvs      string
+	Diff               string
+	Additive           int64
+	Applied            int64
+	AppliedAt          sql.NullString
+	AppliedBy          sql.NullString
+	ProvenanceCommit   sql.NullString
+	ProvenanceRef      sql.NullString
+	ProvenanceActor    sql.NullString
+}
+
 type Environment struct {
 	ID                  string
 	OrgID               string
@@ -568,6 +590,7 @@ type Project struct {
 	CreatedAt              string
 	RetentionRevisionCount sql.NullInt64
 	RetentionAgeSeconds    sql.NullInt64
+	DefinitionsSource      string
 }
 
 type ProjectSchemaRevision struct {

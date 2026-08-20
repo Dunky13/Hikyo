@@ -317,6 +317,10 @@ func TestInvariant11SystemProofEnumeration(t *testing.T) {
 		authz.StoreRetentionSetLastSuccess: true,
 		authz.StoreAuditTenantInsert:       true,
 		authz.StoreAuditInstanceInsert:     true,
+		// The ops spec's hourly/startup GC mandate explicitly includes expired
+		// definitions plans. This deliberate system-proof widening is therefore
+		// pinned here for ADR review rather than hidden behind a side effect.
+		authz.StoreDefinitionsPlanPrune: true,
 	}
 	for site, ops := range sites {
 		if !want[site] {

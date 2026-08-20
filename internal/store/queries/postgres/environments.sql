@@ -57,3 +57,11 @@ WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id
 UPDATE environments SET protected = sqlc.arg(protected), reauth_window_seconds = sqlc.arg(reauth_window_seconds)
 WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id) AND id = sqlc.arg(chain_env_id);
 
+-- ListEnvironmentProtection reads every environment's protected flag under a
+-- PROJECT proof — the definitions plan/apply path pins the project's protected
+-- set and refuses if it grew (#70, permission-model ADR §84). GetEnvironmentSettings
+-- is environment-addressed and cannot serve a project-scoped read.
+-- name: ListEnvironmentProtection :many
+SELECT id, protected FROM environments
+WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id) ORDER BY id;
+

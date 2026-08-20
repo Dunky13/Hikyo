@@ -53,6 +53,26 @@ DELETE FROM value_entries
 WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id)
   AND environment_id = sqlc.arg(chain_env_id);
 
+-- DeleteValueEntriesForKey removes a key's live occurrences across every
+-- environment under a PROJECT proof (key_id is an ordinary column) — the
+-- definitions-apply key-delete path clears them so the composite foreign key
+-- does not refuse the catalogue delete, exactly as an environment delete clears
+-- its own set (#70).
+-- name: DeleteValueEntriesForKey :execrows
+DELETE FROM value_entries
+WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id)
+  AND key_id = sqlc.arg(key_id);
+
+-- CountEnvironmentValues counts one environment's live occurrences under a
+-- PROJECT proof — environment_id is an ordinary column, not a chain column, so
+-- the definitions-apply path (project-scoped) can ask it of an environment it is
+-- about to delete without an environment-addressed proof. Any count above zero
+-- is the unconditional environment-delete refusal (#70, source-of-truth ADR).
+-- name: CountEnvironmentValues :one
+SELECT COUNT(*) FROM value_entries
+WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id)
+  AND environment_id = sqlc.arg(environment_id);
+
 -- ListValueEnvironmentsForKey spans the project's environments deliberately:
 -- it is the input to the key-delete refusal, which must be able to NAME the
 -- environments that still deliver material for the key.

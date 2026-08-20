@@ -608,6 +608,7 @@ export type SettingsOperation =
   | 'set-org-retention'
   | 'set-project-retention'
   | 'set-environment-settings'
+  | 'set-definitions-settings'
   | 'rotate-token-key';
 
 class SettingsOperationFailure extends Error {
@@ -685,6 +686,8 @@ function settingsAction(operation: SettingsOperation | undefined): string {
       return 'change this project retention policy';
     case 'set-environment-settings':
       return 'change this environment policy';
+    case 'set-definitions-settings':
+      return 'change this project definitions source';
     case 'rotate-token-key':
       return 'rotate the change-token key';
     default:
@@ -706,6 +709,8 @@ function invalidSettingsText(operation: SettingsOperation | undefined): string {
       return 'The project retention policy is invalid.';
     case 'set-environment-settings':
       return 'The environment policy is invalid.';
+    case 'set-definitions-settings':
+      return 'The definitions source is invalid.';
     case 'set-credential-policy':
       return 'The machine-credential policy is invalid.';
     default:
@@ -727,6 +732,8 @@ function unavailableSettingsText(operation: SettingsOperation | undefined): stri
       return 'This project retention policy is unavailable or does not exist.';
     case 'set-environment-settings':
       return 'This environment policy is unavailable or does not exist.';
+    case 'set-definitions-settings':
+      return 'This project definitions policy is unavailable or does not exist.';
     case 'list-instance-orgs':
       return 'The instance organisation listing is unavailable.';
     case 'get-credential-policy':

@@ -189,6 +189,62 @@
     ]
   },
   {
+    "operation": "definitions.apply",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "definitions-edit@project"
+    ]
+  },
+  {
+    "operation": "definitions.check",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "read@project"
+    ]
+  },
+  {
+    "operation": "definitions.export",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "read@project"
+    ]
+  },
+  {
+    "operation": "definitions.plan",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "definitions-edit@project"
+    ]
+  },
+  {
+    "operation": "definitions.plan.get",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "definitions-edit@project"
+    ]
+  },
+  {
+    "operation": "definitions.settings.get",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "read@project"
+    ]
+  },
+  {
+    "operation": "definitions.settings.set",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "project-settings@project"
+    ]
+  },
+  {
     "operation": "delivery.fetch",
     "class": "tenant",
     "level": "environment",

@@ -1,9 +1,11 @@
 package importer
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 
+	"github.com/Hikyo-Org/hikyo/internal/definitions"
 	"github.com/Hikyo-Org/hikyo/internal/schema"
 )
 
@@ -202,6 +204,48 @@ func TestEveryImportedKeyDefaultsSecret(t *testing.T) {
 		if c.Downgraded {
 			t.Errorf("%s recorded as downgraded; flag mode performs zero downgrades", c.Key)
 		}
+	}
+}
+
+func TestBundleIsCanonicalAdditiveAndApplicable(t *testing.T) {
+	plan, err := planFrom(t, "k8s-multi.yaml", state(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := definitions.Encode(plan.Bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(raw, []byte(`"project"`)) {
+		t.Fatalf("canonical definitions bundle carries importer project field:\n%s", raw)
+	}
+
+	bundle, err := definitions.Parse(raw)
+	if err != nil {
+		t.Fatalf("importer bundle does not parse through definitions.Parse: %v\n%s", err, raw)
+	}
+	if !bundle.Additive() || len(bundle.Environments) != 0 || len(bundle.KeyGroups) != 0 {
+		t.Fatalf("bundle is not project-wide additive: %+v", bundle)
+	}
+	for _, key := range bundle.Keys {
+		if key.ID != "" || key.Description != "" || key.Deprecated || key.DeprecationNote != "" || key.Group != "" {
+			t.Errorf("key %s carries non-additive identity or metadata: %+v", key.Name, key)
+		}
+		for field, presence := range map[string]definitions.Presence{
+			"required_in": key.RequiredIn, "forbidden_in": key.ForbiddenIn,
+		} {
+			if presence.Mode != string(schema.PresenceNone) || len(presence.Environments) != 0 {
+				t.Errorf("key %s %s = %+v, want mode none with [] environments", key.Name, field, presence)
+			}
+		}
+	}
+
+	resolution, err := definitions.Resolve(bundle, definitions.CurrentState{})
+	if err != nil {
+		t.Fatalf("canonical importer bundle is not applicable additively: %v", err)
+	}
+	if !resolution.Additive || len(resolution.KeyCreates) != len(bundle.Keys) {
+		t.Fatalf("additive resolution = %+v, want %d key creates", resolution, len(bundle.Keys))
 	}
 }
 

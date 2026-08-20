@@ -312,6 +312,28 @@ type CredentialPolicy struct {
 	UpdatedBy                pgtype.Text
 }
 
+type DefinitionsPlan struct {
+	ID                 string
+	OrgID              string
+	ProjectID          string
+	CreatedBy          string
+	CreatedAt          pgtype.Timestamptz
+	ExpiresAt          pgtype.Timestamptz
+	Bundle             string
+	Digest             string
+	BaseSchemaRevision int64
+	EnvRevisions       string
+	ProtectedEnvs      string
+	Diff               string
+	Additive           bool
+	Applied            bool
+	AppliedAt          pgtype.Timestamptz
+	AppliedBy          pgtype.Text
+	ProvenanceCommit   pgtype.Text
+	ProvenanceRef      pgtype.Text
+	ProvenanceActor    pgtype.Text
+}
+
 type Environment struct {
 	ID                  string
 	OrgID               string
@@ -570,6 +592,7 @@ type Project struct {
 	CreatedAt              pgtype.Timestamptz
 	RetentionRevisionCount pgtype.Int8
 	RetentionAgeSeconds    pgtype.Int8
+	DefinitionsSource      string
 }
 
 type ProjectSchemaRevision struct {

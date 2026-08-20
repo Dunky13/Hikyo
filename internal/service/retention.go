@@ -293,6 +293,7 @@ func (s *Retention) SetProject(ctx context.Context, actor Actor, scope domain.Sc
 func (s *Retention) Sweep(ctx context.Context) (int64, error) {
 	startedAt := store.CanonTime(s.now())
 	var total, totalCandidates int64
+	plansPruned := false
 	for {
 		if err := ctx.Err(); err != nil {
 			return total, s.recordFailedPruneRun(ctx, startedAt, store.CanonTime(s.now()), totalCandidates, total, err)
@@ -305,6 +306,14 @@ func (s *Retention) Sweep(ctx context.Context) (int64, error) {
 			p, err := authz.SystemAuthority(authz.SiteScheduler, az.Token())
 			if err != nil {
 				return err
+			}
+			// Expired definitions plans share the hourly GC lifecycle. Run once per
+			// sweep, including startup catch-up, before payload batching begins.
+			if !plansPruned {
+				if _, err := r.Definitions().PruneExpiredPlans(ctx, p, now); err != nil {
+					return err
+				}
+				plansPruned = true
 			}
 			rows, err := r.Retention().Eligible(ctx, p, now, RetentionBatchSize)
 			if err != nil {

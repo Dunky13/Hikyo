@@ -140,6 +140,45 @@ func (q *Queries) GetEnvironmentSettings(ctx context.Context, arg GetEnvironment
 	return i, err
 }
 
+const listEnvironmentProtection = `-- name: ListEnvironmentProtection :many
+SELECT id, protected FROM environments
+WHERE org_id = $1 AND project_id = $2 ORDER BY id
+`
+
+type ListEnvironmentProtectionParams struct {
+	ChainOrgID     string
+	ChainProjectID string
+}
+
+type ListEnvironmentProtectionRow struct {
+	ID        string
+	Protected bool
+}
+
+// ListEnvironmentProtection reads every environment's protected flag under a
+// PROJECT proof — the definitions plan/apply path pins the project's protected
+// set and refuses if it grew (#70, permission-model ADR §84). GetEnvironmentSettings
+// is environment-addressed and cannot serve a project-scoped read.
+func (q *Queries) ListEnvironmentProtection(ctx context.Context, arg ListEnvironmentProtectionParams) ([]ListEnvironmentProtectionRow, error) {
+	rows, err := q.db.Query(ctx, listEnvironmentProtection, arg.ChainOrgID, arg.ChainProjectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListEnvironmentProtectionRow
+	for rows.Next() {
+		var i ListEnvironmentProtectionRow
+		if err := rows.Scan(&i.ID, &i.Protected); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listEnvironments = `-- name: ListEnvironments :many
 SELECT id, org_id, project_id, name, note, created_at, display_order FROM environments
 WHERE org_id = $1 AND project_id = $2 ORDER BY display_order, name

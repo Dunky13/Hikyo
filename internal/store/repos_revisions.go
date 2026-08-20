@@ -291,6 +291,26 @@ func (r sqliteSnapshots) Latest(ctx context.Context, p authz.Proof) (Snapshot, e
 	return snapshot, nil
 }
 
+func (r sqliteSnapshots) ProjectRevisions(ctx context.Context, p authz.Proof) (map[string]int64, error) {
+	chain, err := authz.Verify(p, authz.StoreSnapshotsProjectRevisions, r.tok)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.q.ProjectSnapshotRevisions(ctx, sqlitegen.ProjectSnapshotRevisionsParams{
+		OrgID: string(chain.Org), ProjectID: string(chain.Project),
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]int64, len(rows))
+	for _, row := range rows {
+		if row.Revision > out[row.EnvironmentID] {
+			out[row.EnvironmentID] = row.Revision
+		}
+	}
+	return out, nil
+}
+
 func (r sqliteSnapshots) AtRevision(ctx context.Context, p authz.Proof, revision int64) (Snapshot, error) {
 	chain, err := authz.Verify(p, authz.StoreSnapshotsAtRevision, r.tok)
 	if err != nil {
@@ -941,6 +961,26 @@ func (r pgSnapshots) Latest(ctx context.Context, p authz.Proof) (Snapshot, error
 		return Snapshot{}, err
 	}
 	return revisionSnapshotFromPG(row), nil
+}
+
+func (r pgSnapshots) ProjectRevisions(ctx context.Context, p authz.Proof) (map[string]int64, error) {
+	chain, err := authz.Verify(p, authz.StoreSnapshotsProjectRevisions, r.tok)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.q.ProjectSnapshotRevisions(ctx, pggen.ProjectSnapshotRevisionsParams{
+		ChainOrgID: string(chain.Org), ChainProjectID: string(chain.Project),
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]int64, len(rows))
+	for _, row := range rows {
+		if row.Revision > out[row.EnvironmentID] {
+			out[row.EnvironmentID] = row.Revision
+		}
+	}
+	return out, nil
 }
 
 func (r pgSnapshots) AtRevision(ctx context.Context, p authz.Proof, revision int64) (Snapshot, error) {

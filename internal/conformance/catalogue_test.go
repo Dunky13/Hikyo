@@ -124,8 +124,9 @@ func scenarioKeyCatalogueCRUD(t *testing.T, db *store.DB) {
 		t.Fatalf("rename left the schema revision at %d (err %v), want 4", revision, err)
 	}
 
-	// Metadata is NOT semantic: it moves no revision, which is the machine-
-	// checkable half of the ADR's authorization exemption.
+	// Metadata does not change delivery, but it is bundle desired state. Each
+	// actual metadata change advances the definitions revision without a publish
+	// fan-out, so a stale exported base cannot overwrite it.
 	folder, description, note, deprecated := "services/api", "primary datastore", "superseded by PRIMARY_DSN", true
 	if _, err := keys.UpdateMetadata(t.Context(), actor, scope, created.ID, service.KeyMetadataUpdate{
 		FolderPath: &folder, Description: &description,
@@ -183,8 +184,8 @@ func scenarioKeyCatalogueCRUD(t *testing.T, db *store.DB) {
 	if emptied.FolderPath != "services/api" {
 		t.Fatalf("clearing three members moved the fourth: %+v", emptied)
 	}
-	if _, revision, err = keys.List(t.Context(), actor, scope); err != nil || revision != 4 {
-		t.Fatalf("a metadata change moved the schema revision to %d (err %v)", revision, err)
+	if _, revision, err = keys.List(t.Context(), actor, scope); err != nil || revision != 7 {
+		t.Fatalf("three metadata changes left the definitions revision at %d (err %v), want 7", revision, err)
 	}
 
 	// The name is free again once the key is gone — unique among LIVE keys —
