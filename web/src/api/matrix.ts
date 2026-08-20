@@ -7,16 +7,19 @@ import {
   listPendingDrafts,
   listValues,
   publishPendingChanges,
+  reclassifyKey,
   setValue,
 } from '@hikyo/client';
 import {
   zEnvironmentSignals,
   zCopyValuesResult,
+  zKey,
   zKeyGroupList,
   zKeyList,
   zPendingChange,
   zPendingDraftList,
   zPublishResult,
+  zScanFinding,
   zValueList,
 } from '@hikyo/zod';
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -41,6 +44,13 @@ export { useProjects } from './settings.ts';
 
 export type MatrixRef = { readonly org: string; readonly project: string };
 export type MatrixKeyList = z.infer<typeof zKeyList>;
+/**
+ * A redacted secret-scanning finding (#74, secret-scanning ADR §4). It rides
+ * a config value-write response and carries a rule id, an immutable locator,
+ * and — for a keep-as-config dismissal — an opaque acknowledgement token. It
+ * never carries the matched text, so the UI renders only what it holds.
+ */
+export type ScanFinding = z.infer<typeof zScanFinding>;
 export type MatrixEnvironmentSignals = z.infer<typeof zEnvironmentSignals>;
 export type MatrixSignalCell = MatrixEnvironmentSignals['cells'][number];
 
@@ -317,11 +327,25 @@ export function useMatrixProject(ref: MatrixRef) {
 export function useStageMatrixValue(ref: MatrixRef) {
   const queries = useQueryClient();
   return useMutation({
-    mutationFn: (input: { readonly environment: string; readonly key: string; readonly value: string }) =>
+    // `acknowledgements` carries a keep-as-config token to dismiss a Surface-1
+    // warning (#74): re-staging the SAME value with its token records the
+    // dismissal so the identical value no longer re-warns. The save succeeds
+    // either way — the token only settles whether the finding rides back.
+    mutationFn: (input: {
+      readonly environment: string;
+      readonly key: string;
+      readonly value: string;
+      readonly acknowledgements?: readonly string[];
+    }) =>
       parsed(
         setValue({
           path: { ...ref, environment: input.environment, key: input.key },
-          body: { value: input.value },
+          body: {
+            value: input.value,
+            ...(input.acknowledgements === undefined
+              ? {}
+              : { acknowledgements: [...input.acknowledgements] }),
+          },
         }),
         zPendingChange,
       ),
@@ -331,6 +355,28 @@ export function useStageMatrixValue(ref: MatrixRef) {
         queries.invalidateQueries({ queryKey: signalsKey(ref, input.environment) }),
         queries.invalidateQueries({ queryKey: pendingDraftsKey(ref, input.environment) }),
       ]),
+  });
+}
+
+/**
+ * useReclassifyKey drives the reclassification ceremony (#12). The scanner's
+ * warn dialog reaches it as the primary "reclassify as secret" resolution
+ * (#74, ADR §4): moving the key to `secret` routes every value through secret
+ * handling and drops the key's config-dismissals server-side. The keys query
+ * is invalidated so the matrix reflects the new classification (the 🔒 lock).
+ */
+export function useReclassifyKey(ref: MatrixRef) {
+  const queries = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { readonly key: string; readonly classification: 'secret' | 'config' }) =>
+      parsed(
+        reclassifyKey({
+          path: { ...ref, key: input.key },
+          body: { classification: input.classification },
+        }),
+        zKey,
+      ),
+    onSuccess: () => queries.invalidateQueries({ queryKey: matrixKeysKey(ref) }),
   });
 }
 

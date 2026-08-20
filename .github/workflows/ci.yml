@@ -278,9 +278,10 @@ jobs:
         run: |
           go tool sqlc generate
           go tool oapi-codegen --config api/oapi-codegen.yaml api/openapi.yaml
-          git diff --exit-code -- internal/store/sqlitegen internal/store/pggen api/apigen
+          go run ./internal/scanning/gen
+          git diff --exit-code -- internal/store/sqlitegen internal/store/pggen api/apigen internal/scanning/rules_gen.go
           # git diff misses newly generated untracked files
-          test -z "$(git status --porcelain --untracked-files=all -- internal/store/sqlitegen internal/store/pggen api/apigen)"
+          test -z "$(git status --porcelain --untracked-files=all -- internal/store/sqlitegen internal/store/pggen api/apigen internal/scanning/rules_gen.go)"
       - name: Operator CRDs and deepcopy are fresh
         run: |
           ./scripts/gen-crds.sh
@@ -570,6 +571,12 @@ jobs:
         # Compile from restored GOCACHE, but never replay results: PostgreSQL
         # conformance must exercise this run's fresh service container.
         run: go test -count=1 ./...
+      # The secret-scanning benchmark regression guard (#74, SS1). Relative, not
+      # absolute-ms — CI runners are not the Pi-class calibration floor, so this
+      # only proves BenchmarkScan compiles and runs to completion; the absolute
+      # p99/boot envelope is asserted by the committed Pi artifact under `go test`.
+      - name: Secret-scanning benchmark runs (relative regression guard)
+        run: go test ./internal/scanning/ -run '^$' -bench BenchmarkScan -benchtime 3x
       - name: Save test Go cache
         if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

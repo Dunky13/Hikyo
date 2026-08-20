@@ -1169,6 +1169,59 @@ select {
   font-size: 11px;
 }
 
+/* Surface-1 secret-scanning warn dialog (#74). Reuses the matrix-editor shell;
+   these rules only lay out the finding list, which has no form to inherit the
+   editor's flex gap from. */
+.scan-warn {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.scan-warn__findings {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.scan-warn__finding {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--bg);
+}
+
+.scan-warn__finding-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.scan-warn__rule {
+  font-size: 13px;
+  color: var(--tx);
+}
+
+.scan-warn__env {
+  font-size: 12px;
+  color: var(--tx-dim);
+}
+
+.scan-warn__note {
+  margin: 0;
+  color: var(--tx-dim);
+  font-size: 13px;
+}
+
 @media (max-width: 800px) {
   .content {
     padding: 16px 10px;

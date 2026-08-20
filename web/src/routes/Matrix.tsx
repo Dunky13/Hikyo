@@ -12,6 +12,7 @@ import {
   useCopyMatrixConfig,
   useMatrixProject,
   usePublishMatrix,
+  useReclassifyKey,
   useStageMatrixValue,
   type MatrixKeyList,
   type MatrixPendingDraft,
@@ -29,6 +30,7 @@ import {
   type MatrixPendingEntry,
 } from './MatrixPublishSheet.tsx';
 import { MatrixRowEditor } from './MatrixRowEditor.tsx';
+import { ScanWarnDialog, type ScanWarnItem } from './ScanWarnDialog.tsx';
 import {
   computeMatrixProblems,
   groupProblemCounts,
@@ -74,6 +76,7 @@ export function Matrix({ historyOpen = false }: { historyOpen?: boolean } = {}) 
   const clear = useClearMatrixValue(ref);
   const publish = usePublishMatrix(ref);
   const copy = useCopyMatrixConfig(ref);
+  const reclassify = useReclassifyKey(ref);
 
   const environments = matrix.environments.data?.items ?? [];
   const keys = matrix.keys.data?.items ?? [];
@@ -82,6 +85,11 @@ export function Matrix({ historyOpen = false }: { historyOpen?: boolean } = {}) 
   const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(() => new Set());
   const [filter, setFilter] = useState<MatrixFilter>('all');
   const [selection, setSelection] = useState<Selection | null>(null);
+  const [warn, setWarn] = useState<{
+    readonly keyId: string;
+    readonly keyName: string;
+    readonly items: readonly ScanWarnItem[];
+  } | null>(null);
   const [validationErrors, setValidationErrors] = useState<readonly MatrixValidationError[]>([]);
   const [publishOpen, setPublishOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -746,16 +754,31 @@ export function Matrix({ historyOpen = false }: { historyOpen?: boolean } = {}) 
           onApply={async (changes) => {
             setMutationError(null);
             let normalizedCount = 0;
+            const warnItems: ScanWarnItem[] = [];
             for (const change of changes) {
               try {
                 if (change.operation === 'set') {
                   const normalizedValue = normalizeMatrixDraftValue(change.value);
                   if (normalizedValue !== change.value) normalizedCount += 1;
-                  await stage.mutateAsync({
+                  const staged = await stage.mutateAsync({
                     environment: change.environmentId,
                     key: selectedKey.name,
                     value: normalizedValue,
                   });
+                  // Surface-1 warn (#74): the save succeeded; any findings ride
+                  // the response bound to the value that produced them (the
+                  // canonical, post-normalization bytes the token dismisses).
+                  const environmentName =
+                    environments.find((candidate) => candidate.id === change.environmentId)?.name ??
+                    change.environmentId;
+                  for (const finding of staged.findings ?? []) {
+                    warnItems.push({
+                      environmentId: change.environmentId,
+                      environmentName,
+                      value: normalizedValue,
+                      finding,
+                    });
+                  }
                 } else {
                   await clear.mutateAsync({
                     environment: change.environmentId,
@@ -777,6 +800,9 @@ export function Matrix({ historyOpen = false }: { historyOpen?: boolean } = {}) 
               `${String(changes.length)} draft${changes.length === 1 ? '' : 's'} updated for ${selectedKey.name}.${normalizedCount === 0 ? '' : ` Leading and trailing whitespace was removed from ${String(normalizedCount)} value${normalizedCount === 1 ? '' : 's'}.`}`,
             );
             setSelection(null);
+            if (warnItems.length > 0) {
+              setWarn({ keyId: selectedKey.id, keyName: selectedKey.name, items: warnItems });
+            }
           }}
           onCopy={(destinations, confirmProtected) => {
             setMutationError(null);
@@ -798,6 +824,34 @@ export function Matrix({ historyOpen = false }: { historyOpen?: boolean } = {}) 
                 onError: (error) => setMutationError(matrixMutationError(error, 'copy')),
               },
             );
+          }}
+        />
+      )}
+
+      {warn === null ? null : (
+        <ScanWarnDialog
+          keyName={warn.keyName}
+          items={warn.items}
+          onClose={() => setWarn(null)}
+          onReclassify={async () => {
+            await reclassify.mutateAsync({ key: warn.keyId, classification: 'secret' });
+          }}
+          onDismiss={async (item) => {
+            const staged = await stage.mutateAsync({
+              environment: item.environmentId,
+              key: warn.keyName,
+              value: item.value,
+              acknowledgements:
+                item.finding.acknowledgement === undefined
+                  ? undefined
+                  : [item.finding.acknowledgement],
+            });
+            return (staged.findings ?? []).map((finding) => ({
+              environmentId: item.environmentId,
+              environmentName: item.environmentName,
+              value: item.value,
+              finding,
+            }));
           }}
         />
       )}

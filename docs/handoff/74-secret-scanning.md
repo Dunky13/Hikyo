@@ -1,7 +1,51 @@
 # #74 Secret scanning — implementation handoff
 
-Status: IN PROGRESS (phase 0 committed). Spec: `docs/adr/secret-scanning.md` (locked; every
-`ew_` there reads `hik_` post-rebrand, see `docs/handoff/rebrand-hikyo.md`). Gate: SS1–SS4 (ADR §9).
+Status: FEATURE-COMPLETE for 1.0 minus three named residuals (below). Spec:
+`docs/adr/secret-scanning.md` (locked; every `ew_` there reads `hik_` post-rebrand, see
+`docs/handoff/rebrand-hikyo.md`). Gate: SS1–SS4 (ADR §9). Dual-engine `go test ./...` green;
+the SS-row criteria matrix (`internal/isolation/scanning_criteria_test.go`) maps every §9 clause
+to its fixture and fails on a dropped/renamed one.
+
+## What shipped, by stream
+
+- **Stream A — `internal/scanning`**: compiled ruleset generated from the vendored gitleaks
+  snapshot + committed allowlist (`go run ./internal/scanning/gen` → `rules_gen.go`, drift-checked
+  in CI); fail-closed import contract; `hik_` two-stage rule (RE2 + `crypto.ParseArtifact` CRC);
+  TP/FP fixture corpus; `bench-scan` harness + `BenchmarkScan`; committed Pi-class artifact,
+  CI-validated by `TestPiBenchArtifact`.
+- **Stream B — crypto/audit/store**: tier-3 scanning-fingerprint key (HMAC inside the envelope
+  package, `KindWrappedDEK` instance-scoped); `scanning_dismissals` migration + proof-bound repos;
+  `scanning.finding_warned|dismissed|blocked|overridden` audit registry rows; `rotate-scanning-key`
+  (outright replacement, drops all dismissals).
+- **Stream C — service/server/cli/contract**: Surface-1 warn at stage/declare/copy/clone/import/
+  declassify with sticky dismissals; Surface-2 block at every declaration ingress with content-bound
+  ack tokens; the redacted `ScanFinding` DTO + `acknowledgements` fields wired into OpenAPI, the
+  regenerated TS client, and the CLI.
+- **Stream D — SPA/e2e/CI/criteria (this stream)**: the Surface-1 **warn dialog** on the matrix
+  editing surface (`web/src/routes/ScanWarnDialog.tsx`, wired in `Matrix.tsx`) — names rule id + key,
+  never matched text; "Reclassify as secret" (primary) and sticky "Keep as config"; no blanket
+  ignore-all. Playwright flow `web/e2e/flows/scanning.spec.ts` (SS2/SS4 [UI]), registered in
+  `e2e/registry.ts`. CI: the `generated` job drift-checks `rules_gen.go`; the `test` job runs the
+  `BenchmarkScan` relative regression guard (the corpus and Pi-artifact validation already run under
+  the ordinary `go test ./...`, so no extra step). The SS-row criteria matrix.
+
+## Wire shape (from `api/openapi.yaml`)
+
+- `ScanFinding` = `{ rule_id, surface, locator, acknowledgement? }`. `surface` ∈
+  `value_write | declassification | import_value | edit`. `locator` is the key identity (Surface 1)
+  or a schema-location class like `key.declaration.pattern` (Surface 2). **Never** matched text,
+  offset, length, or excerpt. `acknowledgement` is an opaque, short-lived, content-bound token,
+  present only where an acknowledgement is possible.
+- **Surface-1 warn** rides the *success* response: `findings: ScanFinding[]` on `PendingChange`
+  (value stage), on `Key` (declassification reclassify response), and on the copy/clone/import/declare
+  value-write results. The save succeeded regardless; a clean save omits `findings`.
+- **Surface-2 block** rides the *error* body: `error.findings: ScanFinding[]` on a `bad_request` a
+  declaration ingress refused.
+- **Acknowledgement** = `acknowledgements: string[]` on the write request. On a value write, a
+  keep-as-config token re-submitted with the identical value records the sticky dismissal
+  (`SetValueRequest.acknowledgements`). On a declaration write, one override token per finding is
+  re-scanned against current content; stale/version-skewed/surplus tokens are rejected by name.
+  There is no blanket ignore-all input on any surface.
 
 ## Vendoring pin (phase 0, done)
 
@@ -92,18 +136,39 @@ project/org naming (`internal/service/hierarchy.go`) — refused **before any pe
 persists**, per-finding locator + rule ID + short-lived content-bound ack token;
 resubmission re-scans and rejects stale/surplus tokens by name (ADR §4).
 
-## Scope residuals (NOT green in this PR — named, not silently skipped)
+## Scope residuals (three, named — not silently skipped)
 
-1. **`definitions plan|apply` ingresses (SS3 legs)** — verbs don't exist yet (#70,
-   `internal/importer/artifacts.go:209`). The scanner + ack machinery here is verb-agnostic;
-   #70 must call it before plan persistence and on snapshot-version skew at apply. SS3's
-   plan/apply fixture legs land with #70.
-2. **Surface-2 block dialog in the SPA** — the SPA has no declaration-editing surface
-   (verified; `docs/handoff/60-chrome-surfaces.md:201`). Block presentation ships CLI/API;
-   the dialog lands with the declaration-editing surface.
-3. **Pi-class `bench-scan` artifact (SS1)** — produced on real Pi-class hardware, committed,
-   CI-validated. Runs as a late phase on the homelab Pi; if unreachable this session it is a
-   named blocking leftover, never fabricated.
+These are the only §9 legs not closed; the criteria matrix marks them `Blocked`, pinned at 3.
+
+1. **`definitions plan` ingress (SS3.plan)** — the `definitions plan` verb does not exist yet
+   (#70, `internal/importer/artifacts.go:209`). The scanner + ack machinery here is verb-agnostic;
+   #70 must call `Scan` **before the immutable plan persists** — a plan artifact is stored
+   declaration text and must not be born carrying a credential.
+2. **`definitions apply` re-scan (SS3.apply)** — same #70. `apply` **re-scans iff** the running
+   ruleset snapshot differs from the one the plan recorded (`SnapshotVersion()` skew); a same-version
+   apply adds no second scan. The audit ingress enum already reserves `plan` and `apply`
+   (`scanning.finding_blocked|overridden` payloads), so #70 wires the verbs, not the schema.
+3. **Surface-2 block dialog in the SPA (SS3.ui)** — the SPA has no declaration-editing surface
+   (verified; `docs/handoff/60-chrome-surfaces.md:201`). Block presentation ships CLI/API; the
+   dialog lands with the declaration-editing surface. Only the Surface-1 **warn** dialog ships here.
+
+Nothing else is deferred. The Pi-class `bench-scan` artifact (SS1) is committed and CI-validated
+(`TestPiBenchArtifact`): produced on **pi4-8gb `sapporo`** after the keyword-anchored suffix-window
+fix (commit `b071d4a`), it parses, matches the pinned harness + ruleset snapshot versions, and
+reports p99 ≤ 5 ms per item at the size cap with boot compile ≤ 2 s / ≤ 32 MiB.
+
+## What #70 (definitions plan/apply) must wire
+
+- **plan**: scan every author-controlled string leaf of the plan **before it persists**; on a
+  finding, refuse with `error.findings` and emit `scanning.finding_blocked` (ingress `plan`), nothing
+  else persisted. Honor override tokens (ingress `plan`) under the same content-binding rules.
+- **apply**: compare the plan's recorded `SnapshotVersion()` to the running one; **only on skew**,
+  re-scan the snapshot and refuse on a finding (ingress `apply`); acknowledged resubmission emits
+  `scanning.finding_overridden`. Same-version apply is a no-op for the scanner.
+- The service seam is already there and verb-agnostic — `internal/service/scan.go` +
+  `scan_ack_test.go`; the audit enum values `plan|apply` are reserved. #70 adds the call sites and
+  the two SS3 [E2E] fixture legs; then flip `SS3.plan`/`SS3.apply` off `Blocked` in the criteria
+  matrix and move the pin from 3 to 1.
 
 ## File ownership (parallel streams)
 
@@ -112,6 +177,11 @@ resubmission re-scans and rejects stale/surplus tokens by name (ADR §4).
 - Stream B: `internal/crypto/**`, `internal/audit/**`, migrations `00027`+ both engines,
   `internal/store/queries/**` + repos, rotate-scanning-key service/authz/CLI,
   `internal/boundary/boundary_test.go`.
+- Stream C: `internal/service/**`, `internal/server/**`, `internal/cli/**`, `api/openapi.yaml`,
+  regenerated `clients/ts/src/generated`.
+- Stream D: `web/**` (`ScanWarnDialog.tsx`, `Matrix.tsx`, `api/matrix.ts`, `styles/app.css`,
+  `e2e/flows/scanning.spec.ts`, `e2e/registry.ts`), `internal/isolation/scanning_criteria_test.go`,
+  `.github/workflows/ci.yml` (`generated` + `test` jobs), this handoff.
 - `.github/workflows/ci.yml`: single writer, integration phase only; new jobs join
   `ci-required`.
 
