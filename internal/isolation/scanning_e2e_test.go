@@ -61,14 +61,14 @@ func runScanningLifecycle(t *testing.T, db *store.DB) {
 		t.Fatalf("load ruleset: %v", err)
 	}
 	kr := probeKeyring(t, db)
-	orgs := &service.Orgs{DB: db, Keyring: kr, Scan: rs}
-	projects := &service.Projects{DB: db, Keyring: kr, Scan: rs}
+	orgs := &service.Orgs{DB: db}
+	projects := &service.Projects{DB: db}
 	envs := &service.Environments{DB: db, Keyring: kr, Scan: rs}
 	folders := &service.Folders{DB: db, Keyring: kr, Scan: rs}
 	keys := &service.Keys{DB: db, Keyring: kr, Scan: rs}
 	values := &service.Values{DB: db, Keyring: kr, Scan: rs, Auth: authServiceWithKeyring(t, db)}
 
-	org, err := orgs.Create(ctx, service.LocalPrincipal(root), "scanning-audit-org", true, []byte(`{}`), nil)
+	org, err := orgs.Create(ctx, service.LocalPrincipal(root), "scanning-audit-org", true, []byte(`{}`))
 	if err != nil {
 		t.Fatalf("create org: %v", err)
 	}
@@ -80,7 +80,7 @@ func runScanningLifecycle(t *testing.T, db *store.DB) {
 	}
 	actor := service.LocalPrincipal(who)
 
-	proj, err := projects.Create(ctx, actor, domain.OrgID(org.ID), "scanning-proj", nil)
+	proj, err := projects.Create(ctx, actor, domain.OrgID(org.ID), "scanning-proj")
 	if err != nil {
 		t.Fatalf("create project: %v", err)
 	}
@@ -299,6 +299,17 @@ func runScanningLifecycle(t *testing.T, db *store.DB) {
 	}
 	if scanEventCount(t, db, "scanning.finding_warned") <= declassBefore {
 		t.Fatal("SS2: declassification emitted no finding_warned")
+	}
+	// F2d (#74, ADR §5): a value warn is an ENV-scoped event carrying the value's
+	// owning environment, even when emitted inside the project-scoped
+	// reclassification ceremony. The event's chain is proof-bound, so this proves
+	// the warn commits under a per-environment proof, not the project one.
+	declassScopeClass := queryString(t, db,
+		"SELECT scope_class FROM audit_tenant_events WHERE type = 'scanning.finding_warned' AND object_id = '"+declassKey.ID+"'")
+	declassEnv := queryString(t, db,
+		"SELECT COALESCE(env_id, '') FROM audit_tenant_events WHERE type = 'scanning.finding_warned' AND object_id = '"+declassKey.ID+"'")
+	if declassScopeClass != "env" || declassEnv != env.ID {
+		t.Errorf("SS2: declassification finding_warned scope_class=%q env_id=%q, want env / %s", declassScopeClass, declassEnv, env.ID)
 	}
 
 	// --- SS2: a dismissal keyed by a STALE rule digest does not suppress ---

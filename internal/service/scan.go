@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Hikyo-Org/hikyo/internal/audit"
@@ -16,6 +17,7 @@ import (
 	"github.com/Hikyo-Org/hikyo/internal/scanning"
 	"github.com/Hikyo-Org/hikyo/internal/schema"
 	"github.com/Hikyo-Org/hikyo/internal/store"
+	"github.com/Hikyo-Org/hikyo/internal/store/tx"
 )
 
 // Secret-scanning integration (#74, secret-scanning ADR §§2,4,5,7). This file
@@ -245,6 +247,53 @@ func (a *ackSet) unconsumed() int {
 	return n
 }
 
+// classifyRejections names every unconsumed token against the findings that
+// exist now (ADR §4 / SS3: rejection BY NAME, with a structural reason). The
+// precedence is deterministic so the message is stable: a token that does not
+// decode is unreadable; one whose bound locator+rule matches no current finding
+// is surplus; otherwise the mismatch that kept it from matching its finding is
+// the reason — version-skew before stale before expired.
+func (a *ackSet) classifyRejections(kr *crypto.Keyring, findings []declFinding, snapshot string, now time.Time) []scanRejection {
+	var out []scanRejection
+	for i, tok := range a.tokens {
+		if a.used[i] {
+			continue
+		}
+		rej := scanRejection{Index: i}
+		b, err := openAck(kr, tok)
+		if err != nil || b.kind != ackKindDecl {
+			rej.Reason = rejectUnreadable
+			out = append(out, rej)
+			continue
+		}
+		rej.Locator = b.locator
+		var match *declFinding
+		for j := range findings {
+			if findings[j].locator == b.locator && findings[j].ruleDigest == b.ruleDigest {
+				match = &findings[j]
+				break
+			}
+		}
+		switch {
+		case match == nil:
+			// No current finding shares this token's locator+rule.
+			rej.Reason = rejectSurplus
+		case b.snapshot != snapshot:
+			rej.Reason, rej.RuleID = rejectVersionSkew, match.ruleID
+		case b.contentSHA != match.cSHA:
+			rej.Reason, rej.RuleID = rejectStale, match.ruleID
+		case now.Sub(time.Unix(0, b.mintNano)) > ackTTL:
+			rej.Reason, rej.RuleID = rejectExpired, match.ruleID
+		default:
+			// Binds an exact current finding yet stayed unconsumed: a second token
+			// aimed at the one finding a prior token already claimed — surplus.
+			rej.Reason, rej.RuleID = rejectSurplus, match.ruleID
+		}
+		out = append(out, rej)
+	}
+	return out
+}
+
 // --- Surface 1: warn, non-blocking (ADR §2 Surface 1, §4, §7) ---
 
 // scanConfigValue is the Surface-1 chokepoint helper, run inside the value
@@ -397,9 +446,6 @@ const (
 	locDeclScheme         = "key.declaration.scheme"
 	locDeclJSONSchema     = "key.declaration.json_schema"
 	locGroupName          = "key_group.name"
-	locOrgName            = "org.name"
-	locOrgMetadata        = "org.metadata"
-	locProjectName        = "project.name"
 	locEnvironmentName    = "environment.name"
 	locEnvironmentNote    = "environment.note"
 	locFolderPath         = "folder.path"
@@ -472,17 +518,81 @@ func keyMetadataLeaves(m KeyMetadataUpdate) []scanLeaf {
 // declScanResult is what scanDeclaration reports. blocked findings refuse the
 // write (finding_blocked committed alone); overridden findings ride the write's
 // own transaction (finding_overridden). rejections name every presented token
-// that no current finding claimed — surplus, stale, version-skewed, or expired.
+// that no current finding claimed — surplus, stale, version-skewed, expired, or
+// unreadable — each identified by name (ADR §4 / SS3).
 type declScanResult struct {
 	blocked    []Finding
 	overridden []overrideAck
-	rejections []string
+	rejections []scanRejection
 }
 
 type overrideAck struct {
 	ruleID  string
 	locator string
 	ackRef  string
+}
+
+// declFinding is one current scan finding, retained so an unconsumed
+// acknowledgement token can be classified against the findings that exist NOW.
+type declFinding struct {
+	locator    string
+	ruleID     string
+	ruleDigest string
+	cSHA       [32]byte
+}
+
+// Rejection reason classes (ADR §4 / SS3: a resubmitted token that no current
+// finding claims is refused BY NAME, with a structural reason). Precedence when
+// more than one could apply is deterministic, tested: unreadable → surplus →
+// version-skew → stale → expired.
+const (
+	rejectUnreadable  = "unreadable"   // does not decode, or bound to another surface
+	rejectSurplus     = "surplus"      // no current finding shares its locator+rule
+	rejectVersionSkew = "version-skew" // ruleset snapshot changed since minting
+	rejectStale       = "stale"        // field content changed since minting
+	rejectExpired     = "expired"      // older than the acknowledgement TTL
+)
+
+// scanRejection names one presented acknowledgement token that no current
+// finding claimed. It carries the token's submission index (always available),
+// its bound locator and rule id when the token decodes, and a structural reason
+// class — never any matched text or the token's content digest.
+type scanRejection struct {
+	Index   int    // 0-based position in the submitted acknowledgements
+	Locator string // bound locator, or "" when the token does not decode
+	RuleID  string // rule id of the finding it targeted, when one exists
+	Reason  string // one of the reject* classes above
+}
+
+// reasonDetail is the caller-safe explanation for a rejection class.
+func reasonDetail(reason string) string {
+	switch reason {
+	case rejectStale:
+		return "the field content changed since the token was minted"
+	case rejectVersionSkew:
+		return "the ruleset version changed since the token was minted"
+	case rejectSurplus:
+		return "no current finding corresponds to this token"
+	case rejectExpired:
+		return "the acknowledgement token has expired"
+	default:
+		return "the token is unreadable or was minted for a different surface"
+	}
+}
+
+// Describe renders one rejection for the refusal body and CLI, naming the token
+// (by submission index and, when it decodes, its bound locator/rule) and the
+// structural reason. It embeds no matched text.
+func (r scanRejection) Describe() string {
+	who := fmt.Sprintf("token #%d", r.Index+1)
+	if r.Locator != "" {
+		who += " (" + r.Locator
+		if r.RuleID != "" {
+			who += "/" + r.RuleID
+		}
+		who += ")"
+	}
+	return fmt.Sprintf("%s: %s — %s", who, r.Reason, reasonDetail(r.Reason))
 }
 
 // declFieldObject is the audit object for a Surface-2 event: the immutable
@@ -506,6 +616,7 @@ func scanDeclaration(ctx context.Context, kr *crypto.Keyring, rs *scanning.Rules
 		return declScanResult{}, nil
 	}
 	var res declScanResult
+	var findings []declFinding
 	total := 0
 	for _, leaf := range leaves {
 		matches, err := rs.Scan(ctx, leaf.Content)
@@ -525,6 +636,8 @@ func scanDeclaration(ctx context.Context, kr *crypto.Keyring, rs *scanning.Rules
 			if total > maxRequestFindings {
 				return declScanResult{}, errFindingCap
 			}
+			// Retained so a leftover token can be named against a current finding.
+			findings = append(findings, declFinding{locator: leaf.Locator, ruleID: m.RuleID, ruleDigest: digest, cSHA: cSHA})
 			if acks != nil {
 				if tok, matched := acks.match(kr, ackKindDecl, leaf.Locator, digest, rs.SnapshotVersion(), cSHA, now); matched {
 					res.overridden = append(res.overridden, overrideAck{ruleID: m.RuleID, locator: leaf.Locator, ackRef: ackRef(tok)})
@@ -544,10 +657,7 @@ func scanDeclaration(ctx context.Context, kr *crypto.Keyring, rs *scanning.Rules
 		}
 	}
 	if acks != nil {
-		if n := acks.unconsumed(); n > 0 {
-			res.rejections = append(res.rejections,
-				fmt.Sprintf("%d acknowledgement token(s) matched no current finding (surplus, stale, or version-skewed) and were rejected", n))
-		}
+		res.rejections = acks.classifyRejections(kr, findings, rs.SnapshotVersion(), now)
 	}
 	return res, nil
 }
@@ -558,7 +668,7 @@ func scanDeclaration(ctx context.Context, kr *crypto.Keyring, rs *scanning.Rules
 // acknowledgement token; rejections name surplus/stale tokens.
 type scanRefusalErr struct {
 	blocked    []Finding
-	rejections []string
+	rejections []scanRejection
 }
 
 func (e *scanRefusalErr) Error() string {
@@ -575,15 +685,40 @@ func (e *scanRefusalErr) Is(target error) bool { return target == domain.ErrInva
 func (e *scanRefusalErr) Findings() []Finding { return e.blocked }
 
 // Rejections names the tokens the resubmission presented that no current
-// finding claimed.
-func (e *scanRefusalErr) Rejections() []string { return e.rejections }
-
-func (e *scanRefusalErr) SafeDetail() string {
-	locators := make([]string, 0, len(e.blocked))
-	for _, f := range e.blocked {
-		locators = append(locators, f.Locator+" ("+f.RuleID+")")
+// finding claimed — each rendered as a caller-safe string carrying its
+// submission index, bound locator/rule, and a structural reason class (ADR §4 /
+// SS3). Strings (not the unexported struct) so the contract crosses the package
+// boundary and embeds no matched text.
+func (e *scanRefusalErr) Rejections() []string {
+	out := make([]string, len(e.rejections))
+	for i, r := range e.rejections {
+		out[i] = r.Describe()
 	}
-	return fmt.Sprintf("a declaration field carries a credential-shaped string: %v", locators)
+	return out
+}
+
+// SafeDetail is the caller-safe refusal body. It names each blocked field's
+// locator+rule and each rejected token BY NAME (index, bound locator/rule,
+// reason class) — never any matched text. Both halves are rendered so a refusal
+// carrying ONLY rejected tokens (every finding overridden, but a surplus/stale
+// token presented) is not an empty message.
+func (e *scanRefusalErr) SafeDetail() string {
+	var parts []string
+	if len(e.blocked) > 0 {
+		locators := make([]string, 0, len(e.blocked))
+		for _, f := range e.blocked {
+			locators = append(locators, f.Locator+" ("+f.RuleID+")")
+		}
+		parts = append(parts, fmt.Sprintf("a declaration field carries a credential-shaped string: %s", strings.Join(locators, ", ")))
+	}
+	if len(e.rejections) > 0 {
+		named := make([]string, 0, len(e.rejections))
+		for _, r := range e.rejections {
+			named = append(named, r.Describe())
+		}
+		parts = append(parts, "rejected acknowledgement token(s): "+strings.Join(named, "; "))
+	}
+	return strings.Join(parts, "; ")
 }
 
 // blockedEvent builds one finding_blocked event. The object is the finding's
@@ -646,6 +781,83 @@ func applyDeclarationScan(ctx context.Context, r store.Repos, p authz.Proof, az 
 		return &scanRefusalErr{blocked: res.blocked, rejections: res.rejections}
 	}
 	for _, o := range res.overridden {
+		if err := emitFindingOverridden(ctx, r, p, principal, o); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// scanSurface2Preflight reaches the Surface-2 verdict in a READ-only transaction
+// BEFORE the caller resolves a project sealer. sealerFor / prepareSchemaPublish
+// MINT the project DEK on first use — a wrapped-key row committed in the
+// keyring adapter's OWN transaction, outside the caller's write transaction — so
+// a scan that runs only inside that later write transaction leaves the minted
+// row behind when it blocks, violating ADR §7 (a Surface-2 refusal persists
+// NOTHING but the finding_blocked events). This helper closes the gap for the
+// two ingresses that can first-mint the DEK (environment create, and key create
+// on a project whose DEK no value or key has yet minted): the mint is skipped
+// entirely when the scan blocks, because the caller returns before reaching the
+// sealer.
+//
+// It authorizes (op, scope) inside the read transaction — the same authorize
+// sealerFor performs before it mints — so the scan stays after-authorize and
+// opens no unauthorized-scan oracle. On refusal it CAPTURES the finding_blocked
+// events via az.CaptureAudit; settleDenials flushes them in their own
+// transaction after the read rolls back (the read wrote nothing else), so the
+// block events land while nothing else persists, and it returns *scanRefusalErr.
+// On acceptance it returns the overridden acks for the caller to emit with
+// r.Audit INSIDE the write transaction, so finding_overridden commits with the
+// write (ADR §5,§7).
+//
+// The scanned leaves are request-derived (the entity name / key spec), identical
+// to what the write transaction would carry, so the pre-flight verdict cannot
+// diverge from an in-transaction scan of the same bytes. Ingresses that operate
+// on an existing key (rename, declaration update, reclassify) never first-mint —
+// the key's create already minted the DEK — and so keep the in-transaction
+// applyDeclarationScan; nothing they can block mints a new row.
+func scanSurface2Preflight(ctx context.Context, db *store.DB, kr *crypto.Keyring, rs *scanning.Ruleset,
+	actor Actor, op authz.Operation, scope domain.Scope, leaves []scanLeaf, acks []string) ([]overrideAck, error) {
+	if rs == nil {
+		// Scanning off (pre-#74 test); a booted server always wires the ruleset.
+		return nil, nil
+	}
+	var overrides []overrideAck
+	err := tx.Read(ctx, db, func(ctx context.Context, _ store.ReadRepos, az *authz.TxAuthorizer) error {
+		caller, err := actor.resolve(ctx, az, time.Now().UTC())
+		if err != nil {
+			return err
+		}
+		if _, err := az.Authorize(ctx, caller, op, scope); err != nil {
+			return err
+		}
+		res, err := scanDeclaration(ctx, kr, rs, leaves, newAckSet(acks), time.Now())
+		if err != nil {
+			return err
+		}
+		if res.refuses() {
+			for _, f := range res.blocked {
+				ev, err := blockedEvent(ctx, caller.Principal, f)
+				if err != nil {
+					return err
+				}
+				az.CaptureAudit(audit.TrailTenant, scope, ev)
+			}
+			return &scanRefusalErr{blocked: res.blocked, rejections: res.rejections}
+		}
+		overrides = res.overridden
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return overrides, nil
+}
+
+// emitOverrides writes the finding_overridden events an accepted Surface-2
+// pre-flight produced, inside the caller's write transaction (ADR §5,§7).
+func emitOverrides(ctx context.Context, r store.Repos, p authz.Proof, principal domain.PrincipalID, overrides []overrideAck) error {
+	for _, o := range overrides {
 		if err := emitFindingOverridden(ctx, r, p, principal, o); err != nil {
 			return err
 		}

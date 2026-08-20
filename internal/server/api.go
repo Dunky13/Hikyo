@@ -111,11 +111,11 @@ type SAMLProviderService interface {
 // cross-request cache the permission model forbids, wearing an argument's
 // clothes.
 type OrgService interface {
-	Create(ctx context.Context, actor service.Actor, name string, active bool, metadata json.RawMessage, acks []string) (org service.Org, err error)
+	Create(ctx context.Context, actor service.Actor, name string, active bool, metadata json.RawMessage) (org service.Org, err error)
 	Get(ctx context.Context, actor service.Actor, org domain.OrgID) (service.Org, error)
 	List(ctx context.Context, actor service.Actor) ([]service.Org, error)
 	ListMine(ctx context.Context, actor service.Actor) ([]service.MyOrg, error)
-	Rename(ctx context.Context, actor service.Actor, org domain.OrgID, name string, acks []string) (service.Org, error)
+	Rename(ctx context.Context, actor service.Actor, org domain.OrgID, name string) (service.Org, error)
 	Delete(ctx context.Context, actor service.Actor, org domain.OrgID) error
 }
 
@@ -454,7 +454,10 @@ func (a *API) CreateOrg(ctx context.Context, req apigen.CreateOrgRequestObject) 
 			BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, "metadata")),
 		}, nil
 	}
-	org, err := a.Orgs.Create(ctx, service.Bearer(bearer(ctx)), req.Body.Name, active, metadata, derefAcks(req.Body.Acknowledgements))
+	// req.Body.Acknowledgements is accepted on the wire for shape stability but
+	// ignored: org names are not secret-scanned (#74), so no finding can block a
+	// create and no token can ever apply.
+	org, err := a.Orgs.Create(ctx, service.Bearer(bearer(ctx)), req.Body.Name, active, metadata)
 	if err != nil {
 		// Everything but the metadata leg above goes through the one uniform
 		// writer, so a refusal class added later (conflict, for a duplicate name)

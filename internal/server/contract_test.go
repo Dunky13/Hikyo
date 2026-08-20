@@ -273,7 +273,7 @@ func (s stubOrgs) ListMine(ctx context.Context, a service.Actor) ([]service.MyOr
 	return s.mine(ctx, a)
 }
 
-func (s stubOrgs) Create(ctx context.Context, a service.Actor, n string, active bool, m json.RawMessage, _ []string) (service.Org, error) {
+func (s stubOrgs) Create(ctx context.Context, a service.Actor, n string, active bool, m json.RawMessage) (service.Org, error) {
 	if s.create == nil {
 		return service.Org{}, domain.ErrUnauthorized
 	}
@@ -287,7 +287,7 @@ func (s stubOrgs) Get(ctx context.Context, a service.Actor, org domain.OrgID) (s
 	return s.get(ctx, a, org)
 }
 
-func (s stubOrgs) Rename(ctx context.Context, a service.Actor, org domain.OrgID, name string, _ []string) (service.Org, error) {
+func (s stubOrgs) Rename(ctx context.Context, a service.Actor, org domain.OrgID, name string) (service.Org, error) {
 	if s.rename == nil {
 		return service.Org{}, domain.ErrNotFound
 	}
@@ -954,7 +954,7 @@ func (s stubHierarchy) outcome() error {
 	return s.err
 }
 
-func (s stubHierarchy) Create(context.Context, service.Actor, domain.OrgID, string, []string) (service.Project, error) {
+func (s stubHierarchy) Create(context.Context, service.Actor, domain.OrgID, string) (service.Project, error) {
 	return service.Project{}, s.outcome()
 }
 
@@ -966,7 +966,7 @@ func (s stubHierarchy) List(context.Context, service.Actor, domain.OrgID) ([]ser
 	return nil, s.outcome()
 }
 
-func (s stubHierarchy) Rename(context.Context, service.Actor, domain.Scope, string, []string) (service.Project, error) {
+func (s stubHierarchy) Rename(context.Context, service.Actor, domain.Scope, string) (service.Project, error) {
 	return service.Project{}, s.outcome()
 }
 

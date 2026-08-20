@@ -158,12 +158,12 @@ var tenantProbes = []tenantProbe{
 		name: "project_create_read_only_principal", axis: axisCapabilityDenial, mutation: true,
 		run: func(t *testing.T, db *store.DB) error {
 			_, projects, _ := services(t, db)
-			_, err := projects.Create(tctx(t), service.LocalPrincipal(reader), orgA, "intruder", nil)
+			_, err := projects.Create(tctx(t), service.LocalPrincipal(reader), orgA, "intruder")
 			return err
 		},
 		missing: func(t *testing.T, db *store.DB) error {
 			_, projects, _ := services(t, db)
-			_, err := projects.Create(tctx(t), service.LocalPrincipal(alice), "org_missing", "intruder", nil)
+			_, err := projects.Create(tctx(t), service.LocalPrincipal(alice), "org_missing", "intruder")
 			return err
 		},
 	},
@@ -171,12 +171,12 @@ var tenantProbes = []tenantProbe{
 		name: "project_create_cross_org", axis: axisCrossOrgHuman, mutation: true,
 		run: func(t *testing.T, db *store.DB) error {
 			_, projects, _ := services(t, db)
-			_, err := projects.Create(tctx(t), service.LocalPrincipal(bob), orgA, "intruder", nil)
+			_, err := projects.Create(tctx(t), service.LocalPrincipal(bob), orgA, "intruder")
 			return err
 		},
 		missing: func(t *testing.T, db *store.DB) error {
 			_, projects, _ := services(t, db)
-			_, err := projects.Create(tctx(t), service.LocalPrincipal(alice), "org_missing", "intruder", nil)
+			_, err := projects.Create(tctx(t), service.LocalPrincipal(alice), "org_missing", "intruder")
 			return err
 		},
 	},
@@ -212,12 +212,12 @@ var tenantProbes = []tenantProbe{
 		name: "org_rename_org_admin_refused", axis: axisCapabilityDenial, mutation: true,
 		run: func(t *testing.T, db *store.DB) error {
 			orgs, _, _ := services(t, db)
-			_, err := orgs.Rename(tctx(t), service.LocalPrincipal(alice), orgA, "pwned", nil)
+			_, err := orgs.Rename(tctx(t), service.LocalPrincipal(alice), orgA, "pwned")
 			return err
 		},
 		missing: func(t *testing.T, db *store.DB) error {
 			orgs, _, _ := services(t, db)
-			_, err := orgs.Rename(tctx(t), service.LocalPrincipal(root), "org_missing", "pwned", nil)
+			_, err := orgs.Rename(tctx(t), service.LocalPrincipal(root), "org_missing", "pwned")
 			return err
 		},
 	},
@@ -225,12 +225,12 @@ var tenantProbes = []tenantProbe{
 		name: "org_rename_cross_org", axis: axisCrossOrgHuman, mutation: true,
 		run: func(t *testing.T, db *store.DB) error {
 			orgs, _, _ := services(t, db)
-			_, err := orgs.Rename(tctx(t), service.LocalPrincipal(bob), orgA, "pwned", nil)
+			_, err := orgs.Rename(tctx(t), service.LocalPrincipal(bob), orgA, "pwned")
 			return err
 		},
 		missing: func(t *testing.T, db *store.DB) error {
 			orgs, _, _ := services(t, db)
-			_, err := orgs.Rename(tctx(t), service.LocalPrincipal(root), "org_missing", "pwned", nil)
+			_, err := orgs.Rename(tctx(t), service.LocalPrincipal(root), "org_missing", "pwned")
 			return err
 		},
 	},
@@ -296,12 +296,12 @@ var tenantProbes = []tenantProbe{
 		name: "project_rename_read_only_principal", axis: axisCapabilityDenial, mutation: true,
 		run: func(t *testing.T, db *store.DB) error {
 			_, projects, _ := services(t, db)
-			_, err := projects.Rename(tctx(t), service.LocalPrincipal(reader), scopeProject(orgA, prjA1), "pwned", nil)
+			_, err := projects.Rename(tctx(t), service.LocalPrincipal(reader), scopeProject(orgA, prjA1), "pwned")
 			return err
 		},
 		missing: func(t *testing.T, db *store.DB) error {
 			_, projects, _ := services(t, db)
-			_, err := projects.Rename(tctx(t), service.LocalPrincipal(alice), scopeProject(orgA, "prj_missing"), "pwned", nil)
+			_, err := projects.Rename(tctx(t), service.LocalPrincipal(alice), scopeProject(orgA, "prj_missing"), "pwned")
 			return err
 		},
 	},
@@ -309,7 +309,7 @@ var tenantProbes = []tenantProbe{
 		name: "project_rename_cross_project_machine", axis: axisCrossProjectMachine, mutation: true,
 		run: func(t *testing.T, db *store.DB) error {
 			_, projects, _ := services(t, db)
-			_, err := projects.Rename(tctx(t), service.LocalPrincipal(mchA1), scopeProject(orgA, prjA2), "pwned", nil)
+			_, err := projects.Rename(tctx(t), service.LocalPrincipal(mchA1), scopeProject(orgA, prjA2), "pwned")
 			return err
 		},
 		missing: func(t *testing.T, db *store.DB) error {
@@ -320,7 +320,7 @@ var tenantProbes = []tenantProbe{
 			// address prjA1 with a missing CHILD are already authorized — the
 			// grant covers the project, only the child is absent.)
 			_, projects, _ := services(t, db)
-			_, err := projects.Rename(tctx(t), service.LocalPrincipal(alice), scopeProject(orgA, "prj_missing"), "pwned", nil)
+			_, err := projects.Rename(tctx(t), service.LocalPrincipal(alice), scopeProject(orgA, "prj_missing"), "pwned")
 			return err
 		},
 	},
@@ -874,7 +874,7 @@ func contentSnapshot(t *testing.T, db *store.DB) string {
 func runInstanceProbes(t *testing.T, db *store.DB) {
 	orgs, _, _ := services(t, db)
 	before := rowCounts(t, db)
-	if _, err := orgs.Create(tctx(t), service.LocalPrincipal(bob), "bob-empire", true, []byte(`{}`), nil); !errors.Is(err, domain.ErrUnauthorized) {
+	if _, err := orgs.Create(tctx(t), service.LocalPrincipal(bob), "bob-empire", true, []byte(`{}`)); !errors.Is(err, domain.ErrUnauthorized) {
 		t.Errorf("org.create as org admin: err = %v, want ErrUnauthorized", err)
 	}
 	if _, err := orgs.List(tctx(t), service.LocalPrincipal(bob)); !errors.Is(err, domain.ErrUnauthorized) {
@@ -920,7 +920,7 @@ func runPositiveControls(t *testing.T, db *store.DB) {
 		t.Fatalf("alice updating note: %v", err)
 	}
 
-	proj, err := projects.Create(tctx(t), service.LocalPrincipal(alice), orgA, "alice-project", nil)
+	proj, err := projects.Create(tctx(t), service.LocalPrincipal(alice), orgA, "alice-project")
 	if err != nil {
 		t.Fatalf("alice creating a project: %v", err)
 	}
@@ -936,14 +936,14 @@ func runPositiveControls(t *testing.T, db *store.DB) {
 		t.Fatalf("created env's chain did not come from the proof")
 	}
 
-	org, err := orgs.Create(tctx(t), service.LocalPrincipal(root), "root-org", true, []byte(`{}`), nil)
+	org, err := orgs.Create(tctx(t), service.LocalPrincipal(root), "root-org", true, []byte(`{}`))
 	if err != nil {
 		t.Fatalf("root creating an org: %v", err)
 	}
 	if _, err := orgs.Get(tctx(t), service.LocalPrincipal(root), domain.OrgID(org.ID)); err != nil {
 		t.Fatalf("root reading the created org: %v", err)
 	}
-	if _, err := orgs.Rename(tctx(t), service.LocalPrincipal(root), domain.OrgID(org.ID), "root-org-renamed", nil); err != nil {
+	if _, err := orgs.Rename(tctx(t), service.LocalPrincipal(root), domain.OrgID(org.ID), "root-org-renamed"); err != nil {
 		t.Fatalf("root renaming the created org: %v", err)
 	}
 	if err := orgs.Delete(tctx(t), service.LocalPrincipal(root), domain.OrgID(org.ID)); err != nil {
@@ -1008,7 +1008,7 @@ func runPositiveControls(t *testing.T, db *store.DB) {
 			t.Fatalf("reorder left a non-dense display order: %+v", reordered)
 		}
 	}
-	if _, err := projects.Rename(tctx(t), aliceActor, scopeProject(orgA, prjA1), "renamed-a1", nil); err != nil {
+	if _, err := projects.Rename(tctx(t), aliceActor, scopeProject(orgA, prjA1), "renamed-a1"); err != nil {
 		t.Fatalf("alice renaming a project: %v", err)
 	}
 }

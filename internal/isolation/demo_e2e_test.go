@@ -444,7 +444,7 @@ func TestLoginDoesNotHoldTheWriteLockWhileDeriving(t *testing.T) {
 		if time.Now().After(deadline) {
 			t.Fatal("unrelated writes could not make progress while logins were deriving")
 		}
-		if _, err := orgs.Create(t.Context(), service.LocalPrincipal(boot.PrincipalID), fmt.Sprintf("lockcheck-%d", i), true, []byte(`{}`), nil); err != nil {
+		if _, err := orgs.Create(t.Context(), service.LocalPrincipal(boot.PrincipalID), fmt.Sprintf("lockcheck-%d", i), true, []byte(`{}`)); err != nil {
 			t.Fatalf("write %d blocked behind a login derivation: %v", i, err)
 		}
 	}

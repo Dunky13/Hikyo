@@ -131,17 +131,18 @@ func orgOf(o store.Org) Org {
 // does not exist.
 type Orgs struct {
 	DB *store.DB
-	// Keyring and Scan are the secret-scanning Surface-2 seam (#74): org
-	// create/rename are declaration ingresses, so their author-controlled names
-	// and metadata are scanned before any state persists, and the block's
-	// acknowledgement tokens are minted under the instance key. Nil disables the
-	// scan (tests that predate #74); a booted server always wires both.
-	Keyring *crypto.Keyring
-	Scan    *scanning.Ruleset
 }
 
 // Create publishes a new org through the transactional boundary.
-func (s *Orgs) Create(ctx context.Context, actor Actor, name string, active bool, metadata json.RawMessage, acks []string) (Org, error) {
+//
+// Org names and metadata are NOT secret-scanned (#74, ADR §2 Surface 2): the
+// scan surface is "any string in the DEFINITIONS MODEL", and an org is not
+// bundle content — §5 gives declaration events project scope, so an org-scoped
+// scanning event cannot exist compliantly (OpOrgCreate's instance proof cannot
+// even write a tenant scanning event). Folder/environment/group/key fields —
+// the bundle content the ADR actually enumerates — are scanned; org and project
+// names are not. Decision recorded in docs/handoff/74-secret-scanning.md.
+func (s *Orgs) Create(ctx context.Context, actor Actor, name string, active bool, metadata json.RawMessage) (Org, error) {
 	if err := checkName("organisation name", name); err != nil {
 		return Org{}, err
 	}
@@ -156,10 +157,6 @@ func (s *Orgs) Create(ctx context.Context, actor Actor, name string, active bool
 		Metadata:  metadata,
 		CreatedAt: store.CanonTime(time.Now()),
 	}
-	leaves := nonEmptyLeaf(locOrgName, name)
-	if len(metadata) > 0 {
-		leaves = append(leaves, scanLeaf{Locator: locOrgMetadata, Content: metadata})
-	}
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		caller, err := actor.resolve(ctx, az, time.Now().UTC())
 		if err != nil {
@@ -167,12 +164,6 @@ func (s *Orgs) Create(ctx context.Context, actor Actor, name string, active bool
 		}
 		p, err := az.Authorize(ctx, caller, authz.OpOrgCreate, domain.Scope{})
 		if err != nil {
-			return err
-		}
-		// Surface-2 block (#74): the org name and metadata are scanned before the
-		// row persists. The block events carry the new org as their chain.
-		if err := applyDeclarationScan(ctx, r, p, az, s.Keyring, s.Scan, caller.Principal,
-			domain.Scope{Org: domain.OrgID(id)}, leaves, newAckSet(acks)); err != nil {
 			return err
 		}
 		if err := r.Orgs().Create(ctx, p, org); err != nil {
@@ -341,7 +332,7 @@ func (s *Orgs) Count(ctx context.Context, actor Actor) (int64, error) {
 // Rename changes the org's mutable name. The read that produces the previous
 // name for the trail runs inside the same transaction as the write, so the
 // recorded transition is the one that actually happened.
-func (s *Orgs) Rename(ctx context.Context, actor Actor, org domain.OrgID, name string, acks []string) (Org, error) {
+func (s *Orgs) Rename(ctx context.Context, actor Actor, org domain.OrgID, name string) (Org, error) {
 	if err := checkName("organisation name", name); err != nil {
 		return Org{}, err
 	}
@@ -359,11 +350,7 @@ func (s *Orgs) Rename(ctx context.Context, actor Actor, org domain.OrgID, name s
 		if err != nil {
 			return err
 		}
-		// Surface-2 block (#74): the new org name is scanned before it persists.
-		if err := applyDeclarationScan(ctx, r, p, az, s.Keyring, s.Scan, caller.Principal,
-			domain.Scope{Org: org}, nonEmptyLeaf(locOrgName, name), newAckSet(acks)); err != nil {
-			return err
-		}
+		// Org names are not secret-scanned (see Orgs.Create).
 		if err := r.Orgs().Rename(ctx, p, name); err != nil {
 			return err
 		}
@@ -439,16 +426,16 @@ func projectOf(p store.Project) Project {
 // Projects owns the project surface.
 type Projects struct {
 	DB *store.DB
-	// Keyring and Scan: secret-scanning Surface-2 seam (#74). Project
-	// create/rename names are declaration ingresses.
-	Keyring *crypto.Keyring
-	Scan    *scanning.Ruleset
 }
 
 // Create makes a project inside org. The service addresses the scope; the
 // chain the store writes comes from the proof authorize() minted after
 // resolving that scope — never from these arguments.
-func (s *Projects) Create(ctx context.Context, actor Actor, org domain.OrgID, name string, acks []string) (Project, error) {
+//
+// Project names are NOT secret-scanned (#74, ADR §2 Surface 2): a project name
+// is not definitions-bundle content, on the same ground org names are not (see
+// Orgs.Create). Key/folder/environment/group fields are the scanned surface.
+func (s *Projects) Create(ctx context.Context, actor Actor, org domain.OrgID, name string) (Project, error) {
 	if err := checkName("project name", name); err != nil {
 		return Project{}, err
 	}
@@ -464,12 +451,6 @@ func (s *Projects) Create(ctx context.Context, actor Actor, org domain.OrgID, na
 		}
 		p, err := az.Authorize(ctx, caller, authz.OpProjectCreate, domain.Scope{Org: org})
 		if err != nil {
-			return err
-		}
-		// Surface-2 block (#74): the project name is scanned before the row
-		// persists; the block events carry org→(new project) as their chain.
-		if err := applyDeclarationScan(ctx, r, p, az, s.Keyring, s.Scan, caller.Principal,
-			domain.Scope{Org: org, Project: domain.ProjectID(id)}, nonEmptyLeaf(locProjectName, name), newAckSet(acks)); err != nil {
 			return err
 		}
 		if err := r.Projects().Create(ctx, p, proj); err != nil {
@@ -533,7 +514,7 @@ func (s *Projects) List(ctx context.Context, actor Actor, org domain.OrgID) ([]P
 	return list, nil
 }
 
-func (s *Projects) Rename(ctx context.Context, actor Actor, scope domain.Scope, name string, acks []string) (Project, error) {
+func (s *Projects) Rename(ctx context.Context, actor Actor, scope domain.Scope, name string) (Project, error) {
 	if err := checkName("project name", name); err != nil {
 		return Project{}, err
 	}
@@ -551,11 +532,7 @@ func (s *Projects) Rename(ctx context.Context, actor Actor, scope domain.Scope, 
 		if err != nil {
 			return err
 		}
-		// Surface-2 block (#74): the new project name is scanned before it persists.
-		if err := applyDeclarationScan(ctx, r, p, az, s.Keyring, s.Scan, caller.Principal,
-			scope, nonEmptyLeaf(locProjectName, name), newAckSet(acks)); err != nil {
-			return err
-		}
+		// Project names are not secret-scanned (see Projects.Create).
 		if err := r.Projects().Rename(ctx, p, name); err != nil {
 			return err
 		}
@@ -692,6 +669,18 @@ func (s *Environments) create(ctx context.Context, actor Actor, scope domain.Sco
 	if err != nil {
 		return Environment{}, CloneResult{}, err
 	}
+	// Surface-2 block (#74) reached BEFORE the sealer mints the project DEK.
+	// Environment create is a first-mint ingress (a fresh project's first
+	// materialization mints the DEK here), so scanning only inside the write
+	// transaction below would leave the wrapped-key row behind on a block. The
+	// pre-flight authorizes and scans in a read transaction, refuses before any
+	// mint, and returns the acknowledged overrides to emit with the write (ADR
+	// §7; see scanSurface2Preflight).
+	overrides, err := scanSurface2Preflight(ctx, s.DB, s.Keyring, s.Scan, actor, authz.OpEnvCreate, scope,
+		nonEmptyLeaf(locEnvironmentName, name), acks)
+	if err != nil {
+		return Environment{}, CloneResult{}, err
+	}
 	// The sealer is resolved before the transaction opens: the keyring's store
 	// adapter runs transactions of its own, and sqlite serves writes on a
 	// single connection, so resolving it inside would wait on the connection
@@ -699,10 +688,11 @@ func (s *Environments) create(ctx context.Context, actor Actor, scope domain.Sco
 	//
 	// After authorization, never before: resolving a sealer MINTS the project
 	// data key on first use, and an unauthorized caller must not leave a
-	// wrapped-key row behind (see service.sealerFor). Every create needs one
-	// now, clone or not: an environment is VALIDATED AND MATERIALIZED against
-	// the current schema revision before it becomes fetchable, and a
-	// materialization seals what it publishes.
+	// wrapped-key row behind (see service.sealerFor). The scan pre-flight above
+	// runs before this for the same no-orphan-row reason, one layer earlier.
+	// Every create needs one now, clone or not: an environment is VALIDATED AND
+	// MATERIALIZED against the current schema revision before it becomes
+	// fetchable, and a materialization seals what it publishes.
 	sealer, err := sealerFor(ctx, s.DB, s.Keyring, actor, authz.OpEnvCreate, scope)
 	if err != nil {
 		return Environment{}, CloneResult{}, err
@@ -738,10 +728,10 @@ func (s *Environments) create(ctx context.Context, actor Actor, scope domain.Sco
 			return fmt.Errorf("%w: a project holds at most %d environments",
 				domain.ErrLimitExceeded, MaxEnvironmentsPerProject)
 		}
-		// Surface-2 block (#74): the environment name is scanned before the row
-		// persists.
-		if err := applyDeclarationScan(ctx, r, p, az, s.Keyring, s.Scan, caller.Principal,
-			scope, nonEmptyLeaf(locEnvironmentName, name), newAckSet(acks)); err != nil {
+		// Surface-2 acknowledged overrides (#74): the block verdict was reached in
+		// the pre-flight above; here the finding_overridden events for an
+		// acknowledged environment name commit in the write's own transaction.
+		if err := emitOverrides(ctx, r, p, caller.Principal, overrides); err != nil {
 			return err
 		}
 		// Append past the highest position in use, NOT at the row count: a

@@ -977,7 +977,9 @@ var operations = map[Operation]opSpec{
 		class:    ClassInstance,
 		formula:  Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
 		storeOps: map[StoreOp]bool{StoreOrgsCreate: true, StoreAuditInstanceInsert: true},
-		events:   []audit.EventType{audit.EventOrgCreated, audit.EventScanningFindingBlocked, audit.EventScanningFindingOverridden},
+		// Org names are not secret-scanned (#74, ADR §2 Surface 2 is bundle
+		// content; an org is not) — no scanning.* event is emitted here.
+		events: []audit.EventType{audit.EventOrgCreated},
 	},
 	OpOrgList: {
 		class:    ClassInstance,
@@ -1012,7 +1014,7 @@ var operations = map[Operation]opSpec{
 		level:    domain.LevelOrg,
 		formula:  Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
 		storeOps: map[StoreOp]bool{StoreOrgsGet: true, StoreOrgsRename: true, StoreAuditTenantInsert: true},
-		events:   []audit.EventType{audit.EventOrgRenamed, audit.EventScanningFindingBlocked, audit.EventScanningFindingOverridden},
+		events: []audit.EventType{audit.EventOrgRenamed}, // org names not scanned (#74)
 	},
 	OpOrgDelete: {
 		class:    ClassTenant,
@@ -1162,7 +1164,7 @@ var operations = map[Operation]opSpec{
 		level:    domain.LevelOrg,
 		formula:  Formula{{Cap: domain.CapManageProjects, At: domain.LevelOrg}},
 		storeOps: map[StoreOp]bool{StoreProjectsCreate: true, StoreAuditTenantInsert: true},
-		events:   []audit.EventType{audit.EventProjectCreated, audit.EventScanningFindingBlocked, audit.EventScanningFindingOverridden},
+		events: []audit.EventType{audit.EventProjectCreated}, // project names not scanned (#74)
 	},
 	OpProjectGet: {
 		class:       ClassTenant,
@@ -1183,7 +1185,7 @@ var operations = map[Operation]opSpec{
 		level:    domain.LevelProject,
 		formula:  Formula{{Cap: domain.CapManageProjects, At: domain.LevelOrg}},
 		storeOps: map[StoreOp]bool{StoreProjectsGet: true, StoreProjectsRename: true, StoreAuditTenantInsert: true},
-		events:   []audit.EventType{audit.EventProjectRenamed, audit.EventScanningFindingBlocked, audit.EventScanningFindingOverridden},
+		events: []audit.EventType{audit.EventProjectRenamed}, // project names not scanned (#74)
 	},
 	OpProjectDelete: {
 		class:   ClassTenant,
@@ -1904,6 +1906,14 @@ var operations = map[Operation]opSpec{
 			// stops delivering, so the two transition events are emitted here.
 			audit.EventValueSet, audit.EventValueCleared,
 			audit.EventAdapterSyncRequested, audit.EventAdapterSuperseded,
+			// The declassification warn (#74, ADR §5): a secret→config
+			// reclassification re-materialises the key's occurrences as config and
+			// scans each warn-only. §5 fixes finding_warned at ENV scope (the
+			// value's owning environment), so the event commits under a
+			// per-environment publish proof — the same env-scoped `publish`
+			// authority the reclassification's fan-out already exercises — not the
+			// project-scoped reclassify proof.
+			audit.EventScanningFindingWarned,
 		},
 	},
 	// The export triple. `read` alone exports `config` plaintext and `secret`

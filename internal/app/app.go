@@ -299,8 +299,8 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 	api := &server.API{
 		Auth:     authSvc,
 		SAMLAuth: authSvc,
-		Orgs:     &service.Orgs{DB: db, Keyring: kr, Scan: ruleset},
-		Projects: &service.Projects{DB: db, Keyring: kr, Scan: ruleset},
+		Orgs:     &service.Orgs{DB: db},
+		Projects: &service.Projects{DB: db},
 		// The keyring reaches the value surface (#50): clone-at-creation and
 		// every value write re-seal under the project data key, in the
 		// transaction that writes the row. The ruleset (#74) reaches every

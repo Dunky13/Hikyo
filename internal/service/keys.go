@@ -578,6 +578,16 @@ func (s *Keys) Create(ctx context.Context, actor Actor, scope domain.Scope, spec
 	leafSpec := spec
 	leafSpec.Declaration = stored
 	leaves := keySpecLeaves(leafSpec)
+	// Surface-2 block (#74) reached BEFORE prepareSchemaPublish resolves the
+	// sealer. Key create is a first-mint ingress (a fresh project's first key
+	// mints the project DEK here), so scanning only inside the write transaction
+	// would leave the wrapped-key row behind on a block. The pre-flight refuses
+	// before any mint and returns the acknowledged overrides to emit with the
+	// write (ADR §7; see scanSurface2Preflight).
+	overrides, err := scanSurface2Preflight(ctx, s.DB, s.Keyring, s.Scan, actor, authz.OpKeyCreate, scope, leaves, acks)
+	if err != nil {
+		return Key{}, err
+	}
 	publisher, err := prepareSchemaPublish(ctx, s.DB, s.Keyring, s.Advisory, actor, authz.OpKeyCreate, scope)
 	if err != nil {
 		return Key{}, err
@@ -611,10 +621,11 @@ func (s *Keys) Create(ctx context.Context, actor Actor, scope domain.Scope, spec
 		if err := checkGroupMembership(ctx, r, p, spec.GroupID, id, spec.Presence); err != nil {
 			return err
 		}
-		// Surface-2 block (#74): scan every author-controlled leaf before any
-		// declaration state persists. A finding without a valid ack refuses the
-		// write — finding_blocked commits alone, nothing else persists.
-		if err := applyDeclarationScan(ctx, r, p, az, s.Keyring, s.Scan, caller.Principal, scope, leaves, newAckSet(acks)); err != nil {
+		// Surface-2 acknowledged overrides (#74): the block verdict was reached in
+		// the pre-flight above (before the sealer minted the project DEK); here the
+		// finding_overridden events for acknowledged leaves commit in the write's
+		// own transaction.
+		if err := emitOverrides(ctx, r, p, caller.Principal, overrides); err != nil {
 			return err
 		}
 		// Name uniqueness among LIVE keys is the table's constraint, not a
@@ -754,6 +765,12 @@ func (s *Keys) Rename(ctx context.Context, actor Actor, scope domain.Scope, id, 
 		return Key{}, fmt.Errorf("%w: %s", domain.ErrInvalid, err)
 	}
 	var out Key
+	// No scan pre-flight (unlike Keys.Create): rename operates on an EXISTING key,
+	// and a key exists only because its create already minted the project DEK
+	// (Keys.Create → prepareSchemaPublish, the sole key-creation path). So this
+	// ForProject re-reads the wrapped-key row, mints nothing, and a Surface-2
+	// block below leaves no orphan row — the in-transaction scan is safe here. If
+	// key creation ever stops minting the DEK, move to scanSurface2Preflight.
 	publisher, err := prepareSchemaPublish(ctx, s.DB, s.Keyring, s.Advisory, actor, authz.OpKeyRename, scope)
 	if err != nil {
 		return Key{}, err
@@ -971,6 +988,12 @@ func readKey(ctx context.Context, r store.Repos, p authz.Proof, row store.Catalo
 // would be dead until #50 and then wrong.
 func (s *Keys) UpdateDeclaration(ctx context.Context, actor Actor, scope domain.Scope, id string, u KeyDeclarationUpdate, acks []string) (Key, error) {
 	var out Key
+	// No scan pre-flight (unlike Keys.Create): this operates on an EXISTING key,
+	// whose create already minted the project DEK, so ForProject mints nothing and
+	// a Surface-2 block leaves no orphan row (see Keys.Rename). It is also the
+	// wrong shape for a pre-flight — the scan is gated on the DB-derived no-op
+	// short-circuit below, which the §6.1 no-retro-scan rule needs; an
+	// unconditional pre-flight scan would block a canonically-identical resubmit.
 	publisher, err := prepareSchemaPublish(ctx, s.DB, s.Keyring, s.Advisory, actor, authz.OpKeyUpdateDeclaration, scope)
 	if err != nil {
 		return Key{}, err
@@ -1237,10 +1260,17 @@ func (s *Keys) Reclassify(ctx context.Context, actor Actor, scope domain.Scope, 
 // the moment they become config (#74). It reads each environment's value under
 // a per-environment read proof — the caller already holds project-level reveal,
 // which the ceremony gated above — decrypts with the ceremony's project sealer,
-// and scans warn-only. The finding_warned events commit under the ceremony's
-// project proof p (the ceremony's scope; the finding schema leaves scope class
-// caller-supplied). No dismissal: OpKeyReclassify does not authorise the
-// dismissal store ops, matching the ADR's warn-only declassification.
+// and scans warn-only.
+//
+// Each finding_warned event commits under a per-environment PUBLISH proof, not
+// the ceremony's project proof: ADR §5 fixes finding_warned at env scope (the
+// value's owning environment) with the org→project→env chain, and the chain a
+// tenant event carries is proof-bound. The reclassification's own fan-out
+// authorises `publish` on every environment in the project immediately before
+// commit, and this scan touches only the subset that holds a value — a strict
+// subset — so minting the env-scoped publish proof here can never deny a
+// reclassification the fan-out would have allowed. No dismissal:
+// OpKeyReclassify's warn-only declassification authorises no dismissal store op.
 func (s *Keys) scanDeclassified(ctx context.Context, r store.Repos, az *authz.TxAuthorizer,
 	caller authz.Identity, p authz.Proof, sealer *crypto.ProjectSealer, scope domain.Scope, keyID string) ([]Finding, error) {
 	envs, err := r.Values().EnvironmentsWithValue(ctx, p, keyID)
@@ -1266,7 +1296,13 @@ func (s *Keys) scanDeclassified(ctx context.Context, r store.Repos, az *authz.Tx
 		if err != nil {
 			return nil, err
 		}
-		f, err := scanConfigValue(ctx, r, p, s.Keyring, s.Scan, envScope, keyID,
+		// The env-scoped proof the finding_warned event commits under, so its
+		// chain is org→project→env (ADR §5), not the project reclassify chain.
+		warnProof, err := az.Authorize(ctx, caller, authz.OpValuePublish, envScope)
+		if err != nil {
+			return nil, err
+		}
+		f, err := scanConfigValue(ctx, r, warnProof, s.Keyring, s.Scan, envScope, keyID,
 			string(schema.Config), []byte(schema.Normalize(plain)), surfaceDeclassification,
 			caller.Principal, nil, false, &total)
 		if err != nil {
@@ -1409,6 +1445,13 @@ func (s *Keys) Delete(ctx context.Context, actor Actor, scope domain.Scope, id s
 		// key the schema no longer declares. The rows are collected here and a
 		// publish naming one of those version ids is refused loudly by name.
 		if _, err := r.Pending().DiscardKey(ctx, p, id); err != nil {
+			return err
+		}
+		// A key's sticky dismissals reference it under the non-cascading composite
+		// FK (#74, ADR §4 lifecycle: "key deletion deletes them"). They go before
+		// the key row: otherwise the FK refuses the delete of any key that ever
+		// carried a warn-then-dismiss, which is a handled case, not an error.
+		if _, err := r.ScanningDismissals().DeleteByKey(ctx, p, id); err != nil {
 			return err
 		}
 		if err := r.Catalogue().Delete(ctx, p, id); err != nil {

@@ -153,7 +153,7 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 	})
 
 	t.Run("domain_event_committed_in_transaction", func(t *testing.T) {
-		proj, err := projects.Create(tctx(t), service.LocalPrincipal(alice), orgA, "audited-project", nil)
+		proj, err := projects.Create(tctx(t), service.LocalPrincipal(alice), orgA, "audited-project")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -375,7 +375,7 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 		// The administrator can now perform the first audited mutating
 		// operation — the demo criterion, exercised through the real grants
 		// the admin template wrote.
-		if _, err := orgsSvc.Create(ctx, service.LocalPrincipal(id.Principal), "bootstrapped-org", true, []byte(`{}`), nil); err != nil {
+		if _, err := orgsSvc.Create(ctx, service.LocalPrincipal(id.Principal), "bootstrapped-org", true, []byte(`{}`)); err != nil {
 			t.Fatalf("the bootstrapped administrator cannot administer: %v", err)
 		}
 
@@ -460,7 +460,7 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 		if _, err := retention.GetHealth(tctx(t), service.LocalPrincipal(root)); err != nil {
 			t.Fatalf("emit retention health-read event: %v", err)
 		}
-		org, err := orgsSvc.Create(tctx(t), service.LocalPrincipal(root), "audited-org", true, []byte(`{}`), nil)
+		org, err := orgsSvc.Create(tctx(t), service.LocalPrincipal(root), "audited-org", true, []byte(`{}`))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -929,7 +929,7 @@ func runHierarchyLifecycle(t *testing.T, db *store.DB, org domain.OrgID) {
 	}
 	actor := service.LocalPrincipal(who)
 
-	proj, err := projects.Create(ctx, actor, org, "audited-project", nil)
+	proj, err := projects.Create(ctx, actor, org, "audited-project")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -961,18 +961,18 @@ func runHierarchyLifecycle(t *testing.T, db *store.DB, org domain.OrgID) {
 	}
 	runValueLifecycle(t, db, actor, who, scope)
 	runCatalogueLifecycle(t, db, actor, scope)
-	if _, err := projects.Rename(ctx, actor, scope, "audited-project-renamed", nil); err != nil {
+	if _, err := projects.Rename(ctx, actor, scope, "audited-project-renamed"); err != nil {
 		t.Fatal(err)
 	}
 	if err := projects.Delete(ctx, actor, scope); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := orgs.Rename(ctx, service.LocalPrincipal(root), org, "audited-org-renamed", nil); err != nil {
+	if _, err := orgs.Rename(ctx, service.LocalPrincipal(root), org, "audited-org-renamed"); err != nil {
 		t.Fatal(err)
 	}
 	// The org still holds this fixture's grants, so it cannot be deleted here.
 	// A throwaway org with nothing pointing at it supplies settings.org_deleted.
-	throwaway, err := orgs.Create(ctx, service.LocalPrincipal(root), "audited-org-throwaway", true, []byte(`{}`), nil)
+	throwaway, err := orgs.Create(ctx, service.LocalPrincipal(root), "audited-org-throwaway", true, []byte(`{}`))
 	if err != nil {
 		t.Fatal(err)
 	}

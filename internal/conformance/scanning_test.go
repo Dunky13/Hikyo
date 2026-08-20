@@ -10,6 +10,7 @@ import (
 
 	"github.com/Hikyo-Org/hikyo/internal/authz"
 	"github.com/Hikyo-Org/hikyo/internal/domain"
+	"github.com/Hikyo-Org/hikyo/internal/scanning"
 	"github.com/Hikyo-Org/hikyo/internal/schema"
 	"github.com/Hikyo-Org/hikyo/internal/service"
 	"github.com/Hikyo-Org/hikyo/internal/store"
@@ -25,7 +26,162 @@ func init() {
 	corpus = append(corpus,
 		scenario{"scanning_dismissal_uniqueness_and_lifecycle", scenarioScanningDismissals},
 		scenario{"scanning_key_rotation_drops_all_and_refingerprints", scenarioScanningKeyRotation},
+		scenario{"scanning_key_delete_drops_dismissals", scenarioScanningKeyDeleteDropsDismissals},
+		scenario{"scanning_surface2_block_mints_no_project_key", scenarioScanningPreflightNoOrphanKey},
 	)
+}
+
+// countProjectDEK reads how many active tier-3 project DEK rows exist for a
+// scope, straight from the keystore table, on either engine.
+func countProjectDEK(t *testing.T, db *store.DB, scope domain.Scope) int {
+	t.Helper()
+	var n int
+	if db.Engine() == store.EnginePostgres {
+		if err := db.PG().QueryRow(t.Context(),
+			`SELECT COUNT(*) FROM tier3_keys WHERE purpose='project' AND org_id=$1 AND project_id=$2 AND state='active'`,
+			string(scope.Org), string(scope.Project)).Scan(&n); err != nil {
+			t.Fatalf("count project DEK: %v", err)
+		}
+		return n
+	}
+	if err := db.SQLiteRead().QueryRowContext(t.Context(),
+		`SELECT COUNT(*) FROM tier3_keys WHERE purpose='project' AND org_id=? AND project_id=? AND state='active'`,
+		string(scope.Org), string(scope.Project)).Scan(&n); err != nil {
+		t.Fatalf("count project DEK: %v", err)
+	}
+	return n
+}
+
+// scenarioScanningPreflightNoOrphanKey is the F2a regression fixture (#74, ADR
+// §7): a Surface-2 refusal must persist NOTHING but the finding_blocked events —
+// in particular no wrapped project-DEK row. Environment create and key create
+// are the two first-mint ingresses: on a fresh project (no key, no value) their
+// sealer resolution mints the project DEK. If the scan ran only inside the write
+// transaction, a block would roll the write back but leave the separately
+// committed DEK row behind. The pre-flight reaches the verdict before the mint,
+// so a blocked create leaves the project with zero DEK rows. Both engines.
+func scenarioScanningPreflightNoOrphanKey(t *testing.T, db *store.DB) {
+	ctx := t.Context()
+	who, scope := tenantFixture(t, db, "scanpf")
+	kr := sharedKeyring(t, db)
+	rs, err := scanning.Load()
+	if err != nil {
+		t.Fatalf("load ruleset: %v", err)
+	}
+	actor := service.LocalPrincipal(who)
+	// A classic non-live AWS access key id — the aws-access-token rule matches it.
+	const planted = "AKIAIOSFODNN7EXAMPLE"
+
+	// Fresh project: no DEK has been minted yet, so the assertions below mean
+	// something.
+	if n := countProjectDEK(t, db, scope); n != 0 {
+		t.Fatalf("fresh project already has %d DEK rows; test premise broken", n)
+	}
+
+	envs := &service.Environments{DB: db, Keyring: kr, Scan: rs}
+	keys := &service.Keys{DB: db, Keyring: kr, Scan: rs}
+
+	// Blocked environment create: the env name carries a credential.
+	_, envErr := envs.Create(ctx, actor, scope, planted, nil)
+	if !errors.Is(envErr, domain.ErrInvalid) {
+		t.Fatalf("credential-named env create: err = %v, want invalid refusal", envErr)
+	}
+	if n := countProjectDEK(t, db, scope); n != 0 {
+		t.Fatalf("blocked env create left %d project DEK row(s) behind — pre-transaction mint leaked", n)
+	}
+
+	// Blocked key create: the credential lands in the description.
+	_, keyErr := keys.Create(ctx, actor, scope, service.KeySpec{
+		Name: "OK_NAME", Classification: string(schema.Config), Description: planted,
+		Declaration: schema.Declaration{Rule: &schema.Rule{Type: schema.TypeString}},
+		Presence:    schema.DefaultPresenceRules(),
+	}, nil)
+	if !errors.Is(keyErr, domain.ErrInvalid) {
+		t.Fatalf("credential-carrying key create: err = %v, want invalid refusal", keyErr)
+	}
+	if n := countProjectDEK(t, db, scope); n != 0 {
+		t.Fatalf("blocked key create left %d project DEK row(s) behind — pre-transaction mint leaked", n)
+	}
+
+	// The block events landed (nothing else): one finding_blocked per refusal.
+	var blocked int
+	if db.Engine() == store.EnginePostgres {
+		err = db.PG().QueryRow(ctx, `SELECT COUNT(*) FROM audit_tenant_events WHERE type='scanning.finding_blocked' AND org_id=$1`, string(scope.Org)).Scan(&blocked)
+	} else {
+		err = db.SQLiteRead().QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_tenant_events WHERE type='scanning.finding_blocked' AND org_id=?`, string(scope.Org)).Scan(&blocked)
+	}
+	if err != nil {
+		t.Fatalf("count finding_blocked: %v", err)
+	}
+	if blocked < 2 {
+		t.Fatalf("finding_blocked events = %d, want ≥2 (one per refused create)", blocked)
+	}
+}
+
+// scenarioScanningKeyDeleteDropsDismissals drives the SERVICE Keys.Delete path
+// with a dismissal present (#74, ADR §4 lifecycle: "key deletion deletes
+// them"). The dismissal row carries a non-cascading composite FK to the key, so
+// without Keys.Delete dropping the rows first the delete FAILS on the FK — this
+// asserts the whole service ceremony completes and the row is gone, on both
+// engines. Distinct from scenarioScanningDismissals, which exercises the repo's
+// DeleteByKey directly rather than the service call site.
+func scenarioScanningKeyDeleteDropsDismissals(t *testing.T, db *store.DB) {
+	ctx := t.Context()
+	who, scope := tenantFixture(t, db, "scandel")
+	kr := sharedKeyring(t, db)
+	actor := service.LocalPrincipal(who)
+
+	env, err := (&service.Environments{DB: db, Keyring: kr}).Create(ctx, actor, scope, "scandel-env", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	envScope := scope
+	envScope.Env = domain.EnvID(env.ID)
+	keys := &service.Keys{DB: db, Keyring: kr}
+	key, err := keys.Create(ctx, actor, scope, service.KeySpec{
+		Name: "DELETE_ME", Classification: string(schema.Config),
+		Declaration: schema.Declaration{Rule: &schema.Rule{Type: schema.TypeString}},
+		Presence:    schema.DefaultPresenceRules(),
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Plant a dismissal row for the key (the warn→keep-as-config outcome) via the
+	// same proof-bound repo the stage path uses.
+	fp := kr.ScanningFingerprint(string(scope.Org), string(scope.Project), env.ID, key.ID, []byte("AKIAIOSFODNN7EXAMPLE"))
+	if err := tx.Write(ctx, db, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+		p, err := az.Authorize(ctx, authz.Identity{Principal: who}, authz.OpValueStage, envScope)
+		if err != nil {
+			return err
+		}
+		return r.ScanningDismissals().Insert(ctx, p, store.NewDismissal{
+			ID: "sdm_del", KeyID: key.ID, RuleDigest: "sha256:rule-aws-access-token", Fingerprint: fp,
+			CreatedBy: string(who), CreatedAt: store.CanonTime(time.Now()),
+		})
+	}); err != nil {
+		t.Fatalf("plant dismissal: %v", err)
+	}
+
+	// The key holds no value, so the delete is not refused for delivered
+	// material; without the dismissal drop it would still fail on the FK.
+	if err := keys.Delete(ctx, actor, scope, key.ID); err != nil {
+		t.Fatalf("Keys.Delete with a dismissal present failed (FK not dropped?): %v", err)
+	}
+
+	// The dismissal is gone: its key no longer exists, and the row went with it.
+	if err := tx.Write(ctx, db, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+		p, err := az.Authorize(ctx, authz.Identity{Principal: who}, authz.OpValueStage, envScope)
+		if err != nil {
+			return err
+		}
+		if ok, err := r.ScanningDismissals().Exists(ctx, p, key.ID, "sha256:rule-aws-access-token", fp); err != nil || ok {
+			return fmt.Errorf("dismissal survived Keys.Delete: exists=%v err=%v", ok, err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // scenarioScanningKeyRotation drives the service rotate-scanning-key end to end

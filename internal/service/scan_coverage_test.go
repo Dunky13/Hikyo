@@ -141,7 +141,7 @@ func TestSurface2FieldCoverageMatrix(t *testing.T) {
 
 	// The hierarchy name inputs are single-string leaves; assert each locator
 	// constant is present and distinct so a coverage gap there is visible too.
-	for _, loc := range []string{locOrgName, locOrgMetadata, locProjectName, locEnvironmentName, locEnvironmentNote, locFolderPath, locGroupName} {
+	for _, loc := range []string{locEnvironmentName, locEnvironmentNote, locFolderPath, locGroupName} {
 		if loc == "" {
 			t.Error("a hierarchy locator constant is empty")
 		}

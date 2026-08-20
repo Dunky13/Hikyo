@@ -178,7 +178,7 @@ func resetPostgres(t *testing.T, cfg store.Config) {
 func scenarioRoundtrip(t *testing.T, db *store.DB) {
 	orgs := &service.Orgs{DB: db}
 	meta := json.RawMessage(`{"tier":"gold","limits":{"projects":3}}`)
-	created, err := orgs.Create(t.Context(), service.LocalPrincipal(admin), "roundtrip", true, meta, nil)
+	created, err := orgs.Create(t.Context(), service.LocalPrincipal(admin), "roundtrip", true, meta)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,7 +195,7 @@ func scenarioRoundtrip(t *testing.T, db *store.DB) {
 	if !got.Active {
 		t.Error("active=true did not round-trip")
 	}
-	inactive, err := orgs.Create(t.Context(), service.LocalPrincipal(admin), "roundtrip-inactive", false, json.RawMessage(`{}`), nil)
+	inactive, err := orgs.Create(t.Context(), service.LocalPrincipal(admin), "roundtrip-inactive", false, json.RawMessage(`{}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +221,7 @@ func scenarioRoundtrip(t *testing.T, db *store.DB) {
 func scenarioListOrder(t *testing.T, db *store.DB) {
 	orgs := &service.Orgs{DB: db}
 	for _, name := range []string{"zebra", "alpha", "mango"} {
-		if _, err := orgs.Create(t.Context(), service.LocalPrincipal(admin), name, false, json.RawMessage(`{}`), nil); err != nil {
+		if _, err := orgs.Create(t.Context(), service.LocalPrincipal(admin), name, false, json.RawMessage(`{}`)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -272,17 +272,17 @@ func scenarioRollback(t *testing.T, db *store.DB) {
 
 func scenarioDuplicate(t *testing.T, db *store.DB) {
 	orgs := &service.Orgs{DB: db}
-	if _, err := orgs.Create(t.Context(), service.LocalPrincipal(admin), "dupe", false, json.RawMessage(`{}`), nil); err != nil {
+	if _, err := orgs.Create(t.Context(), service.LocalPrincipal(admin), "dupe", false, json.RawMessage(`{}`)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := orgs.Create(t.Context(), service.LocalPrincipal(admin), "dupe", false, json.RawMessage(`{}`), nil); err == nil {
+	if _, err := orgs.Create(t.Context(), service.LocalPrincipal(admin), "dupe", false, json.RawMessage(`{}`)); err == nil {
 		t.Fatal("duplicate org name must be refused by the unique constraint")
 	}
 }
 
 func scenarioInvalidMetadata(t *testing.T, db *store.DB) {
 	orgs := &service.Orgs{DB: db}
-	if _, err := orgs.Create(t.Context(), service.LocalPrincipal(admin), "badjson", false, json.RawMessage(`{not json`), nil); err == nil {
+	if _, err := orgs.Create(t.Context(), service.LocalPrincipal(admin), "badjson", false, json.RawMessage(`{not json`)); err == nil {
 		t.Fatal("invalid JSON metadata must be refused at the boundary")
 	}
 }
@@ -305,7 +305,7 @@ func scenarioTenantChain(t *testing.T, db *store.DB) {
 	projects := &service.Projects{DB: db}
 	envs := &service.Environments{DB: db, Keyring: sharedKeyring(t, db)}
 
-	org, err := orgs.Create(t.Context(), service.LocalPrincipal(admin), "tenant-chain", true, json.RawMessage(`{}`), nil)
+	org, err := orgs.Create(t.Context(), service.LocalPrincipal(admin), "tenant-chain", true, json.RawMessage(`{}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -327,7 +327,7 @@ func scenarioTenantChain(t *testing.T, db *store.DB) {
 		 VALUES ('grt_ct_pub', 'usr_conformance_tenant', 'publish', '` + org.ID + `', NULL, NULL, '2026-01-01T00:00:00Z')`,
 	})
 
-	proj, err := projects.Create(t.Context(), service.LocalPrincipal(tenant), domain.OrgID(org.ID), "conformance-project", nil)
+	proj, err := projects.Create(t.Context(), service.LocalPrincipal(tenant), domain.OrgID(org.ID), "conformance-project")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -378,7 +378,7 @@ func scenarioConcurrent(t *testing.T, db *store.DB) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := orgs.Create(context.Background(), service.LocalPrincipal(admin), fmt.Sprintf("concurrent-%d", i), true, json.RawMessage(`{}`), nil)
+			_, err := orgs.Create(context.Background(), service.LocalPrincipal(admin), fmt.Sprintf("concurrent-%d", i), true, json.RawMessage(`{}`))
 			errs <- err
 		}()
 	}
@@ -406,7 +406,7 @@ func tenantFixture(t *testing.T, db *store.DB, label string) (domain.PrincipalID
 	t.Helper()
 	orgs := &service.Orgs{DB: db}
 	projects := &service.Projects{DB: db}
-	org, err := orgs.Create(t.Context(), service.LocalPrincipal(admin), label, true, json.RawMessage(`{}`), nil)
+	org, err := orgs.Create(t.Context(), service.LocalPrincipal(admin), label, true, json.RawMessage(`{}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -424,7 +424,7 @@ func tenantFixture(t *testing.T, db *store.DB, label string) (domain.PrincipalID
 			label, i, principal, capability, org.ID))
 	}
 	seed(t, db, stmts)
-	proj, err := projects.Create(t.Context(), service.LocalPrincipal(principal), domain.OrgID(org.ID), label+"-project", nil)
+	proj, err := projects.Create(t.Context(), service.LocalPrincipal(principal), domain.OrgID(org.ID), label+"-project")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -450,7 +450,7 @@ func scenarioHierarchyCRUD(t *testing.T, db *store.DB) {
 	if len(list) != 1 || list[0].ID != string(scope.Project) {
 		t.Fatalf("project list = %+v, want exactly the created project", list)
 	}
-	renamedProject, err := projects.Rename(t.Context(), actor, scope, "hierarchy-renamed", nil)
+	renamedProject, err := projects.Rename(t.Context(), actor, scope, "hierarchy-renamed")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -601,7 +601,7 @@ func scenarioHierarchyCRUD(t *testing.T, db *store.DB) {
 	}
 	// The org still holds this principal's grants, so its delete is refused —
 	// deletes never cascade. Renaming it still works.
-	if _, err := orgs.Rename(t.Context(), service.LocalPrincipal(admin), scope.Org, "hierarchy-renamed-org", nil); err != nil {
+	if _, err := orgs.Rename(t.Context(), service.LocalPrincipal(admin), scope.Org, "hierarchy-renamed-org"); err != nil {
 		t.Fatal(err)
 	}
 	got, err := orgs.Get(t.Context(), service.LocalPrincipal(admin), scope.Org)

@@ -207,6 +207,99 @@ func TestAckSetSurplusReported(t *testing.T) {
 	}
 }
 
+// TestScanRejectionsNamedByClass proves a resubmitted token that no current
+// finding claims is refused BY NAME (#74, ADR §4 / SS3): each of the structural
+// reason classes — stale, version-skew, surplus, expired, unreadable — is
+// reported against the token's submission index and, where it decodes, its bound
+// locator, and the refusal body (SafeDetail) renders it, including the
+// pure-rejection case that carries no blocked finding.
+func TestScanRejectionsNamedByClass(t *testing.T) {
+	ctx := t.Context()
+	kr := ackTestKeyring(t)
+	rs, err := scanning.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1_700_000_100, 0)
+	const cred = "AKIAIOSFODNN7EXAMPLE"  // a valid-looking, non-live AWS key id
+	const cred2 = "AKIAI44QH8DHBEXAMPLE" // a different one — same rule, different content
+
+	// Baseline scan yields the valid token and the matched rule id/digest.
+	base, err := scanDeclaration(ctx, kr, rs, []scanLeaf{{Locator: locDeclPattern, Content: []byte(cred)}}, nil, now)
+	if err != nil || len(base.blocked) != 1 {
+		t.Fatalf("baseline scan: err=%v blocked=%d, want 1 finding", err, len(base.blocked))
+	}
+	validTok := base.blocked[0].Acknowledgement
+	ruleID := base.blocked[0].RuleID
+	digest, ok := rs.SemanticDigest(ruleID)
+	if !ok {
+		t.Fatalf("no semantic digest for %q", ruleID)
+	}
+	mint := func(loc, snap string, content []byte, age time.Duration) string {
+		tok, err := sealAck(kr, ackBinding{
+			kind: ackKindDecl, locator: loc, ruleDigest: digest,
+			contentSHA: contentDigest(content), snapshot: snap, mintNano: now.Add(-age).UnixNano(),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tok
+	}
+
+	cases := []struct {
+		name    string
+		leaf    string // content the current scan sees
+		token   string
+		reason  string
+		locator string // bound locator surfaced (empty for unreadable)
+	}{
+		// The field content changed since minting: same locator+rule, different content.
+		{"stale", cred2, validTok, rejectStale, locDeclPattern},
+		// The ruleset snapshot changed since minting.
+		{"version-skew", cred, mint(locDeclPattern, "old-snapshot", []byte(cred), time.Minute), rejectVersionSkew, locDeclPattern},
+		// No current finding shares the token's locator+rule.
+		{"surplus", cred, mint(locKeyName, rs.SnapshotVersion(), []byte(cred), time.Minute), rejectSurplus, locKeyName},
+		// Older than the TTL, otherwise an exact bind.
+		{"expired", cred, mint(locDeclPattern, rs.SnapshotVersion(), []byte(cred), ackTTL+time.Minute), rejectExpired, locDeclPattern},
+		// Does not decode at all.
+		{"unreadable", cred, "not-a-real-token", rejectUnreadable, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			res, err := scanDeclaration(ctx, kr, rs, []scanLeaf{{Locator: locDeclPattern, Content: []byte(tc.leaf)}},
+				newAckSet([]string{tc.token}), now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(res.rejections) != 1 {
+				t.Fatalf("rejections = %d, want 1", len(res.rejections))
+			}
+			r := res.rejections[0]
+			if r.Reason != tc.reason {
+				t.Errorf("reason = %q, want %q", r.Reason, tc.reason)
+			}
+			if r.Index != 0 {
+				t.Errorf("index = %d, want 0", r.Index)
+			}
+			if r.Locator != tc.locator {
+				t.Errorf("locator = %q, want %q", r.Locator, tc.locator)
+			}
+			// The refusal body names the token (by index) and the reason class.
+			refusal := &scanRefusalErr{blocked: res.blocked, rejections: res.rejections}
+			detail := refusal.SafeDetail()
+			if !strings.Contains(detail, "token #1") || !strings.Contains(detail, tc.reason) {
+				t.Errorf("SafeDetail %q does not name the token and its reason %q", detail, tc.reason)
+			}
+			// A refusal carrying ONLY the rejection (no blocked finding) is still a
+			// non-empty, named message — the pure-rejection bug guard.
+			pure := &scanRefusalErr{rejections: res.rejections}
+			if pd := pure.SafeDetail(); !strings.Contains(pd, "token #1") || !strings.Contains(pd, tc.reason) {
+				t.Errorf("pure-rejection SafeDetail %q is empty or unnamed", pd)
+			}
+		})
+	}
+}
+
 // TestFindingCapFailsClosed proves the per-request finding cap (ADR §7) fails
 // CLOSED naming the cap, never a silent truncation: a declaration with more than
 // maxRequestFindings offending leaves refuses the whole scan.

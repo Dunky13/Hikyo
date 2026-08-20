@@ -37,10 +37,10 @@ import (
 // authorize() takes — so a wrong-depth address is refused at the chokepoint
 // rather than silently widened here.
 type ProjectService interface {
-	Create(ctx context.Context, actor service.Actor, org domain.OrgID, name string, acks []string) (service.Project, error)
+	Create(ctx context.Context, actor service.Actor, org domain.OrgID, name string) (service.Project, error)
 	Get(ctx context.Context, actor service.Actor, scope domain.Scope) (service.Project, error)
 	List(ctx context.Context, actor service.Actor, org domain.OrgID) ([]service.Project, error)
-	Rename(ctx context.Context, actor service.Actor, scope domain.Scope, name string, acks []string) (service.Project, error)
+	Rename(ctx context.Context, actor service.Actor, scope domain.Scope, name string) (service.Project, error)
 	Delete(ctx context.Context, actor service.Actor, scope domain.Scope) error
 }
 
@@ -147,7 +147,8 @@ func (a *API) writeHandlerError(w http.ResponseWriter, r *http.Request, err erro
 // ---------------------------------------------------------------------------
 
 func (a *API) RenameOrg(ctx context.Context, req apigen.RenameOrgRequestObject) (apigen.RenameOrgResponseObject, error) {
-	org, err := a.Orgs.Rename(ctx, service.Bearer(bearer(ctx)), domain.OrgID(req.Org), req.Body.Name, derefAcks(req.Body.Acknowledgements))
+	// Acknowledgements ignored: org names are not secret-scanned (#74).
+	org, err := a.Orgs.Rename(ctx, service.Bearer(bearer(ctx)), domain.OrgID(req.Org), req.Body.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +179,8 @@ func (a *API) ListProjects(ctx context.Context, req apigen.ListProjectsRequestOb
 }
 
 func (a *API) CreateProject(ctx context.Context, req apigen.CreateProjectRequestObject) (apigen.CreateProjectResponseObject, error) {
-	project, err := a.Projects.Create(ctx, service.Bearer(bearer(ctx)), domain.OrgID(req.Org), req.Body.Name, derefAcks(req.Body.Acknowledgements))
+	// Acknowledgements ignored: project names are not secret-scanned (#74).
+	project, err := a.Projects.Create(ctx, service.Bearer(bearer(ctx)), domain.OrgID(req.Org), req.Body.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -194,7 +196,8 @@ func (a *API) GetProject(ctx context.Context, req apigen.GetProjectRequestObject
 }
 
 func (a *API) RenameProject(ctx context.Context, req apigen.RenameProjectRequestObject) (apigen.RenameProjectResponseObject, error) {
-	project, err := a.Projects.Rename(ctx, service.Bearer(bearer(ctx)), projectScope(req.Org, req.Project), req.Body.Name, derefAcks(req.Body.Acknowledgements))
+	// Acknowledgements ignored: project names are not secret-scanned (#74).
+	project, err := a.Projects.Rename(ctx, service.Bearer(bearer(ctx)), projectScope(req.Org, req.Project), req.Body.Name)
 	if err != nil {
 		return nil, err
 	}
