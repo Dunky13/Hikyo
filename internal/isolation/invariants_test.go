@@ -304,6 +304,8 @@ func TestInvariant11SystemProofEnumeration(t *testing.T) {
 	wantBoot := map[authz.StoreOp]bool{
 		authz.StoreKeysActiveMasterWrappers:       true,
 		authz.StoreKeysActiveTier3:                true,
+		authz.StoreKeysTier3Versions:              true,
+		authz.StoreKeysAllOpenableTier3:           true,
 		authz.StoreKeysAcquireHierarchyGeneration: true,
 		authz.StoreKeysInsertMaster:               true,
 		authz.StoreKeysInsertTier3:                true,

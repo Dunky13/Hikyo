@@ -64,6 +64,11 @@ type Config struct {
 	// package reads and validates it at boot. Only `hikyo server` consults it.
 	RootKeyFile    string // --root-key-file (also covers systemd LoadCredential paths)
 	RootKeyFromEnv bool   // HIKYO_ROOT_KEY is set (documented weakest tier)
+	// NewRootKeyFile is the NEW root source consulted only by
+	// `rotate-root-key --prepare` (HIKYO_NEW_ROOT_KEY_FILE). Empty means no
+	// rotation is configured, and prepare refuses rather than reading the wire —
+	// no root key material ever crosses the API.
+	NewRootKeyFile string
 
 	// Auth tuning. The Argon2id parameters may be raised for stronger
 	// hardware and never lowered: boot verifies them against the floor the
@@ -170,6 +175,7 @@ func Load(subcommand string, args []string, getenv func(string) string, environ 
 		Listen:         *listen,
 		RootKeyFile:    *rootKeyFile,
 		RootKeyFromEnv: getenv("HIKYO_ROOT_KEY") != "",
+		NewRootKeyFile: getenv("HIKYO_NEW_ROOT_KEY_FILE"),
 	}
 	if cfg.RootKeyFile != "" && cfg.RootKeyFromEnv {
 		return nil, nil, fmt.Errorf("both --root-key-file and HIKYO_ROOT_KEY are set: configure exactly one root-key source")

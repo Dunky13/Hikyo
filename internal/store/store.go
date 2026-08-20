@@ -415,6 +415,8 @@ type Repos interface {
 	// dismissal, so a read-only twin would have no caller — the shape SCIM took
 	// for the same reason.
 	ScanningDismissals() ScanningDismissalRepo
+	// Reencrypt is the instance-credential reencrypt surface (#75/#187).
+	Reencrypt() ReencryptRepo
 }
 
 // ScanningDismissalRepo is the proof-bound dismissal-row surface (#74,
@@ -770,6 +772,16 @@ type AdapterRepo interface {
 	ReplaceCredential(ctx context.Context, p authz.Proof, mutation AdapterCredentialMutation) (AdapterCredentialResult, error)
 	RevokeCredential(ctx context.Context, p authz.Proof, adapterID string, at time.Time) (AdapterCredentialResult, error)
 	EnqueueManual(ctx context.Context, p authz.Proof, targetID, authorityPrincipalID string, at time.Time) (AdapterEnqueueResult, error)
+	// ListAdaptersForReencrypt / ReencryptAdapter and the route-move pair are
+	// the reencrypt walk's page + in-place re-seal of adapter credential
+	// ciphertext (project-wide, keyset by id). Both credential columns are
+	// nullable; empty rows are skipped by the walker. The AAD owner_row_id is the
+	// adapter id — carried as ReencryptFieldRow.Owner for the route moves, which
+	// key by their own id but seal under the adapter's.
+	ListAdaptersForReencrypt(ctx context.Context, p authz.Proof, cursor string, limit int) ([]ReencryptFieldRow, error)
+	ReencryptAdapter(ctx context.Context, p authz.Proof, id string, newCiphertext, oldCiphertext []byte) (bool, error)
+	ListRouteMovesForReencrypt(ctx context.Context, p authz.Proof, cursor string, limit int) ([]ReencryptFieldRow, error)
+	ReencryptRouteMove(ctx context.Context, p authz.Proof, id string, newCiphertext, oldCiphertext []byte) (bool, error)
 }
 
 type AdapterEnqueueResult struct {

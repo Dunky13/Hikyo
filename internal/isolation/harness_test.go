@@ -13,6 +13,7 @@
 package isolation
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net/url"
@@ -162,6 +163,11 @@ var fixtureSQL = []string{
 	// rotation atoms for five rotation verbs, and the root token key is a
 	// tier-3 key alongside the DEKs.
 	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_ro_rd', 'usr_root', 'rotate-dek', NULL, NULL, NULL, ` + ts + `)`,
+	// The remaining rotation atoms (#75), each its own grant, so the crypto
+	// lifecycle E2E can drive rotate-master-key / reencrypt / rotate-root-key.
+	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_ro_rm', 'usr_root', 'rotate-master-key', NULL, NULL, NULL, ` + ts + `)`,
+	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_ro_rr', 'usr_root', 'rotate-root-key', NULL, NULL, NULL, ` + ts + `)`,
+	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_ro_re', 'usr_root', 'reencrypt', NULL, NULL, NULL, ` + ts + `)`,
 	// mch_a1: machine authority confined to project A1.
 	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_m1_read', 'mch_a1', 'read', 'org_a', 'prj_a1', NULL, ` + ts + `)`,
 	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_m1_edit', 'mch_a1', 'edit', 'org_a', 'prj_a1', NULL, ` + ts + `)`,
@@ -474,7 +480,58 @@ func keySvc(t *testing.T, db *store.DB) *service.Keys {
 var (
 	probeKeyringMu sync.Mutex
 	probeKeyrings  = map[*store.DB]*crypto.Keyring{}
+	// probeRoots retains a clone of each keyring's root so tests exercising
+	// master/root rotation can re-supply it (LoadKeyring zeroes the original).
+	probeRoots = map[*store.DB][]byte{}
 )
+
+// probeRootSource is a service.RootKeySource over a probe keyring's retained
+// root, for the rotations that re-read the root from its source. Next returns
+// the configured new root (set by a root-rotation test), or a generated one.
+type probeRootSource struct {
+	db   *store.DB
+	next []byte // the new root a root-rotation test installs
+}
+
+func (s probeRootSource) Current(context.Context) ([]byte, error) {
+	probeKeyringMu.Lock()
+	defer probeKeyringMu.Unlock()
+	return bytes.Clone(probeRoots[s.db]), nil
+}
+
+func (s probeRootSource) Next(context.Context) ([]byte, error) {
+	if s.next != nil {
+		return bytes.Clone(s.next), nil
+	}
+	return crypto.GenerateRootKey()
+}
+
+// mutableRootSource models the operator swapping the primary root source
+// between rotation phases: prepare reads next, then install() makes it current
+// so verify (which re-reads current) confirms the new root is in place.
+type mutableRootSource struct {
+	mu      sync.Mutex
+	current []byte
+	next    []byte
+}
+
+func (s *mutableRootSource) Current(context.Context) ([]byte, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return bytes.Clone(s.current), nil
+}
+
+func (s *mutableRootSource) Next(context.Context) ([]byte, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return bytes.Clone(s.next), nil
+}
+
+func (s *mutableRootSource) install() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.current = bytes.Clone(s.next)
+}
 
 // cloneSvc is the environment surface with the keyring clone-at-creation
 // needs. It shares valueSvc's cached keyring for the same reason.
@@ -503,6 +560,7 @@ func probeKeyring(t *testing.T, db *store.DB) *crypto.Keyring {
 	if err != nil {
 		t.Fatal(err)
 	}
+	probeRoots[db] = bytes.Clone(root)
 	kr, err := crypto.LoadKeyring(t.Context(), &keyring.Store{DB: db}, root)
 	if err != nil {
 		t.Fatal(err)

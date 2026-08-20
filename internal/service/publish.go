@@ -1047,6 +1047,15 @@ func materialize(ctx context.Context, r store.Repos, p authz.Proof, sealer *cryp
 		return PublishedEnvironment{}, err
 	}
 
+	// Writer fence (invariant 7): one assert before the snapshot-entry loop —
+	// the sealer's DEK version is constant across it, and the fence's row lock is
+	// held to this transaction's commit, covering every InsertEntry below. Refuse
+	// the whole publish if a rotate-dek retired the version mid-flight.
+	if len(cells) > 0 {
+		if err := fenceProject(ctx, r, p, sealer, scope); err != nil {
+			return PublishedEnvironment{}, err
+		}
+	}
 	rows := make([]delivery.Row, 0, len(cells))
 	for _, cell := range cells {
 		if !cell.set {
@@ -1256,6 +1265,11 @@ func putCell(ctx context.Context, r store.Repos, p authz.Proof, sealer *crypto.P
 	}
 	sealed, err := sealer.SealValue(valueAAD(entry), []byte(schema.Normalize(value)))
 	if err != nil {
+		return "", err
+	}
+	// Writer fence (invariant 7): refuse a published cell sealed under a DEK
+	// version a concurrent rotate-dek retired.
+	if err := fenceProject(ctx, r, p, sealer, scope); err != nil {
 		return "", err
 	}
 	return id, r.Values().Put(ctx, p, store.NewValueEntry{

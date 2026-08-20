@@ -213,7 +213,8 @@ func (s *Remotes) AddRemote(ctx context.Context, actor Actor, name, rawURL, pin,
 	// Phase 3: commit. Both identity checks are re-run against the state this
 	// transaction sees, so a concurrent add of the same instance cannot slip
 	// between phases 1 and 3.
-	sealed, err := s.Keyring.ForInstance().SealField(remoteCredentialAAD(id), []byte(credential))
+	sealer := s.Keyring.ForInstance()
+	sealed, err := sealer.SealField(remoteCredentialAAD(id), []byte(credential))
 	if err != nil {
 		return RemoteView{}, err
 	}
@@ -258,6 +259,11 @@ func (s *Remotes) AddRemote(ctx context.Context, actor Actor, name, rawURL, pin,
 		}
 		if other, dup := knownNow[listing.Identity]; dup {
 			return fmt.Errorf("%w: %q already names that instance", domain.ErrConflict, other)
+		}
+		// Writer fence (invariant 7): refuse if a rotate-dek --instance retired the
+		// sealer's DEK version since it was built.
+		if err := fenceInstance(ctx, r, p, sealer); err != nil {
+			return err
 		}
 		if err := r.Remotes().Create(ctx, p, store.NewRemote{
 			ID: id, Name: name, URL: rawURL, SPKIPin: pin,

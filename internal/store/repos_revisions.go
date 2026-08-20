@@ -211,6 +211,39 @@ func (r sqlitePending) Stage(ctx context.Context, p authz.Proof, change NewPendi
 	}))
 }
 
+func (r sqlitePending) ListForReencrypt(ctx context.Context, p authz.Proof, cursor string, limit int) ([]ReencryptFieldRow, error) {
+	chain, err := authz.Verify(p, authz.StorePendingListForReencrypt, r.tok)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.q.ListPendingForReencrypt(ctx, sqlitegen.ListPendingForReencryptParams{
+		OrgID: string(chain.Org), ProjectID: string(chain.Project), ID: cursor, Limit: int64(limit),
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ReencryptFieldRow, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, ReencryptFieldRow{ID: row.ID, EnvironmentID: row.EnvironmentID, KeyID: row.KeyID, Ciphertext: row.Ciphertext})
+	}
+	return out, nil
+}
+
+func (r sqlitePending) Reencrypt(ctx context.Context, p authz.Proof, id string, newCiphertext, oldCiphertext []byte) (bool, error) {
+	chain, err := authz.Verify(p, authz.StorePendingReencrypt, r.tok)
+	if err != nil {
+		return false, err
+	}
+	n, err := r.q.ReencryptPendingChange(ctx, sqlitegen.ReencryptPendingChangeParams{
+		Ciphertext: newCiphertext, OrgID: string(chain.Org), ProjectID: string(chain.Project),
+		ID: id, Ciphertext_2: oldCiphertext,
+	})
+	if err != nil {
+		return false, err
+	}
+	return n == 1, nil
+}
+
 func (r sqlitePending) Discard(ctx context.Context, p authz.Proof, id string) (bool, error) {
 	chain, err := authz.Verify(p, authz.StorePendingDiscard, r.tok)
 	if err != nil {
@@ -481,6 +514,39 @@ func (r sqliteSnapshots) Changes(ctx context.Context, p authz.Proof, revision in
 		})
 	}
 	return out, nil
+}
+
+func (r sqliteSnapshots) ListForReencrypt(ctx context.Context, p authz.Proof, cursor string, limit int) ([]ReencryptFieldRow, error) {
+	chain, err := authz.Verify(p, authz.StoreSnapshotsListForReencrypt, r.tok)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.q.ListSnapshotEntriesForReencrypt(ctx, sqlitegen.ListSnapshotEntriesForReencryptParams{
+		OrgID: string(chain.Org), ProjectID: string(chain.Project), ID: cursor, Limit: int64(limit),
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ReencryptFieldRow, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, ReencryptFieldRow{ID: row.ID, EnvironmentID: row.EnvironmentID, KeyID: row.KeyID, SnapshotID: row.SnapshotID, Ciphertext: row.Ciphertext})
+	}
+	return out, nil
+}
+
+func (r sqliteSnapshots) Reencrypt(ctx context.Context, p authz.Proof, id string, newCiphertext, oldCiphertext []byte) (bool, error) {
+	chain, err := authz.Verify(p, authz.StoreSnapshotsReencrypt, r.tok)
+	if err != nil {
+		return false, err
+	}
+	n, err := r.q.ReencryptSnapshotEntry(ctx, sqlitegen.ReencryptSnapshotEntryParams{
+		Ciphertext: newCiphertext, OrgID: string(chain.Org), ProjectID: string(chain.Project),
+		ID: id, Ciphertext_2: oldCiphertext,
+	})
+	if err != nil {
+		return false, err
+	}
+	return n == 1, nil
 }
 
 func (r sqliteSnapshots) Insert(ctx context.Context, p authz.Proof, snapshot NewSnapshot) error {
@@ -935,6 +1001,39 @@ func (r pgPending) Stage(ctx context.Context, p authz.Proof, change NewPendingCh
 	}))
 }
 
+func (r pgPending) ListForReencrypt(ctx context.Context, p authz.Proof, cursor string, limit int) ([]ReencryptFieldRow, error) {
+	chain, err := authz.Verify(p, authz.StorePendingListForReencrypt, r.tok)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.q.ListPendingForReencrypt(ctx, pggen.ListPendingForReencryptParams{
+		ChainOrgID: string(chain.Org), ChainProjectID: string(chain.Project), Cursor: cursor, PageLimit: int32(limit),
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ReencryptFieldRow, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, ReencryptFieldRow{ID: row.ID, EnvironmentID: row.EnvironmentID, KeyID: row.KeyID, Ciphertext: row.Ciphertext})
+	}
+	return out, nil
+}
+
+func (r pgPending) Reencrypt(ctx context.Context, p authz.Proof, id string, newCiphertext, oldCiphertext []byte) (bool, error) {
+	chain, err := authz.Verify(p, authz.StorePendingReencrypt, r.tok)
+	if err != nil {
+		return false, err
+	}
+	n, err := r.q.ReencryptPendingChange(ctx, pggen.ReencryptPendingChangeParams{
+		NewCiphertext: newCiphertext, ChainOrgID: string(chain.Org), ChainProjectID: string(chain.Project),
+		ID: id, OldCiphertext: oldCiphertext,
+	})
+	if err != nil {
+		return false, err
+	}
+	return n == 1, nil
+}
+
 func (r pgPending) Discard(ctx context.Context, p authz.Proof, id string) (bool, error) {
 	chain, err := authz.Verify(p, authz.StorePendingDiscard, r.tok)
 	if err != nil {
@@ -1170,6 +1269,39 @@ func (r pgSnapshots) Changes(ctx context.Context, p authz.Proof, revision int64)
 		})
 	}
 	return out, nil
+}
+
+func (r pgSnapshots) ListForReencrypt(ctx context.Context, p authz.Proof, cursor string, limit int) ([]ReencryptFieldRow, error) {
+	chain, err := authz.Verify(p, authz.StoreSnapshotsListForReencrypt, r.tok)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.q.ListSnapshotEntriesForReencrypt(ctx, pggen.ListSnapshotEntriesForReencryptParams{
+		ChainOrgID: string(chain.Org), ChainProjectID: string(chain.Project), Cursor: cursor, PageLimit: int32(limit),
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ReencryptFieldRow, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, ReencryptFieldRow{ID: row.ID, EnvironmentID: row.EnvironmentID, KeyID: row.KeyID, SnapshotID: row.SnapshotID, Ciphertext: row.Ciphertext})
+	}
+	return out, nil
+}
+
+func (r pgSnapshots) Reencrypt(ctx context.Context, p authz.Proof, id string, newCiphertext, oldCiphertext []byte) (bool, error) {
+	chain, err := authz.Verify(p, authz.StoreSnapshotsReencrypt, r.tok)
+	if err != nil {
+		return false, err
+	}
+	n, err := r.q.ReencryptSnapshotEntry(ctx, pggen.ReencryptSnapshotEntryParams{
+		NewCiphertext: newCiphertext, ChainOrgID: string(chain.Org), ChainProjectID: string(chain.Project),
+		ID: id, OldCiphertext: oldCiphertext,
+	})
+	if err != nil {
+		return false, err
+	}
+	return n == 1, nil
 }
 
 func (r pgSnapshots) Insert(ctx context.Context, p authz.Proof, snapshot NewSnapshot) error {

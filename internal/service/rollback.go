@@ -223,6 +223,11 @@ func (s *Revisions) Restore(ctx context.Context, actor Actor, scope domain.Scope
 				if err != nil {
 					return err
 				}
+				// Writer fence (invariant 7): refuse a restored draft sealed under
+				// a DEK version a concurrent rotate-dek retired.
+				if err := fenceProject(ctx, r, p, sealer, scope); err != nil {
+					return err
+				}
 			}
 			baseline := ""
 			if currentSet {

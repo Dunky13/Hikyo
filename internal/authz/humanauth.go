@@ -100,6 +100,15 @@ func (a *TxAuthorizer) WritePasswordCredential(ctx context.Context, c PasswordCr
 	return a.r.CreatePasswordCredential(ctx, c, at)
 }
 
+// AssertActiveInstanceDEKVersion is the writer fence for authentication-surface
+// credential writes, which seal under the instance DEK with no tenant proof to
+// carry the proof-based fence. It refuses (domain.ErrConflict) a write whose
+// sealed instance DEK version a concurrent rotate-dek --instance has retired.
+// See the authn.Resolver method for the query semantics.
+func (a *TxAuthorizer) AssertActiveInstanceDEKVersion(ctx context.Context, version int64) error {
+	return a.r.AssertActiveInstanceDEKVersion(ctx, version)
+}
+
 // ReplacePasswordCredential compare-and-swaps an existing verifier. False
 // means the row moved underneath and the caller must not write a stale
 // verifier back.

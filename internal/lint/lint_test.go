@@ -44,9 +44,66 @@ func TestProofForgeryRepo(t *testing.T) {
 	}
 }
 
+func TestFenceCompletenessRepo(t *testing.T) {
+	pkgs, err := LoadRepo()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range CheckFenceCompleteness(pkgs, Module+"/internal/service") {
+		t.Error(f)
+	}
+}
+
+func TestFenceCompletenessCatchesViolations(t *testing.T) {
+	pkgs, err := Load(Module + "/internal/lint/testdata/badseal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	findings := CheckFenceCompleteness(pkgs, Module+"/internal/lint/testdata/badseal")
+	// missingFence seals without fencing → flagged; delegatedSeal (marked)
+	// and exemptSeal (marked) and hasFence (fences) → not flagged.
+	var got string
+	for _, f := range findings {
+		if strings.Contains(f, "missingFence") {
+			got = f
+		}
+		if strings.Contains(f, "delegatedSeal") || strings.Contains(f, "exemptSeal") || strings.Contains(f, "hasFence") {
+			t.Errorf("false positive: %s", f)
+		}
+	}
+	if got == "" {
+		t.Fatalf("expected a finding for missingFence, got %v", findings)
+	}
+}
+
 func TestSQLPredicatesRepo(t *testing.T) {
 	for _, f := range CheckSQLPredicates(repoRoot(t)) {
 		t.Error(f)
+	}
+}
+
+func TestReencryptCoverageRepo(t *testing.T) {
+	dir := filepath.Join(repoRoot(t), "internal", "store", "migrations", "sqlite")
+	for _, f := range CheckReencryptCoverage(dir) {
+		t.Error(f)
+	}
+}
+
+func TestReencryptCoverageCatchesUnclassifiedColumn(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "999_new.sql"),
+		[]byte("CREATE TABLE new_secrets (\n    id TEXT PRIMARY KEY,\n    sneaky_ciphertext BLOB NOT NULL\n);\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	findings := CheckReencryptCoverage(dir)
+	var got bool
+	for _, f := range findings {
+		if strings.Contains(f, "new_secrets.sneaky_ciphertext") && strings.Contains(f, "unclassified") {
+			got = true
+		}
+	}
+	if !got {
+		t.Fatalf("expected an unclassified finding for new_secrets.sneaky_ciphertext, got %v", findings)
 	}
 }
 

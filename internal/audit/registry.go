@@ -391,6 +391,28 @@ const (
 	EventScanningFindingDismissed  EventType = "scanning.finding_dismissed"
 	EventScanningFindingBlocked    EventType = "scanning.finding_blocked"
 	EventScanningFindingOverridden EventType = "scanning.finding_overridden"
+	// crypto.dek_rotated records `rotate-dek` for one project or the instance
+	// scope: a new DEK version is active and the previous one is retiring until
+	// reencrypt walks its ciphertext. Instance trail — DEKs are instance-scoped
+	// crypto material — carrying only the scope and the new version, never key
+	// bytes.
+	EventDEKRotated EventType = "crypto.dek_rotated"
+	// crypto.reencrypt_completed records a finished reencrypt pass over one
+	// scope: every ciphertext is on the active DEK version and the superseded
+	// versions are retired. rows_moved is the count re-sealed this run. Tenant
+	// trail for a project scope, instance trail for the instance scope.
+	EventReencryptCompleted EventType = "crypto.reencrypt_completed"
+	// crypto.master_key_rotated records `rotate-master-key`: a new master now
+	// wraps every tier-3 key and the old master is retired. Instance trail,
+	// payload the new master version only.
+	EventMasterKeyRotated EventType = "crypto.master_key_rotated"
+	// The three crypto.root_key_* events record the crash-safe root rotation
+	// protocol — prepare stores the dual wrapper at the new epoch, verify
+	// confirms the operator installed the new root at the primary source,
+	// finalize retires the old wrapper. Payload the epoch only, never key bytes.
+	EventRootKeyRotationPrepared  EventType = "crypto.root_key_rotation_prepared"
+	EventRootKeyRotationVerified  EventType = "crypto.root_key_rotation_verified"
+	EventRootKeyRotationFinalized EventType = "crypto.root_key_rotation_finalized"
 	// disclosure.value_copied is one event per key per DESTINATION for every
 	// server-side duplication: copy-to, bulk-apply and clone-at-creation. It
 	// records the source environment, because "material this environment's
@@ -1430,6 +1452,62 @@ var registry = map[EventType]TypeSpec{
 		Schema: Schema{
 			"key_version": {Kind: KindInt, Required: true},
 		},
+	},
+	EventDEKRotated: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			// scope is "project" or "instance"; org_id/project_id name the
+			// project scope and are empty for the instance DEK. All three are
+			// schema metadata (never secret), consistent with the ADR's
+			// exposed-names list.
+			"scope":       {Kind: KindString, Required: true},
+			"org_id":      {Kind: KindString, Required: false},
+			"project_id":  {Kind: KindString, Required: false},
+			"key_version": {Kind: KindInt, Required: true},
+		},
+	},
+	EventMasterKeyRotated: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"key_version": {Kind: KindInt, Required: true},
+		},
+	},
+	EventReencryptCompleted: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailTenant: true, TrailInstance: true},
+		Schema: Schema{
+			"scope":      {Kind: KindString, Required: true},
+			"rows_moved": {Kind: KindInt, Required: true},
+		},
+	},
+	EventRootKeyRotationPrepared: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema:        Schema{"root_key_epoch": {Kind: KindInt, Required: true}},
+	},
+	EventRootKeyRotationVerified: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema:        Schema{"root_key_epoch": {Kind: KindInt, Required: true}},
+	},
+	EventRootKeyRotationFinalized: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema:        Schema{"root_key_epoch": {Kind: KindInt, Required: true}},
 	},
 	// `operation` is copy | bulk-apply | clone: the same formula authorizes
 	// all three, and the trail still has to say which act it was.

@@ -55,6 +55,32 @@ func (s *Store) ActiveTier3(ctx context.Context, p crypto.Purpose, orgID, projec
 	return out, err
 }
 
+func (s *Store) Tier3Versions(ctx context.Context, p crypto.Purpose, orgID, projectID string) ([]crypto.WrappedKey, error) {
+	var out []crypto.WrappedKey
+	err := tx.Read(ctx, s.DB, func(ctx context.Context, r store.ReadRepos, az *authz.TxAuthorizer) error {
+		pf, err := authz.SystemAuthority(authz.SiteBoot, az.Token())
+		if err != nil {
+			return err
+		}
+		out, err = r.Keys().Tier3Versions(ctx, pf, p, orgID, projectID)
+		return err
+	})
+	return out, err
+}
+
+func (s *Store) AllOpenableTier3(ctx context.Context) ([]crypto.WrappedKey, error) {
+	var out []crypto.WrappedKey
+	err := tx.Read(ctx, s.DB, func(ctx context.Context, r store.ReadRepos, az *authz.TxAuthorizer) error {
+		pf, err := authz.SystemAuthority(authz.SiteBoot, az.Token())
+		if err != nil {
+			return err
+		}
+		out, err = r.Keys().AllOpenableTier3(ctx, pf)
+		return err
+	})
+	return out, err
+}
+
 func (s *Store) CreateHierarchy(ctx context.Context, master crypto.WrappedKey, tier3 []crypto.WrappedKey) error {
 	now := store.CanonTime(time.Now())
 	return tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {

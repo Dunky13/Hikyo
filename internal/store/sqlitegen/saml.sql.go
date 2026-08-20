@@ -521,6 +521,52 @@ func (q *Queries) ListSAMLSPKeys(ctx context.Context) ([]SamlSpKey, error) {
 	return items, nil
 }
 
+const listSamlKeysForReencrypt = `-- name: ListSamlKeysForReencrypt :many
+SELECT id, encrypted_private_key, dek_version, row_version FROM saml_sp_keys WHERE id > ? ORDER BY id LIMIT ?
+`
+
+type ListSamlKeysForReencryptParams struct {
+	ID    string
+	Limit int64
+}
+
+type ListSamlKeysForReencryptRow struct {
+	ID                  string
+	EncryptedPrivateKey []byte
+	DekVersion          int64
+	RowVersion          int64
+}
+
+// Reencrypt walk (#75/#187): saml_sp_keys, class=authn.
+// hikyo:authn-resolution
+func (q *Queries) ListSamlKeysForReencrypt(ctx context.Context, arg ListSamlKeysForReencryptParams) ([]ListSamlKeysForReencryptRow, error) {
+	rows, err := q.db.QueryContext(ctx, listSamlKeysForReencrypt, arg.ID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSamlKeysForReencryptRow
+	for rows.Next() {
+		var i ListSamlKeysForReencryptRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.EncryptedPrivateKey,
+			&i.DekVersion,
+			&i.RowVersion,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockSAMLProviderForDelete = `-- name: LockSAMLProviderForDelete :one
 SELECT id FROM saml_providers WHERE id = ?
 `
@@ -549,6 +595,31 @@ type MarkSAMLSPKeyRetiringCASParams struct {
 // hikyo:authn-resolution
 func (q *Queries) MarkSAMLSPKeyRetiringCAS(ctx context.Context, arg MarkSAMLSPKeyRetiringCASParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, markSAMLSPKeyRetiringCAS, arg.ID, arg.RowVersion)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const reencryptSamlKey = `-- name: ReencryptSamlKey :execrows
+UPDATE saml_sp_keys SET encrypted_private_key=?1, dek_version=?2, row_version=row_version+1 WHERE id=?3 AND row_version=?4
+`
+
+type ReencryptSamlKeyParams struct {
+	Ct         []byte
+	DekVersion int64
+	ID         string
+	RowVersion int64
+}
+
+// hikyo:authn-resolution
+func (q *Queries) ReencryptSamlKey(ctx context.Context, arg ReencryptSamlKeyParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, reencryptSamlKey,
+		arg.Ct,
+		arg.DekVersion,
+		arg.ID,
+		arg.RowVersion,
+	)
 	if err != nil {
 		return 0, err
 	}

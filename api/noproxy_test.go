@@ -432,6 +432,16 @@ var pinnedContractSurface = map[string]bool{
 	// drops this instance's own dismissal rows. It returns this instance's own
 	// data and never fetches, relays or forwards on the caller's behalf.
 	"POST /api/v1/instance/rotate-scanning-key": true,
+	// rotate-dek and rotate-master-key act only on this instance's own key
+	// hierarchy — they touch local key rows and forward nothing on the caller's
+	// behalf.
+	"POST /api/v1/instance/rotate-dek":        true,
+	"POST /api/v1/instance/rotate-master-key": true,
+	"POST /api/v1/instance/rotate-root-key":   true,
+	// reencrypt walks this instance's own ciphertext onto the active DEK
+	// version; it forwards nothing on the caller's behalf.
+	"POST /api/v1/instance/reencrypt":                      true,
+	"POST /api/v1/orgs/{org}/projects/{project}/reencrypt": true,
 
 	// SCIM provisioning (#73): the administrative binding surface and the
 	// standards-mandated SCIM 2.0 wire surface. The DIRECTION here is the

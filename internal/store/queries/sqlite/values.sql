@@ -68,3 +68,20 @@ WHERE org_id = ? AND project_id = ? AND environment_id = ?;
 SELECT environment_id FROM value_entries
 WHERE org_id = ? AND project_id = ? AND key_id = ?
 ORDER BY environment_id;
+
+-- ListValueEntriesForReencrypt pages a project's entire value set by id (keyset
+-- cursor) so reencrypt walks it in fixed chunks. It spans every environment: a
+-- DEK covers the whole project. id > '' returns the first page.
+-- name: ListValueEntriesForReencrypt :many
+SELECT id, environment_id, key_id, ciphertext FROM value_entries
+WHERE org_id = ? AND project_id = ? AND id > ?
+ORDER BY id LIMIT ?;
+
+-- ReencryptValueEntry re-seals one value row's ciphertext in place. The id (and
+-- thus the AAD) is unchanged -- only the DEK version moves -- so this is exempt
+-- from the delete-then-insert-with-fresh-id rule that governs value CHANGES.
+-- Compare-and-swap on the old ciphertext: if a concurrent write replaced it, the
+-- row is already on a fresh version and this matches zero rows (anti-resurrection).
+-- name: ReencryptValueEntry :execrows
+UPDATE value_entries SET ciphertext = ?
+WHERE org_id = ? AND project_id = ? AND id = ? AND ciphertext = ?;

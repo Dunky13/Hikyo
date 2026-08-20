@@ -81,3 +81,22 @@ SELECT environment_id FROM value_entries
 WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id)
   AND key_id = sqlc.arg(key_id)
 ORDER BY environment_id;
+
+-- ListValueEntriesForReencrypt pages a project's entire value set by id (keyset
+-- cursor) so reencrypt walks it in fixed chunks. It spans every environment: a
+-- DEK covers the whole project. id > '' returns the first page.
+-- name: ListValueEntriesForReencrypt :many
+SELECT id, environment_id, key_id, ciphertext FROM value_entries
+WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id)
+  AND id > sqlc.arg(cursor)
+ORDER BY id LIMIT sqlc.arg(page_limit);
+
+-- ReencryptValueEntry re-seals one value row's ciphertext in place. The id (and
+-- thus the AAD) is unchanged -- only the DEK version moves -- so this is exempt
+-- from the delete-then-insert-with-fresh-id rule that governs value CHANGES.
+-- Compare-and-swap on the old ciphertext: if a concurrent write replaced it, the
+-- row is already on a fresh version and this matches zero rows (anti-resurrection).
+-- name: ReencryptValueEntry :execrows
+UPDATE value_entries SET ciphertext = sqlc.arg(new_ciphertext)
+WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id)
+  AND id = sqlc.arg(id) AND ciphertext = sqlc.arg(old_ciphertext);

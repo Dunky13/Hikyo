@@ -231,6 +231,23 @@ const (
 	// `rotate-dek` authority as the other tier-3 rotations for the same reason
 	// `rotate-token-key` does.
 	OpRotateScanningKey Operation = "crypto.rotate-scanning-key"
+	// rotate-dek appends a DEK version for one project or the instance scope
+	// (#75, encryption-model ADR § Rotation), its own instance-level capability.
+	OpRotateDEK Operation = "crypto.rotate-dek"
+	// rotate-master-key generates a new master and re-wraps every tier-3 key
+	// under it, retiring the old master after a fenced zero-reference check.
+	OpRotateMasterKey Operation = "crypto.rotate-master-key"
+	// rotate-root-key replaces the operator-held root through the crash-safe
+	// dual-wrapped protocol (--prepare / --verify / --finalize), one capability
+	// across all three phases.
+	OpRotateRootKey Operation = "crypto.rotate-root-key"
+	// reencrypt walks a scope's ciphertext onto the active DEK version and
+	// retires the old (#75 + #187). Split by scope class: the project walk is
+	// tenant-class (it reads/writes a project's tenant-owned value rows), the
+	// instance walk is instance-class. Both ride the instance-level reencrypt
+	// capability — an operator authority over every scope.
+	OpReencryptProject  Operation = "crypto.reencrypt-project"
+	OpReencryptInstance Operation = "crypto.reencrypt-instance"
 
 	OpKeyGroupCreate Operation = "key-group.create"
 	OpKeyGroupGet    Operation = "key-group.get"
@@ -625,23 +642,28 @@ const (
 	StoreAdaptersMoveTarget             StoreOp = "adapters.MoveTarget"
 	StoreAdaptersMoveOrigin             StoreOp = "adapters.MoveOrigin"
 	StoreAdaptersMove                   StoreOp = "adapters.Move"
-	StoreAdaptersCancelMove             StoreOp = "adapters.CancelMove"
-	StoreAdaptersReplaceMoveTarget      StoreOp = "adapters.ReplaceMoveTarget"
-	StoreAdaptersReplaceMoveOrigin      StoreOp = "adapters.ReplaceMoveOrigin"
-	StoreAdaptersMapping                StoreOp = "adapters.Mapping"
-	StoreAdaptersPlanMaterial           StoreOp = "adapters.PlanMaterial"
-	StoreAdaptersTargetEnvironments     StoreOp = "adapters.TargetEnvironments"
-	StoreAdaptersEnvironments           StoreOp = "adapters.Environments"
-	StoreAdaptersConflicts              StoreOp = "adapters.Conflicts"
-	StoreAdaptersRecordPlan             StoreOp = "adapters.RecordPlan"
-	StoreAdaptersAdopt                  StoreOp = "adapters.Adopt"
-	StoreAdaptersEnqueuePublished       StoreOp = "adapters.EnqueuePublished"
-	StoreAdaptersTeardownTarget         StoreOp = "adapters.TeardownTarget"
-	StoreAdaptersTeardownAdapter        StoreOp = "adapters.TeardownAdapter"
-	StoreAdaptersReplaceCredential      StoreOp = "adapters.ReplaceCredential"
-	StoreAdaptersRevokeCredential       StoreOp = "adapters.RevokeCredential"
-	StoreAdaptersEnqueueManual          StoreOp = "adapters.EnqueueManual"
-	StoreCatalogueRevisionBump          StoreOp = "catalogue.BumpSchemaRevision"
+	// Reencrypt walk over the two adapter credential columns.
+	StoreAdaptersListForReencrypt      StoreOp = "adapters.ListAdaptersForReencrypt"
+	StoreAdaptersReencrypt             StoreOp = "adapters.ReencryptAdapter"
+	StoreAdaptersListMovesForReencrypt StoreOp = "adapters.ListRouteMovesForReencrypt"
+	StoreAdaptersReencryptMove         StoreOp = "adapters.ReencryptRouteMove"
+	StoreAdaptersCancelMove            StoreOp = "adapters.CancelMove"
+	StoreAdaptersReplaceMoveTarget     StoreOp = "adapters.ReplaceMoveTarget"
+	StoreAdaptersReplaceMoveOrigin     StoreOp = "adapters.ReplaceMoveOrigin"
+	StoreAdaptersMapping               StoreOp = "adapters.Mapping"
+	StoreAdaptersPlanMaterial          StoreOp = "adapters.PlanMaterial"
+	StoreAdaptersTargetEnvironments    StoreOp = "adapters.TargetEnvironments"
+	StoreAdaptersEnvironments          StoreOp = "adapters.Environments"
+	StoreAdaptersConflicts             StoreOp = "adapters.Conflicts"
+	StoreAdaptersRecordPlan            StoreOp = "adapters.RecordPlan"
+	StoreAdaptersAdopt                 StoreOp = "adapters.Adopt"
+	StoreAdaptersEnqueuePublished      StoreOp = "adapters.EnqueuePublished"
+	StoreAdaptersTeardownTarget        StoreOp = "adapters.TeardownTarget"
+	StoreAdaptersTeardownAdapter       StoreOp = "adapters.TeardownAdapter"
+	StoreAdaptersReplaceCredential     StoreOp = "adapters.ReplaceCredential"
+	StoreAdaptersRevokeCredential      StoreOp = "adapters.RevokeCredential"
+	StoreAdaptersEnqueueManual         StoreOp = "adapters.EnqueueManual"
+	StoreCatalogueRevisionBump         StoreOp = "catalogue.BumpSchemaRevision"
 
 	StoreFoldersCreate StoreOp = "folders.Create"
 	StoreFoldersGet    StoreOp = "folders.Get"
@@ -657,8 +679,11 @@ const (
 	StoreValuesList                  StoreOp = "values.List"
 	StoreValuesEnvironmentsWithValue StoreOp = "values.EnvironmentsWithValue"
 	StoreValuesPut                   StoreOp = "values.Put"
-	StoreValuesClear                 StoreOp = "values.Clear"
-	StoreValuesClearEnvironment      StoreOp = "values.ClearEnvironment"
+	// The reencrypt walk's project-wide page + in-place re-seal of value rows.
+	StoreValuesListForReencrypt StoreOp = "values.ListForReencrypt"
+	StoreValuesReencrypt        StoreOp = "values.Reencrypt"
+	StoreValuesClear            StoreOp = "values.Clear"
+	StoreValuesClearEnvironment StoreOp = "values.ClearEnvironment"
 	// StoreValuesCountEnvironment is the project-scoped live-occurrence count
 	// behind the definitions-apply environment-delete refusal (#70).
 	StoreValuesCountEnvironment StoreOp = "values.CountEnvironmentValues"
@@ -674,6 +699,8 @@ const (
 	StorePendingListForOwnerInEnvironment StoreOp = "pending.ListForOwnerInEnvironment"
 	StorePendingListMarkers               StoreOp = "pending.ListMarkers"
 	StorePendingStage                     StoreOp = "pending.Stage"
+	StorePendingListForReencrypt          StoreOp = "pending.ListForReencrypt"
+	StorePendingReencrypt                 StoreOp = "pending.Reencrypt"
 	StorePendingDiscard                   StoreOp = "pending.Discard"
 	StorePendingDiscardEnvironment        StoreOp = "pending.DiscardEnvironment"
 	StorePendingDiscardKey                StoreOp = "pending.DiscardKey"
@@ -689,6 +716,8 @@ const (
 	StoreSnapshotsAtRevision                  StoreOp = "snapshots.AtRevision"
 	StoreSnapshotsList                        StoreOp = "snapshots.List"
 	StoreSnapshotsEntries                     StoreOp = "snapshots.Entries"
+	StoreSnapshotsListForReencrypt            StoreOp = "snapshots.ListForReencrypt"
+	StoreSnapshotsReencrypt                   StoreOp = "snapshots.Reencrypt"
 	StoreSnapshotsChanges                     StoreOp = "snapshots.Changes"
 	StoreSnapshotsInsert                      StoreOp = "snapshots.Insert"
 	StoreSnapshotsInsertEntry                 StoreOp = "snapshots.InsertEntry"
@@ -713,14 +742,40 @@ const (
 	// Keyring persistence (#43). These carry no tenant chain: wrapped-key
 	// rows are instance-scoped crypto material, and the scope a tier-3 key
 	// belongs to is part of its AAD, not a tenant predicate.
-	StoreKeysActiveMasterWrappers       StoreOp = "keys.ActiveMasterWrappers"
-	StoreKeysActiveTier3                StoreOp = "keys.ActiveTier3"
+	StoreKeysActiveMasterWrappers StoreOp = "keys.ActiveMasterWrappers"
+	StoreKeysActiveTier3          StoreOp = "keys.ActiveTier3"
+	StoreKeysTier3Versions        StoreOp = "keys.Tier3Versions"
+	StoreKeysAllOpenableTier3     StoreOp = "keys.AllOpenableTier3"
+	// StoreKeysAssertActiveDEKVersion is the writer fence, invoked inside every
+	// ciphertext-writing operation's transaction — a read (+ FOR SHARE lock on
+	// postgres) of the sealed DEK version's state. It is in the store sets of the
+	// operations that write ciphertext, not the boot set.
+	StoreKeysAssertActiveDEKVersion     StoreOp = "keys.AssertActiveDEKVersion"
 	StoreKeysAcquireHierarchyGeneration StoreOp = "keys.AcquireHierarchyGeneration"
 	StoreKeysInsertMaster               StoreOp = "keys.InsertMaster"
 	StoreKeysInsertTier3                StoreOp = "keys.InsertTier3"
 	StoreKeysRotateTokenKey             StoreOp = "keys.RotateTokenKey"
 	StoreKeysRotateScanningKey          StoreOp = "keys.RotateScanningKey"
-	StoreKeysInsertScopeGeneration      StoreOp = "keys.InsertScopeGeneration"
+	StoreKeysRotateDEK                  StoreOp = "keys.RotateDEK"
+	StoreKeysRotateMasterKey            StoreOp = "keys.RotateMasterKey"
+	StoreKeysRetireRetiringTier3        StoreOp = "keys.RetireRetiringTier3"
+
+	// The instance-credential reencrypt surface (#75/#187), one ReencryptRepo.
+	StoreReencryptListPasswordCreds StoreOp = "reencrypt.ListPasswordCredsForReencrypt"
+	StoreReencryptPasswordCred      StoreOp = "reencrypt.ReencryptPasswordCred"
+	StoreReencryptListTotpCreds     StoreOp = "reencrypt.ListTotpCredsForReencrypt"
+	StoreReencryptTotpCred          StoreOp = "reencrypt.ReencryptTotpCred"
+	StoreReencryptListRecoveryCodes StoreOp = "reencrypt.ListRecoveryCodesForReencrypt"
+	StoreReencryptRecoveryCodes     StoreOp = "reencrypt.ReencryptRecoveryCodes"
+	StoreReencryptListOidcProviders StoreOp = "reencrypt.ListOidcProvidersForReencrypt"
+	StoreReencryptOidcProvider      StoreOp = "reencrypt.ReencryptOidcProvider"
+	StoreReencryptListSamlKeys      StoreOp = "reencrypt.ListSamlKeysForReencrypt"
+	StoreReencryptSamlKey           StoreOp = "reencrypt.ReencryptSamlKey"
+	StoreReencryptListRemotes       StoreOp = "reencrypt.ListRemotesForReencrypt"
+	StoreReencryptRemote            StoreOp = "reencrypt.ReencryptRemote"
+	StoreKeysRootRotatePrepare      StoreOp = "keys.RootKeyRotatePrepare"
+	StoreKeysRootRotateFinalize     StoreOp = "keys.RootKeyRotateFinalize"
+	StoreKeysInsertScopeGeneration  StoreOp = "keys.InsertScopeGeneration"
 
 	// Secret-scanning dismissal rows (#74, secret-scanning ADR section 4). The
 	// "keep as config" sticky-dismissal surface. Insert/Exists ride the
@@ -888,6 +943,20 @@ var readOnlyStoreOps = map[StoreOp]bool{
 	StoreCatalogueRevisionGet:                true,
 	StoreKeysActiveMasterWrappers:            true,
 	StoreKeysActiveTier3:                     true,
+	StoreKeysTier3Versions:                   true,
+	StoreKeysAllOpenableTier3:                true,
+	StoreKeysAssertActiveDEKVersion:          true,
+	StoreValuesListForReencrypt:              true,
+	StoreSnapshotsListForReencrypt:           true,
+	StorePendingListForReencrypt:             true,
+	StoreAdaptersListForReencrypt:            true,
+	StoreAdaptersListMovesForReencrypt:       true,
+	StoreReencryptListPasswordCreds:          true,
+	StoreReencryptListTotpCreds:              true,
+	StoreReencryptListRecoveryCodes:          true,
+	StoreReencryptListOidcProviders:          true,
+	StoreReencryptListSamlKeys:               true,
+	StoreReencryptListRemotes:                true,
 	StoreAuditTenantPage:                     true,
 	StoreAuditInstancePage:                   true,
 	StoreValuesGet:                           true,
@@ -914,6 +983,8 @@ var readOnlyStoreOps = map[StoreOp]bool{
 var bootKeyringOps = map[StoreOp]bool{
 	StoreKeysActiveMasterWrappers:       true,
 	StoreKeysActiveTier3:                true,
+	StoreKeysTier3Versions:              true,
+	StoreKeysAllOpenableTier3:           true,
 	StoreKeysAcquireHierarchyGeneration: true,
 	StoreKeysInsertMaster:               true,
 	StoreKeysInsertTier3:                true,
@@ -1036,10 +1107,12 @@ var operations = map[Operation]opSpec{
 	// The put/delete paths also sweep federated sessions on the resolution
 	// surface (A4).
 	OpProviderPut: {
-		class:    ClassInstance,
-		formula:  Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
-		storeOps: map[StoreOp]bool{StoreAuditInstanceInsert: true},
-		events:   []audit.EventType{audit.EventOIDCProviderChanged},
+		class:   ClassInstance,
+		formula: Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
+		storeOps: map[StoreOp]bool{
+			StoreKeysAssertActiveDEKVersion: true, StoreAuditInstanceInsert: true,
+		},
+		events: []audit.EventType{audit.EventOIDCProviderChanged},
 	},
 	OpProviderGet: {
 		class:    ClassInstance,
@@ -1065,9 +1138,11 @@ var operations = map[Operation]opSpec{
 	// like OIDC administration; the operation registry therefore owns the
 	// instance-config proof and audit linkage, not those storage calls.
 	OpSAMLProviderPut: {
-		class:    ClassInstance,
-		formula:  Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
-		storeOps: map[StoreOp]bool{StoreAuditInstanceInsert: true},
+		class:   ClassInstance,
+		formula: Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
+		storeOps: map[StoreOp]bool{
+			StoreKeysAssertActiveDEKVersion: true, StoreAuditInstanceInsert: true,
+		},
 		events: []audit.EventType{
 			audit.EventSAMLProviderConfigure,
 			audit.EventSAMLCertChange,
@@ -1731,7 +1806,7 @@ var operations = map[Operation]opSpec{
 		storeOps: map[StoreOp]bool{
 			StoreProjectsLock: true, StoreCatalogueList: true,
 			StoreCataloguePresenceList: true, StoreValuesPut: true,
-			StoreAuditTenantInsert: true,
+			StoreKeysAssertActiveDEKVersion: true, StoreAuditTenantInsert: true,
 		},
 		events: []audit.EventType{audit.EventValueSet, audit.EventScanningFindingWarned},
 	},
@@ -1789,7 +1864,7 @@ var operations = map[Operation]opSpec{
 		storeOps: map[StoreOp]bool{
 			StoreProjectsLock: true, StoreCatalogueList: true,
 			StoreCataloguePresenceList: true, StoreEnvironmentsGetSettings: true,
-			StoreValuesPut: true, StoreAuditTenantInsert: true,
+			StoreValuesPut: true, StoreKeysAssertActiveDEKVersion: true, StoreAuditTenantInsert: true,
 		},
 		events: []audit.EventType{audit.EventValueCopied},
 	},
@@ -1804,7 +1879,7 @@ var operations = map[Operation]opSpec{
 		storeOps: map[StoreOp]bool{
 			StoreProjectsLock: true, StoreCatalogueList: true,
 			StoreCataloguePresenceList: true, StoreEnvironmentsGetSettings: true,
-			StoreValuesPut: true, StoreAuditTenantInsert: true,
+			StoreValuesPut: true, StoreKeysAssertActiveDEKVersion: true, StoreAuditTenantInsert: true,
 		},
 		// The config leg is where a copied/cloned config value is scanned
 		// warn-only (#74, Surface 1); the secret leg never scans.
@@ -1858,7 +1933,7 @@ var operations = map[Operation]opSpec{
 			StoreProjectsLock: true, StoreCatalogueList: true,
 			StoreCataloguePresenceList: true, StoreCatalogueRevisionGet: true,
 			StoreValuesList: true, StoreValuesPut: true,
-			StoreAuditTenantInsert: true,
+			StoreKeysAssertActiveDEKVersion: true, StoreAuditTenantInsert: true,
 		},
 		// The writes land as ordinary value writes, so they emit the ordinary
 		// event: a trail that spelled an imported write differently would make
@@ -1889,6 +1964,7 @@ var operations = map[Operation]opSpec{
 			// hold. The full scan/dismiss wiring lands with the scanning stream;
 			// this is the store authority that write path needs.
 			StoreScanningDismissalsExists: true, StoreScanningDismissalsInsert: true,
+			StoreKeysAssertActiveDEKVersion: true,
 		},
 		events: []audit.EventType{audit.EventValueStaged, audit.EventScanningFindingWarned, audit.EventScanningFindingDismissed},
 	},
@@ -1911,6 +1987,7 @@ var operations = map[Operation]opSpec{
 			StoreSnapshotsRecordSecretValueOccurrence: true,
 			StoreSnapshotsInsertChange:                true,
 			StoreAdaptersEnqueuePublished:             true,
+			StoreKeysAssertActiveDEKVersion:           true,
 			StoreAuditTenantInsert:                    true,
 		},
 		events: []audit.EventType{
@@ -1997,6 +2074,92 @@ var operations = map[Operation]opSpec{
 		},
 		events: []audit.EventType{audit.EventScanningKeyRotated},
 	},
+	// rotate-dek is instance-class for the same reason rotate-token-key is: a
+	// DEK belongs to the instance's crypto hierarchy, not to a tenant, so a
+	// refusal mimics no tenant object's nonexistence. Its own capability,
+	// separate grant — the post-compromise recovery order runs each rotation
+	// under a distinct authority.
+	OpRotateDEK: {
+		class:   ClassInstance,
+		formula: Formula{{Cap: domain.CapRotateDEK, At: domain.LevelNone}},
+		storeOps: map[StoreOp]bool{
+			StoreKeysRotateDEK:       true,
+			StoreAuditInstanceInsert: true,
+		},
+		events: []audit.EventType{audit.EventDEKRotated},
+	},
+	// reencrypt --project: tenant-class, project depth, instance-level reencrypt
+	// capability (an operator holding reencrypt@instance may walk any project).
+	// The @None atom truncates the chain to empty, so the instance grant covers
+	// it; the resolved project chain still binds the value store ops.
+	OpReencryptProject: {
+		class:   ClassTenant,
+		level:   domain.LevelProject,
+		formula: Formula{{Cap: domain.CapReencrypt, At: domain.LevelNone}},
+		storeOps: map[StoreOp]bool{
+			StoreValuesListForReencrypt:        true,
+			StoreValuesReencrypt:               true,
+			StoreSnapshotsListForReencrypt:     true,
+			StoreSnapshotsReencrypt:            true,
+			StorePendingListForReencrypt:       true,
+			StorePendingReencrypt:              true,
+			StoreAdaptersListForReencrypt:      true,
+			StoreAdaptersReencrypt:             true,
+			StoreAdaptersListMovesForReencrypt: true,
+			StoreAdaptersReencryptMove:         true,
+			StoreKeysAssertActiveDEKVersion:    true,
+			StoreKeysRetireRetiringTier3:       true,
+			StoreAuditTenantInsert:             true,
+		},
+		events: []audit.EventType{audit.EventReencryptCompleted},
+	},
+	// reencrypt --instance: instance-class (the six credential tables carry no
+	// tenant chain), instance-level reencrypt capability.
+	OpReencryptInstance: {
+		class:   ClassInstance,
+		formula: Formula{{Cap: domain.CapReencrypt, At: domain.LevelNone}},
+		storeOps: map[StoreOp]bool{
+			StoreReencryptListPasswordCreds: true, StoreReencryptPasswordCred: true,
+			StoreReencryptListTotpCreds: true, StoreReencryptTotpCred: true,
+			StoreReencryptListRecoveryCodes: true, StoreReencryptRecoveryCodes: true,
+			StoreReencryptListOidcProviders: true, StoreReencryptOidcProvider: true,
+			StoreReencryptListSamlKeys: true, StoreReencryptSamlKey: true,
+			StoreReencryptListRemotes: true, StoreReencryptRemote: true,
+			StoreKeysAssertActiveDEKVersion: true,
+			StoreKeysRetireRetiringTier3:    true,
+			StoreAuditInstanceInsert:        true,
+		},
+		events: []audit.EventType{audit.EventReencryptCompleted},
+	},
+	// rotate-master-key is instance-class: the master belongs to the instance's
+	// crypto hierarchy. Its own capability, distinct from rotate-dek — the
+	// recovery order runs master rotation under its own grant.
+	OpRotateMasterKey: {
+		class:   ClassInstance,
+		formula: Formula{{Cap: domain.CapRotateMasterKey, At: domain.LevelNone}},
+		storeOps: map[StoreOp]bool{
+			StoreKeysRotateMasterKey: true,
+			StoreAuditInstanceInsert: true,
+		},
+		events: []audit.EventType{audit.EventMasterKeyRotated},
+	},
+	// rotate-root-key is instance-class: the root is the instance's, and one
+	// capability authorizes all three phases. The store set carries prepare and
+	// finalize; verify writes only its audit event.
+	OpRotateRootKey: {
+		class:   ClassInstance,
+		formula: Formula{{Cap: domain.CapRotateRootKey, At: domain.LevelNone}},
+		storeOps: map[StoreOp]bool{
+			StoreKeysRootRotatePrepare:  true,
+			StoreKeysRootRotateFinalize: true,
+			StoreAuditInstanceInsert:    true,
+		},
+		events: []audit.EventType{
+			audit.EventRootKeyRotationPrepared,
+			audit.EventRootKeyRotationVerified,
+			audit.EventRootKeyRotationFinalized,
+		},
+	},
 	OpRevisionList: {
 		class:       ClassTenant,
 		level:       domain.LevelEnv,
@@ -2055,7 +2218,8 @@ var operations = map[Operation]opSpec{
 			StoreSnapshotsAtRevision: true, StoreSnapshotsEntries: true,
 			StoreSnapshotsSecretValueOccurrenceIDs: true,
 			StorePendingListForOwner:               true, StorePendingListMarkers: true,
-			StorePendingStage: true, StoreAuditTenantInsert: true,
+			StorePendingStage:               true,
+			StoreKeysAssertActiveDEKVersion: true, StoreAuditTenantInsert: true,
 		},
 		events: []audit.EventType{
 			audit.EventValueStaged, audit.EventRevisionRestoreStaged, audit.EventValueRevealed,
@@ -3028,12 +3192,13 @@ var operations = map[Operation]opSpec{
 		// existing entries already name, or the ADR's "same identity from two
 		// entries" case is undetectable at the moment it can still be refused.
 		storeOps: map[StoreOp]bool{
-			StoreRemotesCount:         true,
-			StoreRemotesList:          true,
-			StoreRemoteSnapshotsList:  true,
-			StoreRemotesCreate:        true,
-			StoreRemoteSnapshotsWrite: true,
-			StoreAuditInstanceInsert:  true,
+			StoreRemotesCount:               true,
+			StoreRemotesList:                true,
+			StoreRemoteSnapshotsList:        true,
+			StoreRemotesCreate:              true,
+			StoreRemoteSnapshotsWrite:       true,
+			StoreKeysAssertActiveDEKVersion: true,
+			StoreAuditInstanceInsert:        true,
 		},
 		events: []audit.EventType{audit.EventRemoteAdded},
 	},
@@ -3148,13 +3313,13 @@ var operations = map[Operation]opSpec{
 	OpAdapterConfigure: {
 		class: ClassTenant, level: domain.LevelProject, postGrantForbidden: true,
 		formula:  Formula{{Cap: domain.CapManageAdapters, At: domain.LevelProject}},
-		storeOps: map[StoreOp]bool{StoreAdaptersCreate: true, StoreAdaptersAddTarget: true, StoreAdaptersBeginConfigureEffect: true, StoreAdaptersFinishConfigureEffect: true, StoreAdaptersUpdateTarget: true, StoreAdaptersMoveTarget: true, StoreAdaptersMoveOrigin: true, StoreAdaptersCancelMove: true, StoreAdaptersReplaceMoveTarget: true, StoreAdaptersReplaceMoveOrigin: true, StoreAdaptersMove: true, StoreAdaptersConfiguration: true, StoreAdaptersTarget: true, StoreAdaptersTargetKeyIDs: true, StoreAdaptersEnvironments: true, StoreAuditTenantInsert: true},
+		storeOps: map[StoreOp]bool{StoreAdaptersCreate: true, StoreAdaptersAddTarget: true, StoreAdaptersBeginConfigureEffect: true, StoreAdaptersFinishConfigureEffect: true, StoreAdaptersUpdateTarget: true, StoreAdaptersMoveTarget: true, StoreAdaptersMoveOrigin: true, StoreAdaptersCancelMove: true, StoreAdaptersReplaceMoveTarget: true, StoreAdaptersReplaceMoveOrigin: true, StoreAdaptersMove: true, StoreAdaptersConfiguration: true, StoreAdaptersTarget: true, StoreAdaptersTargetKeyIDs: true, StoreAdaptersEnvironments: true, StoreKeysAssertActiveDEKVersion: true, StoreAuditTenantInsert: true},
 		events:   []audit.EventType{audit.EventAdapterConfigure, audit.EventAdapterSyncRequested, audit.EventAdapterSuperseded, audit.EventAdapterScrub, audit.EventAdapterPushIntent, audit.EventAdapterPushOutcome},
 	},
 	OpAdapterCredentialSet: {
 		class: ClassTenant, level: domain.LevelProject, postGrantForbidden: true,
 		formula:  Formula{{Cap: domain.CapManageAdapters, At: domain.LevelProject}},
-		storeOps: map[StoreOp]bool{StoreAdaptersEnvironments: true, StoreAdaptersReplaceCredential: true, StoreAuditTenantInsert: true},
+		storeOps: map[StoreOp]bool{StoreAdaptersEnvironments: true, StoreAdaptersReplaceCredential: true, StoreKeysAssertActiveDEKVersion: true, StoreAuditTenantInsert: true},
 		events:   []audit.EventType{audit.EventAdapterCredentialReplace},
 	},
 	OpAdapterCredentialRevoke: {

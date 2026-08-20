@@ -8256,6 +8256,203 @@ paths:
         "500":
           $ref: "#/components/responses/Internal"
 
+  /api/v1/instance/rotate-dek:
+    post:
+      operationId: rotateDEK
+      tags: [instance]
+      summary: Append a new DEK version for one project or the instance scope.
+      description: |
+        Appends a new data-encryption-key version. New writes seal under it
+        immediately; ciphertext under the previous version stays readable until
+        `reencrypt` walks it onto the new one (Vault keyring semantics). Free on
+        its own, and incomplete without a following reencrypt.
+
+        Its own capability, `rotate-dek`, never bundled - the post-compromise
+        recovery order runs each rotation under a distinct authority.
+      x-hikyo-class: instance
+      x-hikyo-operation: crypto.rotate-dek
+      x-hikyo-formula: [rotate-dek@instance]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RotateDEKRequest"
+      responses:
+        "200":
+          description: The rotation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DEKRotation"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/instance/reencrypt:
+    post:
+      operationId: reencryptInstance
+      tags: [instance]
+      summary: Walk the instance credential ciphertext onto the active DEK version.
+      description: |
+        Moves every instance-DEK credential ciphertext (password verifiers, TOTP
+        seeds, recovery codes, OIDC/SAML secrets, remote credentials) onto the
+        active instance DEK version and retires the superseded versions — the
+        completion of an instance `rotate-dek`. Chunked and resumable; re-run to
+        continue after an interruption.
+      x-hikyo-class: instance
+      x-hikyo-operation: crypto.reencrypt-instance
+      x-hikyo-formula: [reencrypt@instance]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "200":
+          description: The reencrypt result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReencryptResult"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/instance/rotate-master-key:
+    post:
+      operationId: rotateMasterKey
+      tags: [instance]
+      summary: Generate a new master key and re-wrap every tier-3 key under it.
+      description: |
+        Generates a new master key, re-wraps every tier-3 key (all project DEKs,
+        the instance DEK, the root token key) under it, and retires the old
+        master after a fenced zero-reference check. Bounded by the number of
+        projects, so seconds.
+
+        Step 2 of the post-compromise recovery order: an attacker who held
+        process memory holds the master, so every DEK must be re-wrapped under a
+        master they never saw. Refused while the root is dual-wrapped — finalize
+        the root rotation first.
+      x-hikyo-class: instance
+      x-hikyo-operation: crypto.rotate-master-key
+      x-hikyo-formula: [rotate-master-key@instance]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "200":
+          description: The rotation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MasterKeyRotation"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/instance/rotate-root-key:
+    post:
+      operationId: rotateRootKey
+      tags: [instance]
+      summary: Run one phase of the crash-safe root-key rotation.
+      description: |
+        Replaces the operator-held root through a three-phase protocol over a
+        dual-wrapped master. NO key material crosses the wire: `prepare` reads
+        the NEW root from the server-side source (HIKYO_NEW_ROOT_KEY_FILE) and
+        seals a second master wrapper; the operator then installs the new root
+        at the PRIMARY source; `verify` re-reads the primary source and confirms
+        it now unwraps the new wrapper; `finalize` retires the old wrapper.
+
+        A crash at any point leaves the instance bootable under either root, and
+        every start warns until finalize. This is the rotation operators need
+        after an env-file leak — it re-wraps the master only, touching no data.
+      x-hikyo-class: instance
+      x-hikyo-operation: crypto.rotate-root-key
+      x-hikyo-formula: [rotate-root-key@instance]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RotateRootKeyRequest"
+      responses:
+        "200":
+          description: The phase result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RootKeyRotation"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}/projects/{project}/reencrypt:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+    post:
+      operationId: reencryptProject
+      tags: [instance]
+      summary: Walk a project's ciphertext onto the active DEK version.
+      description: |
+        Moves every ciphertext in the project (values, drafts, snapshot payloads,
+        adapter credentials) onto the active project DEK version and retires the
+        superseded versions — the completion of a project `rotate-dek`. Chunked
+        and resumable.
+      x-hikyo-class: tenant
+      x-hikyo-operation: crypto.reencrypt-project
+      x-hikyo-formula: [reencrypt@instance]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "200":
+          description: The reencrypt result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReencryptResult"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/Internal"
+
   /api/v1/instance/rotate-scanning-key:
     post:
       operationId: rotateScanningKey
@@ -10558,6 +10755,88 @@ components:
         value:
           type: string
           description: Present only when `revealed` is true.
+    RotateDEKRequest:
+      type: object
+      required: [scope]
+      additionalProperties: false
+      properties:
+        scope:
+          type: string
+          enum: [project, instance]
+          description: |
+            `project` rotates one project's DEK (org and project required);
+            `instance` rotates the instance DEK for rows belonging to no project.
+        org:
+          type: string
+          description: Organisation id. Required when scope is `project`, absent otherwise.
+        project:
+          type: string
+          description: Project id. Required when scope is `project`, absent otherwise.
+    DEKRotation:
+      type: object
+      required: [scope, key_version]
+      additionalProperties: false
+      properties:
+        scope:
+          type: string
+          enum: [project, instance]
+        org:
+          type: string
+        project:
+          type: string
+        key_version:
+          type: integer
+          format: int64
+          description: The new active DEK version. Old versions remain readable until reencrypt.
+    RotateRootKeyRequest:
+      type: object
+      required: [phase]
+      additionalProperties: false
+      properties:
+        phase:
+          type: string
+          enum: [prepare, verify, finalize]
+          description: |
+            `prepare` seals the master under the new root; `verify` confirms the
+            operator installed it at the primary source; `finalize` retires the
+            old wrapper. Run in that order.
+    RootKeyRotation:
+      type: object
+      required: [phase, root_key_epoch]
+      additionalProperties: false
+      properties:
+        phase:
+          type: string
+          enum: [prepare, verify, finalize]
+        root_key_epoch:
+          type: integer
+          format: int64
+          description: The epoch this phase concerns — the new epoch for prepare/verify, the surviving epoch after finalize.
+    ReencryptResult:
+      type: object
+      required: [scope, rows_moved]
+      additionalProperties: false
+      properties:
+        scope:
+          type: string
+          enum: [project, instance]
+        org:
+          type: string
+        project:
+          type: string
+        rows_moved:
+          type: integer
+          format: int64
+          description: How many ciphertext rows this run moved onto the active DEK version.
+    MasterKeyRotation:
+      type: object
+      required: [key_version]
+      additionalProperties: false
+      properties:
+        key_version:
+          type: integer
+          format: int64
+          description: The new master key version. Every tier-3 key is now wrapped under it.
     TokenKeyRotation:
       type: object
       required: [token_key_version]

@@ -201,6 +201,27 @@ type PendingRepo interface {
 	// AROUND the new row: the caller refuses when it has reached the per-project
 	// pending cap.
 	CountForProjectExcludingCell(ctx context.Context, p authz.Proof, keyID, ownerID string) (int64, error)
+	// ListForReencrypt / Reencrypt are the reencrypt walk's page + in-place
+	// re-seal of pending-draft ciphertext (project-wide, keyset by id). Unset
+	// drafts (NULL ciphertext) are skipped by the query.
+	ListForReencrypt(ctx context.Context, p authz.Proof, cursor string, limit int) ([]ReencryptFieldRow, error)
+	Reencrypt(ctx context.Context, p authz.Proof, id string, newCiphertext, oldCiphertext []byte) (bool, error)
+}
+
+// ReencryptFieldRow is one project_field row the reencrypt walk considers.
+// SnapshotID is set for snapshot entries and empty for pending drafts, matching
+// each table's AAD (the snapshot AAD binds it; the pending AAD does not). Owner
+// is the AAD's owner_row_id where it differs from the primary key: an adapter
+// route move is keyed by its own id but its credential AAD binds the ADAPTER's
+// id, so Owner carries the adapter_id while ID (used for the CAS and cursor)
+// stays the move's id. Empty Owner means "same as ID".
+type ReencryptFieldRow struct {
+	ID            string
+	EnvironmentID string
+	KeyID         string
+	SnapshotID    string
+	Owner         string
+	Ciphertext    []byte
 }
 
 // SnapshotReader is the read side of the published state.
@@ -239,6 +260,10 @@ type SnapshotRepo interface {
 	// DeleteEnvironment removes the environment's snapshots, their entries and
 	// their lineage, in the transaction that deletes the environment.
 	DeleteEnvironment(ctx context.Context, p authz.Proof) error
+	// ListForReencrypt / Reencrypt are the reencrypt walk's page + in-place
+	// re-seal of snapshot-entry ciphertext (project-wide, keyset by id).
+	ListForReencrypt(ctx context.Context, p authz.Proof, cursor string, limit int) ([]ReencryptFieldRow, error)
+	Reencrypt(ctx context.Context, p authz.Proof, id string, newCiphertext, oldCiphertext []byte) (bool, error)
 }
 
 // RevisionPin is one durable delivery route and retention reference.

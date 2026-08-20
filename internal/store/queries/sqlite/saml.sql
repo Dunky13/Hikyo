@@ -143,3 +143,11 @@ WHERE id = ? AND provider_id IS NULL AND saml_provider_id IS NULL;
 -- hikyo:authn-resolution
 -- name: DeleteSessionsForSAMLProvider :execrows
 DELETE FROM sessions WHERE saml_provider_id = ?;
+
+-- Reencrypt walk (#75/#187): saml_sp_keys, class=authn.
+-- hikyo:authn-resolution
+-- name: ListSamlKeysForReencrypt :many
+SELECT id, encrypted_private_key, dek_version, row_version FROM saml_sp_keys WHERE id > ? ORDER BY id LIMIT ?;
+-- hikyo:authn-resolution
+-- name: ReencryptSamlKey :execrows
+UPDATE saml_sp_keys SET encrypted_private_key=sqlc.arg(ct), dek_version=sqlc.arg(dek_version), row_version=row_version+1 WHERE id=sqlc.arg(id) AND row_version=sqlc.arg(row_version);
