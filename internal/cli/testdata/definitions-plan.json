@@ -1,0 +1,54 @@
+{
+  "plan": {
+    "additive": false,
+    "base_revision": 7,
+    "current_revision": 9,
+    "deletions_present": true,
+    "diff": {
+      "env_deletions": [],
+      "environments": {
+        "creates": [
+          "preview"
+        ],
+        "deletes": [],
+        "renames": [],
+        "updates": []
+      },
+      "key_deletions": [
+        {
+          "live_in": [
+            "production",
+            "staging"
+          ],
+          "name": "OLD_KEY"
+        }
+      ],
+      "key_groups": {
+        "creates": [],
+        "deletes": [],
+        "renames": [],
+        "updates": []
+      },
+      "keys": {
+        "creates": [],
+        "deletes": [
+          "OLD_KEY"
+        ],
+        "renames": [],
+        "updates": []
+      },
+      "reveal_required": [
+        "DATABASE_URL"
+      ]
+    },
+    "digest": "abc123",
+    "expires_at": "2030-01-02T03:04:05Z",
+    "id": "pln_70",
+    "protected_environments": [
+      "production"
+    ],
+    "reveal_required": [
+      "DATABASE_URL"
+    ]
+  }
+}

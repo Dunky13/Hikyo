@@ -11,7 +11,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Hikyo-Org/hikyo/internal/definitions"
 	"github.com/Hikyo-Org/hikyo/internal/importer"
+	"github.com/Hikyo-Org/hikyo/internal/schema"
 )
 
 func TestImportCommandsRemainRoutable(t *testing.T) {
@@ -252,6 +254,50 @@ func TestWriteArtifactsRefusesValuesFilePhaseTwoCannotRead(t *testing.T) {
 		if _, statErr := os.Stat(filepath.Join(outDir, name)); !errors.Is(statErr, os.ErrNotExist) {
 			t.Fatalf("%s survived refused artifact run: %v", name, statErr)
 		}
+	}
+}
+
+func TestWriteArtifactsEmitsCanonicalDefinitionsBundle(t *testing.T) {
+	bundle, err := definitions.Normalize(definitions.Bundle{
+		FormatVersion: definitions.FormatVersion,
+		Environments:  []definitions.Environment{},
+		KeyGroups:     []definitions.KeyGroup{},
+		Keys: []definitions.Key{{
+			Name: "DATABASE_URL", Classification: string(schema.Secret),
+			Declaration: schema.Declaration{Rule: &schema.Rule{Type: schema.TypeString}},
+			RequiredIn: definitions.Presence{
+				Mode: string(schema.PresenceNone), Environments: []string{},
+			},
+			ForbiddenIn: definitions.Presence{
+				Mode: string(schema.PresenceNone), Environments: []string{},
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outDir := t.TempDir()
+	if _, err := writeArtifacts(IO{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}}, outDir, "env_1", &importer.Plan{Bundle: bundle}); err != nil {
+		t.Fatal(err)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(outDir, bundleFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := definitions.Parse(raw)
+	if err != nil {
+		t.Fatalf("emitted definitions-bundle.json is not canonical bundle input: %v\n%s", err, raw)
+	}
+	if !parsed.Additive() || len(parsed.Keys) != 1 || parsed.Keys[0].Name != "DATABASE_URL" {
+		t.Fatalf("emitted bundle = %+v", parsed)
+	}
+	want, err := definitions.Encode(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(raw, want) {
+		t.Fatalf("emitted bundle is not canonical:\n%s\nwant:\n%s", raw, want)
 	}
 }
 

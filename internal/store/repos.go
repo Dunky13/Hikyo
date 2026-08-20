@@ -60,6 +60,7 @@ func (s sqliteReadRepos) Folders() FolderReader           { return s.r.Folders()
 func (s sqliteReadRepos) Audit() AuditReader              { return s.r.Audit() }
 func (s sqliteReadRepos) Remotes() RemoteReader           { return s.r.Remotes() }
 func (s sqliteReadRepos) Adapters() AdapterReader         { return s.r.Adapters() }
+func (s sqliteReadRepos) Definitions() DefinitionsReader  { return s.r.Definitions() }
 
 type pgReadRepos struct{ r pgRepos }
 
@@ -77,6 +78,7 @@ func (p pgReadRepos) Folders() FolderReader           { return p.r.Folders() }
 func (p pgReadRepos) Audit() AuditReader              { return p.r.Audit() }
 func (p pgReadRepos) Remotes() RemoteReader           { return p.r.Remotes() }
 func (p pgReadRepos) Adapters() AdapterReader         { return p.r.Adapters() }
+func (p pgReadRepos) Definitions() DefinitionsReader  { return p.r.Definitions() }
 
 // CanonTime fixes the canonical cross-engine timestamp semantics: UTC,
 // microsecond precision (postgres timestamptz cannot hold more; sqlite text
@@ -198,6 +200,10 @@ func (r sqliteRepos) Catalogue() CatalogueRepo {
 
 func (r sqliteRepos) Values() ValueRepo {
 	return sqliteValues{q: sqlitegen.New(r.db), tok: r.tok}
+}
+
+func (r sqliteRepos) Definitions() DefinitionsRepo {
+	return sqliteDefinitions{q: sqlitegen.New(r.db), tok: r.tok}
 }
 
 func (r sqliteRepos) Pending() PendingRepo {
@@ -482,6 +488,18 @@ func (r sqliteProjects) SetRetention(ctx context.Context, p authz.Proof, policy 
 	return affected(r.q.SetProjectRetention(ctx, params))
 }
 
+func (r sqliteProjects) SetDefinitionsSource(ctx context.Context, p authz.Proof, source string) error {
+	chain, err := authz.Verify(p, authz.StoreProjectsSetDefinitionsSource, r.tok)
+	if err != nil {
+		return err
+	}
+	return affected(r.q.SetProjectDefinitionsSource(ctx, sqlitegen.SetProjectDefinitionsSourceParams{
+		DefinitionsSource: source,
+		OrgID:             string(chain.Org),
+		ID:                string(chain.Project),
+	}))
+}
+
 func (r sqliteProjects) Delete(ctx context.Context, p authz.Proof) error {
 	chain, err := authz.Verify(p, authz.StoreProjectsDelete, r.tok)
 	if err != nil {
@@ -509,7 +527,7 @@ func projectFromSQLite(row sqlitegen.Project) (Project, error) {
 	if err != nil {
 		return Project{}, err
 	}
-	project := Project{ID: row.ID, OrgID: row.OrgID, Name: row.Name, CreatedAt: created}
+	project := Project{ID: row.ID, OrgID: row.OrgID, Name: row.Name, CreatedAt: created, DefinitionsSource: row.DefinitionsSource}
 	if row.RetentionAgeSeconds.Valid != row.RetentionRevisionCount.Valid {
 		return Project{}, fmt.Errorf("store: project %s: partial retention override", row.ID)
 	}
@@ -643,6 +661,24 @@ func (r sqliteEnvs) Settings(ctx context.Context, p authz.Proof) (EnvironmentSet
 		HasWindow: row.ReauthWindowSeconds.Valid,
 		Window:    time.Duration(row.ReauthWindowSeconds.Int64) * time.Second,
 	}, nil
+}
+
+func (r sqliteEnvs) ListProtection(ctx context.Context, p authz.Proof) ([]EnvironmentProtection, error) {
+	chain, err := authz.Verify(p, authz.StoreEnvironmentsListProtection, r.tok)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.q.ListEnvironmentProtection(ctx, sqlitegen.ListEnvironmentProtectionParams{
+		OrgID: string(chain.Org), ProjectID: string(chain.Project),
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]EnvironmentProtection, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, EnvironmentProtection{ID: row.ID, Protected: row.Protected != 0})
+	}
+	return out, nil
 }
 
 func (r sqliteEnvs) SetSettings(ctx context.Context, p authz.Proof, s EnvironmentSettings) error {
@@ -832,6 +868,7 @@ func (r pgRepos) Environments() EnvironmentRepo { return pgEnvs{q: pggen.New(r.d
 func (r pgRepos) Folders() FolderRepo           { return pgFolders{q: pggen.New(r.db), tok: r.tok} }
 func (r pgRepos) Catalogue() CatalogueRepo      { return pgCatalogue{q: pggen.New(r.db), tok: r.tok} }
 func (r pgRepos) Values() ValueRepo             { return pgValues{q: pggen.New(r.db), tok: r.tok} }
+func (r pgRepos) Definitions() DefinitionsRepo  { return pgDefinitions{q: pggen.New(r.db), tok: r.tok} }
 func (r pgRepos) Pending() PendingRepo          { return pgPending{q: pggen.New(r.db), tok: r.tok} }
 func (r pgRepos) Snapshots() SnapshotRepo       { return pgSnapshots{q: pggen.New(r.db), tok: r.tok} }
 func (r pgRepos) Pins() RevisionPinRepo         { return pgPins{q: pggen.New(r.db), tok: r.tok} }
@@ -1090,6 +1127,18 @@ func (r pgProjects) SetRetention(ctx context.Context, p authz.Proof, policy *Ret
 	return affected(r.q.SetProjectRetention(ctx, params))
 }
 
+func (r pgProjects) SetDefinitionsSource(ctx context.Context, p authz.Proof, source string) error {
+	chain, err := authz.Verify(p, authz.StoreProjectsSetDefinitionsSource, r.tok)
+	if err != nil {
+		return err
+	}
+	return affected(r.q.SetProjectDefinitionsSource(ctx, pggen.SetProjectDefinitionsSourceParams{
+		DefinitionsSource: source,
+		ChainOrgID:        string(chain.Org),
+		ChainProjectID:    string(chain.Project),
+	}))
+}
+
 func (r pgProjects) Delete(ctx context.Context, p authz.Proof) error {
 	chain, err := authz.Verify(p, authz.StoreProjectsDelete, r.tok)
 	if err != nil {
@@ -1112,7 +1161,7 @@ func projectFromPG(row pggen.Project) (Project, error) {
 	if !row.CreatedAt.Valid {
 		return Project{}, fmt.Errorf("store: project %s: null created_at", row.ID)
 	}
-	project := Project{ID: row.ID, OrgID: row.OrgID, Name: row.Name, CreatedAt: row.CreatedAt.Time.UTC()}
+	project := Project{ID: row.ID, OrgID: row.OrgID, Name: row.Name, CreatedAt: row.CreatedAt.Time.UTC(), DefinitionsSource: row.DefinitionsSource}
 	if row.RetentionAgeSeconds.Valid != row.RetentionRevisionCount.Valid {
 		return Project{}, fmt.Errorf("store: project %s: partial retention override", row.ID)
 	}
@@ -1255,6 +1304,24 @@ func (r pgEnvs) Settings(ctx context.Context, p authz.Proof) (EnvironmentSetting
 		HasWindow: row.ReauthWindowSeconds.Valid,
 		Window:    time.Duration(row.ReauthWindowSeconds.Int64) * time.Second,
 	}, nil
+}
+
+func (r pgEnvs) ListProtection(ctx context.Context, p authz.Proof) ([]EnvironmentProtection, error) {
+	chain, err := authz.Verify(p, authz.StoreEnvironmentsListProtection, r.tok)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.q.ListEnvironmentProtection(ctx, pggen.ListEnvironmentProtectionParams{
+		ChainOrgID: string(chain.Org), ChainProjectID: string(chain.Project),
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]EnvironmentProtection, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, EnvironmentProtection{ID: row.ID, Protected: row.Protected})
+	}
+	return out, nil
 }
 
 func (r pgEnvs) SetSettings(ctx context.Context, p authz.Proof, s EnvironmentSettings) error {

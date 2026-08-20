@@ -195,7 +195,7 @@ No bundle format exists in the tree. This ticket defines a minimal one in
 Names are the portable handles. There is **no base revision and no `base`
 field** — that absence *is* the additive semantics (source-of-truth ADR
 § Additive bundles; the flat-model ADR deleted `base` outright). **#70 owns the
-real format**; when it lands, reconcile these two and delete whichever loses.
+canonical format**, now used here; see `docs/handoff/70-definitions-git-flow.md` § Importer reconciliation.
 `definitions plan|apply` is not built here — this ticket only EMITS the
 artifact, and `cli:definitions` stays `ClassStub`.
 

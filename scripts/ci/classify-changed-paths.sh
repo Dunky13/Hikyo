@@ -47,7 +47,7 @@ else
 		[ -n "$path" ] || continue
 		saw_path=true
 		case "$path" in
-		install/compose/* | scripts/compose-demo.sh | internal/cli/* | internal/compose/* | internal/service/delivery.go | api/* | go.mod)
+		install/compose/demo/* | scripts/compose-demo.sh | internal/cli/compose.go | internal/cli/run*.go | internal/compose/* | internal/service/delivery.go | api/* | go.mod)
 			compose_demo=true
 			;;
 		esac

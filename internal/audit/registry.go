@@ -298,6 +298,21 @@ const (
 	// the committing transaction ahead of the classification write.
 	EventKeyRevealGateAttempt EventType = "settings.key_reveal_gate_attempt"
 
+	// Definitions Git flow (#70, source-of-truth ADR § Propagations). plan_created
+	// and applied are COMMITTED acts written inside their transaction; the three
+	// *_refused events record acts that ROLL THEIR TRANSACTION BACK — a stale-pin
+	// apply, a refused deletion, a refused additive modification — so they ride
+	// the rollback-surviving settlement path (az.CaptureAudit) and carry only
+	// schema vocabulary, never a value or a bundle body.
+	EventDefinitionsPlanCreated                 EventType = "definitions.plan_created"
+	EventDefinitionsApplied                     EventType = "definitions.applied"
+	EventDefinitionsApplyRejectedStale          EventType = "definitions.apply_rejected_stale"
+	EventDefinitionsDeletionRefused             EventType = "definitions.deletion_refused"
+	EventDefinitionsAdditiveModificationRefused EventType = "definitions.additive_modification_refused"
+	// settings.definitions_source_changed is the git/db flip, audited in both
+	// directions like the protected-flag flip it sits beside.
+	EventSettingsDefinitionsSourceChanged EventType = "settings.definitions_source_changed"
+
 	// value.* and disclosure.* — the flat value model (#50). Both categories
 	// are the audit catalogue's own: `value` holds the acts that change what
 	// an environment delivers, `disclosure` holds the acts that move stored
@@ -1267,6 +1282,51 @@ var registry = map[EventType]TypeSpec{
 			"gate": {Kind: KindString, Required: true},
 		},
 	},
+	// Definitions Git flow (#70). plan_created/applied are committed successes;
+	// provenance labels ride the applied event as free text. The three refusals
+	// are denied-outcome rows written on the rollback path, so they carry only
+	// the plan id (or, for the pre-plan additive refusal, the offending key name).
+	EventDefinitionsPlanCreated: hierarchyEvent(Schema{
+		"plan_id":           {Kind: KindString, Required: true},
+		"additive":          {Kind: KindBool, Required: true},
+		"deletions_present": {Kind: KindBool, Required: true},
+	}),
+	EventDefinitionsApplied: hierarchyEvent(Schema{
+		"plan_id":  {Kind: KindString, Required: true},
+		"revision": {Kind: KindInt, Required: true},
+		"commit":   {Kind: KindFreeText, Required: false},
+		"ref":      {Kind: KindFreeText, Required: false},
+		"actor":    {Kind: KindFreeText, Required: false},
+	}),
+	EventDefinitionsApplyRejectedStale: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeDenied: true},
+		Trails:        map[Trail]bool{TrailTenant: true},
+		Schema: Schema{
+			"plan_id": {Kind: KindString, Required: true},
+			// digest | schema-revision | env-revision | topology | protected-set
+			"moved": {Kind: KindString, Required: true},
+		},
+	},
+	EventDefinitionsDeletionRefused: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeDenied: true},
+		Trails:        map[Trail]bool{TrailTenant: true},
+		Schema:        Schema{"plan_id": {Kind: KindString, Required: true}},
+	},
+	EventDefinitionsAdditiveModificationRefused: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeDenied: true},
+		Trails:        map[Trail]bool{TrailTenant: true},
+		Schema:        Schema{"name": {Kind: KindFreeText, Required: true}},
+	},
+	EventSettingsDefinitionsSourceChanged: hierarchyEvent(Schema{
+		"previous_source": {Kind: KindString, Required: true},
+		"source":          {Kind: KindString, Required: true},
+	}),
 	// The flat value model (#50). Tenant trail, security class, success-only:
 	// each records a COMMITTED act, and a refusal is either the uniform
 	// nonexistent response or a rollback.

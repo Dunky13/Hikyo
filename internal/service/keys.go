@@ -216,6 +216,13 @@ func checkDeclaration(d schema.Declaration, p schema.PresenceRules) error {
 	return nil
 }
 
+func checkClassifiedDeclaration(classification string, d schema.Declaration, p schema.PresenceRules) error {
+	if err := schema.CheckDeclarationClassification(schema.Classification(classification), d); err != nil {
+		return fmt.Errorf("%w: %s", domain.ErrInvalid, err)
+	}
+	return checkDeclaration(d, p)
+}
+
 // keyOf converts a store row plus its presence rows into the service key.
 func keyOf(row store.CatalogueKey, presence []store.KeyPresence) (Key, error) {
 	decl, err := schema.ParseDeclaration([]byte(row.Declaration))
@@ -381,7 +388,10 @@ func cascadeEnvironmentPresence(ctx context.Context, r store.Repos, p authz.Proo
 			return err
 		}
 	}
-	return r.Catalogue().BumpSchemaRevision(ctx, p)
+	// The revision bump is the caller's (#70): an environment delete advances the
+	// definitions revision unconditionally, so the bump moved to the delete path
+	// and no longer rides this cascade's conditional presence rewrite.
+	return nil
 }
 
 // emptiedMode collapses an `explicit` set the cascade emptied to `none`.
@@ -524,7 +534,7 @@ func (s *Keys) Create(ctx context.Context, actor Actor, scope domain.Scope, spec
 	if err := checkKeySpec(spec); err != nil {
 		return Key{}, err
 	}
-	if err := checkDeclaration(spec.Declaration, spec.Presence); err != nil {
+	if err := checkClassifiedDeclaration(spec.Classification, spec.Declaration, spec.Presence); err != nil {
 		return Key{}, err
 	}
 	canonical, err := schema.Canonical(spec.Declaration)
@@ -571,6 +581,9 @@ func (s *Keys) Create(ctx context.Context, actor Actor, scope domain.Scope, spec
 		// read-then-write, and the presence rows reference environments another
 		// transaction may be deleting.
 		if err := r.Projects().Lock(ctx, p); err != nil {
+			return err
+		}
+		if err := requireDBManagedDefinitions(ctx, r, p); err != nil {
 			return err
 		}
 		n, err := r.Catalogue().Count(ctx, p)
@@ -737,6 +750,9 @@ func (s *Keys) Rename(ctx context.Context, actor Actor, scope domain.Scope, id, 
 		if err := r.Projects().Lock(ctx, p); err != nil {
 			return err
 		}
+		if err := requireDBManagedDefinitions(ctx, r, p); err != nil {
+			return err
+		}
 		before, err := r.Catalogue().Get(ctx, p, id)
 		if err != nil {
 			return err
@@ -774,9 +790,12 @@ func (s *Keys) Rename(ctx context.Context, actor Actor, scope domain.Scope, id, 
 	return out, err
 }
 
-// UpdateMetadata writes the non-semantic fields. No reveal gate and no
-// revision bump: these cannot change what any environment delivers or whether
-// it validates, so there is nothing to re-materialize and nothing to disclose.
+// UpdateMetadata writes the non-semantic fields. No reveal gate and no publish
+// fan-out: these cannot change what any environment delivers or whether it
+// validates, so there is nothing to re-materialize and nothing to disclose. It
+// DOES advance the schema revision (#70): folder path and deprecation are
+// definitions-bundle desired state, and a revision used as a bundle base must be
+// able to detect they moved.
 func (s *Keys) UpdateMetadata(ctx context.Context, actor Actor, scope domain.Scope, id string, m KeyMetadataUpdate) (Key, error) {
 	if m.FolderPath != nil {
 		if err := checkKeyFolderPath(*m.FolderPath); err != nil {
@@ -803,6 +822,12 @@ func (s *Keys) UpdateMetadata(ctx context.Context, actor Actor, scope domain.Sco
 		if err != nil {
 			return err
 		}
+		if err := r.Projects().Lock(ctx, p); err != nil {
+			return err
+		}
+		if err := requireDBManagedDefinitions(ctx, r, p); err != nil {
+			return err
+		}
 		before, err := r.Catalogue().Get(ctx, p, id)
 		if err != nil {
 			return err
@@ -814,7 +839,15 @@ func (s *Keys) UpdateMetadata(ctx context.Context, actor Actor, scope domain.Sco
 			Deprecated:      pickBool(m.Deprecated, before.Deprecated),
 			DeprecationNote: pick(m.DeprecationNote, before.DeprecationNote),
 		}
+		if merged.FolderPath == before.FolderPath && merged.Description == before.Description &&
+			merged.Deprecated == before.Deprecated && merged.DeprecationNote == before.DeprecationNote {
+			out, err = readKey(ctx, r, p, before)
+			return err
+		}
 		if err := r.Catalogue().UpdateMetadata(ctx, p, id, merged); err != nil {
+			return err
+		}
+		if err := r.Catalogue().BumpSchemaRevision(ctx, p); err != nil {
 			return err
 		}
 		after := before
@@ -920,6 +953,9 @@ func (s *Keys) UpdateDeclaration(ctx context.Context, actor Actor, scope domain.
 		if err := r.Projects().Lock(ctx, p); err != nil {
 			return err
 		}
+		if err := requireDBManagedDefinitions(ctx, r, p); err != nil {
+			return err
+		}
 		before, err := r.Catalogue().Get(ctx, p, id)
 		if err != nil {
 			return err
@@ -942,7 +978,7 @@ func (s *Keys) UpdateDeclaration(ctx context.Context, actor Actor, scope domain.
 		}
 
 		// Only now is the new declaration examined at all.
-		if err := checkDeclaration(u.Declaration, u.Presence); err != nil {
+		if err := checkClassifiedDeclaration(before.Classification, u.Declaration, u.Presence); err != nil {
 			return err
 		}
 		canonical, err := schema.Canonical(u.Declaration)
@@ -1060,6 +1096,9 @@ func (s *Keys) Reclassify(ctx context.Context, actor Actor, scope domain.Scope, 
 		if err := r.Projects().Lock(ctx, p); err != nil {
 			return err
 		}
+		if err := requireDBManagedDefinitions(ctx, r, p); err != nil {
+			return err
+		}
 		before, err := r.Catalogue().Get(ctx, p, id)
 		if err != nil {
 			return err
@@ -1072,6 +1111,15 @@ func (s *Keys) Reclassify(ctx context.Context, actor Actor, scope domain.Scope, 
 			// would write a disclosure-class audit record for an act that never
 			// happened.
 			return fmt.Errorf("%w: the key is already classified %q", domain.ErrInvalid, classification)
+		}
+		if classification == string(schema.Secret) {
+			decl, err := schema.ParseDeclaration([]byte(before.Declaration))
+			if err != nil {
+				return fmt.Errorf("service: key %s: stored declaration unreadable: %w", id, err)
+			}
+			if err := schema.CheckDeclarationClassification(schema.Secret, decl); err != nil {
+				return fmt.Errorf("%w: key %q cannot be classified secret: %s", domain.ErrInvalid, before.Name, err)
+			}
 		}
 		if classification == string(schema.Config) {
 			// The ATTEMPT record rides the rollback-surviving settlement path;
@@ -1144,6 +1192,9 @@ func (s *Keys) SetGroup(ctx context.Context, actor Actor, scope domain.Scope, id
 		if err := r.Projects().Lock(ctx, p); err != nil {
 			return err
 		}
+		if err := requireDBManagedDefinitions(ctx, r, p); err != nil {
+			return err
+		}
 		before, err := r.Catalogue().Get(ctx, p, id)
 		if err != nil {
 			return err
@@ -1214,6 +1265,9 @@ func (s *Keys) Delete(ctx context.Context, actor Actor, scope domain.Scope, id s
 			return err
 		}
 		if err := r.Projects().Lock(ctx, p); err != nil {
+			return err
+		}
+		if err := requireDBManagedDefinitions(ctx, r, p); err != nil {
 			return err
 		}
 		before, err := r.Catalogue().Get(ctx, p, id)
@@ -1298,6 +1352,9 @@ func (s *KeyGroups) Create(ctx context.Context, actor Actor, scope domain.Scope,
 			return err
 		}
 		if err := r.Projects().Lock(ctx, p); err != nil {
+			return err
+		}
+		if err := requireDBManagedDefinitions(ctx, r, p); err != nil {
 			return err
 		}
 		n, err := r.Catalogue().CountGroups(ctx, p)
@@ -1404,8 +1461,10 @@ func groupView(group store.CatalogueGroup, keys []store.CatalogueKey) KeyGroupVi
 	}
 }
 
-// Rename changes a group's label. A group name is never delivered and never
-// validated against, so — unlike a KEY rename — it moves no revision.
+// Rename changes a group's label. A group name is never delivered, so it
+// materializes nothing — but a group name IS definitions-bundle desired state
+// (#70), so the rename advances the definitions revision so a bundle base can
+// detect it.
 func (s *KeyGroups) Rename(ctx context.Context, actor Actor, scope domain.Scope, id, name string) (KeyGroupView, error) {
 	if err := schema.CheckGroupName(name); err != nil {
 		return KeyGroupView{}, fmt.Errorf("%w: %s", domain.ErrInvalid, err)
@@ -1423,11 +1482,17 @@ func (s *KeyGroups) Rename(ctx context.Context, actor Actor, scope domain.Scope,
 		if err := r.Projects().Lock(ctx, p); err != nil {
 			return err
 		}
+		if err := requireDBManagedDefinitions(ctx, r, p); err != nil {
+			return err
+		}
 		before, err := r.Catalogue().GetGroup(ctx, p, id)
 		if err != nil {
 			return err
 		}
 		if err := r.Catalogue().RenameGroup(ctx, p, id, name); err != nil {
+			return err
+		}
+		if err := r.Catalogue().BumpSchemaRevision(ctx, p); err != nil {
 			return err
 		}
 		keys, err := r.Catalogue().List(ctx, p)
@@ -1468,6 +1533,9 @@ func (s *KeyGroups) Delete(ctx context.Context, actor Actor, scope domain.Scope,
 			return err
 		}
 		if err := r.Projects().Lock(ctx, p); err != nil {
+			return err
+		}
+		if err := requireDBManagedDefinitions(ctx, r, p); err != nil {
 			return err
 		}
 		before, err := r.Catalogue().GetGroup(ctx, p, id)

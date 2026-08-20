@@ -2,6 +2,13 @@ import { useEffect, useId, useState } from 'react';
 import { generatePath, Link, useParams } from 'react-router';
 
 import {
+  GIT_DEFINITIONS_NOTICE,
+  parseDefinitionsSource,
+  useDefinitionsSettings,
+  useSetDefinitionsSettings,
+  type DefinitionsSettings,
+} from '../api/definitions.ts';
+import {
   projectRetentionInherited,
   retentionBoundsPayload,
   retentionDayState,
@@ -30,18 +37,17 @@ import { useFeedback } from './useModalDialog.ts';
  * Project settings (registry surface `project-settings`, #60; locked prototype
  * app-chrome iteration 15, retention panel from iteration 16).
  *
- * Sections: Identity · Policy · Retention · Access · Danger zone. Two of the
- * prototype's are missing, by name rather than by omission:
+ * Sections: Identity · Policy · Retention · Access · Danger zone. One of the
+ * prototype's is deliberately absent, by name rather than by omission:
  *
  *  - **Metadata** (description, icon, hue). The project contract carries id,
  *    org, name and creation time and nothing else — there is no field to write
  *    and no operation to write it with.
- *  - **`definitions_source: db | git`**. The source-of-truth ADR fixes the
- *    switch and the read-only consequence, but no column, service or endpoint
- *    for it exists on this branch (it belongs to the definitions Git flow,
- *    mvp-boundary S4). A select that could not persist would be the one thing
- *    worse than its absence: a security guard that appears to be set and is
- *    not.
+ *
+ * Definitions governance does live here. Definition authoring does not yet
+ * exist in the web app, so this is the only surface that needs the persistent
+ * Git-mode explanation; matrix editing remains available because it writes
+ * values, never definitions.
  */
 export function ProjectSettings() {
   const params = useParams();
@@ -51,6 +57,8 @@ export function ProjectSettings() {
   const environments = useEnvironments(org, project);
   const orgRetention = useOrgRetention(org);
   const projectRetention = useProjectRetention(org, project);
+  const definitionsSettings = useDefinitionsSettings(org, project);
+  const setDefinitionsSettings = useSetDefinitionsSettings(org, project);
   const rename = useRenameProject(org);
   const remove = useDeleteProject(org);
   const nameId = useId();
@@ -145,6 +153,29 @@ export function ProjectSettings() {
       </Panel>
 
       <Panel id="project-policy" title="Policy">
+        {definitionsSettings.isPending ? (
+          <p role="status">Loading definitions policy…</p>
+        ) : null}
+        {definitionsSettings.isError ? (
+          <Alert>This project&apos;s definitions policy could not be read.</Alert>
+        ) : null}
+        {definitionsSettings.data === undefined ? null : (
+          <DefinitionsPolicy
+            settings={definitionsSettings.data}
+            busy={setDefinitionsSettings.isPending}
+            onChange={(source) =>
+              setDefinitionsSettings.mutate(source, {
+                onSuccess: (result) =>
+                  feedback.ok(
+                    result.definitions_source === 'git'
+                      ? 'Definitions are now managed through Git apply.'
+                      : 'Definitions can now be edited through the database-backed interfaces.',
+                  ),
+                onError: (error) => report('set-definitions-settings', error),
+              })
+            }
+          />
+        )}
         <p>
           Per environment: whether it is protected, and how long one successful reauthentication
           stands for further disclosures. A protected environment caps that window at zero — a
@@ -163,11 +194,6 @@ export function ProjectSettings() {
             onError={(error) => report('set-environment-settings', error)}
           />
         ) : null}
-        <p className="field__hint">
-          The definitions source (<span className="mono">db</span> or{' '}
-          <span className="mono">git</span>) belongs in this panel and is not here: nothing on this
-          branch stores it. It arrives with the definitions Git flow.
-        </p>
       </Panel>
 
       <Panel id="project-retention" title="Retention">
@@ -230,6 +256,82 @@ export function ProjectSettings() {
           }
         />
       </Panel>
+    </div>
+  );
+}
+
+function DefinitionsPolicy({
+  settings,
+  busy,
+  onChange,
+}: {
+  settings: DefinitionsSettings;
+  busy: boolean;
+  onChange: (source: DefinitionsSettings['definitions_source']) => void;
+}) {
+  const sourceId = useId();
+  const lastApply = settings.last_apply;
+  return (
+    <div className="settings-block">
+      <div className="field">
+        <label htmlFor={sourceId}>Definitions source</label>
+        <select
+          id={sourceId}
+          value={settings.definitions_source}
+          disabled={busy}
+          onChange={(event) => onChange(parseDefinitionsSource(event.currentTarget.value))}
+        >
+          <option value="db">Database</option>
+          <option value="git">Git</option>
+        </select>
+        <p className="field__hint">
+          In Git mode, definitions become read-only in the UI and arrive through{' '}
+          <span className="mono">definitions plan</span> /{' '}
+          <span className="mono">definitions apply</span>. Values remain editable in either mode.
+        </p>
+      </div>
+      {settings.definitions_source === 'git' ? <Alert>{GIT_DEFINITIONS_NOTICE}</Alert> : null}
+      {lastApply === undefined ? null : (
+        <div>
+          <h3>Last definitions apply</h3>
+          <dl className="kv">
+            {lastApply.commit === undefined ? null : (
+              <div className="kv__pair">
+                <dt>Commit</dt>
+                <dd className="mono">{lastApply.commit}</dd>
+              </div>
+            )}
+            {lastApply.ref === undefined ? null : (
+              <div className="kv__pair">
+                <dt>Ref</dt>
+                <dd className="mono">{lastApply.ref}</dd>
+              </div>
+            )}
+            {lastApply.actor === undefined ? null : (
+              <div className="kv__pair">
+                <dt>Actor</dt>
+                <dd>{lastApply.actor}</dd>
+              </div>
+            )}
+            <div className="kv__pair">
+              <dt>Applied</dt>
+              <dd>
+                <time dateTime={lastApply.applied_at}>
+                  {new Date(lastApply.applied_at).toLocaleString()}
+                </time>
+              </dd>
+            </div>
+            <div className="kv__pair">
+              <dt>Revision</dt>
+              <dd className="mono">{String(lastApply.revision)}</dd>
+            </div>
+          </dl>
+          <p className="field__hint">
+            Provenance is supplied by the apply client and is shown only as a label; it is not
+            trusted as authority.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

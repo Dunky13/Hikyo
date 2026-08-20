@@ -167,6 +167,48 @@ func TestDoctorStampMismatch(t *testing.T) {
 	}
 }
 
+func TestDoctorCompose238OmittedEnvFileHealthy(t *testing.T) {
+	in := fullyHealthyInput(t)
+	svc := in.Config.Services["api"]
+	svc.EnvFile = nil // Compose 2.38 folds env_file into environment in config JSON.
+	in.Config.Services["api"] = svc
+	if f := Doctor(in); len(f) != 0 {
+		t.Fatalf("healthy Compose 2.38 config produced findings: %+v", f)
+	}
+}
+
+func TestDoctorCompose238OmittedEnvFileMismatch(t *testing.T) {
+	in := fullyHealthyInput(t)
+	other := TargetStamp(testKeys(t), "api", []byte("other"))
+	svc := in.Config.Services["api"]
+	svc.EnvFile = nil // 2.38 shape: the resolved label retains the actual variable value.
+	svc.Labels[stampLabel] = other
+	in.Config.Services["api"] = svc
+	f := Doctor(in)
+	if !hasCode(f, "stamp_mismatch") {
+		t.Errorf("expected stamp_mismatch from the resolved label fallback, got %+v", f)
+	}
+	if !hasCode(f, "label_stamp_mismatch") {
+		t.Errorf("expected label_stamp_mismatch, got %+v", f)
+	}
+	if hasCode(f, "compose_env_file_resolution_unavailable") {
+		t.Errorf("resolved label should keep the env_file check available, got %+v", f)
+	}
+}
+
+func TestDoctorOmittedEnvFileWithoutResolutionWarns(t *testing.T) {
+	in := fullyHealthyInput(t)
+	svc := in.Config.Services["api"]
+	svc.EnvFile = nil
+	svc.Labels = nil
+	in.Config.Services["api"] = svc
+	f := Doctor(in)
+	got, ok := codes(f)["compose_env_file_resolution_unavailable"]
+	if !ok || got.Severity != SeverityWarn {
+		t.Errorf("expected explicit env_file resolution warning, got %+v", f)
+	}
+}
+
 func TestDoctorFormatRawMissing(t *testing.T) {
 	in := fullyHealthyInput(t)
 	// Drop `format: raw` from the raw YAML.

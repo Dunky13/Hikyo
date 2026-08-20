@@ -108,6 +108,31 @@ func (r sqliteValues) EnvironmentsWithValue(ctx context.Context, p authz.Proof, 
 	})
 }
 
+func (r sqliteValues) CountEnvironmentValues(ctx context.Context, p authz.Proof, environmentID string) (int64, error) {
+	chain, err := authz.Verify(p, authz.StoreValuesCountEnvironment, r.tok)
+	if err != nil {
+		return 0, err
+	}
+	return r.q.CountEnvironmentValues(ctx, sqlitegen.CountEnvironmentValuesParams{
+		OrgID:         string(chain.Org),
+		ProjectID:     string(chain.Project),
+		EnvironmentID: environmentID,
+	})
+}
+
+func (r sqliteValues) ClearKey(ctx context.Context, p authz.Proof, keyID string) (int64, error) {
+	chain, err := authz.Verify(p, authz.StoreValuesClearKey, r.tok)
+	if err != nil {
+		return 0, err
+	}
+	n, err := r.q.DeleteValueEntriesForKey(ctx, sqlitegen.DeleteValueEntriesForKeyParams{
+		OrgID:     string(chain.Org),
+		ProjectID: string(chain.Project),
+		KeyID:     keyID,
+	})
+	return n, constraint(err)
+}
+
 func (r sqliteValues) Put(ctx context.Context, p authz.Proof, entry NewValueEntry) error {
 	chain, err := authz.Verify(p, authz.StoreValuesPut, r.tok)
 	if err != nil {
@@ -264,6 +289,31 @@ func (r pgValues) EnvironmentsWithValue(ctx context.Context, p authz.Proof, keyI
 		ChainProjectID: string(chain.Project),
 		KeyID:          keyID,
 	})
+}
+
+func (r pgValues) CountEnvironmentValues(ctx context.Context, p authz.Proof, environmentID string) (int64, error) {
+	chain, err := authz.Verify(p, authz.StoreValuesCountEnvironment, r.tok)
+	if err != nil {
+		return 0, err
+	}
+	return r.q.CountEnvironmentValues(ctx, pggen.CountEnvironmentValuesParams{
+		ChainOrgID:     string(chain.Org),
+		ChainProjectID: string(chain.Project),
+		EnvironmentID:  environmentID,
+	})
+}
+
+func (r pgValues) ClearKey(ctx context.Context, p authz.Proof, keyID string) (int64, error) {
+	chain, err := authz.Verify(p, authz.StoreValuesClearKey, r.tok)
+	if err != nil {
+		return 0, err
+	}
+	n, err := r.q.DeleteValueEntriesForKey(ctx, pggen.DeleteValueEntriesForKeyParams{
+		ChainOrgID:     string(chain.Org),
+		ChainProjectID: string(chain.Project),
+		KeyID:          keyID,
+	})
+	return n, constraint(err)
 }
 
 func (r pgValues) Put(ctx context.Context, p authz.Proof, entry NewValueEntry) error {

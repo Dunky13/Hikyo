@@ -1,0 +1,13 @@
+FIELD                   VALUE
+plan_id                 pln_70
+digest                  abc123
+base_revision           7
+current_revision        9
+additive                false
+expires_at              2030-01-02T03:04:05Z
+protected_environments  production
+deletions_present       true
+environment create      preview
+key delete              OLD_KEY
+delete_key_impact       OLD_KEY (live in production,staging)
+reveal_required         DATABASE_URL

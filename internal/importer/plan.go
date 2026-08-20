@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Hikyo-Org/hikyo/internal/definitions"
 	"github.com/Hikyo-Org/hikyo/internal/schema"
 )
 
@@ -91,7 +92,7 @@ type PlanInput struct {
 type Plan struct {
 	Template Template
 	Manifest Manifest
-	Bundle   Bundle
+	Bundle   definitions.Bundle
 	Values   ValuesFile
 
 	// Renames is every source-name → target-name mapping. Nothing is renamed
@@ -288,7 +289,12 @@ func BuildPlan(in PlanInput) (*Plan, error) {
 		Project:       in.State.Project,
 		Environment:   in.State.Environment,
 	}
-	plan.Bundle = Bundle{FormatVersion: FormatVersion, Project: in.State.Project}
+	plan.Bundle = definitions.Bundle{
+		FormatVersion: definitions.FormatVersion,
+		Environments:  []definitions.Environment{},
+		KeyGroups:     []definitions.KeyGroup{},
+		Keys:          []definitions.Key{},
+	}
 
 	for _, row := range rows {
 		rec, target := row.record, row.target
@@ -360,11 +366,19 @@ func BuildPlan(in PlanInput) (*Plan, error) {
 			plan.AlreadyDeclared = append(plan.AlreadyDeclared, target)
 		} else {
 			rule := schema.Rule{Type: declType}
-			plan.Bundle.Keys = append(plan.Bundle.Keys, BundleKey{
+			plan.Bundle.Keys = append(plan.Bundle.Keys, definitions.Key{
 				Name:           target,
 				FolderPath:     targetFolder,
 				Classification: class,
 				Declaration:    schema.Declaration{Rule: &rule},
+				RequiredIn: definitions.Presence{
+					Mode:         string(schema.PresenceNone),
+					Environments: []string{},
+				},
+				ForbiddenIn: definitions.Presence{
+					Mode:         string(schema.PresenceNone),
+					Environments: []string{},
+				},
 			})
 		}
 
@@ -512,7 +526,10 @@ func BuildPlan(in PlanInput) (*Plan, error) {
 	}
 	plan.Manifest.SourceVersions = nonNil(plan.Manifest.SourceVersions)
 	plan.Manifest.Occurrences = nonNil(plan.Manifest.Occurrences)
-	plan.Bundle.Keys = nonNil(plan.Bundle.Keys)
+	plan.Bundle, err = definitions.Normalize(plan.Bundle)
+	if err != nil {
+		return nil, fmt.Errorf("import: normalizing definitions bundle: %w", err)
+	}
 	// A run that writes nothing emits NO values file. An empty one is an
 	// artifact its own phase 2 refuses ("the values file holds no entries"),
 	// which would end every idempotent re-run in a refusal for having correctly

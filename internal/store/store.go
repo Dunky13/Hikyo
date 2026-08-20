@@ -62,6 +62,9 @@ type Project struct {
 	Name              string
 	CreatedAt         time.Time
 	RetentionOverride *RetentionPolicy
+	// DefinitionsSource is `db` or `git` (#70). In `git` the definition-write
+	// chokepoint refuses every ordinary edit and only definitions apply writes.
+	DefinitionsSource string
 }
 
 // RetentionPolicy is the stored keep-if-either payload policy. Unlimited is
@@ -187,6 +190,9 @@ type ProjectRepo interface {
 	Create(ctx context.Context, p authz.Proof, proj NewProject) error
 	Rename(ctx context.Context, p authz.Proof, name string) error
 	SetRetention(ctx context.Context, p authz.Proof, policy *RetentionPolicy) error
+	// SetDefinitionsSource writes the git/db definitions mode (#70). It is a
+	// project-settings write, off the definitions-edit path.
+	SetDefinitionsSource(ctx context.Context, p authz.Proof, source string) error
 	Delete(ctx context.Context, p authz.Proof) error
 	// Lock takes the project row for the rest of the transaction, so every
 	// mutation of that project's environment SET serializes: the cap check and
@@ -213,6 +219,15 @@ type EnvironmentReader interface {
 	// Settings reads the environment's protection state and its own
 	// reauthentication window (#55). The proof addresses the environment.
 	Settings(ctx context.Context, p authz.Proof) (EnvironmentSettings, error)
+	// ListProtection reads every environment's protected flag under a PROJECT
+	// proof — the definitions plan/apply protected-set pin (#70).
+	ListProtection(ctx context.Context, p authz.Proof) ([]EnvironmentProtection, error)
+}
+
+// EnvironmentProtection is one environment's identity and protected flag.
+type EnvironmentProtection struct {
+	ID        string
+	Protected bool
 }
 
 // EnvironmentSettings is the per-environment half of `project-settings`.
@@ -392,6 +407,8 @@ type Repos interface {
 	// Remotes is the multi-instance directory's viewing side (#71).
 	Remotes() RemoteRepo
 	Adapters() AdapterRepo
+	// Definitions is the plan ledger behind definitions plan/apply (#70).
+	Definitions() DefinitionsRepo
 }
 
 // ReadRepos bundles the read-only repositories bound to one read
@@ -412,6 +429,84 @@ type ReadRepos interface {
 	Audit() AuditReader
 	Remotes() RemoteReader
 	Adapters() AdapterReader
+	Definitions() DefinitionsReader
+}
+
+// DefinitionsPlan is a stored plan row (#70). Bundle holds the canonical bundle
+// bytes; EnvRevisions, ProtectedEnvs and Diff hold canonical JSON. Applied is
+// false until a successful apply stamps AppliedAt/AppliedBy and the display-only
+// provenance strings.
+type DefinitionsPlan struct {
+	ID                 string
+	OrgID              string
+	ProjectID          string
+	CreatedBy          string
+	CreatedAt          time.Time
+	ExpiresAt          time.Time
+	Bundle             string
+	Digest             string
+	BaseSchemaRevision int64
+	EnvRevisions       string
+	ProtectedEnvs      string
+	Diff               string
+	Additive           bool
+	Applied            bool
+	AppliedAt          time.Time
+	AppliedBy          string
+	ProvenanceCommit   string
+	ProvenanceRef      string
+	ProvenanceActor    string
+}
+
+// NewDefinitionsPlan carries the caller-suppliable fields of a plan insert;
+// chain columns are bound from the proof.
+type NewDefinitionsPlan struct {
+	ID                 string
+	CreatedBy          string
+	CreatedAt          time.Time
+	ExpiresAt          time.Time
+	Bundle             string
+	Digest             string
+	BaseSchemaRevision int64
+	EnvRevisions       string
+	ProtectedEnvs      string
+	Diff               string
+	Additive           bool
+}
+
+// PlanApplyStamp is the one-shot apply record. Commit/Ref/Actor are the
+// length-bounded, sanitized display-only provenance labels.
+type PlanApplyStamp struct {
+	AppliedAt time.Time
+	AppliedBy string
+	Commit    string
+	Ref       string
+	Actor     string
+}
+
+// DefinitionsReader is the read side of the plan ledger.
+type DefinitionsReader interface {
+	// GetPlan returns the plan addressed by (proof chain, id). ErrNotFound when
+	// absent — the uniform outcome, so unauthorized ≡ nonexistent on the wire.
+	GetPlan(ctx context.Context, p authz.Proof, id string) (DefinitionsPlan, error)
+	// LatestAppliedPlan returns the project's most recently applied plan, or
+	// ErrNotFound when none has ever been applied.
+	LatestAppliedPlan(ctx context.Context, p authz.Proof) (DefinitionsPlan, error)
+	// CountOpenPlans is the open-plan quota input: unapplied and unexpired at now.
+	CountOpenPlans(ctx context.Context, p authz.Proof, now time.Time) (int64, error)
+}
+
+// DefinitionsRepo is the full plan ledger.
+type DefinitionsRepo interface {
+	DefinitionsReader
+	CreatePlan(ctx context.Context, p authz.Proof, plan NewDefinitionsPlan) error
+	// MarkPlanApplied stamps the apply record. It returns false when the plan was
+	// already applied (the guarded update affected no row), which the service
+	// maps to the already-applied conflict.
+	MarkPlanApplied(ctx context.Context, p authz.Proof, id string, stamp PlanApplyStamp) (bool, error)
+	// PruneExpiredPlans deletes expired, unapplied plans across the instance
+	// under an instance-scope proof (the hourly GC).
+	PruneExpiredPlans(ctx context.Context, p authz.Proof, now time.Time) (int64, error)
 }
 
 type AdapterConflictEntry struct {

@@ -28,7 +28,9 @@ import (
 // written by a newer build and silently truncated by an older one would replay
 // a migration under choices nobody made.
 
-// FormatVersion is the artifact format version carried by all four artifacts.
+// FormatVersion is the artifact format version carried by the three
+// importer-owned artifacts. The definitions bundle owns its version in
+// internal/definitions.
 const FormatVersion = 1
 
 // ConnectorContractVersion is the connector-behaviour version. It advances when
@@ -183,38 +185,6 @@ type Manifest struct {
 	DefinitionsRevision      int64                `json:"definitions_revision"`
 	Occurrences              []ManifestOccurrence `json:"occurrences"`
 	PhaseCompletion          PhaseCompletion      `json:"phase_completion"`
-}
-
-// ---------------------------------------------------------------------------
-// The additive definitions bundle.
-// ---------------------------------------------------------------------------
-
-// BundleKey is one declaration the bundle creates. Names are the portable
-// logical handles; there are no server-owned ids and no base revision, which
-// is exactly what MAKES this bundle additive (source-of-truth ADR § Additive
-// bundles): it creates, it cannot delete, and it refuses to modify a
-// declaration it was not computed against.
-type BundleKey struct {
-	Name           string             `json:"name"`
-	FolderPath     string             `json:"folder_path"`
-	Classification string             `json:"classification"`
-	Declaration    schema.Declaration `json:"declaration"`
-}
-
-// Bundle is the project-wide additive definitions bundle. ONE bundle per target
-// project, not one per environment: keys, types and classifications are
-// project-scoped and only presence varies by environment.
-//
-// This is a MINIMAL versioned format authored by this ticket, because no bundle
-// format exists in the tree yet. `definitions plan|apply` (#70) owns the real
-// one; the two must be reconciled there. It deliberately carries NO base
-// revision — that absence is the additive semantics, not an omission — and no
-// `base` field of any kind, which the flat-model ADR deleted from the bundle
-// schema outright.
-type Bundle struct {
-	FormatVersion int         `json:"format_version"`
-	Project       string      `json:"project"`
-	Keys          []BundleKey `json:"keys"`
 }
 
 // ---------------------------------------------------------------------------

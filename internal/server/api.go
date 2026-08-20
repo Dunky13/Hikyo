@@ -119,6 +119,19 @@ type OrgService interface {
 	Delete(ctx context.Context, actor service.Actor, org domain.OrgID) error
 }
 
+// DefinitionsService is the project definitions Git-flow surface. Bundle
+// inputs remain raw bytes through transport so the strict parser can detect
+// duplicate members and enforce its own byte bound without a lossy re-encode.
+type DefinitionsService interface {
+	Export(ctx context.Context, actor service.Actor, scope domain.Scope, portable bool) ([]byte, error)
+	Check(ctx context.Context, actor service.Actor, scope domain.Scope, raw []byte) (service.CheckResult, error)
+	Plan(ctx context.Context, actor service.Actor, scope domain.Scope, raw []byte) (service.PlanView, error)
+	GetPlan(ctx context.Context, actor service.Actor, scope domain.Scope, planID string) (service.PlanView, error)
+	Apply(ctx context.Context, actor service.Actor, scope domain.Scope, planID string, opts service.ApplyOptions) (service.ApplyResult, error)
+	GetSettings(ctx context.Context, actor service.Actor, scope domain.Scope) (service.DefinitionsSettings, error)
+	SetSettings(ctx context.Context, actor service.Actor, scope domain.Scope, source string) (service.DefinitionsSettings, error)
+}
+
 // API implements the generated strict server.
 type API struct {
 	Auth            AuthService
@@ -128,6 +141,7 @@ type API struct {
 	Environments    EnvironmentService
 	Folders         FolderService
 	Keys            KeyService
+	Definitions     DefinitionsService
 	Values          ValueService
 	Revisions       RevisionService
 	Pins            PinService

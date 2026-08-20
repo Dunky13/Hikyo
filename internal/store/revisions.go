@@ -212,6 +212,11 @@ type SnapshotReader interface {
 	SecretValueOccurrenceIDs(ctx context.Context, p authz.Proof) ([]string, error)
 	// Changes returns one revision's lineage rows.
 	Changes(ctx context.Context, p authz.Proof, revision int64) ([]RevisionKeyChange, error)
+	// ProjectRevisions returns the latest published revision per environment
+	// across the whole project, under a PROJECT proof — the definitions
+	// plan/apply value-snapshot pin (#70). Environments with no snapshot are
+	// absent from the map (revision 0).
+	ProjectRevisions(ctx context.Context, p authz.Proof) (map[string]int64, error)
 }
 
 // SnapshotRepo is the full published-state aggregate. There is no update and

@@ -77,6 +77,21 @@ const (
 	OpKeySecretRuleChange Operation = "key.secret-rule-change"
 	OpKeyDeclassify       Operation = "key.declassify"
 
+	// Definitions Git flow (#70, source-of-truth ADR). export and check are pure
+	// reads (`read@project`, audited-none); plan and apply carry
+	// `definitions-edit@project`, with apply additionally fanning out
+	// `publish@environment` immediately before commit. Settings read is
+	// `read@project`; settings write rides `project-settings@project`,
+	// deliberately off the definitions-edit path so a blocked editor cannot
+	// disable its own git-mode guard (permission-model ADR §84).
+	OpDefinitionsExport      Operation = "definitions.export"
+	OpDefinitionsCheck       Operation = "definitions.check"
+	OpDefinitionsPlanCreate  Operation = "definitions.plan"
+	OpDefinitionsPlanGet     Operation = "definitions.plan.get"
+	OpDefinitionsApply       Operation = "definitions.apply"
+	OpDefinitionsSettingsGet Operation = "definitions.settings.get"
+	OpDefinitionsSettingsSet Operation = "definitions.settings.set"
+
 	// The flat value model (#50, flat-model ADR + permission-model ADR's
 	// locked formula table). Every operation addresses ENVIRONMENT depth: a
 	// value attaches to a (key, environment) and there are no other layers,
@@ -530,7 +545,19 @@ const (
 	StoreProjectsLock         StoreOp = "projects.Lock"
 	StoreProjectsRename       StoreOp = "projects.Rename"
 	StoreProjectsSetRetention StoreOp = "projects.SetRetention"
-	StoreProjectsDelete       StoreOp = "projects.Delete"
+	// StoreProjectsSetDefinitionsSource flips the git/db definitions mode (#70).
+	// It rides project-settings authority, off the definitions-edit path.
+	StoreProjectsSetDefinitionsSource StoreOp = "projects.SetDefinitionsSource"
+	StoreProjectsDelete               StoreOp = "projects.Delete"
+
+	// The definitions plan ledger (#70). CreatePlan/MarkPlanApplied/PruneExpired
+	// mutate; GetPlan/CountOpenPlans/LatestAppliedPlan read.
+	StoreDefinitionsPlanCreate        StoreOp = "definitions.CreatePlan"
+	StoreDefinitionsPlanGet           StoreOp = "definitions.GetPlan"
+	StoreDefinitionsPlanCountOpen     StoreOp = "definitions.CountOpenPlans"
+	StoreDefinitionsPlanApply         StoreOp = "definitions.MarkPlanApplied"
+	StoreDefinitionsPlanPrune         StoreOp = "definitions.PruneExpiredPlans"
+	StoreDefinitionsLatestAppliedPlan StoreOp = "definitions.LatestAppliedPlan"
 
 	StoreEnvironmentsCreate     StoreOp = "environments.Create"
 	StoreEnvironmentsGet        StoreOp = "environments.Get"
@@ -544,6 +571,9 @@ const (
 	// The protected flag and per-environment window (#55).
 	StoreEnvironmentsGetSettings StoreOp = "environments.Settings"
 	StoreEnvironmentsSetSettings StoreOp = "environments.SetSettings"
+	// StoreEnvironmentsListProtection is the project-scoped protected-flag read
+	// behind the definitions plan/apply protected-set pin (#70).
+	StoreEnvironmentsListProtection StoreOp = "environments.ListProtection"
 
 	// The key catalogue (#49). Named `catalogue.*` and not `keys.*`: that
 	// prefix is the KEYRING's (#43, wrapped crypto material), and two unrelated
@@ -621,6 +651,12 @@ const (
 	StoreValuesPut                   StoreOp = "values.Put"
 	StoreValuesClear                 StoreOp = "values.Clear"
 	StoreValuesClearEnvironment      StoreOp = "values.ClearEnvironment"
+	// StoreValuesCountEnvironment is the project-scoped live-occurrence count
+	// behind the definitions-apply environment-delete refusal (#70).
+	StoreValuesCountEnvironment StoreOp = "values.CountEnvironmentValues"
+	// StoreValuesClearKey clears a key's occurrences project-wide when
+	// definitions apply deletes the key with --allow-delete (#70).
+	StoreValuesClearKey StoreOp = "values.ClearKey"
 
 	// Drafts and published revisions (#51). `pending.*` is the per-user
 	// working state; `snapshots.*` is the published state, its lineage and
@@ -634,7 +670,10 @@ const (
 	StorePendingDiscardEnvironment        StoreOp = "pending.DiscardEnvironment"
 	StorePendingDiscardKey                StoreOp = "pending.DiscardKey"
 
-	StoreSnapshotsLatest                      StoreOp = "snapshots.Latest"
+	StoreSnapshotsLatest StoreOp = "snapshots.Latest"
+	// StoreSnapshotsProjectRevisions is the project-scoped per-environment latest
+	// revision behind the definitions plan/apply value-snapshot pin (#70).
+	StoreSnapshotsProjectRevisions            StoreOp = "snapshots.ProjectRevisions"
 	StoreSnapshotsAtRevision                  StoreOp = "snapshots.AtRevision"
 	StoreSnapshotsList                        StoreOp = "snapshots.List"
 	StoreSnapshotsEntries                     StoreOp = "snapshots.Entries"
@@ -776,18 +815,21 @@ const (
 // op it can invoke is in this set. A wrongly listed op is caught by review
 // of this pinned table, exactly like the formula pins.
 var readOnlyStoreOps = map[StoreOp]bool{
-	StoreOrgsGet:             true,
-	StoreOrgsList:            true,
-	StoreOrgsCount:           true,
-	StoreProjectsGet:         true,
-	StoreProjectsList:        true,
-	StoreProjectsListAll:     true,
-	StoreRemotesList:         true,
-	StoreRemotesGet:          true,
-	StoreRemotesGetByName:    true,
-	StoreRemotesCount:        true,
-	StoreRemoteSnapshotsList: true,
-	StoreRemoteSnapshotsGet:  true,
+	StoreOrgsGet:         true,
+	StoreOrgsList:        true,
+	StoreOrgsCount:       true,
+	StoreProjectsGet:     true,
+	StoreProjectsList:    true,
+	StoreProjectsListAll: true,
+	// The definitions-settings read is `read@project`, audited-none; its only
+	// non-project store op is the latest-applied-plan lookup (#70).
+	StoreDefinitionsLatestAppliedPlan: true,
+	StoreRemotesList:                  true,
+	StoreRemotesGet:                   true,
+	StoreRemotesGetByName:             true,
+	StoreRemotesCount:                 true,
+	StoreRemoteSnapshotsList:          true,
+	StoreRemoteSnapshotsGet:           true,
 	// StoreRemotesSealed is deliberately ABSENT even though it mutates
 	// nothing. This set's only job is to license `audited: none`, and reading a
 	// stored credential is not something an unaudited operation may do — the
@@ -1141,9 +1183,13 @@ var operations = map[Operation]opSpec{
 		level:   domain.LevelProject,
 		formula: Formula{{Cap: domain.CapDefinitionsEdit, At: domain.LevelProject}},
 		storeOps: map[StoreOp]bool{
-			StoreProjectsLock: true, StoreEnvironmentsCount: true,
+			// StoreProjectsGet is the git-mode guard's read. Creating an
+			// environment is definitions-bundle desired state, so #70 advances
+			// the catalogue revision here (StoreCatalogueRevisionBump) — a
+			// revision used as a bundle base must detect a new environment.
+			StoreProjectsGet: true, StoreProjectsLock: true, StoreEnvironmentsCount: true,
 			StoreEnvironmentsNextOrder: true, StoreEnvironmentsCreate: true,
-			StoreAuditTenantInsert: true,
+			StoreCatalogueRevisionBump: true, StoreAuditTenantInsert: true,
 		},
 		events: []audit.EventType{audit.EventEnvCreated},
 	},
@@ -1165,11 +1211,18 @@ var operations = map[Operation]opSpec{
 		auditedNone: true,
 	},
 	OpEnvRename: {
-		class:    ClassTenant,
-		level:    domain.LevelEnv,
-		formula:  Formula{{Cap: domain.CapDefinitionsEdit, At: domain.LevelProject}},
-		storeOps: map[StoreOp]bool{StoreEnvironmentsGet: true, StoreEnvironmentsRename: true, StoreAuditTenantInsert: true},
-		events:   []audit.EventType{audit.EventEnvRenamed},
+		class:   ClassTenant,
+		level:   domain.LevelEnv,
+		formula: Formula{{Cap: domain.CapDefinitionsEdit, At: domain.LevelProject}},
+		// StoreProjectsGet is the git-mode guard's read; the rename now advances
+		// the catalogue revision (#70), so it takes the project lock and the bump
+		// like every other definitions-bundle change.
+		storeOps: map[StoreOp]bool{
+			StoreProjectsGet: true, StoreProjectsLock: true,
+			StoreEnvironmentsGet: true, StoreEnvironmentsRename: true,
+			StoreCatalogueRevisionBump: true, StoreAuditTenantInsert: true,
+		},
+		events: []audit.EventType{audit.EventEnvRenamed},
 	},
 	// Reorder addresses the PROJECT: it rewrites the whole ordered set in one
 	// transaction, so no caller can observe a duplicate or a gap, and there is
@@ -1178,8 +1231,10 @@ var operations = map[Operation]opSpec{
 		class:   ClassTenant,
 		level:   domain.LevelProject,
 		formula: Formula{{Cap: domain.CapDefinitionsEdit, At: domain.LevelProject}},
+		// Reorder is guarded (StoreProjectsGet) but is NOT a bundle change:
+		// display order is not definitional, so it advances no revision.
 		storeOps: map[StoreOp]bool{
-			StoreProjectsLock: true, StoreEnvironmentsList: true,
+			StoreProjectsGet: true, StoreProjectsLock: true, StoreEnvironmentsList: true,
 			StoreEnvironmentsSetOrder: true, StoreAuditTenantInsert: true,
 		},
 		events: []audit.EventType{audit.EventEnvReordered},
@@ -1195,7 +1250,7 @@ var operations = map[Operation]opSpec{
 		level:   domain.LevelEnv,
 		formula: Formula{{Cap: domain.CapDefinitionsEdit, At: domain.LevelProject}},
 		storeOps: map[StoreOp]bool{
-			StoreProjectsLock: true, StoreEnvironmentsGet: true,
+			StoreProjectsGet: true, StoreProjectsLock: true, StoreEnvironmentsGet: true,
 			// The cascade reads the project's presence rows and its keys,
 			// collapses any explicit set it empties, and advances the catalogue
 			// revision — the catalogue changed, so its revision must.
@@ -1241,7 +1296,7 @@ var operations = map[Operation]opSpec{
 			// environments; each one is then authorized for `publish`
 			// separately, immediately before commit.
 			StoreEnvironmentsList: true,
-			StoreProjectsLock:     true, StoreCatalogueCount: true,
+			StoreProjectsGet:      true, StoreProjectsLock: true, StoreCatalogueCount: true,
 			StoreCatalogueList: true, StoreCataloguePresenceList: true,
 			StoreCatalogueGroupGet: true, StoreCatalogueCreate: true,
 			StoreCataloguePresenceReplace: true, StoreCatalogueRevisionBump: true,
@@ -1280,7 +1335,7 @@ var operations = map[Operation]opSpec{
 			// environments; each one is then authorized for `publish`
 			// separately, immediately before commit.
 			StoreEnvironmentsList: true,
-			StoreProjectsLock:     true, StoreCatalogueGet: true, StoreCatalogueRename: true,
+			StoreProjectsGet:      true, StoreProjectsLock: true, StoreCatalogueGet: true, StoreCatalogueRename: true,
 			StoreCatalogueAdapterPins:  true,
 			StoreCatalogueRevisionBump: true, StoreCataloguePresenceList: true,
 			StoreAuditTenantInsert: true,
@@ -1296,7 +1351,7 @@ var operations = map[Operation]opSpec{
 			// environments; each one is then authorized for `publish`
 			// separately, immediately before commit.
 			StoreEnvironmentsList: true,
-			StoreProjectsLock:     true, StoreCatalogueGet: true, StoreCatalogueList: true,
+			StoreProjectsGet:      true, StoreProjectsLock: true, StoreCatalogueGet: true, StoreCatalogueList: true,
 			StoreCataloguePresenceList: true, StoreCatalogueUpdateDeclaration: true,
 			StoreCataloguePresenceReplace: true, StoreCatalogueRevisionBump: true,
 			// The resulting revision is read back inside the same transaction:
@@ -1306,17 +1361,22 @@ var operations = map[Operation]opSpec{
 		},
 		events: []audit.EventType{audit.EventKeyDeclarationChanged},
 	},
-	// Metadata is the schema-model ADR's one exemption: description, deprecated,
-	// deprecation_note and folder path cannot change what any environment
-	// delivers or whether it validates, so they need `definitions-edit` alone,
-	// take no reveal gate, and move no revision — hence no revision bump in
-	// this operation's store set, which is where that claim is enforceable.
+	// Metadata is the schema-model ADR's one delivery exemption: description,
+	// deprecated, deprecation_note and folder path change nothing an environment
+	// delivers or validates, so they need `definitions-edit` alone and take no
+	// reveal gate. They ARE definitions-bundle desired state, though, so #70
+	// advances the revision here too — a revision used as a bundle base must be
+	// able to detect a folder-path or deprecation move — but they materialize no
+	// snapshot, so there is no publish fan-out. StoreProjectsGet is the git-mode
+	// guard's read.
 	OpKeyUpdateMetadata: {
 		class:   ClassTenant,
 		level:   domain.LevelProject,
 		formula: Formula{{Cap: domain.CapDefinitionsEdit, At: domain.LevelProject}},
 		storeOps: map[StoreOp]bool{
+			StoreProjectsGet: true, StoreProjectsLock: true,
 			StoreCatalogueGet: true, StoreCatalogueUpdateMetadata: true,
+			StoreCatalogueRevisionBump: true,
 			StoreCataloguePresenceList: true, StoreAuditTenantInsert: true,
 		},
 		events: []audit.EventType{audit.EventKeyMetadataChanged},
@@ -1330,7 +1390,7 @@ var operations = map[Operation]opSpec{
 			// environments; each one is then authorized for `publish`
 			// separately, immediately before commit.
 			StoreEnvironmentsList: true,
-			StoreProjectsLock:     true, StoreCatalogueGet: true, StoreCatalogueGroupGet: true,
+			StoreProjectsGet:      true, StoreProjectsLock: true, StoreCatalogueGet: true, StoreCatalogueGroupGet: true,
 			StoreCatalogueList: true, StoreCataloguePresenceList: true,
 			StoreCatalogueSetGroup: true, StoreCatalogueRevisionBump: true,
 			StoreAuditTenantInsert: true,
@@ -1348,7 +1408,7 @@ var operations = map[Operation]opSpec{
 			// environments; each one is then authorized for `publish`
 			// separately, immediately before commit.
 			StoreEnvironmentsList: true,
-			StoreProjectsLock:     true, StoreCatalogueGet: true,
+			StoreProjectsGet:      true, StoreProjectsLock: true, StoreCatalogueGet: true,
 			StoreCataloguePresenceReplace: true, StoreCatalogueDelete: true,
 			// A key that any environment still holds a value for is REFUSED
 			// (#50), naming those environments: destroying delivered material
@@ -1373,7 +1433,7 @@ var operations = map[Operation]opSpec{
 			// environments; each one is then authorized for `publish`
 			// separately, immediately before commit.
 			StoreEnvironmentsList: true,
-			StoreProjectsLock:     true, StoreCatalogueGet: true,
+			StoreProjectsGet:      true, StoreProjectsLock: true, StoreCatalogueGet: true,
 			StoreCatalogueSetClassification: true, StoreCatalogueRevisionBump: true,
 			StoreCatalogueAdapterPins:  true,
 			StoreCataloguePresenceList: true, StoreAuditTenantInsert: true,
@@ -1407,6 +1467,136 @@ var operations = map[Operation]opSpec{
 		level:   domain.LevelProject,
 		formula: Formula{{Cap: domain.CapReveal, At: domain.LevelProject}},
 		events:  []audit.EventType{audit.EventKeyRevealGateAttempt},
+	},
+
+	// Definitions Git flow (#70). export/check are pure reads under the same
+	// `read@project` the key list uses — "no permission gate" means no ADDITIONAL
+	// gate, not no authorization — so both take the audited-none permit. plan and
+	// apply carry `definitions-edit@project`; apply additionally fans out
+	// `publish@environment` per environment immediately before commit, exactly as
+	// the key mutations do, so it lists StoreEnvironmentsList (the fan-out's own
+	// read) while the per-environment publish store ops ride OpValuePublish.
+	OpDefinitionsExport: {
+		class:   ClassTenant,
+		level:   domain.LevelProject,
+		formula: Formula{{Cap: domain.CapRead, At: domain.LevelProject}},
+		storeOps: map[StoreOp]bool{
+			StoreProjectsGet: true, StoreEnvironmentsList: true,
+			StoreCatalogueList: true, StoreCataloguePresenceList: true,
+			StoreCatalogueGroupList: true, StoreCatalogueRevisionGet: true,
+		},
+		auditedNone: true,
+	},
+	OpDefinitionsCheck: {
+		class:   ClassTenant,
+		level:   domain.LevelProject,
+		formula: Formula{{Cap: domain.CapRead, At: domain.LevelProject}},
+		storeOps: map[StoreOp]bool{
+			StoreProjectsGet: true, StoreEnvironmentsList: true,
+			StoreCatalogueList: true, StoreCataloguePresenceList: true,
+			StoreCatalogueGroupList: true, StoreCatalogueRevisionGet: true,
+		},
+		auditedNone: true,
+	},
+	// A plan reads current state, pins it, and persists an immutable plan row.
+	// It is read-shaped but writes the plan ledger, so it is NOT audited-none;
+	// it emits plan_created on success and the additive-modification refusal on
+	// the rollback path.
+	OpDefinitionsPlanCreate: {
+		class:   ClassTenant,
+		level:   domain.LevelProject,
+		formula: Formula{{Cap: domain.CapDefinitionsEdit, At: domain.LevelProject}},
+		storeOps: map[StoreOp]bool{
+			StoreProjectsLock: true, StoreProjectsGet: true,
+			StoreEnvironmentsList: true, StoreEnvironmentsListProtection: true,
+			StoreCatalogueList: true, StoreCataloguePresenceList: true,
+			StoreCatalogueGroupList: true, StoreCatalogueRevisionGet: true,
+			StoreSnapshotsProjectRevisions:   true,
+			StoreValuesCountEnvironment:      true,
+			StoreValuesEnvironmentsWithValue: true,
+			StoreDefinitionsPlanCountOpen:    true, StoreDefinitionsPlanCreate: true,
+			StoreAuditTenantInsert: true,
+		},
+		events: []audit.EventType{
+			audit.EventDefinitionsPlanCreated,
+			audit.EventDefinitionsAdditiveModificationRefused,
+		},
+	},
+	// A plan read is authorized under `definitions-edit` (the diff is edit-class
+	// visibility), writes nothing, and duplicates no act — its creation and its
+	// apply carry the events — so it is name-pinned in the audit exemption fixture
+	// rather than emitting a read event once per poll.
+	OpDefinitionsPlanGet: {
+		class:    ClassTenant,
+		level:    domain.LevelProject,
+		formula:  Formula{{Cap: domain.CapDefinitionsEdit, At: domain.LevelProject}},
+		storeOps: map[StoreOp]bool{StoreDefinitionsPlanGet: true},
+	},
+	// Apply is the one write path a git-mode project allows. It executes the
+	// whole final definition set through the STORE layer inside one transaction,
+	// bumps the revision once, and fans schema publish out over every environment.
+	// Its store-op set is the union of the definition-write ops it drives plus the
+	// plan ledger and the protected-set/live-occurrence reads; the per-environment
+	// publish ops ride OpValuePublish, re-authorized immediately before commit.
+	OpDefinitionsApply: {
+		class:   ClassTenant,
+		level:   domain.LevelProject,
+		formula: Formula{{Cap: domain.CapDefinitionsEdit, At: domain.LevelProject}},
+		storeOps: map[StoreOp]bool{
+			StoreProjectsLock: true, StoreProjectsGet: true,
+			StoreEnvironmentsList: true, StoreEnvironmentsListProtection: true,
+			StoreEnvironmentsCount: true, StoreEnvironmentsNextOrder: true,
+			StoreEnvironmentsCreate: true, StoreEnvironmentsRename: true,
+			StoreEnvironmentsDelete: true,
+			StoreCatalogueList:      true, StoreCatalogueGet: true,
+			StoreCatalogueCount: true, StoreCataloguePresenceList: true,
+			StoreCatalogueGroupList: true, StoreCatalogueGroupGet: true,
+			StoreCatalogueRevisionGet: true, StoreCatalogueRevisionBump: true,
+			StoreCatalogueCreate: true, StoreCatalogueRename: true,
+			StoreCatalogueUpdateMetadata: true, StoreCatalogueUpdateDeclaration: true,
+			StoreCatalogueSetClassification: true, StoreCatalogueSetGroup: true,
+			StoreCatalogueDelete: true, StoreCatalogueAdapterPins: true,
+			StoreCataloguePresenceReplace: true, StoreCataloguePresenceCascade: true,
+			StoreCatalogueGroupCreate: true, StoreCatalogueGroupRename: true,
+			StoreCatalogueGroupDelete: true, StoreCatalogueGroupClearMembers: true,
+			StoreValuesCountEnvironment: true, StoreValuesEnvironmentsWithValue: true,
+			StoreValuesClearKey:            true,
+			StorePendingDiscardKey:         true,
+			StoreSnapshotsProjectRevisions: true, StoreSnapshotsDeleteEnvironment: true,
+			StorePinsDeleteEnvironment: true,
+			StoreDefinitionsPlanGet:    true, StoreDefinitionsPlanApply: true,
+			StoreAuditTenantInsert: true,
+		},
+		events: []audit.EventType{
+			audit.EventDefinitionsApplied,
+			audit.EventDefinitionsApplyRejectedStale,
+			audit.EventDefinitionsDeletionRefused,
+			audit.EventEnvCreated, audit.EventEnvRenamed, audit.EventEnvDeleted,
+			audit.EventKeyGroupCreated, audit.EventKeyGroupRenamed, audit.EventKeyGroupDeleted,
+			audit.EventKeyCreated, audit.EventKeyRenamed, audit.EventKeyDeleted,
+			audit.EventKeyMetadataChanged, audit.EventKeyDeclarationChanged,
+			audit.EventKeyReclassified, audit.EventKeyGroupMembershipChanged,
+		},
+	},
+	OpDefinitionsSettingsGet: {
+		class:   ClassTenant,
+		level:   domain.LevelProject,
+		formula: Formula{{Cap: domain.CapRead, At: domain.LevelProject}},
+		storeOps: map[StoreOp]bool{
+			StoreProjectsGet: true, StoreDefinitionsLatestAppliedPlan: true,
+		},
+		auditedNone: true,
+	},
+	OpDefinitionsSettingsSet: {
+		class:   ClassTenant,
+		level:   domain.LevelProject,
+		formula: Formula{{Cap: domain.CapProjectSettings, At: domain.LevelProject}},
+		storeOps: map[StoreOp]bool{
+			StoreProjectsGet: true, StoreProjectsSetDefinitionsSource: true,
+			StoreDefinitionsLatestAppliedPlan: true,
+			StoreAuditTenantInsert:            true,
+		},
+		events: []audit.EventType{audit.EventSettingsDefinitionsSourceChanged},
 	},
 
 	// The flat value model (#50). Every mutation takes the project row first,
@@ -1881,7 +2071,7 @@ var operations = map[Operation]opSpec{
 			// environments; each one is then authorized for `publish`
 			// separately, immediately before commit.
 			StoreEnvironmentsList: true,
-			StoreProjectsLock:     true, StoreCatalogueGroupCount: true,
+			StoreProjectsGet:      true, StoreProjectsLock: true, StoreCatalogueGroupCount: true,
 			StoreCatalogueGroupCreate: true, StoreCatalogueRevisionBump: true,
 			StoreAuditTenantInsert: true,
 		},
@@ -1914,9 +2104,11 @@ var operations = map[Operation]opSpec{
 			// environments; each one is then authorized for `publish`
 			// separately, immediately before commit.
 			StoreEnvironmentsList: true,
-			StoreProjectsLock:     true, StoreCatalogueGroupGet: true,
+			StoreProjectsGet:      true, StoreProjectsLock: true, StoreCatalogueGroupGet: true,
 			StoreCatalogueGroupRename: true, StoreCatalogueList: true,
-			StoreAuditTenantInsert: true,
+			// A group name is bundle desired state, so #70 advances the revision.
+			StoreCatalogueRevisionBump: true,
+			StoreAuditTenantInsert:     true,
 		},
 		events: []audit.EventType{audit.EventKeyGroupRenamed},
 	},
@@ -1932,7 +2124,7 @@ var operations = map[Operation]opSpec{
 			// environments; each one is then authorized for `publish`
 			// separately, immediately before commit.
 			StoreEnvironmentsList: true,
-			StoreProjectsLock:     true, StoreCatalogueGroupGet: true,
+			StoreProjectsGet:      true, StoreProjectsLock: true, StoreCatalogueGroupGet: true,
 			StoreCatalogueList: true, StoreCatalogueGroupClearMembers: true,
 			StoreCatalogueGroupDelete: true, StoreCatalogueRevisionBump: true,
 			StoreAuditTenantInsert: true,
@@ -1944,11 +2136,14 @@ var operations = map[Operation]opSpec{
 	// permission-model ADR forbids folder-scoped grants outright, and names the
 	// folder path as `definitions-edit` territory. Every folder operation
 	// therefore addresses PROJECT depth — there is no folder scope to address.
+	// Folders are guarded by git-mode (StoreProjectsGet) like every other
+	// definitions-edit write, but a folder is NOT a bundle entity — a folder path
+	// rides on its keys — so folder writes advance no revision.
 	OpFolderCreate: {
 		class:    ClassTenant,
 		level:    domain.LevelProject,
 		formula:  Formula{{Cap: domain.CapDefinitionsEdit, At: domain.LevelProject}},
-		storeOps: map[StoreOp]bool{StoreFoldersCreate: true, StoreAuditTenantInsert: true},
+		storeOps: map[StoreOp]bool{StoreProjectsGet: true, StoreFoldersCreate: true, StoreAuditTenantInsert: true},
 		events:   []audit.EventType{audit.EventFolderCreated},
 	},
 	OpFolderGet: {
@@ -1969,14 +2164,14 @@ var operations = map[Operation]opSpec{
 		class:    ClassTenant,
 		level:    domain.LevelProject,
 		formula:  Formula{{Cap: domain.CapDefinitionsEdit, At: domain.LevelProject}},
-		storeOps: map[StoreOp]bool{StoreFoldersGet: true, StoreFoldersRename: true, StoreAuditTenantInsert: true},
+		storeOps: map[StoreOp]bool{StoreProjectsGet: true, StoreFoldersGet: true, StoreFoldersRename: true, StoreAuditTenantInsert: true},
 		events:   []audit.EventType{audit.EventFolderRenamed},
 	},
 	OpFolderDelete: {
 		class:    ClassTenant,
 		level:    domain.LevelProject,
 		formula:  Formula{{Cap: domain.CapDefinitionsEdit, At: domain.LevelProject}},
-		storeOps: map[StoreOp]bool{StoreFoldersGet: true, StoreFoldersDelete: true, StoreAuditTenantInsert: true},
+		storeOps: map[StoreOp]bool{StoreProjectsGet: true, StoreFoldersGet: true, StoreFoldersDelete: true, StoreAuditTenantInsert: true},
 		events:   []audit.EventType{audit.EventFolderDeleted},
 	},
 
@@ -3029,6 +3224,8 @@ var systemSites = map[SystemSite]map[StoreOp]bool{
 		StoreRetentionDeleteEntries: true, StoreRetentionLastSuccess: true,
 		StoreRetentionSetLastSuccess: true, StoreAuditTenantInsert: true,
 		StoreAuditInstanceInsert: true,
+		// The hourly GC also prunes expired, unapplied definitions plans (#70).
+		StoreDefinitionsPlanPrune: true,
 	},
 }
 

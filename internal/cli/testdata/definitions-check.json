@@ -1,0 +1,30 @@
+{
+  "base_revision": 7,
+  "current_revision": 9,
+  "differences": {
+    "environments": {
+      "creates": [
+        "preview"
+      ],
+      "deletes": [],
+      "renames": [],
+      "updates": []
+    },
+    "key_groups": {
+      "creates": [],
+      "deletes": [],
+      "renames": [],
+      "updates": []
+    },
+    "keys": {
+      "creates": [],
+      "deletes": [],
+      "renames": [],
+      "updates": [
+        "DATABASE_URL"
+      ]
+    },
+    "reveal_required": []
+  },
+  "state": "diverged"
+}

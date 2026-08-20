@@ -1235,6 +1235,134 @@ export type ValueDiffRow = {
     equal?: boolean;
 };
 
+export type DefinitionsBundle = {
+    format_version: 1;
+    base_revision?: number;
+    environments: Array<DefinitionsBundleEntity>;
+    key_groups: Array<DefinitionsBundleEntity>;
+    keys: Array<DefinitionsBundleKey>;
+};
+
+export type DefinitionsBundleEntity = {
+    id?: Id;
+    name: string;
+};
+
+export type DefinitionsBundlePresence = {
+    mode: 'all' | 'none' | 'explicit';
+    environments: Array<string>;
+};
+
+export type DefinitionsBundleKey = {
+    id?: Id;
+    name: KeyName;
+    folder_path: KeyFolderPath;
+    classification: KeyClassification;
+    description: string;
+    deprecated: boolean;
+    deprecation_note: string;
+    group: string;
+    declaration: KeyDeclaration;
+    required_in: DefinitionsBundlePresence;
+    forbidden_in: DefinitionsBundlePresence;
+};
+
+export type DefinitionsRename = {
+    id: string;
+    from: string;
+    to: string;
+};
+
+export type DefinitionsKindDiff = {
+    creates: Array<string>;
+    updates: Array<string>;
+    renames: Array<DefinitionsRename>;
+    deletes: Array<string>;
+};
+
+export type DefinitionsDiff = {
+    environments: DefinitionsKindDiff;
+    key_groups: DefinitionsKindDiff;
+    keys: DefinitionsKindDiff;
+    reveal_required: Array<string>;
+};
+
+export type DefinitionsCheckResult = {
+    state: 'equal' | 'file_ahead' | 'db_ahead' | 'diverged';
+    base_revision?: number;
+    current_revision: number;
+    differences: DefinitionsDiff;
+};
+
+export type DefinitionsKeyDeletion = {
+    name: string;
+    live_in: Array<string>;
+};
+
+export type DefinitionsEnvironmentDeletion = {
+    name: string;
+    occurrences: number;
+};
+
+export type DefinitionsPlanDiff = {
+    environments: DefinitionsKindDiff;
+    key_groups: DefinitionsKindDiff;
+    keys: DefinitionsKindDiff;
+    key_deletions: Array<DefinitionsKeyDeletion>;
+    env_deletions: Array<DefinitionsEnvironmentDeletion>;
+    reveal_required: Array<string>;
+};
+
+export type DefinitionsPlan = {
+    id: Id;
+    digest: string;
+    base_revision?: number;
+    current_revision: number;
+    additive: boolean;
+    expires_at: Timestamp;
+    protected_environments: Array<string>;
+    diff: DefinitionsPlanDiff;
+    deletions_present: boolean;
+    reveal_required: Array<string>;
+};
+
+export type DefinitionsPlanResponse = {
+    plan: DefinitionsPlan;
+};
+
+export type ApplyDefinitionsPlanRequest = {
+    allow_delete: boolean;
+    digest?: string;
+    commit?: string;
+    ref?: string;
+    actor?: string;
+};
+
+export type ApplyDefinitionsPlanResult = {
+    revision: number;
+    published: Array<string>;
+    plan_id: Id;
+};
+
+export type DefinitionsLastApply = {
+    plan_id: Id;
+    applied_at: Timestamp;
+    applied_by: string;
+    commit?: string;
+    ref?: string;
+    actor?: string;
+    revision: number;
+};
+
+export type DefinitionsSettings = {
+    definitions_source: 'db' | 'git';
+    last_apply?: DefinitionsLastApply;
+};
+
+export type SetDefinitionsSettingsRequest = {
+    definitions_source: 'db' | 'git';
+};
+
 /**
  * An environment carries NO `base` pointer and no defaults layer, here or
  * anywhere: the flat-model ADR deleted both, and every value is explicit
@@ -3246,6 +3374,11 @@ export type GrantCapability = Capability;
  * Key identifier - the immutable id, never the mutable name.
  */
 export type KeyId = Id;
+
+/**
+ * Immutable definitions-plan identifier.
+ */
+export type DefinitionsPlanId = Id;
 
 /**
  * The key's NAME, not its id. Values are addressed the way an operator
@@ -7083,6 +7216,433 @@ export type SetEnvironmentSettingsResponses = {
 };
 
 export type SetEnvironmentSettingsResponse = SetEnvironmentSettingsResponses[keyof SetEnvironmentSettingsResponses];
+
+export type ExportDefinitionsData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+    };
+    query?: {
+        portable?: boolean;
+    };
+    url: '/api/v1/orgs/{org}/projects/{project}/definitions/export';
+};
+
+export type ExportDefinitionsErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type ExportDefinitionsError = ExportDefinitionsErrors[keyof ExportDefinitionsErrors];
+
+export type ExportDefinitionsResponses = {
+    /**
+     * Canonical definitions bundle bytes.
+     */
+    200: DefinitionsBundle;
+};
+
+export type ExportDefinitionsResponse = ExportDefinitionsResponses[keyof ExportDefinitionsResponses];
+
+export type CheckDefinitionsData = {
+    body: DefinitionsBundle;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/definitions/check';
+};
+
+export type CheckDefinitionsErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type CheckDefinitionsError = CheckDefinitionsErrors[keyof CheckDefinitionsErrors];
+
+export type CheckDefinitionsResponses = {
+    /**
+     * Drift classification and structural differences.
+     */
+    200: DefinitionsCheckResult;
+};
+
+export type CheckDefinitionsResponse = CheckDefinitionsResponses[keyof CheckDefinitionsResponses];
+
+export type CreateDefinitionsPlanData = {
+    body: DefinitionsBundle;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/definitions/plans';
+};
+
+export type CreateDefinitionsPlanErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type CreateDefinitionsPlanError = CreateDefinitionsPlanErrors[keyof CreateDefinitionsPlanErrors];
+
+export type CreateDefinitionsPlanResponses = {
+    /**
+     * The immutable impact plan.
+     */
+    201: DefinitionsPlanResponse;
+};
+
+export type CreateDefinitionsPlanResponse = CreateDefinitionsPlanResponses[keyof CreateDefinitionsPlanResponses];
+
+export type GetDefinitionsPlanData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        /**
+         * Immutable definitions-plan identifier.
+         */
+        plan: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/definitions/plans/{plan}';
+};
+
+export type GetDefinitionsPlanErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type GetDefinitionsPlanError = GetDefinitionsPlanErrors[keyof GetDefinitionsPlanErrors];
+
+export type GetDefinitionsPlanResponses = {
+    /**
+     * The immutable impact plan.
+     */
+    200: DefinitionsPlanResponse;
+};
+
+export type GetDefinitionsPlanResponse = GetDefinitionsPlanResponses[keyof GetDefinitionsPlanResponses];
+
+export type ApplyDefinitionsPlanData = {
+    body: ApplyDefinitionsPlanRequest;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        /**
+         * Immutable definitions-plan identifier.
+         */
+        plan: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/definitions/plans/{plan}/apply';
+};
+
+export type ApplyDefinitionsPlanErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type ApplyDefinitionsPlanError = ApplyDefinitionsPlanErrors[keyof ApplyDefinitionsPlanErrors];
+
+export type ApplyDefinitionsPlanResponses = {
+    /**
+     * The committed schema revision and published environments.
+     */
+    200: ApplyDefinitionsPlanResult;
+};
+
+export type ApplyDefinitionsPlanResponse = ApplyDefinitionsPlanResponses[keyof ApplyDefinitionsPlanResponses];
+
+export type GetDefinitionsSettingsData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/definitions/settings';
+};
+
+export type GetDefinitionsSettingsErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type GetDefinitionsSettingsError = GetDefinitionsSettingsErrors[keyof GetDefinitionsSettingsErrors];
+
+export type GetDefinitionsSettingsResponses = {
+    /**
+     * Definitions governance settings.
+     */
+    200: DefinitionsSettings;
+};
+
+export type GetDefinitionsSettingsResponse = GetDefinitionsSettingsResponses[keyof GetDefinitionsSettingsResponses];
+
+export type SetDefinitionsSettingsData = {
+    body: SetDefinitionsSettingsRequest;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/definitions/settings';
+};
+
+export type SetDefinitionsSettingsErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type SetDefinitionsSettingsError = SetDefinitionsSettingsErrors[keyof SetDefinitionsSettingsErrors];
+
+export type SetDefinitionsSettingsResponses = {
+    /**
+     * Updated definitions governance settings.
+     */
+    200: DefinitionsSettings;
+};
+
+export type SetDefinitionsSettingsResponse = SetDefinitionsSettingsResponses[keyof SetDefinitionsSettingsResponses];
 
 export type ListKeysData = {
     body?: never;

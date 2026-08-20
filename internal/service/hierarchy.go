@@ -686,6 +686,9 @@ func (s *Environments) create(ctx context.Context, actor Actor, scope domain.Sco
 		if err := r.Projects().Lock(ctx, p); err != nil {
 			return err
 		}
+		if err := requireDBManagedDefinitions(ctx, r, p); err != nil {
+			return err
+		}
 		n, err := r.Environments().Count(ctx, p)
 		if err != nil {
 			return err
@@ -710,6 +713,14 @@ func (s *Environments) create(ctx context.Context, actor Actor, scope domain.Sco
 			CreatedAt:    store.CanonTime(time.Now()),
 		}
 		if err := r.Environments().Create(ctx, p, created); err != nil {
+			return err
+		}
+		// The environment list is definitions-bundle desired state, so its change
+		// advances the definitions revision (#70). Bumped BEFORE the new
+		// environment's initial materialization so that snapshot pins the fresh
+		// revision. Existing environments are not re-materialized: adding an
+		// environment changes no key, declaration or presence rule they deliver.
+		if err := r.Catalogue().BumpSchemaRevision(ctx, p); err != nil {
 			return err
 		}
 		ev, err := domainEvent(ctx, audit.EventEnvCreated, caller.Principal,
@@ -812,11 +823,23 @@ func (s *Environments) Rename(ctx context.Context, actor Actor, scope domain.Sco
 		if err != nil {
 			return err
 		}
+		if err := r.Projects().Lock(ctx, p); err != nil {
+			return err
+		}
+		if err := requireDBManagedDefinitions(ctx, r, p); err != nil {
+			return err
+		}
 		before, err := r.Environments().Get(ctx, p)
 		if err != nil {
 			return err
 		}
 		if err := r.Environments().Rename(ctx, p, name); err != nil {
+			return err
+		}
+		// The environment name is definitions-bundle desired state, so a rename
+		// advances the definitions revision (#70). It materializes nothing — a
+		// rename moves a label nothing is delivered under.
+		if err := r.Catalogue().BumpSchemaRevision(ctx, p); err != nil {
 			return err
 		}
 		out = before
@@ -862,6 +885,9 @@ func (s *Environments) Reorder(ctx context.Context, actor Actor, scope domain.Sc
 		// with duplicate positions, and a reorder racing a create would race its
 		// append position.
 		if err := r.Projects().Lock(ctx, p); err != nil {
+			return err
+		}
+		if err := requireDBManagedDefinitions(ctx, r, p); err != nil {
 			return err
 		}
 		live, err := r.Environments().List(ctx, p)
@@ -941,6 +967,9 @@ func (s *Environments) Delete(ctx context.Context, actor Actor, scope domain.Sco
 		if err := r.Projects().Lock(ctx, p); err != nil {
 			return err
 		}
+		if err := requireDBManagedDefinitions(ctx, r, p); err != nil {
+			return err
+		}
 		before, err := r.Environments().Get(ctx, p)
 		if err != nil {
 			return err
@@ -979,6 +1008,12 @@ func (s *Environments) Delete(ctx context.Context, actor Actor, scope domain.Sco
 			return err
 		}
 		if err := r.Environments().Delete(ctx, p); err != nil {
+			return err
+		}
+		// The environment list is definitions-bundle desired state, so its
+		// deletion advances the definitions revision unconditionally (#70) — even
+		// when the environment carried no presence rows for the cascade to rewrite.
+		if err := r.Catalogue().BumpSchemaRevision(ctx, p); err != nil {
 			return err
 		}
 		ev, err := domainEvent(ctx, audit.EventEnvDeleted, caller.Principal,
@@ -1059,6 +1094,9 @@ func (s *Folders) Create(ctx context.Context, actor Actor, scope domain.Scope, p
 		}
 		p, err := az.Authorize(ctx, caller, authz.OpFolderCreate, scope)
 		if err != nil {
+			return err
+		}
+		if err := requireDBManagedDefinitions(ctx, r, p); err != nil {
 			return err
 		}
 		if err := r.Folders().Create(ctx, p, folder); err != nil {
@@ -1142,6 +1180,9 @@ func (s *Folders) Rename(ctx context.Context, actor Actor, scope domain.Scope, i
 		if err != nil {
 			return err
 		}
+		if err := requireDBManagedDefinitions(ctx, r, p); err != nil {
+			return err
+		}
 		before, err := r.Folders().Get(ctx, p, id)
 		if err != nil {
 			return err
@@ -1175,6 +1216,9 @@ func (s *Folders) Delete(ctx context.Context, actor Actor, scope domain.Scope, i
 		}
 		p, err := az.Authorize(ctx, caller, authz.OpFolderDelete, scope)
 		if err != nil {
+			return err
+		}
+		if err := requireDBManagedDefinitions(ctx, r, p); err != nil {
 			return err
 		}
 		before, err := r.Folders().Get(ctx, p, id)

@@ -178,6 +178,10 @@ func (c *Client) Do(ctx context.Context, method, path string, body, out any) err
 	if out == nil || len(payload) == 0 {
 		return nil
 	}
+	if raw, ok := out.(*[]byte); ok {
+		*raw = append((*raw)[:0], payload...)
+		return nil
+	}
 	if text, ok := out.(*string); ok && strings.HasPrefix(resp.Header.Get("Content-Type"), "text/plain") {
 		*text = string(payload)
 		return nil

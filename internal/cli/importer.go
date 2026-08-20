@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/Hikyo-Org/hikyo/api/apigen"
+	"github.com/Hikyo-Org/hikyo/internal/definitions"
 	"github.com/Hikyo-Org/hikyo/internal/disclose"
 	"github.com/Hikyo-Org/hikyo/internal/importer"
 )
@@ -365,19 +366,26 @@ func writeArtifacts(ios IO, outDir, envID string, plan *importer.Plan) (string, 
 			_ = os.Remove(path)
 		}
 	}
+	bundleBody, err := definitions.Encode(plan.Bundle)
+	if err != nil {
+		return "", err
+	}
+	mappingBody, err := importer.Encode(plan.Template)
+	if err != nil {
+		return "", err
+	}
+	manifestBody, err := importer.Encode(plan.Manifest)
+	if err != nil {
+		return "", err
+	}
 	for _, artifact := range []struct {
 		name string
-		body any
+		body []byte
 	}{
-		{bundleFile, plan.Bundle},
-		{mappingFile, plan.Template},
-		{manifestFile, plan.Manifest},
+		{bundleFile, bundleBody},
+		{mappingFile, mappingBody},
+		{manifestFile, manifestBody},
 	} {
-		raw, err := importer.Encode(artifact.body)
-		if err != nil {
-			cleanup()
-			return "", err
-		}
 		path := filepath.Join(outDir, artifact.name)
 		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 		if err != nil {
@@ -389,7 +397,7 @@ func writeArtifacts(ios IO, outDir, envID string, plan *importer.Plan) (string, 
 			return "", failf(ExitRefused, "writing %s: %v", path, err)
 		}
 		created = append(created, path)
-		if _, err := f.Write(raw); err != nil {
+		if _, err := f.Write(artifact.body); err != nil {
 			f.Close()
 			cleanup()
 			return "", failf(ExitRefused, "writing %s: %v", path, err)

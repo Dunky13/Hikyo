@@ -82,6 +82,14 @@ import:                                            authors artifacts, then stops
   export; --environment names the target. Nothing is renamed invisibly and
   nothing already set is overwritten without naming it.
 
+definitions:                                       reviewable Git-managed catalogue flow
+  hikyo definitions export [--portable] [--output-file PATH] [--project P]
+  hikyo definitions check --file PATH [-o table|json]
+      exits 0 when equal, 1 when different, 2 on error
+  hikyo definitions plan --file PATH [-o table|json]
+  hikyo definitions apply --plan ID [--file PATH] [--allow-delete]
+      [--commit C] [--ref R] [--actor A] [-o table|json]
+
 revisions:                                         --env selects the environment
   hikyo revision list                               lineage only, never values
   hikyo revision show [<N>|latest]                  carries the change token

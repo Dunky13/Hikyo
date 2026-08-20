@@ -315,6 +315,16 @@ var wireRegistry = map[string]Class{
 	"http:PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/declaration":    ClassTenant,
 	"http:PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/classification": ClassTenant,
 	"http:PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/group":          ClassTenant,
+
+	// Definitions Git flow (#70). Every route is project-addressed tenant
+	// material; grant refusal and a missing project/plan share one wire shape.
+	"http:GET /api/v1/orgs/{org}/projects/{project}/definitions/export":              ClassTenant,
+	"http:POST /api/v1/orgs/{org}/projects/{project}/definitions/check":              ClassTenant,
+	"http:POST /api/v1/orgs/{org}/projects/{project}/definitions/plans":              ClassTenant,
+	"http:GET /api/v1/orgs/{org}/projects/{project}/definitions/plans/{plan}":        ClassTenant,
+	"http:POST /api/v1/orgs/{org}/projects/{project}/definitions/plans/{plan}/apply": ClassTenant,
+	"http:GET /api/v1/orgs/{org}/projects/{project}/definitions/settings":            ClassTenant,
+	"http:PUT /api/v1/orgs/{org}/projects/{project}/definitions/settings":            ClassTenant,
 	// The flat value model (#50). Tenant-class throughout: a value the caller
 	// may not reach answers exactly like one that is not there.
 	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values":               ClassTenant,
@@ -484,10 +494,12 @@ var wireRegistry = map[string]Class{
 	// class is the verb's, and every sub-verb reaches only those two routes.
 	"cli:run":     ClassTenant,
 	"cli:compose": ClassTenant,
-	// `adopt` and `definitions` remain not-yet-implemented (they depend on the
-	// definitions flow, #70): still stubs, still in app.ClientVerbs.
-	"cli:adopt":       ClassStub,
-	"cli:definitions": ClassStub,
+	// `adopt` remains not-yet-implemented: still a stub, still in
+	// app.ClientVerbs.
+	"cli:adopt": ClassStub,
+	// `definitions` (#70) reaches only the tenant-scoped export/check/plan/apply
+	// routes; server operations own every authorization and audit decision.
+	"cli:definitions": ClassTenant,
 	// `render` and `sync` are no longer top-level verbs — they are `compose`
 	// sub-verbs — but the scaffolded top-level entries stay stubs until removed
 	// with the help surface, so a bare `hikyo render` still refuses cleanly.
@@ -871,6 +883,14 @@ var wireRoutes = map[string][]Operation{
 	"http:PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/declaration":    {OpKeyUpdateDeclaration, OpKeySecretRuleChange},
 	"http:PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/classification": {OpKeyReclassify, OpKeyDeclassify},
 	"http:PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/group":          {OpKeySetGroup},
+
+	"http:GET /api/v1/orgs/{org}/projects/{project}/definitions/export":              {OpDefinitionsExport},
+	"http:POST /api/v1/orgs/{org}/projects/{project}/definitions/check":              {OpDefinitionsCheck},
+	"http:POST /api/v1/orgs/{org}/projects/{project}/definitions/plans":              {OpDefinitionsPlanCreate},
+	"http:GET /api/v1/orgs/{org}/projects/{project}/definitions/plans/{plan}":        {OpDefinitionsPlanGet},
+	"http:POST /api/v1/orgs/{org}/projects/{project}/definitions/plans/{plan}/apply": {OpDefinitionsApply},
+	"http:GET /api/v1/orgs/{org}/projects/{project}/definitions/settings":            {OpDefinitionsSettingsGet},
+	"http:PUT /api/v1/orgs/{org}/projects/{project}/definitions/settings":            {OpDefinitionsSettingsSet},
 	// The flat value model (#50). Three routes reach TWO operations each,
 	// following the credential-reset precedent: a route that reaches a second
 	// operation at runtime must say so, or the registry describes an

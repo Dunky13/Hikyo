@@ -233,6 +233,18 @@ describe('settings refusals', () => {
     );
   });
 
+  it('maps definitions governance failures as project policy', () => {
+    expect(settingsFailureText(new ApiError(400, 'x'), 'set-definitions-settings')).toBe(
+      'The definitions source is invalid.',
+    );
+    expect(settingsFailureText(new ApiError(403, 'x'), 'set-definitions-settings')).toContain(
+      'change this project definitions source',
+    );
+    expect(settingsFailureText(new ApiError(404, 'x'), 'set-definitions-settings')).toBe(
+      'This project definitions policy is unavailable or does not exist.',
+    );
+  });
+
   it('maps instance administration reads and credential-policy writes by operation', () => {
     expect(settingsFailureText(new ApiError(404, 'x'), 'get-retention-health')).toBe(
       'Retention health is unavailable.',

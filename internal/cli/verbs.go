@@ -116,6 +116,7 @@ var verbHandlers = map[string]func(context.Context, IO, []string) error{
 	"remote":            runRemote,
 	"remote-credential": runRemoteCredential,
 	"import":            runImport,
+	"definitions":       runDefinitions,
 	"adapter":           runAdapter,
 	"run":               runRun,
 	"compose":           runCompose,
@@ -208,6 +209,14 @@ import:                                            authors artifacts, then stops
   state moved since you reviewed it. --env names the SOURCE slice inside an
   export; --environment names the target. Nothing is renamed invisibly and
   nothing already set is overwritten without naming it.
+
+definitions:                                       reviewable Git-managed catalogue flow
+  hikyo definitions export [--portable] [--output-file PATH] [--project P]
+  hikyo definitions check --file PATH [-o table|json]
+      exits 0 when equal, 1 when different, 2 on error
+  hikyo definitions plan --file PATH [-o table|json]
+  hikyo definitions apply --plan ID [--file PATH] [--allow-delete]
+      [--commit C] [--ref R] [--actor A] [-o table|json]
 
 revisions:                                         --env selects the environment
   hikyo revision list                               lineage only, never values

@@ -22,6 +22,9 @@ cleanup() {
 		wait "$server_pid" 2>/dev/null || true
 	fi
 	docker compose --project-directory "$project_dir" down --remove-orphans >/dev/null 2>&1 || true
+	if [[ -n "${runtime_tmpfs_mounted:-}" ]]; then
+		sudo umount "$runtime_dir" 2>/dev/null || true
+	fi
 	chmod -R u+w "$work_dir" 2>/dev/null || true
 	rm -rf -- "$work_dir"
 }
@@ -113,6 +116,19 @@ need jq
 need python3
 
 mkdir -m 700 "$project_dir" "$runtime_dir" "$state_dir" "$home_dir"
+
+# On Linux the runtime dir must BE tmpfs, not merely be tolerated as a doctor
+# finding: `compose sync` runs doctor itself and refuses to render on any
+# error-severity finding, so a non-tmpfs runtime (GitHub runners put /tmp on
+# ext4) dead-ends the demo at sync. Mounting a real tmpfs satisfies the
+# ops-spec § 6 property the check enforces instead of allowlisting its
+# violation. macOS has no tmpfs; doctor's check does not fire there.
+runtime_tmpfs_mounted=''
+if [[ "$(uname -s)" == Linux ]] && ! findmnt -n -t tmpfs -- "$runtime_dir" >/dev/null 2>&1; then
+	sudo mount -t tmpfs -o size=16m,mode=700,uid="$(id -u)",gid="$(id -g)" tmpfs "$runtime_dir" ||
+		fail 'could not mount a tmpfs for the runtime dir'
+	runtime_tmpfs_mounted=1
+fi
 python3 - "$demo_dir" "$project_dir" "$runtime_dir" <<'PY'
 import pathlib
 import sys
@@ -424,10 +440,20 @@ DEMO_REAL_DOCKER="$real_docker" PATH="$docker_wrapper_dir:$PATH" \
 doctor_code=$?
 set -e
 [[ $doctor_code -eq 0 || $doctor_code -eq 4 ]] || fail "doctor exited $doctor_code"
-jq -e '.status == "ok" or .status == "error" or .status == "warn"' "$work_dir/doctor.json" >/dev/null
-jq -e 'all(.findings[]?; .code == "runtime_not_tmpfs")' "$work_dir/doctor.json" >/dev/null || {
+jq -e '
+	(.status == "ok" or .status == "error" or .status == "warning") and
+	(.findings | type == "array") and
+	all(.findings[];
+		(has("check") and (.check | type == "string")) and
+		(has("status") and (.status | type == "string")) and
+		(
+			(.check == "runtime_not_tmpfs" and .status == "error") or
+			(.check == "systemd_plain_token_file" and .status == "warn")
+		)
+	)
+' "$work_dir/doctor.json" >/dev/null || {
 	jq . "$work_dir/doctor.json" >&2
-	fail 'doctor returned a finding other than runtime_not_tmpfs'
+	fail 'doctor returned a finding outside the environmental allowlist'
 }
 
 printf '%s' 'hello after sync' >"$work_dir/value-GREETING-updated"

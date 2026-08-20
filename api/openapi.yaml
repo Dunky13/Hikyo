@@ -76,6 +76,10 @@ tags:
       separate schema object: every constraint is declared inline on the Key,
       so the catalogue revision IS the schema revision. Tenant-scoped
       throughout, at project depth.
+  - name: definitions
+    description: |
+      Canonical project-definition export, drift checks, immutable impact
+      plans, atomic apply, and Git-governance settings.
   - name: identities
     description: |
       Machine identities: project-owned service accounts and the credentials
@@ -2157,6 +2161,202 @@ paths:
           $ref: "#/components/responses/TooManyRequests"
         "500":
           $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}/projects/{project}/definitions/export:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+    get:
+      operationId: exportDefinitions
+      tags: [definitions]
+      summary: Export the project's canonical definitions bundle.
+      x-hikyo-class: tenant
+      x-hikyo-operation: definitions.export
+      x-hikyo-formula: [read@project]
+      x-hikyo-artifacts: [human-session, machine-credential]
+      x-hikyo-min-revision: 2
+      parameters:
+        - name: portable
+          in: query
+          schema: {type: boolean, default: false}
+      responses:
+        "200":
+          description: Canonical definitions bundle bytes.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/DefinitionsBundle"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
+        "500": {$ref: "#/components/responses/Internal"}
+
+  /api/v1/orgs/{org}/projects/{project}/definitions/check:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+    post:
+      operationId: checkDefinitions
+      tags: [definitions]
+      summary: Compare a definitions bundle with current project state.
+      x-hikyo-class: tenant
+      x-hikyo-operation: definitions.check
+      x-hikyo-formula: [read@project]
+      x-hikyo-artifacts: [human-session, machine-credential]
+      x-hikyo-min-revision: 2
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/DefinitionsBundle"}
+      responses:
+        "200":
+          description: Drift classification and structural differences.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/DefinitionsCheckResult"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
+        "500": {$ref: "#/components/responses/Internal"}
+
+  /api/v1/orgs/{org}/projects/{project}/definitions/plans:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+    post:
+      operationId: createDefinitionsPlan
+      tags: [definitions]
+      summary: Persist an immutable definitions impact plan.
+      x-hikyo-class: tenant
+      x-hikyo-operation: definitions.plan
+      x-hikyo-formula: [definitions-edit@project]
+      x-hikyo-artifacts: [human-session, machine-credential]
+      x-hikyo-min-revision: 2
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/DefinitionsBundle"}
+      responses:
+        "201":
+          description: The immutable impact plan.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/DefinitionsPlanResponse"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
+        "500": {$ref: "#/components/responses/Internal"}
+
+  /api/v1/orgs/{org}/projects/{project}/definitions/plans/{plan}:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+      - $ref: "#/components/parameters/DefinitionsPlanID"
+    get:
+      operationId: getDefinitionsPlan
+      tags: [definitions]
+      summary: Read an immutable definitions impact plan.
+      x-hikyo-class: tenant
+      x-hikyo-operation: definitions.plan.get
+      x-hikyo-formula: [definitions-edit@project]
+      x-hikyo-artifacts: [human-session, machine-credential]
+      x-hikyo-min-revision: 2
+      responses:
+        "200":
+          description: The immutable impact plan.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/DefinitionsPlanResponse"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
+        "500": {$ref: "#/components/responses/Internal"}
+
+  /api/v1/orgs/{org}/projects/{project}/definitions/plans/{plan}/apply:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+      - $ref: "#/components/parameters/DefinitionsPlanID"
+    post:
+      operationId: applyDefinitionsPlan
+      tags: [definitions]
+      summary: Atomically apply a pinned definitions plan.
+      x-hikyo-class: tenant
+      x-hikyo-operation: definitions.apply
+      x-hikyo-formula: [definitions-edit@project]
+      x-hikyo-dynamic-formula: [publish@each-environment]
+      x-hikyo-artifacts: [human-session, machine-credential]
+      x-hikyo-min-revision: 2
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ApplyDefinitionsPlanRequest"}
+      responses:
+        "200":
+          description: The committed schema revision and published environments.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ApplyDefinitionsPlanResult"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
+        "500": {$ref: "#/components/responses/Internal"}
+
+  /api/v1/orgs/{org}/projects/{project}/definitions/settings:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+    get:
+      operationId: getDefinitionsSettings
+      tags: [definitions]
+      summary: Read definitions governance settings and last-apply provenance.
+      x-hikyo-class: tenant
+      x-hikyo-operation: definitions.settings.get
+      x-hikyo-formula: [read@project]
+      x-hikyo-artifacts: [human-session, machine-credential]
+      x-hikyo-min-revision: 2
+      responses:
+        "200":
+          description: Definitions governance settings.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/DefinitionsSettings"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
+        "500": {$ref: "#/components/responses/Internal"}
+    put:
+      operationId: setDefinitionsSettings
+      tags: [definitions]
+      summary: Select database- or Git-governed definitions.
+      x-hikyo-class: tenant
+      x-hikyo-operation: definitions.settings.set
+      x-hikyo-formula: [project-settings@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 2
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/SetDefinitionsSettingsRequest"}
+      responses:
+        "200":
+          description: Updated definitions governance settings.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/DefinitionsSettings"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
+        "500": {$ref: "#/components/responses/Internal"}
 
   /api/v1/orgs/{org}/projects/{project}/keys:
     parameters:
@@ -8471,6 +8671,13 @@ components:
       description: Key identifier - the immutable id, never the mutable name.
       schema:
         $ref: "#/components/schemas/ID"
+    DefinitionsPlanID:
+      name: plan
+      in: path
+      required: true
+      description: Immutable definitions-plan identifier.
+      schema:
+        $ref: "#/components/schemas/ID"
     ValueKeyName:
       name: key
       in: path
@@ -10547,6 +10754,202 @@ components:
             something the caller may not see - both sides `set` with at least
             one unreadable. Whether two secrets match is itself material, so it
             is not answered as `false` either.
+
+    DefinitionsBundle:
+      type: object
+      additionalProperties: false
+      required: [format_version, environments, key_groups, keys]
+      x-go-type: json.RawMessage
+      properties:
+        format_version: {type: integer, const: 1}
+        base_revision: {type: integer, format: int64, minimum: 0}
+        environments:
+          type: array
+          maxItems: 10000
+          items: {$ref: "#/components/schemas/DefinitionsBundleEntity"}
+        key_groups:
+          type: array
+          maxItems: 10000
+          items: {$ref: "#/components/schemas/DefinitionsBundleEntity"}
+        keys:
+          type: array
+          maxItems: 10000
+          items: {$ref: "#/components/schemas/DefinitionsBundleKey"}
+
+    DefinitionsBundleEntity:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        id: {$ref: "#/components/schemas/ID"}
+        name: {type: string, minLength: 1, maxLength: 128}
+
+    DefinitionsBundlePresence:
+      type: object
+      additionalProperties: false
+      required: [mode, environments]
+      properties:
+        mode: {type: string, enum: [all, none, explicit]}
+        environments:
+          type: array
+          maxItems: 50
+          uniqueItems: true
+          items: {type: string, minLength: 1, maxLength: 128}
+
+    DefinitionsBundleKey:
+      type: object
+      additionalProperties: false
+      required: [name, folder_path, classification, description, deprecated, deprecation_note, group, declaration, required_in, forbidden_in]
+      properties:
+        id: {$ref: "#/components/schemas/ID"}
+        name: {$ref: "#/components/schemas/KeyName"}
+        folder_path: {$ref: "#/components/schemas/KeyFolderPath"}
+        classification: {$ref: "#/components/schemas/KeyClassification"}
+        description: {type: string, maxLength: 4096}
+        deprecated: {type: boolean}
+        deprecation_note: {type: string, maxLength: 4096}
+        group: {type: string, maxLength: 128}
+        declaration: {$ref: "#/components/schemas/KeyDeclaration"}
+        required_in: {$ref: "#/components/schemas/DefinitionsBundlePresence"}
+        forbidden_in: {$ref: "#/components/schemas/DefinitionsBundlePresence"}
+
+    DefinitionsRename:
+      type: object
+      additionalProperties: false
+      required: [id, from, to]
+      properties:
+        id: {type: string}
+        from: {type: string}
+        to: {type: string}
+
+    DefinitionsKindDiff:
+      type: object
+      additionalProperties: false
+      required: [creates, updates, renames, deletes]
+      properties:
+        creates: {type: array, items: {type: string}}
+        updates: {type: array, items: {type: string}}
+        renames: {type: array, items: {$ref: "#/components/schemas/DefinitionsRename"}}
+        deletes: {type: array, items: {type: string}}
+
+    DefinitionsDiff:
+      type: object
+      additionalProperties: false
+      required: [environments, key_groups, keys, reveal_required]
+      properties:
+        environments: {$ref: "#/components/schemas/DefinitionsKindDiff"}
+        key_groups: {$ref: "#/components/schemas/DefinitionsKindDiff"}
+        keys: {$ref: "#/components/schemas/DefinitionsKindDiff"}
+        reveal_required: {type: array, items: {type: string}}
+
+    DefinitionsCheckResult:
+      type: object
+      additionalProperties: false
+      required: [state, current_revision, differences]
+      properties:
+        state: {type: string, enum: [equal, file_ahead, db_ahead, diverged]}
+        base_revision: {type: integer, format: int64, minimum: 0}
+        current_revision: {type: integer, format: int64, minimum: 0}
+        differences: {$ref: "#/components/schemas/DefinitionsDiff"}
+
+    DefinitionsKeyDeletion:
+      type: object
+      additionalProperties: false
+      required: [name, live_in]
+      properties:
+        name: {type: string}
+        live_in: {type: array, items: {type: string}}
+
+    DefinitionsEnvironmentDeletion:
+      type: object
+      additionalProperties: false
+      required: [name, occurrences]
+      properties:
+        name: {type: string}
+        occurrences: {type: integer, format: int64, minimum: 0}
+
+    DefinitionsPlanDiff:
+      type: object
+      additionalProperties: false
+      required: [environments, key_groups, keys, key_deletions, env_deletions, reveal_required]
+      properties:
+        environments: {$ref: "#/components/schemas/DefinitionsKindDiff"}
+        key_groups: {$ref: "#/components/schemas/DefinitionsKindDiff"}
+        keys: {$ref: "#/components/schemas/DefinitionsKindDiff"}
+        key_deletions: {type: array, items: {$ref: "#/components/schemas/DefinitionsKeyDeletion"}}
+        env_deletions: {type: array, items: {$ref: "#/components/schemas/DefinitionsEnvironmentDeletion"}}
+        reveal_required: {type: array, items: {type: string}}
+
+    DefinitionsPlan:
+      type: object
+      additionalProperties: false
+      required: [id, digest, current_revision, additive, expires_at, protected_environments, diff, deletions_present, reveal_required]
+      properties:
+        id: {$ref: "#/components/schemas/ID"}
+        digest: {type: string, minLength: 64, maxLength: 64, pattern: "^[0-9a-f]{64}$"}
+        base_revision: {type: integer, format: int64, minimum: 0}
+        current_revision: {type: integer, format: int64, minimum: 0}
+        additive: {type: boolean}
+        expires_at: {$ref: "#/components/schemas/Timestamp"}
+        protected_environments: {type: array, items: {type: string}}
+        diff: {$ref: "#/components/schemas/DefinitionsPlanDiff"}
+        deletions_present: {type: boolean}
+        reveal_required: {type: array, items: {type: string}}
+
+    DefinitionsPlanResponse:
+      type: object
+      additionalProperties: false
+      required: [plan]
+      properties:
+        plan: {$ref: "#/components/schemas/DefinitionsPlan"}
+
+    ApplyDefinitionsPlanRequest:
+      type: object
+      additionalProperties: false
+      required: [allow_delete]
+      properties:
+        allow_delete: {type: boolean}
+        digest: {type: string, maxLength: 64}
+        commit: {type: string, maxLength: 256}
+        ref: {type: string, maxLength: 256}
+        actor: {type: string, maxLength: 256}
+
+    ApplyDefinitionsPlanResult:
+      type: object
+      additionalProperties: false
+      required: [revision, published, plan_id]
+      properties:
+        revision: {type: integer, format: int64, minimum: 0}
+        published: {type: array, items: {type: string}}
+        plan_id: {$ref: "#/components/schemas/ID"}
+
+    DefinitionsLastApply:
+      type: object
+      additionalProperties: false
+      required: [plan_id, applied_at, applied_by, revision]
+      properties:
+        plan_id: {$ref: "#/components/schemas/ID"}
+        applied_at: {$ref: "#/components/schemas/Timestamp"}
+        applied_by: {type: string}
+        commit: {type: string, maxLength: 256}
+        ref: {type: string, maxLength: 256}
+        actor: {type: string, maxLength: 256}
+        revision: {type: integer, format: int64, minimum: 0}
+
+    DefinitionsSettings:
+      type: object
+      additionalProperties: false
+      required: [definitions_source]
+      properties:
+        definitions_source: {type: string, enum: [db, git]}
+        last_apply: {$ref: "#/components/schemas/DefinitionsLastApply"}
+
+    SetDefinitionsSettingsRequest:
+      type: object
+      additionalProperties: false
+      required: [definitions_source]
+      properties:
+        definitions_source: {type: string, enum: [db, git]}
 
     Environment:
       type: object

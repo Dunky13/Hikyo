@@ -588,6 +588,69 @@ func (e CredentialLifetime) Valid() bool {
 	}
 }
 
+// Defines values for DefinitionsBundlePresenceMode.
+const (
+	DefinitionsBundlePresenceModeAll      DefinitionsBundlePresenceMode = "all"
+	DefinitionsBundlePresenceModeExplicit DefinitionsBundlePresenceMode = "explicit"
+	DefinitionsBundlePresenceModeNone     DefinitionsBundlePresenceMode = "none"
+)
+
+// Valid indicates whether the value is a known member of the DefinitionsBundlePresenceMode enum.
+func (e DefinitionsBundlePresenceMode) Valid() bool {
+	switch e {
+	case DefinitionsBundlePresenceModeAll:
+		return true
+	case DefinitionsBundlePresenceModeExplicit:
+		return true
+	case DefinitionsBundlePresenceModeNone:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DefinitionsCheckResultState.
+const (
+	DbAhead   DefinitionsCheckResultState = "db_ahead"
+	Diverged  DefinitionsCheckResultState = "diverged"
+	Equal     DefinitionsCheckResultState = "equal"
+	FileAhead DefinitionsCheckResultState = "file_ahead"
+)
+
+// Valid indicates whether the value is a known member of the DefinitionsCheckResultState enum.
+func (e DefinitionsCheckResultState) Valid() bool {
+	switch e {
+	case DbAhead:
+		return true
+	case Diverged:
+		return true
+	case Equal:
+		return true
+	case FileAhead:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DefinitionsSettingsDefinitionsSource.
+const (
+	DefinitionsSettingsDefinitionsSourceDb  DefinitionsSettingsDefinitionsSource = "db"
+	DefinitionsSettingsDefinitionsSourceGit DefinitionsSettingsDefinitionsSource = "git"
+)
+
+// Valid indicates whether the value is a known member of the DefinitionsSettingsDefinitionsSource enum.
+func (e DefinitionsSettingsDefinitionsSource) Valid() bool {
+	switch e {
+	case DefinitionsSettingsDefinitionsSourceDb:
+		return true
+	case DefinitionsSettingsDefinitionsSourceGit:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DeliveredKeyPresence.
 const (
 	DeliveredKeyPresenceForbidden DeliveredKeyPresence = "forbidden"
@@ -1350,6 +1413,24 @@ func (e ServiceAccountKind) Valid() bool {
 	}
 }
 
+// Defines values for SetDefinitionsSettingsRequestDefinitionsSource.
+const (
+	SetDefinitionsSettingsRequestDefinitionsSourceDb  SetDefinitionsSettingsRequestDefinitionsSource = "db"
+	SetDefinitionsSettingsRequestDefinitionsSourceGit SetDefinitionsSettingsRequestDefinitionsSource = "git"
+)
+
+// Valid indicates whether the value is a known member of the SetDefinitionsSettingsRequestDefinitionsSource enum.
+func (e SetDefinitionsSettingsRequestDefinitionsSource) Valid() bool {
+	switch e {
+	case SetDefinitionsSettingsRequestDefinitionsSourceDb:
+		return true
+	case SetDefinitionsSettingsRequestDefinitionsSourceGit:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for StartWorkspaceHandoffRequestPurpose.
 const (
 	Establishment StartWorkspaceHandoffRequestPurpose = "establishment"
@@ -1850,6 +1931,23 @@ type AffectedCredential struct {
 
 // AffectedCredentialReason defines model for AffectedCredential.Reason.
 type AffectedCredentialReason string
+
+// ApplyDefinitionsPlanRequest defines model for ApplyDefinitionsPlanRequest.
+type ApplyDefinitionsPlanRequest struct {
+	Actor       *string `json:"actor,omitempty"`
+	AllowDelete bool    `json:"allow_delete"`
+	Commit      *string `json:"commit,omitempty"`
+	Digest      *string `json:"digest,omitempty"`
+	Ref         *string `json:"ref,omitempty"`
+}
+
+// ApplyDefinitionsPlanResult defines model for ApplyDefinitionsPlanResult.
+type ApplyDefinitionsPlanResult struct {
+	// PlanId A prefixed UUIDv7, e.g. `org_0198…`.
+	PlanId    ID       `json:"plan_id"`
+	Published []string `json:"published"`
+	Revision  int64    `json:"revision"`
+}
 
 // ApplyTemplateRequest defines model for ApplyTemplateRequest.
 type ApplyTemplateRequest struct {
@@ -2399,6 +2497,166 @@ type DeclareValuesRequest struct {
 	Key   KeyName `json:"key"`
 	Value string  `json:"value"`
 }
+
+// DefinitionsBundle defines model for DefinitionsBundle.
+type DefinitionsBundle = json.RawMessage
+
+// DefinitionsBundleEntity defines model for DefinitionsBundleEntity.
+type DefinitionsBundleEntity struct {
+	// Id A prefixed UUIDv7, e.g. `org_0198…`.
+	Id   *ID    `json:"id,omitempty"`
+	Name string `json:"name"`
+}
+
+// DefinitionsBundleKey defines model for DefinitionsBundleKey.
+type DefinitionsBundleKey struct {
+	// Classification Classification IS the sensitivity boundary. A matrix row is uniformly
+	// secret or config; it changes only through the reclassification
+	// ceremony. Closed, deliberately: a third value would be a third
+	// disclosure regime.
+	Classification KeyClassification `json:"classification"`
+
+	// Declaration Exactly one of `rule` or `any_of`. `any_of` is a bounded union whose
+	// value is valid if it satisfies AT LEAST ONE alternative - deliberately
+	// not `oneOf`, whose JSON Schema meaning is exactly-one, because two
+	// meanings for one word inside one product is a trap. Alternatives may
+	// not nest.
+	Declaration     KeyDeclaration `json:"declaration"`
+	Deprecated      bool           `json:"deprecated"`
+	DeprecationNote string         `json:"deprecation_note"`
+	Description     string         `json:"description"`
+
+	// FolderPath The key's namespace within the project. Organizational only: a plain
+	// slash-separated path, empty for the catalogue root. It is a PATH, not a
+	// folder reference - no folder row need exist for it.
+	FolderPath  KeyFolderPath             `json:"folder_path"`
+	ForbiddenIn DefinitionsBundlePresence `json:"forbidden_in"`
+	Group       string                    `json:"group"`
+
+	// Id A prefixed UUIDv7, e.g. `org_0198…`.
+	Id *ID `json:"id,omitempty"`
+
+	// Name The canonical key grammar: uppercase ASCII, digits and underscore, no
+	// leading digit. It is the environment-variable-safe grammar every
+	// delivery surface assumes - an execve environment block, a Kubernetes
+	// Secret data key, an adapter effective name - so it is a delivery
+	// constraint, not a style preference. `maxLength` counts code points
+	// here and bytes in the service; the grammar is ASCII, so they agree.
+	Name       KeyName                   `json:"name"`
+	RequiredIn DefinitionsBundlePresence `json:"required_in"`
+}
+
+// DefinitionsBundlePresence defines model for DefinitionsBundlePresence.
+type DefinitionsBundlePresence struct {
+	Environments []string                      `json:"environments"`
+	Mode         DefinitionsBundlePresenceMode `json:"mode"`
+}
+
+// DefinitionsBundlePresenceMode defines model for DefinitionsBundlePresence.Mode.
+type DefinitionsBundlePresenceMode string
+
+// DefinitionsCheckResult defines model for DefinitionsCheckResult.
+type DefinitionsCheckResult struct {
+	BaseRevision    *int64                      `json:"base_revision,omitempty"`
+	CurrentRevision int64                       `json:"current_revision"`
+	Differences     DefinitionsDiff             `json:"differences"`
+	State           DefinitionsCheckResultState `json:"state"`
+}
+
+// DefinitionsCheckResultState defines model for DefinitionsCheckResult.State.
+type DefinitionsCheckResultState string
+
+// DefinitionsDiff defines model for DefinitionsDiff.
+type DefinitionsDiff struct {
+	Environments   DefinitionsKindDiff `json:"environments"`
+	KeyGroups      DefinitionsKindDiff `json:"key_groups"`
+	Keys           DefinitionsKindDiff `json:"keys"`
+	RevealRequired []string            `json:"reveal_required"`
+}
+
+// DefinitionsEnvironmentDeletion defines model for DefinitionsEnvironmentDeletion.
+type DefinitionsEnvironmentDeletion struct {
+	Name        string `json:"name"`
+	Occurrences int64  `json:"occurrences"`
+}
+
+// DefinitionsKeyDeletion defines model for DefinitionsKeyDeletion.
+type DefinitionsKeyDeletion struct {
+	LiveIn []string `json:"live_in"`
+	Name   string   `json:"name"`
+}
+
+// DefinitionsKindDiff defines model for DefinitionsKindDiff.
+type DefinitionsKindDiff struct {
+	Creates []string            `json:"creates"`
+	Deletes []string            `json:"deletes"`
+	Renames []DefinitionsRename `json:"renames"`
+	Updates []string            `json:"updates"`
+}
+
+// DefinitionsLastApply defines model for DefinitionsLastApply.
+type DefinitionsLastApply struct {
+	Actor *string `json:"actor,omitempty"`
+
+	// AppliedAt RFC 3339 UTC, microsecond precision.
+	AppliedAt Timestamp `json:"applied_at"`
+	AppliedBy string    `json:"applied_by"`
+	Commit    *string   `json:"commit,omitempty"`
+
+	// PlanId A prefixed UUIDv7, e.g. `org_0198…`.
+	PlanId   ID      `json:"plan_id"`
+	Ref      *string `json:"ref,omitempty"`
+	Revision int64   `json:"revision"`
+}
+
+// DefinitionsPlan defines model for DefinitionsPlan.
+type DefinitionsPlan struct {
+	Additive         bool                `json:"additive"`
+	BaseRevision     *int64              `json:"base_revision,omitempty"`
+	CurrentRevision  int64               `json:"current_revision"`
+	DeletionsPresent bool                `json:"deletions_present"`
+	Diff             DefinitionsPlanDiff `json:"diff"`
+	Digest           string              `json:"digest"`
+
+	// ExpiresAt RFC 3339 UTC, microsecond precision.
+	ExpiresAt Timestamp `json:"expires_at"`
+
+	// Id A prefixed UUIDv7, e.g. `org_0198…`.
+	Id                    ID       `json:"id"`
+	ProtectedEnvironments []string `json:"protected_environments"`
+	RevealRequired        []string `json:"reveal_required"`
+}
+
+// DefinitionsPlanDiff defines model for DefinitionsPlanDiff.
+type DefinitionsPlanDiff struct {
+	EnvDeletions   []DefinitionsEnvironmentDeletion `json:"env_deletions"`
+	Environments   DefinitionsKindDiff              `json:"environments"`
+	KeyDeletions   []DefinitionsKeyDeletion         `json:"key_deletions"`
+	KeyGroups      DefinitionsKindDiff              `json:"key_groups"`
+	Keys           DefinitionsKindDiff              `json:"keys"`
+	RevealRequired []string                         `json:"reveal_required"`
+}
+
+// DefinitionsPlanResponse defines model for DefinitionsPlanResponse.
+type DefinitionsPlanResponse struct {
+	Plan DefinitionsPlan `json:"plan"`
+}
+
+// DefinitionsRename defines model for DefinitionsRename.
+type DefinitionsRename struct {
+	From string `json:"from"`
+	Id   string `json:"id"`
+	To   string `json:"to"`
+}
+
+// DefinitionsSettings defines model for DefinitionsSettings.
+type DefinitionsSettings struct {
+	DefinitionsSource DefinitionsSettingsDefinitionsSource `json:"definitions_source"`
+	LastApply         *DefinitionsLastApply                `json:"last_apply,omitempty"`
+}
+
+// DefinitionsSettingsDefinitionsSource defines model for DefinitionsSettings.DefinitionsSource.
+type DefinitionsSettingsDefinitionsSource string
 
 // DeliveredKey One key as the machine surface delivers it. `value` is present IFF the
 // plaintext was actually delivered to this caller; its absence means
@@ -4803,6 +5061,14 @@ type SetCredentialPolicyRequest struct {
 	MaxLiveCredentials       int   `json:"max_live_credentials"`
 }
 
+// SetDefinitionsSettingsRequest defines model for SetDefinitionsSettingsRequest.
+type SetDefinitionsSettingsRequest struct {
+	DefinitionsSource SetDefinitionsSettingsRequestDefinitionsSource `json:"definitions_source"`
+}
+
+// SetDefinitionsSettingsRequestDefinitionsSource defines model for SetDefinitionsSettingsRequest.DefinitionsSource.
+type SetDefinitionsSettingsRequestDefinitionsSource string
+
 // SetKeyGroupRequest defines model for SetKeyGroupRequest.
 type SetKeyGroupRequest struct {
 	// GroupId The group to join, or empty to leave every group.
@@ -5351,6 +5617,9 @@ type ConnectionID = ID
 // CredentialID A prefixed UUIDv7, e.g. `org_0198…`.
 type CredentialID = ID
 
+// DefinitionsPlanID A prefixed UUIDv7, e.g. `org_0198…`.
+type DefinitionsPlanID = ID
+
 // DeliveryAcknowledgedKeys defines model for DeliveryAcknowledgedKeys.
 type DeliveryAcknowledgedKeys = []KeyName
 
@@ -5519,6 +5788,11 @@ type ShowAdapterTargetParamsFormat string
 // DeleteAdapterParams defines parameters for DeleteAdapter.
 type DeleteAdapterParams struct {
 	KeepRemote *bool `form:"keep_remote,omitempty" json:"keep_remote,omitempty"`
+}
+
+// ExportDefinitionsParams defines parameters for ExportDefinitions.
+type ExportDefinitionsParams struct {
+	Portable *bool `form:"portable,omitempty" json:"portable,omitempty"`
 }
 
 // FetchDeliveryParams defines parameters for FetchDelivery.
@@ -5829,6 +6103,18 @@ type SetAdapterCredentialJSONRequestBody = SetAdapterCredentialRequest
 
 // AddAdapterTargetJSONRequestBody defines body for AddAdapterTarget for application/json ContentType.
 type AddAdapterTargetJSONRequestBody = AdapterTargetInput
+
+// CheckDefinitionsJSONRequestBody defines body for CheckDefinitions for application/json ContentType.
+type CheckDefinitionsJSONRequestBody = DefinitionsBundle
+
+// CreateDefinitionsPlanJSONRequestBody defines body for CreateDefinitionsPlan for application/json ContentType.
+type CreateDefinitionsPlanJSONRequestBody = DefinitionsBundle
+
+// ApplyDefinitionsPlanJSONRequestBody defines body for ApplyDefinitionsPlan for application/json ContentType.
+type ApplyDefinitionsPlanJSONRequestBody = ApplyDefinitionsPlanRequest
+
+// SetDefinitionsSettingsJSONRequestBody defines body for SetDefinitionsSettings for application/json ContentType.
+type SetDefinitionsSettingsJSONRequestBody = SetDefinitionsSettingsRequest
 
 // CreateEnvironmentJSONRequestBody defines body for CreateEnvironment for application/json ContentType.
 type CreateEnvironmentJSONRequestBody = CreateEnvironmentRequest
@@ -6389,6 +6675,27 @@ type ServerInterface interface {
 	// AddAdapterTarget Add a tested target and atomically reassign adapter authority.
 	// (POST /api/v1/orgs/{org}/projects/{project}/adapters/{adapter}/targets)
 	AddAdapterTarget(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, adapter AdapterID)
+	// CheckDefinitions Compare a definitions bundle with current project state.
+	// (POST /api/v1/orgs/{org}/projects/{project}/definitions/check)
+	CheckDefinitions(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID)
+	// ExportDefinitions Export the project's canonical definitions bundle.
+	// (GET /api/v1/orgs/{org}/projects/{project}/definitions/export)
+	ExportDefinitions(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, params ExportDefinitionsParams)
+	// CreateDefinitionsPlan Persist an immutable definitions impact plan.
+	// (POST /api/v1/orgs/{org}/projects/{project}/definitions/plans)
+	CreateDefinitionsPlan(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID)
+	// GetDefinitionsPlan Read an immutable definitions impact plan.
+	// (GET /api/v1/orgs/{org}/projects/{project}/definitions/plans/{plan})
+	GetDefinitionsPlan(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, plan DefinitionsPlanID)
+	// ApplyDefinitionsPlan Atomically apply a pinned definitions plan.
+	// (POST /api/v1/orgs/{org}/projects/{project}/definitions/plans/{plan}/apply)
+	ApplyDefinitionsPlan(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, plan DefinitionsPlanID)
+	// GetDefinitionsSettings Read definitions governance settings and last-apply provenance.
+	// (GET /api/v1/orgs/{org}/projects/{project}/definitions/settings)
+	GetDefinitionsSettings(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID)
+	// SetDefinitionsSettings Select database- or Git-governed definitions.
+	// (PUT /api/v1/orgs/{org}/projects/{project}/definitions/settings)
+	SetDefinitionsSettings(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID)
 	// ListEnvironments List the project's environments, in display order.
 	// (GET /api/v1/orgs/{org}/projects/{project}/environments)
 	ListEnvironments(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID)
@@ -7391,6 +7698,48 @@ func (_ Unimplemented) ListAdapterTargets(w http.ResponseWriter, r *http.Request
 // AddAdapterTarget Add a tested target and atomically reassign adapter authority.
 // (POST /api/v1/orgs/{org}/projects/{project}/adapters/{adapter}/targets)
 func (_ Unimplemented) AddAdapterTarget(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, adapter AdapterID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CheckDefinitions Compare a definitions bundle with current project state.
+// (POST /api/v1/orgs/{org}/projects/{project}/definitions/check)
+func (_ Unimplemented) CheckDefinitions(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ExportDefinitions Export the project's canonical definitions bundle.
+// (GET /api/v1/orgs/{org}/projects/{project}/definitions/export)
+func (_ Unimplemented) ExportDefinitions(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, params ExportDefinitionsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateDefinitionsPlan Persist an immutable definitions impact plan.
+// (POST /api/v1/orgs/{org}/projects/{project}/definitions/plans)
+func (_ Unimplemented) CreateDefinitionsPlan(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetDefinitionsPlan Read an immutable definitions impact plan.
+// (GET /api/v1/orgs/{org}/projects/{project}/definitions/plans/{plan})
+func (_ Unimplemented) GetDefinitionsPlan(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, plan DefinitionsPlanID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ApplyDefinitionsPlan Atomically apply a pinned definitions plan.
+// (POST /api/v1/orgs/{org}/projects/{project}/definitions/plans/{plan}/apply)
+func (_ Unimplemented) ApplyDefinitionsPlan(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, plan DefinitionsPlanID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetDefinitionsSettings Read definitions governance settings and last-apply provenance.
+// (GET /api/v1/orgs/{org}/projects/{project}/definitions/settings)
+func (_ Unimplemented) GetDefinitionsSettings(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetDefinitionsSettings Select database- or Git-governed definitions.
+// (PUT /api/v1/orgs/{org}/projects/{project}/definitions/settings)
+func (_ Unimplemented) SetDefinitionsSettings(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -10831,6 +11180,285 @@ func (siw *ServerInterfaceWrapper) AddAdapterTarget(w http.ResponseWriter, r *ht
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.AddAdapterTarget(w, r, org, project, adapter)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CheckDefinitions operation middleware
+func (siw *ServerInterfaceWrapper) CheckDefinitions(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CheckDefinitions(w, r, org, project)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ExportDefinitions operation middleware
+func (siw *ServerInterfaceWrapper) ExportDefinitions(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ExportDefinitionsParams
+
+	// ------------- Optional query parameter "portable" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "portable", r.URL.Query(), &params.Portable, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "portable"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "portable", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ExportDefinitions(w, r, org, project, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateDefinitionsPlan operation middleware
+func (siw *ServerInterfaceWrapper) CreateDefinitionsPlan(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateDefinitionsPlan(w, r, org, project)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetDefinitionsPlan operation middleware
+func (siw *ServerInterfaceWrapper) GetDefinitionsPlan(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "plan" -------------
+	var plan DefinitionsPlanID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "plan", chi.URLParam(r, "plan"), &plan, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "plan", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetDefinitionsPlan(w, r, org, project, plan)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ApplyDefinitionsPlan operation middleware
+func (siw *ServerInterfaceWrapper) ApplyDefinitionsPlan(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "plan" -------------
+	var plan DefinitionsPlanID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "plan", chi.URLParam(r, "plan"), &plan, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "plan", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ApplyDefinitionsPlan(w, r, org, project, plan)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetDefinitionsSettings operation middleware
+func (siw *ServerInterfaceWrapper) GetDefinitionsSettings(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetDefinitionsSettings(w, r, org, project)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetDefinitionsSettings operation middleware
+func (siw *ServerInterfaceWrapper) SetDefinitionsSettings(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetDefinitionsSettings(w, r, org, project)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -15660,6 +16288,27 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Put(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/environments/{environment}/settings", wrapper.SetEnvironmentSettings)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/definitions/export", wrapper.ExportDefinitions)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/definitions/check", wrapper.CheckDefinitions)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/definitions/plans", wrapper.CreateDefinitionsPlan)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/definitions/plans/{plan}", wrapper.GetDefinitionsPlan)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/definitions/plans/{plan}/apply", wrapper.ApplyDefinitionsPlan)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/definitions/settings", wrapper.GetDefinitionsSettings)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/definitions/settings", wrapper.SetDefinitionsSettings)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/keys", wrapper.ListKeys)
@@ -26758,6 +27407,657 @@ func (response AddAdapterTarget500JSONResponse) VisitAddAdapterTargetResponse(w 
 	return err
 }
 
+type CheckDefinitionsRequestObject struct {
+	Org     OrgID     `json:"org"`
+	Project ProjectID `json:"project"`
+	Body    *CheckDefinitionsJSONRequestBody
+}
+
+type CheckDefinitionsResponseObject interface {
+	VisitCheckDefinitionsResponse(w http.ResponseWriter) error
+}
+
+type CheckDefinitions200JSONResponse DefinitionsCheckResult
+
+func (response CheckDefinitions200JSONResponse) VisitCheckDefinitionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CheckDefinitions400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response CheckDefinitions400JSONResponse) VisitCheckDefinitionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CheckDefinitions401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CheckDefinitions401JSONResponse) VisitCheckDefinitionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CheckDefinitions404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response CheckDefinitions404JSONResponse) VisitCheckDefinitionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CheckDefinitions429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response CheckDefinitions429JSONResponse) VisitCheckDefinitionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CheckDefinitions500JSONResponse struct{ InternalJSONResponse }
+
+func (response CheckDefinitions500JSONResponse) VisitCheckDefinitionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExportDefinitionsRequestObject struct {
+	Org     OrgID     `json:"org"`
+	Project ProjectID `json:"project"`
+	Params  ExportDefinitionsParams
+}
+
+type ExportDefinitionsResponseObject interface {
+	VisitExportDefinitionsResponse(w http.ResponseWriter) error
+}
+
+type ExportDefinitions200JSONResponse DefinitionsBundle
+
+func (response ExportDefinitions200JSONResponse) VisitExportDefinitionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExportDefinitions401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ExportDefinitions401JSONResponse) VisitExportDefinitionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExportDefinitions404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ExportDefinitions404JSONResponse) VisitExportDefinitionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExportDefinitions429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ExportDefinitions429JSONResponse) VisitExportDefinitionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExportDefinitions500JSONResponse struct{ InternalJSONResponse }
+
+func (response ExportDefinitions500JSONResponse) VisitExportDefinitionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateDefinitionsPlanRequestObject struct {
+	Org     OrgID     `json:"org"`
+	Project ProjectID `json:"project"`
+	Body    *CreateDefinitionsPlanJSONRequestBody
+}
+
+type CreateDefinitionsPlanResponseObject interface {
+	VisitCreateDefinitionsPlanResponse(w http.ResponseWriter) error
+}
+
+type CreateDefinitionsPlan201JSONResponse DefinitionsPlanResponse
+
+func (response CreateDefinitionsPlan201JSONResponse) VisitCreateDefinitionsPlanResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateDefinitionsPlan400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response CreateDefinitionsPlan400JSONResponse) VisitCreateDefinitionsPlanResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateDefinitionsPlan401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CreateDefinitionsPlan401JSONResponse) VisitCreateDefinitionsPlanResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateDefinitionsPlan404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response CreateDefinitionsPlan404JSONResponse) VisitCreateDefinitionsPlanResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateDefinitionsPlan409JSONResponse struct{ ConflictJSONResponse }
+
+func (response CreateDefinitionsPlan409JSONResponse) VisitCreateDefinitionsPlanResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateDefinitionsPlan429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response CreateDefinitionsPlan429JSONResponse) VisitCreateDefinitionsPlanResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateDefinitionsPlan500JSONResponse struct{ InternalJSONResponse }
+
+func (response CreateDefinitionsPlan500JSONResponse) VisitCreateDefinitionsPlanResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetDefinitionsPlanRequestObject struct {
+	Org     OrgID             `json:"org"`
+	Project ProjectID         `json:"project"`
+	Plan    DefinitionsPlanID `json:"plan"`
+}
+
+type GetDefinitionsPlanResponseObject interface {
+	VisitGetDefinitionsPlanResponse(w http.ResponseWriter) error
+}
+
+type GetDefinitionsPlan200JSONResponse DefinitionsPlanResponse
+
+func (response GetDefinitionsPlan200JSONResponse) VisitGetDefinitionsPlanResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetDefinitionsPlan401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response GetDefinitionsPlan401JSONResponse) VisitGetDefinitionsPlanResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetDefinitionsPlan404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetDefinitionsPlan404JSONResponse) VisitGetDefinitionsPlanResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetDefinitionsPlan429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response GetDefinitionsPlan429JSONResponse) VisitGetDefinitionsPlanResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetDefinitionsPlan500JSONResponse struct{ InternalJSONResponse }
+
+func (response GetDefinitionsPlan500JSONResponse) VisitGetDefinitionsPlanResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyDefinitionsPlanRequestObject struct {
+	Org     OrgID             `json:"org"`
+	Project ProjectID         `json:"project"`
+	Plan    DefinitionsPlanID `json:"plan"`
+	Body    *ApplyDefinitionsPlanJSONRequestBody
+}
+
+type ApplyDefinitionsPlanResponseObject interface {
+	VisitApplyDefinitionsPlanResponse(w http.ResponseWriter) error
+}
+
+type ApplyDefinitionsPlan200JSONResponse ApplyDefinitionsPlanResult
+
+func (response ApplyDefinitionsPlan200JSONResponse) VisitApplyDefinitionsPlanResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyDefinitionsPlan400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response ApplyDefinitionsPlan400JSONResponse) VisitApplyDefinitionsPlanResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyDefinitionsPlan401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ApplyDefinitionsPlan401JSONResponse) VisitApplyDefinitionsPlanResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyDefinitionsPlan404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ApplyDefinitionsPlan404JSONResponse) VisitApplyDefinitionsPlanResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyDefinitionsPlan409JSONResponse struct{ ConflictJSONResponse }
+
+func (response ApplyDefinitionsPlan409JSONResponse) VisitApplyDefinitionsPlanResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyDefinitionsPlan429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ApplyDefinitionsPlan429JSONResponse) VisitApplyDefinitionsPlanResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyDefinitionsPlan500JSONResponse struct{ InternalJSONResponse }
+
+func (response ApplyDefinitionsPlan500JSONResponse) VisitApplyDefinitionsPlanResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetDefinitionsSettingsRequestObject struct {
+	Org     OrgID     `json:"org"`
+	Project ProjectID `json:"project"`
+}
+
+type GetDefinitionsSettingsResponseObject interface {
+	VisitGetDefinitionsSettingsResponse(w http.ResponseWriter) error
+}
+
+type GetDefinitionsSettings200JSONResponse DefinitionsSettings
+
+func (response GetDefinitionsSettings200JSONResponse) VisitGetDefinitionsSettingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetDefinitionsSettings401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response GetDefinitionsSettings401JSONResponse) VisitGetDefinitionsSettingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetDefinitionsSettings404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetDefinitionsSettings404JSONResponse) VisitGetDefinitionsSettingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetDefinitionsSettings429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response GetDefinitionsSettings429JSONResponse) VisitGetDefinitionsSettingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetDefinitionsSettings500JSONResponse struct{ InternalJSONResponse }
+
+func (response GetDefinitionsSettings500JSONResponse) VisitGetDefinitionsSettingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetDefinitionsSettingsRequestObject struct {
+	Org     OrgID     `json:"org"`
+	Project ProjectID `json:"project"`
+	Body    *SetDefinitionsSettingsJSONRequestBody
+}
+
+type SetDefinitionsSettingsResponseObject interface {
+	VisitSetDefinitionsSettingsResponse(w http.ResponseWriter) error
+}
+
+type SetDefinitionsSettings200JSONResponse DefinitionsSettings
+
+func (response SetDefinitionsSettings200JSONResponse) VisitSetDefinitionsSettingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetDefinitionsSettings400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response SetDefinitionsSettings400JSONResponse) VisitSetDefinitionsSettingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetDefinitionsSettings401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response SetDefinitionsSettings401JSONResponse) VisitSetDefinitionsSettingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetDefinitionsSettings404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response SetDefinitionsSettings404JSONResponse) VisitSetDefinitionsSettingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetDefinitionsSettings429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response SetDefinitionsSettings429JSONResponse) VisitSetDefinitionsSettingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetDefinitionsSettings500JSONResponse struct{ InternalJSONResponse }
+
+func (response SetDefinitionsSettings500JSONResponse) VisitSetDefinitionsSettingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListEnvironmentsRequestObject struct {
 	Org     OrgID     `json:"org"`
 	Project ProjectID `json:"project"`
@@ -37378,6 +38678,27 @@ type StrictServerInterface interface {
 	// AddAdapterTarget Add a tested target and atomically reassign adapter authority.
 	// (POST /api/v1/orgs/{org}/projects/{project}/adapters/{adapter}/targets)
 	AddAdapterTarget(ctx context.Context, request AddAdapterTargetRequestObject) (AddAdapterTargetResponseObject, error)
+	// CheckDefinitions Compare a definitions bundle with current project state.
+	// (POST /api/v1/orgs/{org}/projects/{project}/definitions/check)
+	CheckDefinitions(ctx context.Context, request CheckDefinitionsRequestObject) (CheckDefinitionsResponseObject, error)
+	// ExportDefinitions Export the project's canonical definitions bundle.
+	// (GET /api/v1/orgs/{org}/projects/{project}/definitions/export)
+	ExportDefinitions(ctx context.Context, request ExportDefinitionsRequestObject) (ExportDefinitionsResponseObject, error)
+	// CreateDefinitionsPlan Persist an immutable definitions impact plan.
+	// (POST /api/v1/orgs/{org}/projects/{project}/definitions/plans)
+	CreateDefinitionsPlan(ctx context.Context, request CreateDefinitionsPlanRequestObject) (CreateDefinitionsPlanResponseObject, error)
+	// GetDefinitionsPlan Read an immutable definitions impact plan.
+	// (GET /api/v1/orgs/{org}/projects/{project}/definitions/plans/{plan})
+	GetDefinitionsPlan(ctx context.Context, request GetDefinitionsPlanRequestObject) (GetDefinitionsPlanResponseObject, error)
+	// ApplyDefinitionsPlan Atomically apply a pinned definitions plan.
+	// (POST /api/v1/orgs/{org}/projects/{project}/definitions/plans/{plan}/apply)
+	ApplyDefinitionsPlan(ctx context.Context, request ApplyDefinitionsPlanRequestObject) (ApplyDefinitionsPlanResponseObject, error)
+	// GetDefinitionsSettings Read definitions governance settings and last-apply provenance.
+	// (GET /api/v1/orgs/{org}/projects/{project}/definitions/settings)
+	GetDefinitionsSettings(ctx context.Context, request GetDefinitionsSettingsRequestObject) (GetDefinitionsSettingsResponseObject, error)
+	// SetDefinitionsSettings Select database- or Git-governed definitions.
+	// (PUT /api/v1/orgs/{org}/projects/{project}/definitions/settings)
+	SetDefinitionsSettings(ctx context.Context, request SetDefinitionsSettingsRequestObject) (SetDefinitionsSettingsResponseObject, error)
 	// ListEnvironments List the project's environments, in display order.
 	// (GET /api/v1/orgs/{org}/projects/{project}/environments)
 	ListEnvironments(ctx context.Context, request ListEnvironmentsRequestObject) (ListEnvironmentsResponseObject, error)
@@ -41007,6 +42328,226 @@ func (sh *strictHandler) AddAdapterTarget(w http.ResponseWriter, r *http.Request
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(AddAdapterTargetResponseObject); ok {
 		if err := validResponse.VisitAddAdapterTargetResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CheckDefinitions operation middleware
+func (sh *strictHandler) CheckDefinitions(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
+	var request CheckDefinitionsRequestObject
+
+	request.Org = org
+	request.Project = project
+
+	var body CheckDefinitionsJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CheckDefinitions(ctx, request.(CheckDefinitionsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CheckDefinitions")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CheckDefinitionsResponseObject); ok {
+		if err := validResponse.VisitCheckDefinitionsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ExportDefinitions operation middleware
+func (sh *strictHandler) ExportDefinitions(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, params ExportDefinitionsParams) {
+	var request ExportDefinitionsRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ExportDefinitions(ctx, request.(ExportDefinitionsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ExportDefinitions")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ExportDefinitionsResponseObject); ok {
+		if err := validResponse.VisitExportDefinitionsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateDefinitionsPlan operation middleware
+func (sh *strictHandler) CreateDefinitionsPlan(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
+	var request CreateDefinitionsPlanRequestObject
+
+	request.Org = org
+	request.Project = project
+
+	var body CreateDefinitionsPlanJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateDefinitionsPlan(ctx, request.(CreateDefinitionsPlanRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateDefinitionsPlan")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateDefinitionsPlanResponseObject); ok {
+		if err := validResponse.VisitCreateDefinitionsPlanResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetDefinitionsPlan operation middleware
+func (sh *strictHandler) GetDefinitionsPlan(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, plan DefinitionsPlanID) {
+	var request GetDefinitionsPlanRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Plan = plan
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetDefinitionsPlan(ctx, request.(GetDefinitionsPlanRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetDefinitionsPlan")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetDefinitionsPlanResponseObject); ok {
+		if err := validResponse.VisitGetDefinitionsPlanResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ApplyDefinitionsPlan operation middleware
+func (sh *strictHandler) ApplyDefinitionsPlan(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, plan DefinitionsPlanID) {
+	var request ApplyDefinitionsPlanRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Plan = plan
+
+	var body ApplyDefinitionsPlanJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ApplyDefinitionsPlan(ctx, request.(ApplyDefinitionsPlanRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ApplyDefinitionsPlan")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ApplyDefinitionsPlanResponseObject); ok {
+		if err := validResponse.VisitApplyDefinitionsPlanResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetDefinitionsSettings operation middleware
+func (sh *strictHandler) GetDefinitionsSettings(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
+	var request GetDefinitionsSettingsRequestObject
+
+	request.Org = org
+	request.Project = project
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetDefinitionsSettings(ctx, request.(GetDefinitionsSettingsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetDefinitionsSettings")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetDefinitionsSettingsResponseObject); ok {
+		if err := validResponse.VisitGetDefinitionsSettingsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetDefinitionsSettings operation middleware
+func (sh *strictHandler) SetDefinitionsSettings(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
+	var request SetDefinitionsSettingsRequestObject
+
+	request.Org = org
+	request.Project = project
+
+	var body SetDefinitionsSettingsJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetDefinitionsSettings(ctx, request.(SetDefinitionsSettingsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetDefinitionsSettings")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetDefinitionsSettingsResponseObject); ok {
+		if err := validResponse.VisitSetDefinitionsSettingsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

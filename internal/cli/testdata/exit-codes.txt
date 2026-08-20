@@ -72,3 +72,9 @@ hikyo values import stray --instance unknown-ref -> 2 usage
 hikyo import --mapping m.json --file x.yaml --project prj_x -> 2 usage
 hikyo import --mapping m.json --file x.yaml --environment env_x -> 2 usage
 hikyo values import --file v.json -o yaml --instance unknown-ref -> 2 usage
+hikyo definitions -> 2 usage
+hikyo definitions warp -> 2 usage
+hikyo definitions check -> 2 usage
+hikyo definitions plan -> 2 usage
+hikyo definitions apply -> 2 usage
+hikyo definitions export stray -> 2 usage

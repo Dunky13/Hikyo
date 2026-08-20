@@ -480,6 +480,9 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 		// binding, credential, user, group, mapping, attention and the lockout
 		// pair — before the trails are read.
 		runSCIMLifecycle(t, db)
+		// Definitions Git flow (#70): plan/apply, stale/deletion/additive
+		// refusals, and the source-mode setting all traverse the real service.
+		runDefinitionsAuditLifecycle(t, db)
 		// Deployment adapters (#65): configuration, conflict adoption, outbox
 		// converge/abort and teardown all traverse their real service/runtime
 		// boundaries before the registry-emitter closure check.

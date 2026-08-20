@@ -1,0 +1,4 @@
+FIELD      VALUE
+plan_id    pln_70
+revision   10
+published  production,staging

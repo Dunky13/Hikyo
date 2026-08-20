@@ -18,6 +18,7 @@ import (
 	"github.com/Hikyo-Org/hikyo/api/apigen"
 	"github.com/Hikyo-Org/hikyo/internal/admission"
 	"github.com/Hikyo-Org/hikyo/internal/crypto"
+	"github.com/Hikyo-Org/hikyo/internal/definitions"
 	"github.com/Hikyo-Org/hikyo/internal/domain"
 	"github.com/Hikyo-Org/hikyo/internal/server"
 	"github.com/Hikyo-Org/hikyo/internal/service"
@@ -799,6 +800,151 @@ func TestBrowserPasskeyLoginTokenOnlyOnCookie(t *testing.T) {
 // stub that "does nothing" is a stub that behaves correctly.
 type stubHierarchy struct {
 	err error
+}
+
+type stubDefinitions struct {
+	err      error
+	seenBody *[]byte
+}
+
+func (s stubDefinitions) Export(context.Context, service.Actor, domain.Scope, bool) ([]byte, error) {
+	return []byte(`{"format_version":1,"base_revision":7,"environments":[],"key_groups":[],"keys":[]}`), s.err
+}
+
+func (s stubDefinitions) Check(_ context.Context, _ service.Actor, _ domain.Scope, raw []byte) (service.CheckResult, error) {
+	if s.seenBody != nil {
+		*s.seenBody = append((*s.seenBody)[:0], raw...)
+	}
+	return service.CheckResult{State: "equal", CurrentRevision: 7, Differences: emptyDefinitionsDiff()}, s.err
+}
+
+func (s stubDefinitions) Plan(_ context.Context, _ service.Actor, _ domain.Scope, raw []byte) (service.PlanView, error) {
+	if s.seenBody != nil {
+		*s.seenBody = append((*s.seenBody)[:0], raw...)
+	}
+	return testDefinitionsPlan(), s.err
+}
+
+func (s stubDefinitions) GetPlan(context.Context, service.Actor, domain.Scope, string) (service.PlanView, error) {
+	return testDefinitionsPlan(), s.err
+}
+
+func (s stubDefinitions) Apply(context.Context, service.Actor, domain.Scope, string, service.ApplyOptions) (service.ApplyResult, error) {
+	return service.ApplyResult{Revision: 8, Published: []string{"production"}, PlanID: testDefinitionsPlanID}, s.err
+}
+
+func (s stubDefinitions) GetSettings(context.Context, service.Actor, domain.Scope) (service.DefinitionsSettings, error) {
+	return service.DefinitionsSettings{Source: "db"}, s.err
+}
+
+func (s stubDefinitions) SetSettings(context.Context, service.Actor, domain.Scope, string) (service.DefinitionsSettings, error) {
+	return service.DefinitionsSettings{Source: "git"}, s.err
+}
+
+const testDefinitionsPlanID = "dpl_00000000-0000-0000-0000-000000000001"
+
+func emptyDefinitionsKindDiff() definitions.KindDiff {
+	return definitions.KindDiff{Creates: []string{}, Updates: []string{}, Renames: []definitions.Rename{}, Deletes: []string{}}
+}
+
+func emptyDefinitionsDiff() definitions.Diff {
+	return definitions.Diff{
+		Environments: emptyDefinitionsKindDiff(), KeyGroups: emptyDefinitionsKindDiff(),
+		Keys: emptyDefinitionsKindDiff(), RevealRequired: []string{},
+	}
+}
+
+func testDefinitionsPlan() service.PlanView {
+	return service.PlanView{
+		ID: testDefinitionsPlanID, Digest: strings.Repeat("0", 64), CurrentRevision: 7,
+		Additive: true, ExpiresAt: time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC),
+		ProtectedEnvironments: []string{}, DeletionsPresent: false, RevealRequired: []string{},
+		Diff: service.PlanDiff{
+			Environments: emptyDefinitionsKindDiff(), KeyGroups: emptyDefinitionsKindDiff(),
+			Keys: emptyDefinitionsKindDiff(), KeyDeletions: []service.KeyDeletion{},
+			EnvDeletions: []service.EnvDeletion{}, RevealRequired: []string{},
+		},
+	}
+}
+
+func definitionsServer(t *testing.T, definitionsService server.DefinitionsService) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(server.New(stubReady{}, &server.API{
+		Auth: stubAuth{identity: liveIdentityFn}, Definitions: definitionsService, Version: "test",
+	}, nil))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestDefinitionsRoutesSatisfyContractAndPreserveRawBundle(t *testing.T) {
+	var seen []byte
+	srv := definitionsServer(t, stubDefinitions{seenBody: &seen})
+	base := api.PathPrefix + "/orgs/" + testOrgID + "/projects/" + testProjectID + "/definitions"
+	bundle := json.RawMessage(`{"format_version":1,"format_version":1,"environments":[],"key_groups":[],"keys":[]}`)
+
+	for _, tc := range []struct {
+		method string
+		path   string
+		body   any
+		status int
+	}{
+		{http.MethodGet, base + "/export?portable=false", nil, http.StatusOK},
+		{http.MethodPost, base + "/check", bundle, http.StatusOK},
+		{http.MethodPost, base + "/plans", bundle, http.StatusCreated},
+		{http.MethodGet, base + "/plans/" + testDefinitionsPlanID, nil, http.StatusOK},
+		{http.MethodPost, base + "/plans/" + testDefinitionsPlanID + "/apply", apigen.ApplyDefinitionsPlanRequest{AllowDelete: false}, http.StatusOK},
+		{http.MethodGet, base + "/settings", nil, http.StatusOK},
+		{http.MethodPut, base + "/settings", apigen.SetDefinitionsSettingsRequest{DefinitionsSource: "git"}, http.StatusOK},
+	} {
+		resp, payload := call(t, srv, tc.method, tc.path, "hik_1_cli_x", tc.body)
+		if resp.StatusCode != tc.status {
+			t.Fatalf("%s %s: status %d, want %d: %s", tc.method, tc.path, resp.StatusCode, tc.status, payload)
+		}
+	}
+	if !bytes.Equal(seen, bundle) {
+		t.Fatalf("bundle bytes changed before service parse:\n got %s\nwant %s", seen, bundle)
+	}
+	_, exported := call(t, srv, http.MethodGet, base+"/export", "hik_1_cli_x", nil)
+	if bytes.HasSuffix(exported, []byte("\n")) {
+		t.Fatalf("canonical export gained a transport newline: %q", exported)
+	}
+}
+
+func TestDefinitionsRefusalsAndPlanNonexistenceAreUniform(t *testing.T) {
+	base := api.PathPrefix + "/orgs/" + testOrgID + "/projects/" + testProjectID + "/definitions"
+	for _, tc := range []struct {
+		name   string
+		err    error
+		method string
+		path   string
+		body   any
+		status int
+	}{
+		{"invalid bundle", domain.ErrInvalid, http.MethodPost, base + "/check", json.RawMessage(`{}`), http.StatusBadRequest},
+		{"stale plan", domain.ErrConflict, http.MethodPost, base + "/plans", json.RawMessage(`{"format_version":1,"environments":[],"key_groups":[],"keys":[]}`), http.StatusConflict},
+		{"apply refused", domain.ErrConflict, http.MethodPost, base + "/plans/" + testDefinitionsPlanID + "/apply", apigen.ApplyDefinitionsPlanRequest{AllowDelete: false}, http.StatusConflict},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, payload := call(t, definitionsServer(t, stubDefinitions{err: tc.err}), tc.method, tc.path, "hik_1_cli_x", tc.body)
+			if resp.StatusCode != tc.status {
+				t.Fatalf("status %d, want %d: %s", resp.StatusCode, tc.status, payload)
+			}
+		})
+	}
+
+	missing := definitionsServer(t, stubDefinitions{err: domain.ErrNotFound})
+	refused := definitionsServer(t, stubDefinitions{err: fmt.Errorf("unauthorized scope: %w", domain.ErrNotFound)})
+	for _, suffix := range []string{"/plans/" + testDefinitionsPlanID, "/plans/" + testDefinitionsPlanID + "/apply"} {
+		method, body := http.MethodGet, any(nil)
+		if strings.HasSuffix(suffix, "/apply") {
+			method, body = http.MethodPost, apigen.ApplyDefinitionsPlanRequest{AllowDelete: false}
+		}
+		respA, bodyA := call(t, missing, method, base+suffix, "hik_1_cli_x", body)
+		respB, bodyB := call(t, refused, method, base+suffix, "hik_1_cli_x", body)
+		if respA.StatusCode != http.StatusNotFound || respB.StatusCode != http.StatusNotFound || !bytes.Equal(bodyA, bodyB) {
+			t.Fatalf("%s missing/refused differ: %d %s vs %d %s", suffix, respA.StatusCode, bodyA, respB.StatusCode, bodyB)
+		}
+	}
 }
 
 func (s stubHierarchy) outcome() error {

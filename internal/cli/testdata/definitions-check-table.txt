@@ -1,0 +1,6 @@
+FIELD               VALUE
+state               diverged
+base_revision       7
+current_revision    9
+environment create  preview
+key update          DATABASE_URL

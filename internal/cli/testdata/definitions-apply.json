@@ -1,0 +1,8 @@
+{
+  "plan_id": "pln_70",
+  "published": [
+    "production",
+    "staging"
+  ],
+  "revision": 10
+}

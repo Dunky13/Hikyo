@@ -365,6 +365,17 @@ var pinnedContractSurface = map[string]bool{
 	"PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/group":                                              true,
 	"PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/name":                                               true,
 
+	// Definitions Git flow (#70). Every route reads or writes this instance's
+	// own project state; provenance labels are data, never network locations,
+	// and no route fetches, relays, or forwards for the caller.
+	"GET /api/v1/orgs/{org}/projects/{project}/definitions/export":              true,
+	"POST /api/v1/orgs/{org}/projects/{project}/definitions/check":              true,
+	"POST /api/v1/orgs/{org}/projects/{project}/definitions/plans":              true,
+	"GET /api/v1/orgs/{org}/projects/{project}/definitions/plans/{plan}":        true,
+	"POST /api/v1/orgs/{org}/projects/{project}/definitions/plans/{plan}/apply": true,
+	"GET /api/v1/orgs/{org}/projects/{project}/definitions/settings":            true,
+	"PUT /api/v1/orgs/{org}/projects/{project}/definitions/settings":            true,
+
 	// OIDC federation and the delivery surface (#62). The issuer rows are THIS
 	// instance's own configuration; delivery returns this instance's stored
 	// snapshot, and offline reconciliation writes records into this instance's

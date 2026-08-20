@@ -11,6 +11,30 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countEnvironmentValues = `-- name: CountEnvironmentValues :one
+SELECT COUNT(*) FROM value_entries
+WHERE org_id = $1 AND project_id = $2
+  AND environment_id = $3
+`
+
+type CountEnvironmentValuesParams struct {
+	ChainOrgID     string
+	ChainProjectID string
+	EnvironmentID  string
+}
+
+// CountEnvironmentValues counts one environment's live occurrences under a
+// PROJECT proof — environment_id is an ordinary column, not a chain column, so
+// the definitions-apply path (project-scoped) can ask it of an environment it is
+// about to delete without an environment-addressed proof. Any count above zero
+// is the unconditional environment-delete refusal (#70, source-of-truth ADR).
+func (q *Queries) CountEnvironmentValues(ctx context.Context, arg CountEnvironmentValuesParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countEnvironmentValues, arg.ChainOrgID, arg.ChainProjectID, arg.EnvironmentID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const deleteValueEntriesForEnvironment = `-- name: DeleteValueEntriesForEnvironment :execrows
 DELETE FROM value_entries
 WHERE org_id = $1 AND project_id = $2
@@ -29,6 +53,31 @@ type DeleteValueEntriesForEnvironmentParams struct {
 // while they existed.
 func (q *Queries) DeleteValueEntriesForEnvironment(ctx context.Context, arg DeleteValueEntriesForEnvironmentParams) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteValueEntriesForEnvironment, arg.ChainOrgID, arg.ChainProjectID, arg.ChainEnvID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteValueEntriesForKey = `-- name: DeleteValueEntriesForKey :execrows
+DELETE FROM value_entries
+WHERE org_id = $1 AND project_id = $2
+  AND key_id = $3
+`
+
+type DeleteValueEntriesForKeyParams struct {
+	ChainOrgID     string
+	ChainProjectID string
+	KeyID          string
+}
+
+// DeleteValueEntriesForKey removes a key's live occurrences across every
+// environment under a PROJECT proof (key_id is an ordinary column) — the
+// definitions-apply key-delete path clears them so the composite foreign key
+// does not refuse the catalogue delete, exactly as an environment delete clears
+// its own set (#70).
+func (q *Queries) DeleteValueEntriesForKey(ctx context.Context, arg DeleteValueEntriesForKeyParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteValueEntriesForKey, arg.ChainOrgID, arg.ChainProjectID, arg.KeyID)
 	if err != nil {
 		return 0, err
 	}
