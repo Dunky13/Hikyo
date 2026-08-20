@@ -21,7 +21,8 @@ go build -o "$bin" ./cmd/hikyo
 port=47811
 origin="http://127.0.0.1:${port}"
 trace="$work/net.log"
-stracelog="$work/strace.err"
+# The per-syscall trace goes to strace's own -o file; strace's diagnostics AND
+# the server's slog (which writes "boot complete" to stderr) share serverlog.
 serverlog="$work/server.log"
 
 export HIKYO_STATE_DIR="$work/state"
@@ -38,7 +39,7 @@ fi
 # Trace TCP connect(2) AND UDP sendto/sendmsg(2): both are outbound paths, and a
 # UDP send needs no connect(), so tracing connect alone would miss it.
 setsid strace -f -e trace=connect,sendto,sendmsg -o "$trace" \
-	"$bin" server --dev --listen "127.0.0.1:${port}" >"$serverlog" 2>"$stracelog" &
+	"$bin" server --dev --listen "127.0.0.1:${port}" >"$serverlog" 2>&1 &
 child=$!
 pgid="$(ps -o pgid= "$child" | tr -d ' ')"
 
@@ -77,12 +78,12 @@ wait "$child" 2>/dev/null || true
 # proved nothing about egress and must not report a green result.
 if [ ! -f "$trace" ]; then
 	echo "no-egress: strace produced no trace file; egress was not instrumented"
-	cat "$stracelog" >&2 || true
+	sed -n '1,120p' "$serverlog" >&2 || true
 	exit 1
 fi
-if grep -qiE 'ptrace|could not attach|failed to' "$stracelog"; then
+if grep -qiE 'strace: (ptrace|could not attach|test_ptrace|failed)' "$serverlog"; then
 	echo "no-egress: strace reported an attach/trace error; instrumentation unreliable"
-	cat "$stracelog" >&2
+	sed -n '1,120p' "$serverlog" >&2
 	exit 1
 fi
 
