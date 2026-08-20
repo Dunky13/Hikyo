@@ -1,6 +1,6 @@
 # Pull-request orchestration must come from the base branch. This workflow
-# never executes PR-controlled workflow YAML, receives no secrets, and narrows
-# the automatic token to public-source read access.
+# never executes PR-controlled workflow YAML or receives secrets. Validation
+# stays read-only; reporting writes are isolated in a base-controlled job.
 name: trusted-ci
 
 on:
@@ -18,6 +18,94 @@ jobs:
     uses: ./.github/workflows/ci.yml
     permissions:
       contents: read
+
+  # Re-run each minimized input against trusted base code without write
+  # authority. Base failure = pre-existing issue; base pass/new target = PR.
+  classify-fuzz-findings:
+    if: ${{ always() && needs.validation.result == 'failure' }}
+    needs: validation
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      classification: ${{ steps.classify.outputs.classification }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Restore shared Go module cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+      - name: Download minimized fuzz reproducers
+        id: artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ARTIFACT_NAME: fuzz-reproducers-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          artifact_id=
+          attempt=1
+          while [ "$attempt" -le 5 ]; do
+            artifact_id=$(gh api \
+              "repos/$GH_REPO/actions/runs/${{ github.run_id }}/artifacts?per_page=100" \
+              --jq ".artifacts | map(select(.name == \"$ARTIFACT_NAME\" and .expired == false))[0].id // empty")
+            [ -z "$artifact_id" ] || break
+            [ "$attempt" -eq 5 ] || sleep 2
+            attempt=$((attempt + 1))
+          done
+          if [ -z "$artifact_id" ]; then
+            echo 'found=false' >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          archive="$RUNNER_TEMP/fuzz-reproducers.zip"
+          gh api "repos/$GH_REPO/actions/artifacts/$artifact_id/zip" >"$archive"
+          echo 'found=true' >>"$GITHUB_OUTPUT"
+          echo "archive=$archive" >>"$GITHUB_OUTPUT"
+      - name: Classify findings against trusted base
+        id: classify
+        if: steps.artifact.outputs.found == 'true'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          classification=$(./scripts/ci/classify-fuzz-findings.sh \
+            "${{ steps.artifact.outputs.archive }}" "$BASE_SHA" "$GITHUB_WORKSPACE")
+          echo "classification=$classification" >>"$GITHUB_OUTPUT"
+
+  # Validation executes the untrusted PR head without write authority. Only
+  # this base-controlled job receives issue/PR permission, and its reporter
+  # accepts strict Go corpus paths from the fuzz artifact before publishing.
+  report-fuzz-failure:
+    if: ${{ always() && needs.validation.result == 'failure' }}
+    needs: [validation, classify-fuzz-findings]
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+      - name: Route fuzz findings to PR or issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          FUZZ_CLASSIFICATION: ${{ needs.classify-fuzz-findings.outputs.classification }}
+        run: >-
+          ./scripts/ci/report-fuzz-finding.sh "PR #${{ github.event.pull_request.number }}"
+          "${{ github.event.pull_request.head.sha }}" "$RUN_URL"
+          "${{ github.run_id }}" "${{ github.run_attempt }}"
 
   # Permanent required context. This job and its success criteria are loaded
   # from the base branch, so a PR cannot redefine its own merge gate.

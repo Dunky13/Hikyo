@@ -44,3 +44,11 @@ CI also runs the race detector over every package except `./internal/isolation/`
 (which runs race-instrumented on the weekly `race-isolation` workflow), a bounded
 fuzz pass over every `Fuzz*` target, and `govulncheck`. To fuzz one target
 locally: `go test -run='^$' -fuzz='^FuzzParseHeader$' -fuzztime=30s ./internal/crypto/`.
+
+When fuzzing finds a failure, CI retains the minimized corpus file for 30 days
+and replays it against the pull request's trusted base. A finding that does not
+reproduce on the base is added to the pull request with its replay command; a
+finding that also fails on the base creates or updates a standalone bug issue.
+Either result leaves `fuzz` and the aggregate `ci-required` gate red until fixed.
+Commit the minimized corpus file with the fix so `go test ./...` keeps it as a
+regression case.
