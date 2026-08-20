@@ -70,6 +70,7 @@ export function StepUpBanner({ session }: { session: WhoAmI }) {
             <input
               id="stepup-code"
               name="code"
+              aria-label="Authenticator code"
               inputMode="numeric"
               autoComplete="one-time-code"
               pattern="[0-9]{6,10}"

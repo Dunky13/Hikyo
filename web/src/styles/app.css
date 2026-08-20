@@ -3037,7 +3037,7 @@ select {
   flex-wrap: wrap;
   gap: 12px 24px;
   align-items: flex-end;
-  margin: 12px 16px 0;
+  margin: 0 0 16px;
   padding: 12px 16px;
   border: 1px solid var(--line);
   border-radius: var(--radius-container, 8px);
@@ -3075,6 +3075,7 @@ select {
 
 .stepup__form input {
   width: 9ch;
+  min-height: var(--touch);
   font-family: var(--font-mono);
 }
 
@@ -3086,4 +3087,13 @@ select {
   margin: 4px 0;
   text-align: center;
   color: var(--tx-dim);
+}
+
+/* A long command in an empty state must wrap on a phone rather than make the
+   content region scroll sideways (axe: scrollable-region-focusable). */
+.hint-wrap,
+.hint-wrap code,
+.sidebar__empty code {
+  overflow-wrap: anywhere;
+  white-space: normal;
 }

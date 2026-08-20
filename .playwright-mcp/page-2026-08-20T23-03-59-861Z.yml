@@ -1,0 +1,13 @@
+- main [ref=f4e3]:
+  - generic [ref=f4e4]:
+    - heading "Sign in to Hikyo" [level=1] [ref=f4e5]
+    - paragraph [ref=f4e6]: Use the credential you established with your setup authority.
+    - generic [ref=f4e7]:
+      - generic [ref=f4e8]: Username
+      - textbox "Username" [ref=f4e9]
+    - generic [ref=f4e10]:
+      - generic [ref=f4e11]: Password
+      - textbox "Password" [ref=f4e12]
+    - button "Sign in" [ref=f4e13] [cursor=pointer]
+    - paragraph [ref=f4e14]: or
+    - button "Use a passkey instead" [ref=f4e15] [cursor=pointer]

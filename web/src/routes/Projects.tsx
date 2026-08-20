@@ -23,12 +23,12 @@ export function Projects() {
         </p>
       ) : null}
       {activeOrgId === '' ? (
-        <p role="status">
-          None of your grants names an organisation yet. An instance administrator creates one under
-          Instance administration and then grants access there (Instance grants: your principal ID
-          from Account &amp; security, with a role template), or from a terminal with{' '}
-          <code>hikyo access grant template --org &lt;org-id&gt; --principal &lt;your-id&gt; --template admin</code>.
-          Granting yourself ends the current session; sign in again afterwards.
+        <p role="status" className="hint-wrap">
+          None of your grants names an organisation yet. An instance administrator creates one
+          under Instance administration and grants access there (Instance grants, with your
+          principal ID from Account &amp; security), or from a terminal with{' '}
+          <code>hikyo access grant template</code>. A grant on your own account ends the current
+          session.
         </p>
       ) : (
         <NewProjectForm org={activeOrgId} />

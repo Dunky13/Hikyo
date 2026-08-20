@@ -208,8 +208,8 @@ export function Shell({ session }: { session: WhoAmI }) {
             </span>
           </p>
         ) : null}
-        <StepUpBanner session={session} />
         <main className="content" id="content" tabIndex={-1}>
+          <StepUpBanner session={session} />
           <Outlet context={{ activeOrgId }} />
         </main>
       </div>

@@ -1,0 +1,28 @@
+- generic [ref=f4e16]:
+  - link "Skip to content" [ref=f4e17] [cursor=pointer]:
+    - /url: "#content"
+  - navigation "Organisations" [ref=f4e18]:
+    - button "Menu" [ref=f4e19] [cursor=pointer]
+    - list [ref=f4e20]:
+      - listitem [ref=f4e21]:
+        - button "Organisation demo" [ref=f4e22] [cursor=pointer]: DE
+    - 'button "Account: usr_01a02142-fb03-700f-bef2-01ef7a3e117a" [ref=f4e23] [cursor=pointer]': US
+  - generic [ref=f4e24]:
+    - banner [ref=f4e25]:
+      - list "Breadcrumb" [ref=f4e26]:
+        - listitem [ref=f4e27]: demo
+        - listitem [ref=f4e28]: /
+        - listitem [ref=f4e29]: Overview
+      - button "Switch to dark theme" [ref=f4e30] [cursor=pointer]
+    - region [ref=f4e39]:
+      - generic [ref=f4e40]:
+        - heading "This session is password-only" [level=2] [ref=f4e41]
+        - paragraph [ref=f4e42]: Instance administration, grants and secret disclosure need a second factor presented in this session. Present it here; nothing else about the session changes.
+      - generic [ref=f4e44]:
+        - generic [ref=f4e45]: Authenticator code
+        - textbox "Authenticator code" [ref=f4e46]
+        - button "Present code" [disabled] [ref=f4e47]
+    - main [ref=f4e48]:
+      - region [ref=f4e49]:
+        - heading "Overview" [level=1] [ref=f4e50]
+        - paragraph [ref=f4e51]: Choose a project to open its environment matrix, values, and access surfaces.
