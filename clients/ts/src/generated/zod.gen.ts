@@ -2139,6 +2139,11 @@ export const zRevealWindow = z.object({
     expires_at: zTimestamp.optional()
 });
 
+export const zTotpStatus = z.object({
+    confirmed: z.boolean(),
+    pending: z.boolean()
+});
+
 export const zPasskey = z.object({
     id: zId,
     label: z.string(),
@@ -2838,6 +2843,11 @@ export const zRemoveTotpBody = zTotpProofRequest;
  * Factor removed. The reissued session token replaces the old one.
  */
 export const zRemoveTotpResponse = zLoginResult;
+
+/**
+ * The caller's TOTP factor state.
+ */
+export const zGetTotpStatusResponse = zTotpStatus;
 
 export const zRegenerateRecoveryCodesBody = zRecoveryProofRequest;
 

@@ -259,6 +259,7 @@ var pinnedContractSurface = map[string]bool{
 	"GET /api/v1/auth/methods":                                                                                true,
 	"GET /api/v1/auth/oidc/{provider}/callback":                                                               true,
 	"GET /api/v1/auth/saml/{provider}/metadata":                                                               true,
+	"GET /api/v1/auth/totp":                                                                                   true,
 	"GET /api/v1/auth/webauthn/credentials":                                                                   true,
 	"GET /api/v1/auth/whoami":                                                                                 true,
 	"GET /api/v1/instance/connections":                                                                        true,

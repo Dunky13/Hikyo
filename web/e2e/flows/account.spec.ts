@@ -41,17 +41,17 @@ test.describe('account and security', () => {
     await expect(page.getByRole('heading', { name: 'Account & security', level: 1 })).toBeVisible();
   });
 
-  test('shows the account as it is, and says what it cannot know', async ({ page }) => {
+  test('shows the account as it is, including whether a factor stands', async ({ page }) => {
     // Profile is read-only because nothing writes it: no operation anywhere in
     // the contract sets a display name or an email.
     await expect(page.locator('#account-profile')).toContainText('Read-only');
 
-    // Passkeys are listable, so they are listed. Whether a code factor stands
-    // is not readable anywhere in the API, and the panel says so rather than
-    // claiming a state it cannot observe.
+    // Passkeys are listable, so they are listed. The authenticator factor is
+    // now readable too: this suite's administrator has a confirmed one, and the
+    // panel reports it rather than disclaiming knowledge.
     const factors = page.locator('#account-factors');
     await expect(factors.getByRole('button', { name: 'Add a passkey' })).toBeVisible();
-    await expect(factors).toContainText('not readable anywhere in this API');
+    await expect(factors).toContainText('An authenticator is enrolled on this account.');
     await expect(factors.getByRole('listitem').first()).toContainText('last used');
 
     // The kill switch, absorbed from #71: this session is in the list.
@@ -124,12 +124,19 @@ test.describe('account and security', () => {
 
   test('keeps the theme choice explicit and local', async ({ page }) => {
     const theme = page.locator('#account-preferences').getByLabel('Theme');
+    const headerToggle = page.getByRole('button', { name: /theme/i });
     await theme.selectOption('light');
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+    // The choice is one piece of shared state: choosing it in Preferences moves
+    // the header toggle in the same document, with no reload. Painting light
+    // makes the toggle offer dark.
+    await expect(headerToggle).toHaveAccessibleName('Switch to dark theme');
+    await theme.selectOption('dark');
+    await expect(headerToggle).toHaveAccessibleName('Switch to light theme');
     await page.reload();
-    await expect(theme).toHaveValue('light');
+    await expect(theme).toHaveValue('dark');
     await theme.selectOption('system');
-    await expect(page.locator('html')).not.toHaveAttribute('data-theme', 'light');
+    await expect(page.locator('html')).not.toHaveAttribute('data-theme', 'dark');
   });
 
   test('revokes a second browser session without killing the current one', async ({ browser, page }) => {
@@ -207,6 +214,12 @@ test.describe('account and security', () => {
   test('reports the existing TOTP factor and enrols then removes an additional passkey', async ({ page }) => {
     const persistPasskey = await installPasskeyAuthenticator(page, 'empty');
     try {
+      // The factor state is now readable: the suite's administrator has a
+      // confirmed authenticator, and the panel reports it rather than
+      // disclaiming knowledge.
+      await expect(page.locator('#account-factors')).toContainText(
+        'An authenticator is enrolled on this account.',
+      );
       await page.getByRole('button', { name: 'Enrol an authenticator' }).click();
       const totpProof = page.getByRole('dialog');
       await totpProof.getByLabel('Password').fill(ADMIN.password);

@@ -9,6 +9,11 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import { App } from './app/App.tsx';
+import { initTheme } from './app/theme.ts';
+
+// Paint the stored theme choice before first render, so a reload lands on it
+// without waiting for a theme-aware control to mount and apply it.
+initTheme();
 
 // The fonts are self-hosted npm packages, not a CDN link: `font-src 'self'`
 // is part of the CSP baseline, and an external font host would be both a CSP

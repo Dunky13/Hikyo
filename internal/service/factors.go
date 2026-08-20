@@ -220,6 +220,51 @@ func (s *Auth) reissueSession(ctx context.Context, az *authz.TxAuthorizer, accou
 	}, nil
 }
 
+// TOTPStatusResult is the caller's own authenticator state: whether a confirmed
+// factor stands and whether an enrolment is staged but unconfirmed.
+type TOTPStatusResult struct {
+	Confirmed bool
+	Pending   bool
+}
+
+// TOTPStatus reads the caller's OWN authenticator state. It is a pure read that
+// mutates nothing and advances no generation. It reveals only what a caller
+// could already learn by attempting an enrolment — a second start is refused by
+// name — so the account surface can state the fact instead of disclaiming it.
+func (s *Auth) TOTPStatus(ctx context.Context, presented string) (TOTPStatusResult, error) {
+	var status TOTPStatusResult
+	err := tx.Read(ctx, s.DB, func(ctx context.Context, _ store.ReadRepos, az *authz.TxAuthorizer) error {
+		id, err := az.Authenticate(ctx, presented, s.now())
+		if err != nil {
+			return err
+		}
+		account, err := az.AccountByPrincipal(ctx, id.Principal)
+		if err != nil {
+			return err
+		}
+		if _, err := az.ConfirmedTOTP(ctx, account.ID); err == nil {
+			status.Confirmed = true
+		} else if !errors.Is(err, domain.ErrNotFound) {
+			return err
+		}
+		// A pending row is only "pending" while it is still finishable. Confirm
+		// binds the seed to its start ceremony by the same window (a stale or
+		// future-stamped row is refused there), so reporting an expired one as
+		// pending would promise a completion the server would reject.
+		if p, err := az.PendingTOTP(ctx, account.ID); err == nil {
+			age := s.now().Sub(p.CreatedAt)
+			status.Pending = age >= 0 && age <= AuthorityLifetime
+		} else if !errors.Is(err, domain.ErrNotFound) {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return TOTPStatusResult{}, err
+	}
+	return status, nil
+}
+
 // EnrolTOTPStart verifies the account-security proof (the pre-existing password,
 // since no possession factor stands yet), stages a fresh sealed seed as a
 // pending enrolment, and returns the otpauth URI ONCE. It performs no

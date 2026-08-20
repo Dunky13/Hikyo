@@ -39,6 +39,7 @@ type AuthService interface {
 	EnrolTOTPConfirm(ctx context.Context, presented, code string) (service.LoginResult, error)
 	StepUpTOTP(ctx context.Context, presented, code string) (service.LoginResult, error)
 	RemoveTOTP(ctx context.Context, presented, password string) (service.LoginResult, error)
+	TOTPStatus(ctx context.Context, presented string) (service.TOTPStatusResult, error)
 	GenerateRecoveryCodes(ctx context.Context, presented, proof string) ([]string, service.LoginResult, error)
 	ConsumeRecoveryCode(ctx context.Context, username, code string) (service.RecoveryResult, error)
 	AuthMethods(ctx context.Context) ([]service.AuthMethodProvider, bool, error)
@@ -372,6 +373,27 @@ func (a *API) RemoveTotp(ctx context.Context, req apigen.RemoveTotpRequestObject
 		return nil, err
 	}
 	return sessionResponse(result), nil
+}
+
+// GetTotpStatus reports the caller's own authenticator state. A pure read on the
+// caller's account, classified like ListPasskeys: no MFA gate, no mutation.
+func (a *API) GetTotpStatus(ctx context.Context, _ apigen.GetTotpStatusRequestObject) (apigen.GetTotpStatusResponseObject, error) {
+	status, err := a.Auth.TOTPStatus(ctx, bearer(ctx))
+	if err != nil {
+		switch classify(err) {
+		case apigen.ErrorCodeUnauthenticated:
+			return apigen.GetTotpStatus401JSONResponse{UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, ""))}, nil
+		case apigen.ErrorCodeTooManyRequests:
+			return apigen.GetTotpStatus429JSONResponse{TooManyRequestsJSONResponse: tooMany()}, nil
+		default:
+			a.fault(ctx, "get totp status", err)
+			return apigen.GetTotpStatus500JSONResponse{InternalJSONResponse: apigen.InternalJSONResponse(errorBody(apigen.ErrorCodeInternal, ""))}, nil
+		}
+	}
+	return apigen.GetTotpStatus200JSONResponse(apigen.TotpStatus{
+		Confirmed: status.Confirmed,
+		Pending:   status.Pending,
+	}), nil
 }
 
 func (a *API) RegenerateRecoveryCodes(ctx context.Context, req apigen.RegenerateRecoveryCodesRequestObject) (apigen.RegenerateRecoveryCodesResponseObject, error) {

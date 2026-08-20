@@ -90,6 +90,14 @@ select {
   cursor: not-allowed;
 }
 
+/* A square control that holds a single glyph — the theme toggle. Keeps the
+   control radius and the touch floor the pinned set asserts. */
+.btn--icon {
+  width: var(--touch);
+  min-width: var(--touch);
+  padding: 0;
+}
+
 .field {
   display: flex;
   flex-direction: column;
@@ -142,6 +150,173 @@ select {
 .avatar[aria-pressed='true'] {
   border-color: var(--accent);
   color: var(--accent);
+}
+
+/* --- Polymorphing theme icon (author: Marc Went) ------------------------- *
+ *
+ * The sun↔moon morph the header toggle wears. The markup is in Shell.tsx with
+ * the sun path baked as an attribute; everything animated lives here because
+ * the CSP forbids an inline <style>. The colours are icon-local so they do not
+ * leak into the teal palette the token sweep pins, and the whole thing degrades
+ * to a static shape under `prefers-reduced-motion` and forced-colors.
+ */
+.theme-icon {
+  --sun: #ca8a04;
+  --moon: #60a5fa;
+  --moon-shine: #dbeafe;
+  overflow: visible;
+}
+
+.theme-icon__shape {
+  d: path(
+    'M70 49.5C70 60.8218 60.8218 70 49.5 70C38.1782 70 29 60.8218 29 49.5C29 38.1782 38.1782 29 49.5 29C60 29 69.5 38 70 49.5Z'
+  );
+  fill: var(--sun);
+  stroke: var(--sun);
+  fill-opacity: 0.35;
+  stroke-width: 4;
+  stroke-linecap: round;
+  transform-origin: 50px 50px;
+  transition:
+    d 0.6s ease,
+    fill 0.6s ease,
+    stroke 0.6s ease,
+    rotate 0.8s ease,
+    scale 0.8s ease;
+}
+
+.theme-icon--dark .theme-icon__shape {
+  d: path(
+    'M70 49.5C70 60.8218 60.8218 70 49.5 70C38.1782 70 29 60.8218 29 49.5C29 38.1782 38.1782 29 49.5 29C39 45 49.5 59.5 70 49.5Z'
+  );
+  fill: var(--moon);
+  stroke: var(--moon);
+  rotate: -360deg;
+  scale: 2;
+}
+
+.theme-icon__rays {
+  fill: none;
+  stroke: var(--sun);
+  stroke-width: 4;
+  stroke-linecap: round;
+}
+
+.theme-icon__rays path {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  opacity: 0;
+}
+
+@keyframes theme-icon-ray-in {
+  to {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+}
+
+.theme-icon:not(.theme-icon--dark) .theme-icon__rays path {
+  animation: theme-icon-ray-in 0.3s ease-out forwards;
+}
+
+.theme-icon:not(.theme-icon--dark) .theme-icon__rays path:nth-child(1) {
+  animation-delay: 0s;
+}
+.theme-icon:not(.theme-icon--dark) .theme-icon__rays path:nth-child(2) {
+  animation-delay: 0.05s;
+}
+.theme-icon:not(.theme-icon--dark) .theme-icon__rays path:nth-child(3) {
+  animation-delay: 0.1s;
+}
+.theme-icon:not(.theme-icon--dark) .theme-icon__rays path:nth-child(4) {
+  animation-delay: 0.15s;
+}
+.theme-icon:not(.theme-icon--dark) .theme-icon__rays path:nth-child(5) {
+  animation-delay: 0.2s;
+}
+.theme-icon:not(.theme-icon--dark) .theme-icon__rays path:nth-child(6) {
+  animation-delay: 0.25s;
+}
+.theme-icon:not(.theme-icon--dark) .theme-icon__rays path:nth-child(7) {
+  animation-delay: 0.3s;
+}
+.theme-icon:not(.theme-icon--dark) .theme-icon__rays path:nth-child(8) {
+  animation-delay: 0.35s;
+}
+
+.theme-icon__shine {
+  d: path(
+    'M70 49.5C70 60.8218 60.8218 70 49.5 70C38.1782 70 29 60.8218 29 49.5C29 38.1782 38.1782 29 49.5 29C39 45 49.5 59.5 70 49.5Z'
+  );
+  fill: none;
+  stroke: var(--moon-shine);
+  stroke-width: 4;
+  stroke-linecap: round;
+  stroke-dasharray: 20 1000;
+  scale: 2;
+  transform-origin: 50px 50px;
+  opacity: 0;
+}
+
+@keyframes theme-icon-shine {
+  0% {
+    opacity: 0;
+    stroke-dashoffset: 0;
+    filter: blur(0);
+  }
+  20% {
+    opacity: 1;
+    filter: blur(2px);
+  }
+  100% {
+    opacity: 0;
+    stroke-dashoffset: -100;
+    filter: blur(0);
+  }
+}
+
+.theme-icon--dark .theme-icon__shine {
+  animation: theme-icon-shine 0.75s linear forwards;
+}
+
+/* A hover flourish on the control, motion-gated below. */
+.btn:hover .theme-icon {
+  animation: theme-icon-wiggle 0.5s ease-in-out;
+}
+
+@keyframes theme-icon-wiggle {
+  0%,
+  100% {
+    rotate: 0deg;
+  }
+  20% {
+    rotate: -12deg;
+  }
+  40% {
+    rotate: 10deg;
+  }
+  60% {
+    rotate: -6deg;
+  }
+  80% {
+    rotate: 4deg;
+  }
+}
+
+/* Motion off: the shape still MORPHS (state must survive), but instantly, and
+   the sun keeps its rays without the draw-in that would otherwise leave them
+   at their animated-from opacity of 0. */
+@media (prefers-reduced-motion: reduce) {
+  .theme-icon,
+  .theme-icon * {
+    transition: none !important;
+    animation: none !important;
+  }
+
+  .theme-icon:not(.theme-icon--dark) .theme-icon__rays path {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
 }
 
 /* --- Login --------------------------------------------------------------- */
@@ -204,6 +379,9 @@ select {
 }
 
 .rail {
+  /* The account menu is absolutely positioned against this column so it opens
+     next to the avatar at the rail's foot, not against the viewport. */
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -330,8 +508,16 @@ select {
 
 .content {
   flex: 1;
-  padding: 24px 16px;
+  /* No top padding on the scroll container: a sticky child (the jump index)
+     pins BELOW the container's top padding, leaving a band under the header
+     through which scrolled content shows. The surface's top breathing room is
+     a margin on the scrolled child instead, so the pin sits flush. */
+  padding: 0 16px 24px;
   overflow: auto;
+}
+
+.content > * {
+  margin-top: 24px;
 }
 
 .card {
@@ -356,8 +542,8 @@ select {
 
 .menu {
   position: absolute;
-  right: 12px;
-  bottom: 60px;
+  left: calc(100% + 8px);
+  bottom: 12px;
   z-index: 10;
   display: flex;
   flex-direction: column;
@@ -459,6 +645,7 @@ select {
   }
 
   .menu {
+    left: auto;
     right: 12px;
     top: 60px;
     bottom: auto;
@@ -1224,7 +1411,18 @@ select {
 
 @media (max-width: 800px) {
   .content {
-    padding: 16px 10px;
+    /* Keep the scroller's top padding at 0 (see the base rule) so the sticky
+       jump index pins flush; the top breathing room stays a child margin. */
+    padding: 0 10px 16px;
+  }
+
+  .content > * {
+    margin-top: 16px;
+  }
+
+  .panel {
+    /* The index wraps to more rows at a phone's width (~165px). */
+    scroll-margin-top: 176px;
   }
 
   .matrix__layout {
@@ -2399,6 +2597,11 @@ select {
   flex-direction: column;
   gap: 12px;
   max-width: none;
+  /* A jump-index anchor lands the panel at the scroller's top, where the
+     pinned index sits — so offset the landing clear of it. Sized to the index
+     wrapped at the page's fixed 72ch measure (~113px; taller once it wraps on
+     a phone, raised in the mobile block). */
+  scroll-margin-top: 124px;
 }
 
 .panel h2 {
@@ -2733,6 +2936,20 @@ select {
   margin: 0;
   overflow-wrap: anywhere;
   color: var(--tx);
+}
+
+/* The setup QR: a fixed white tile so it scans against the dark surface, held
+   to its real colours even under forced-colors (an OS repaint would make it
+   unreadable — the secret text below is the accessible fallback either way). */
+.totp-qr {
+  display: block;
+  width: 176px;
+  height: 176px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: #ffffff;
+  forced-color-adjust: none;
 }
 
 .codes {
