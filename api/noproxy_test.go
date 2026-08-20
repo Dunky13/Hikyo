@@ -376,6 +376,10 @@ var pinnedContractSurface = map[string]bool{
 	"POST /api/v1/orgs/{org}/projects/{project}/definitions/plans/{plan}/apply": true,
 	"GET /api/v1/orgs/{org}/projects/{project}/definitions/settings":            true,
 	"PUT /api/v1/orgs/{org}/projects/{project}/definitions/settings":            true,
+	// The per-project machine-reveal opt-in: reads and writes one column of
+	// this instance's own project row; fetches, relays and forwards nothing.
+	"GET /api/v1/orgs/{org}/projects/{project}/machine-reveal": true,
+	"PUT /api/v1/orgs/{org}/projects/{project}/machine-reveal": true,
 
 	// OIDC federation and the delivery surface (#62). The issuer rows are THIS
 	// instance's own configuration; delivery returns this instance's stored

@@ -592,6 +592,7 @@ type Project struct {
 	RetentionRevisionCount sql.NullInt64
 	RetentionAgeSeconds    sql.NullInt64
 	DefinitionsSource      string
+	MachineReveal          int64
 }
 
 type ProjectSchemaRevision struct {

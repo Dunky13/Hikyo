@@ -483,6 +483,9 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 		// Definitions Git flow (#70): plan/apply, stale/deletion/additive
 		// refusals, and the source-mode setting all traverse the real service.
 		runDefinitionsAuditLifecycle(t, db)
+		// The per-project machine-reveal opt-in: settings.machine_reveal_changed
+		// gets a real emitter in both directions.
+		runMachineRevealAuditLifecycle(t, db)
 		// Deployment adapters (#65): configuration, conflict adoption, outbox
 		// converge/abort and teardown all traverse their real service/runtime
 		// boundaries before the registry-emitter closure check.

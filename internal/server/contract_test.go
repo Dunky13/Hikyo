@@ -1241,6 +1241,14 @@ func (s stubSettings) SetEnvironment(context.Context, service.Actor, domain.Scop
 	return service.EnvironmentSettings{}, s.outcome()
 }
 
+func (s stubSettings) GetMachineReveal(context.Context, service.Actor, domain.Scope) (service.MachineRevealSettings, error) {
+	return service.MachineRevealSettings{}, nil
+}
+
+func (s stubSettings) SetMachineReveal(_ context.Context, _ service.Actor, _ domain.Scope, enabled bool) (service.MachineRevealSettings, error) {
+	return service.MachineRevealSettings{Enabled: enabled}, nil
+}
+
 type stubRevisions struct{ stubHierarchy }
 
 func (s stubRevisions) PublishPlanned(context.Context, service.Actor, domain.Scope, service.PublishRequest) (service.PublishResult, error) {

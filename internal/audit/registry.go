@@ -312,6 +312,11 @@ const (
 	// settings.definitions_source_changed is the git/db flip, audited in both
 	// directions like the protected-flag flip it sits beside.
 	EventSettingsDefinitionsSourceChanged EventType = "settings.definitions_source_changed"
+	// settings.machine_reveal_changed is the per-project machine-reveal
+	// opt-in flip (source-of-truth ADR), audited in both directions: enabling
+	// it admits a standing decryption capability onto machine principals,
+	// withdrawing it makes every such grant inert on the next fetch.
+	EventSettingsMachineRevealChanged EventType = "settings.machine_reveal_changed"
 
 	// value.* and disclosure.* — the flat value model (#50). Both categories
 	// are the audit catalogue's own: `value` holds the acts that change what
@@ -1369,6 +1374,10 @@ var registry = map[EventType]TypeSpec{
 	EventSettingsDefinitionsSourceChanged: hierarchyEvent(Schema{
 		"previous_source": {Kind: KindString, Required: true},
 		"source":          {Kind: KindString, Required: true},
+	}),
+	EventSettingsMachineRevealChanged: hierarchyEvent(Schema{
+		"previous_enabled": {Kind: KindBool, Required: true},
+		"enabled":          {Kind: KindBool, Required: true},
 	}),
 	// The flat value model (#50). Tenant trail, security class, success-only:
 	// each records a COMMITTED act, and a refusal is either the uniform

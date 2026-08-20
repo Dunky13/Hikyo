@@ -59,6 +59,12 @@ var (
 	// ErrMachineCapability is the normative machine allowlist refusing. It is
 	// a refusal by the API, not a convention.
 	ErrMachineCapability = fmt.Errorf("%w: service: this capability is not on the principal class's allowlist", domain.ErrConflict)
+	// ErrMachineRevealOptIn refuses `reveal` on a workload or automation
+	// principal while the project's machine-reveal opt-in is off
+	// (source-of-truth ADR: "an explicit, documented, per-project operator
+	// opt-in, never a default"). The grant API names the opt-in so the
+	// operator learns which act admits it, rather than a bare allowlist refusal.
+	ErrMachineRevealOptIn = fmt.Errorf("%w: service: reveal on a machine principal requires the project's machine-reveal opt-in", domain.ErrConflict)
 	// ErrMachineScope refuses a machine grant that is SHALLOWER than its
 	// class admits — a workload outside an explicit (project, environment),
 	// or automation above project depth. The allowlist bounds which
@@ -489,7 +495,13 @@ func (s *Auth) RequireDisclosureAuthority(
 			// One refusal for four causes. Which window predicate failed is
 			// the caller's own state, and the remedy — reauthenticate over
 			// this environment and retry — is identical for all of them.
-			return fmt.Errorf("%w (%s)", ErrReauthRequired, env)
+			// Carried as wire detail: the environment is one the caller named,
+			// and the remedy - a reauthentication over it - is what the CLI's
+			// inline ceremony and the browser's modal both key on.
+			return &detailErr{
+				detail: fmt.Sprintf("reauthenticate over the environments this operation makes reachable, then retry (%s)", env),
+				err:    fmt.Errorf("%w (%s)", ErrReauthRequired, env),
+			}
 		default:
 			return err
 		}
@@ -576,11 +588,27 @@ func lockAndClassify(ctx context.Context, az *authz.TxAuthorizer, target domain.
 	if err != nil {
 		return "", err
 	}
-	if err := checkPrincipalClass(class, capability); err != nil {
-		return "", err
-	}
 	if class == domain.ClassHuman {
+		if err := checkPrincipalClass(class, capability, false); err != nil {
+			return "", err
+		}
 		return class, nil
+	}
+	// The per-project machine-reveal opt-in (source-of-truth ADR) is the ONLY
+	// thing that admits `reveal` onto a machine principal, and it is read
+	// live, here, under the row lock - never cached on the allowlist. A scope
+	// above project depth carries no project and therefore no opt-in; the
+	// depth check below refuses it by name either way.
+	optIn := false
+	if scope.Project != "" {
+		on, err := az.ProjectMachineReveal(ctx, string(scope.Project))
+		if err != nil && !errors.Is(err, domain.ErrNotFound) {
+			return "", err
+		}
+		optIn = on && err == nil
+	}
+	if err := checkPrincipalClass(class, capability, optIn); err != nil {
+		return "", err
 	}
 	if err := checkMachineScope(class, scope); err != nil {
 		return "", err
@@ -1167,7 +1195,7 @@ func checkGrantable(capability domain.Capability, at domain.Level) error {
 // only what its class's list admits, which is what makes "no machine principal
 // may hold manage-members, manage-projects, project-settings or any instance
 // capability" a refusal rather than a convention.
-func checkPrincipalClass(class domain.PrincipalClass, capability domain.Capability) error {
+func checkPrincipalClass(class domain.PrincipalClass, capability domain.Capability, machineRevealOptIn bool) error {
 	if capability == domain.CapSCIMProvision {
 		// Machine-only AND system-created: the provisioning connection's own
 		// grant is written with its SCIM binding (#73) and retired with it.
@@ -1195,6 +1223,12 @@ func checkPrincipalClass(class domain.PrincipalClass, capability domain.Capabili
 		// ATTACHED BY HAND", whose answer is no. Without this branch a grant
 		// could outlive the credential binding that justifies it.
 		return fmt.Errorf("%w: %q", ErrSystemCreatedOnly, capability)
+	}
+	if capability == domain.CapReveal && domain.MachineMayHoldRevealByOptIn(class) {
+		if !machineRevealOptIn {
+			return fmt.Errorf("%w: class %q may hold %q only under the project's machine-reveal opt-in, which is off", ErrMachineRevealOptIn, class, capability)
+		}
+		return nil
 	}
 	if !domain.MachineMayHold(class, capability) {
 		return fmt.Errorf("%w: class %q may not hold %q", ErrMachineCapability, class, capability)

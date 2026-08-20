@@ -136,7 +136,20 @@ Anyone able to inspect `/proc/<pid>/environ` can read environment-delivered
 values, and membership in the Docker group is effectively root-equivalent.
 
 This build does not include `compose adopt`; author the project file by hand.
-It does not include the human-session exception for `run`; delivery is
-machine-credential-only. It also does not expose the per-project machine-reveal
-opt-in yet, so secret-bearing demo setup requires an operator-provisioned grant;
-config-only delivery works now.
+`render` and `sync` are machine-credential-only; `run --use-human-session` is
+the single locked exception (a TTY, an enumerated confirmation, and a
+disclosure reauthentication window, opened inline with an authenticator code
+where the environment's window allows it).
+
+A fresh workload credential delivers configuration and secret presence only.
+Secret plaintext requires the project's machine-reveal opt-in and then a
+`reveal` grant on the principal:
+
+```bash
+hikyo project-settings machine-reveal set --enabled true   # project-settings + reveal, second factor
+hikyo access grant add --principal <mch_...> --capability reveal --env <env-id>
+```
+
+Withdrawing the opt-in (`--enabled false`) stops every machine secret delivery
+in the project on the next fetch without touching any grant. `--config-only`
+remains the explicit no-secrets projection.

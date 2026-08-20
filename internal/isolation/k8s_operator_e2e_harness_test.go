@@ -753,6 +753,8 @@ func revokeE2ERead(t *testing.T, db *store.DB, p domain.PrincipalID) {
 // seeds the row the same way).
 func seedE2EReveal(t *testing.T, db *store.DB, id string, p domain.PrincipalID, cap domain.Capability) {
 	t.Helper()
+	// The per-project machine-reveal opt-in is what admits the grant below.
+	execRaw(t, db, fmt.Sprintf(`UPDATE projects SET machine_reveal = TRUE WHERE id = '%s'`, e2ePrj))
 	execRaw(t, db, fmt.Sprintf(
 		`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('%s', '%s', '%s', '%s', '%s', '%s', %s)`,
 		id, p, cap, e2eOrg, e2ePrj, e2eEnv, ts))

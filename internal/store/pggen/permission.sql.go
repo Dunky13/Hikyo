@@ -418,3 +418,15 @@ func (q *Queries) ListManageMembersHoldersForOrg(ctx context.Context, orgID pgty
 	}
 	return items, nil
 }
+
+const projectMachineReveal = `-- name: ProjectMachineReveal :one
+SELECT machine_reveal FROM projects WHERE id = $1
+`
+
+// hikyo:authn-resolution
+func (q *Queries) ProjectMachineReveal(ctx context.Context, id string) (bool, error) {
+	row := q.db.QueryRow(ctx, projectMachineReveal, id)
+	var machine_reveal bool
+	err := row.Scan(&machine_reveal)
+	return machine_reveal, err
+}

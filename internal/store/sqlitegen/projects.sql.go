@@ -55,7 +55,8 @@ func (q *Queries) DeleteProject(ctx context.Context, arg DeleteProjectParams) (i
 
 const getProject = `-- name: GetProject :one
 SELECT id, org_id, name, created_at,
-       retention_revision_count, retention_age_seconds, definitions_source
+       retention_revision_count, retention_age_seconds, definitions_source,
+       machine_reveal
 FROM projects
 WHERE org_id = ? AND id = ?
 `
@@ -76,6 +77,7 @@ func (q *Queries) GetProject(ctx context.Context, arg GetProjectParams) (Project
 		&i.RetentionRevisionCount,
 		&i.RetentionAgeSeconds,
 		&i.DefinitionsSource,
+		&i.MachineReveal,
 	)
 	return i, err
 }
@@ -122,7 +124,8 @@ func (q *Queries) ListAllProjects(ctx context.Context) ([]ListAllProjectsRow, er
 
 const listProjects = `-- name: ListProjects :many
 SELECT id, org_id, name, created_at,
-       retention_revision_count, retention_age_seconds, definitions_source
+       retention_revision_count, retention_age_seconds, definitions_source,
+       machine_reveal
 FROM projects
 WHERE org_id = ? ORDER BY name
 `
@@ -144,6 +147,7 @@ func (q *Queries) ListProjects(ctx context.Context, orgID string) ([]Project, er
 			&i.RetentionRevisionCount,
 			&i.RetentionAgeSeconds,
 			&i.DefinitionsSource,
+			&i.MachineReveal,
 		); err != nil {
 			return nil, err
 		}
@@ -219,6 +223,29 @@ type SetProjectDefinitionsSourceParams struct {
 // definitions-edit path so a blocked editor cannot disable its own guard.
 func (q *Queries) SetProjectDefinitionsSource(ctx context.Context, arg SetProjectDefinitionsSourceParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, setProjectDefinitionsSource, arg.DefinitionsSource, arg.OrgID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const setProjectMachineReveal = `-- name: SetProjectMachineReveal :execrows
+UPDATE projects SET machine_reveal = ?
+WHERE org_id = ? AND id = ?
+`
+
+type SetProjectMachineRevealParams struct {
+	MachineReveal int64
+	OrgID         string
+	ID            string
+}
+
+// SetProjectMachineReveal flips the per-project machine-reveal opt-in. It is
+// a project-settings write; the grant writer and the fetch path both read the
+// column live, so flipping it back to 0 withdraws machine secret delivery on
+// the next fetch without touching any grant row.
+func (q *Queries) SetProjectMachineReveal(ctx context.Context, arg SetProjectMachineRevealParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setProjectMachineReveal, arg.MachineReveal, arg.OrgID, arg.ID)
 	if err != nil {
 		return 0, err
 	}

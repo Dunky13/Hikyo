@@ -377,6 +377,26 @@ func (r *Resolver) EnvironmentReauthSettings(ctx context.Context, envID string) 
 	}, nil
 }
 
+// ProjectMachineReveal reads the per-project machine-reveal opt-in. It is a
+// resolution read like EnvironmentReauthSettings: the grant writer's class
+// check and the chokepoint's machine conjunct both consult it before an
+// operation proof exists. An unknown project answers ErrNotFound, which every
+// caller treats as "opt-in off" - fail-closed, never widened by absence.
+func (r *Resolver) ProjectMachineReveal(ctx context.Context, projectID string) (bool, error) {
+	if r.sq != nil {
+		flag, err := r.sq.ProjectMachineReveal(ctx, projectID)
+		if err != nil {
+			return false, notFoundOr(err)
+		}
+		return flag == 1, nil
+	}
+	flag, err := r.pg.ProjectMachineReveal(ctx, projectID)
+	if err != nil {
+		return false, notFoundOr(err)
+	}
+	return flag, nil
+}
+
 // PrincipalClass resolves a principal's class for the normative machine
 // allowlists. A human answers domain.ClassHuman; a machine answers its stored
 // class, and an unclassified machine answers the empty class, which every

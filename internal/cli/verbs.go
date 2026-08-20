@@ -194,9 +194,11 @@ values:                                            --env selects the environment
   hikyo values copy --from <env> --to <env,env> --keys <KEY,KEY> [--confirm-protected]
   hikyo values import --file <values-file> [--manifest <run-manifest.json>]
       [--overwrite KEY,KEY]                       strict: undeclared keys are refused
+  hikyo values import --from-dotenv <.env>          stage a plaintext .env through the strict path
   hikyo values pending                              your drafts, and the ids to publish
   hikyo values publish --versions <id,id>           selective; closes over key groups
-  hikyo values export [--revision N] [--reveal] [--output-file PATH | --dangerously-print]
+  hikyo values export [--format table|json|dotenv] [--revision N] [--reveal]
+      [--output-file PATH | --dangerously-print]
 
 import:                                            authors artifacts, then stops
   hikyo import --from <k8s|sops|vault|infisical> --project <p> --environment <e>
@@ -216,6 +218,7 @@ import:                                            authors artifacts, then stops
   nothing already set is overwritten without naming it.
 
 definitions:                                       reviewable Git-managed catalogue flow
+  hikyo definitions scaffold --from <.env>          offline: an additive bundle, every key config + TODO
   hikyo definitions export [--portable] [--output-file PATH] [--project P]
   hikyo definitions check --file PATH [-o table|json]
       exits 0 when equal, 1 when different, 2 on error
@@ -269,14 +272,17 @@ adapters:
 delivery:                                          machine credential only
   hikyo run [--config-only] [--allow-override KEY,KEY] [--project-directory DIR]
       [--token-file PATH] -- <command> [args...]   fetch, merge, exec
+  hikyo run --use-human-session -- <command>        the locked #18 exception: TTY,
+      confirmation, and a live disclosure window required (secrets)
 
 compose:                                           machine credential only
   hikyo compose render [--project-directory DIR] [--config-only] [--token-file PATH]
   hikyo compose sync [--project-directory DIR] [--token-file PATH]
   hikyo compose doctor [--project-directory DIR] [-o table|json] [--token-file PATH]
 
-  run and compose accept ONLY a machine credential (--token-file or HIKYO_TOKEN);
-  the stored human session is never used. run execs the command after '--' with
+  run and compose accept a machine credential (--token-file or HIKYO_TOKEN); only
+  run may instead use the stored human session, under --use-human-session and its
+  three gates. render and compose have no human path. run execs the command after '--' with
   the fetched values merged in (fetched wins; a differing collision is refused
   unless named in --allow-override). exit 127 is command-not-found, 126 is
   command-not-executable - the child's own convention, not hikyo's.
@@ -298,6 +304,7 @@ access:
   hikyo access member remove --principal <id>
   hikyo project-settings get --env E [-o table|json]
   hikyo project-settings set --env E [--protected true|false] [--reauth-window-seconds N|inherit]
+  hikyo project-settings machine-reveal get|set --enabled true|false
 
 machine identities:
   hikyo sa list [-o table|json]

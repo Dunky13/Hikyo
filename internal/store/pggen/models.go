@@ -594,6 +594,7 @@ type Project struct {
 	RetentionRevisionCount pgtype.Int8
 	RetentionAgeSeconds    pgtype.Int8
 	DefinitionsSource      string
+	MachineReveal          bool
 }
 
 type ProjectSchemaRevision struct {

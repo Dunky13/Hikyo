@@ -1252,6 +1252,10 @@ export const zEnvironmentSettings = z.object({
     reauth_window_seconds: z.int().gte(0).nullish()
 });
 
+export const zMachineRevealSettings = z.object({
+    enabled: z.boolean()
+});
+
 export const zRetentionPolicy = z.object({
     mode: z.enum(['keep-if-either', 'unlimited']),
     max_age_seconds: z.int().gte(1).nullish(),
@@ -3453,6 +3457,28 @@ export const zSetDefinitionsSettingsPath = z.object({
  * Updated definitions governance settings.
  */
 export const zSetDefinitionsSettingsResponse = zDefinitionsSettings;
+
+export const zGetMachineRevealPath = z.object({
+    org: zId,
+    project: zId
+});
+
+/**
+ * The opt-in state.
+ */
+export const zGetMachineRevealResponse = zMachineRevealSettings;
+
+export const zSetMachineRevealBody = zMachineRevealSettings;
+
+export const zSetMachineRevealPath = z.object({
+    org: zId,
+    project: zId
+});
+
+/**
+ * The opt-in state after the write.
+ */
+export const zSetMachineRevealResponse = zMachineRevealSettings;
 
 export const zListKeysPath = z.object({
     org: zId,

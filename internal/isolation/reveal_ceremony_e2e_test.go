@@ -691,7 +691,9 @@ func runAMachineNeverReauthenticates(t *testing.T, db *store.DB) {
 	}
 
 	// The disclosure capability the ADR's explicit per-project operator opt-in
-	// supplies, plus the `read` every delivery needs.
+	// supplies, plus the `read` every delivery needs. The opt-in itself is the
+	// project column the chokepoint reads live; the grant is seeded raw beside it.
+	execRaw(t, db, `UPDATE projects SET machine_reveal = TRUE WHERE id = 'prj_a1'`)
 	for _, cap := range []string{"read", "reveal"} {
 		id := "g_sa_" + cap
 		execRaw(t, db, `INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) `+

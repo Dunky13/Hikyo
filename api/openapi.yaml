@@ -352,6 +352,8 @@ paths:
           $ref: "#/components/responses/Unauthenticated"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
         "429":
           $ref: "#/components/responses/TooManyRequests"
         "500":
@@ -390,6 +392,8 @@ paths:
           $ref: "#/components/responses/Unauthenticated"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
         "429":
           $ref: "#/components/responses/TooManyRequests"
         "500":
@@ -617,6 +621,8 @@ paths:
           $ref: "#/components/responses/Unauthenticated"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
         "429":
           $ref: "#/components/responses/TooManyRequests"
         "500":
@@ -2384,6 +2390,70 @@ paths:
               schema: {$ref: "#/components/schemas/DefinitionsSettings"}
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
+        "500": {$ref: "#/components/responses/Internal"}
+
+  /api/v1/orgs/{org}/projects/{project}/machine-reveal:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+    get:
+      operationId: getMachineReveal
+      tags: [access]
+      summary: Read the per-project machine-reveal opt-in.
+      description: |
+        The source-of-truth ADR's explicit, documented, per-project operator
+        opt-in. While it is off no machine principal may be granted `reveal`
+        in this project and every machine fetch delivers secret presence
+        only, whatever grant rows exist.
+      x-hikyo-class: tenant
+      x-hikyo-operation: project.machine-reveal.get
+      x-hikyo-formula: [read@project]
+      x-hikyo-artifacts: [human-session, machine-credential]
+      x-hikyo-min-revision: 2
+      responses:
+        "200":
+          description: The opt-in state.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/MachineRevealSettings"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
+        "500": {$ref: "#/components/responses/Internal"}
+    put:
+      operationId: setMachineReveal
+      tags: [access]
+      summary: Enable or withdraw the per-project machine-reveal opt-in.
+      description: |
+        Enabling admits `reveal` grants onto workload and automation
+        principals in this project - a standing decryption capability, and
+        on a CI runner that capability in the most-attacked box in the
+        system (machine-identities ADR). Withdrawing it stops every machine
+        secret delivery on the next fetch without touching any grant and
+        moves every machine cursor. The formula carries `reveal` because
+        nobody may confer plaintext reach they do not hold themselves, and
+        `reveal` is MFA-mandatory.
+      x-hikyo-class: tenant
+      x-hikyo-operation: project.machine-reveal.set
+      x-hikyo-formula: [project-settings@project, reveal@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 2
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/MachineRevealSettings"}
+      responses:
+        "200":
+          description: The opt-in state after the write.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/MachineRevealSettings"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
         "429": {$ref: "#/components/responses/TooManyRequests"}
         "500": {$ref: "#/components/responses/Internal"}
@@ -12409,6 +12479,17 @@ components:
             it inherits the instance default - which is NOT the same statement
             as 0, and 0 is a legal value meaning every disclosure
             reauthenticates.
+
+    MachineRevealSettings:
+      type: object
+      additionalProperties: false
+      required: [enabled]
+      properties:
+        enabled:
+          type: boolean
+          description: |
+            True while workload and automation principals in this project
+            may hold `reveal` and receive secret plaintext on fetch.
 
     RetentionPolicy:
       type: object

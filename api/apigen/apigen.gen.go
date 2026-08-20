@@ -3931,6 +3931,13 @@ type MachineCredentialList struct {
 	Items []MachineCredential `json:"items"`
 }
 
+// MachineRevealSettings defines model for MachineRevealSettings.
+type MachineRevealSettings struct {
+	// Enabled True while workload and automation principals in this project
+	// may hold `reveal` and receive secret plaintext on fetch.
+	Enabled bool `json:"enabled"`
+}
+
 // MasterKeyRotation defines model for MasterKeyRotation.
 type MasterKeyRotation struct {
 	// KeyVersion The new master key version. Every tier-3 key is now wrapped under it.
@@ -6623,6 +6630,9 @@ type SetKeyGroupJSONRequestBody = SetKeyGroupRequest
 // RenameKeyJSONRequestBody defines body for RenameKey for application/json ContentType.
 type RenameKeyJSONRequestBody = RenameKeyRequest
 
+// SetMachineRevealJSONRequestBody defines body for SetMachineReveal for application/json ContentType.
+type SetMachineRevealJSONRequestBody = MachineRevealSettings
+
 // SetProjectRetentionJSONRequestBody defines body for SetProjectRetention for application/json ContentType.
 type SetProjectRetentionJSONRequestBody = SetProjectRetentionRequest
 
@@ -7311,6 +7321,12 @@ type ServerInterface interface {
 	// RenameKey Rename a key.
 	// (PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/name)
 	RenameKey(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, key KeyID)
+	// GetMachineReveal Read the per-project machine-reveal opt-in.
+	// (GET /api/v1/orgs/{org}/projects/{project}/machine-reveal)
+	GetMachineReveal(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID)
+	// SetMachineReveal Enable or withdraw the per-project machine-reveal opt-in.
+	// (PUT /api/v1/orgs/{org}/projects/{project}/machine-reveal)
+	SetMachineReveal(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID)
 	// ReencryptProject Walk a project's ciphertext onto the active DEK version.
 	// (POST /api/v1/orgs/{org}/projects/{project}/reencrypt)
 	ReencryptProject(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID)
@@ -8565,6 +8581,18 @@ func (_ Unimplemented) SetKeyGroup(w http.ResponseWriter, r *http.Request, org O
 // RenameKey Rename a key.
 // (PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/name)
 func (_ Unimplemented) RenameKey(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, key KeyID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetMachineReveal Read the per-project machine-reveal opt-in.
+// (GET /api/v1/orgs/{org}/projects/{project}/machine-reveal)
+func (_ Unimplemented) GetMachineReveal(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetMachineReveal Enable or withdraw the per-project machine-reveal opt-in.
+// (PUT /api/v1/orgs/{org}/projects/{project}/machine-reveal)
+func (_ Unimplemented) SetMachineReveal(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -14593,6 +14621,76 @@ func (siw *ServerInterfaceWrapper) RenameKey(w http.ResponseWriter, r *http.Requ
 	handler.ServeHTTP(w, r)
 }
 
+// GetMachineReveal operation middleware
+func (siw *ServerInterfaceWrapper) GetMachineReveal(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetMachineReveal(w, r, org, project)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetMachineReveal operation middleware
+func (siw *ServerInterfaceWrapper) SetMachineReveal(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetMachineReveal(w, r, org, project)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ReencryptProject operation middleware
 func (siw *ServerInterfaceWrapper) ReencryptProject(w http.ResponseWriter, r *http.Request) {
 
@@ -16938,6 +17036,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Put(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/definitions/settings", wrapper.SetDefinitionsSettings)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/machine-reveal", wrapper.GetMachineReveal)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/machine-reveal", wrapper.SetMachineReveal)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/keys", wrapper.ListKeys)
 	})
 	r.Group(func(r chi.Router) {
@@ -18764,6 +18868,20 @@ func (response RegenerateRecoveryCodes404JSONResponse) VisitRegenerateRecoveryCo
 	return err
 }
 
+type RegenerateRecoveryCodes409JSONResponse struct{ ConflictJSONResponse }
+
+func (response RegenerateRecoveryCodes409JSONResponse) VisitRegenerateRecoveryCodesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type RegenerateRecoveryCodes429JSONResponse struct{ TooManyRequestsJSONResponse }
 
 func (response RegenerateRecoveryCodes429JSONResponse) VisitRegenerateRecoveryCodesResponse(w http.ResponseWriter) error {
@@ -19352,6 +19470,20 @@ func (response EnrolTotpConfirm404JSONResponse) VisitEnrolTotpConfirmResponse(w 
 	return err
 }
 
+type EnrolTotpConfirm409JSONResponse struct{ ConflictJSONResponse }
+
+func (response EnrolTotpConfirm409JSONResponse) VisitEnrolTotpConfirmResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type EnrolTotpConfirm429JSONResponse struct{ TooManyRequestsJSONResponse }
 
 func (response EnrolTotpConfirm429JSONResponse) VisitEnrolTotpConfirmResponse(w http.ResponseWriter) error {
@@ -19534,6 +19666,20 @@ func (response StepUpTotp404JSONResponse) VisitStepUpTotpResponse(w http.Respons
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StepUpTotp409JSONResponse struct{ ConflictJSONResponse }
+
+func (response StepUpTotp409JSONResponse) VisitStepUpTotpResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -34822,6 +34968,195 @@ func (response RenameKey500JSONResponse) VisitRenameKeyResponse(w http.ResponseW
 	return err
 }
 
+type GetMachineRevealRequestObject struct {
+	Org     OrgID     `json:"org"`
+	Project ProjectID `json:"project"`
+}
+
+type GetMachineRevealResponseObject interface {
+	VisitGetMachineRevealResponse(w http.ResponseWriter) error
+}
+
+type GetMachineReveal200JSONResponse MachineRevealSettings
+
+func (response GetMachineReveal200JSONResponse) VisitGetMachineRevealResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetMachineReveal401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response GetMachineReveal401JSONResponse) VisitGetMachineRevealResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetMachineReveal404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetMachineReveal404JSONResponse) VisitGetMachineRevealResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetMachineReveal429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response GetMachineReveal429JSONResponse) VisitGetMachineRevealResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetMachineReveal500JSONResponse struct{ InternalJSONResponse }
+
+func (response GetMachineReveal500JSONResponse) VisitGetMachineRevealResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetMachineRevealRequestObject struct {
+	Org     OrgID     `json:"org"`
+	Project ProjectID `json:"project"`
+	Body    *SetMachineRevealJSONRequestBody
+}
+
+type SetMachineRevealResponseObject interface {
+	VisitSetMachineRevealResponse(w http.ResponseWriter) error
+}
+
+type SetMachineReveal200JSONResponse MachineRevealSettings
+
+func (response SetMachineReveal200JSONResponse) VisitSetMachineRevealResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetMachineReveal400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response SetMachineReveal400JSONResponse) VisitSetMachineRevealResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetMachineReveal401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response SetMachineReveal401JSONResponse) VisitSetMachineRevealResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetMachineReveal403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response SetMachineReveal403JSONResponse) VisitSetMachineRevealResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetMachineReveal404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response SetMachineReveal404JSONResponse) VisitSetMachineRevealResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetMachineReveal429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response SetMachineReveal429JSONResponse) VisitSetMachineRevealResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetMachineReveal500JSONResponse struct{ InternalJSONResponse }
+
+func (response SetMachineReveal500JSONResponse) VisitSetMachineRevealResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ReencryptProjectRequestObject struct {
 	Org     OrgID     `json:"org"`
 	Project ProjectID `json:"project"`
@@ -40167,6 +40502,12 @@ type StrictServerInterface interface {
 	// RenameKey Rename a key.
 	// (PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/name)
 	RenameKey(ctx context.Context, request RenameKeyRequestObject) (RenameKeyResponseObject, error)
+	// GetMachineReveal Read the per-project machine-reveal opt-in.
+	// (GET /api/v1/orgs/{org}/projects/{project}/machine-reveal)
+	GetMachineReveal(ctx context.Context, request GetMachineRevealRequestObject) (GetMachineRevealResponseObject, error)
+	// SetMachineReveal Enable or withdraw the per-project machine-reveal opt-in.
+	// (PUT /api/v1/orgs/{org}/projects/{project}/machine-reveal)
+	SetMachineReveal(ctx context.Context, request SetMachineRevealRequestObject) (SetMachineRevealResponseObject, error)
 	// ReencryptProject Walk a project's ciphertext onto the active DEK version.
 	// (POST /api/v1/orgs/{org}/projects/{project}/reencrypt)
 	ReencryptProject(ctx context.Context, request ReencryptProjectRequestObject) (ReencryptProjectResponseObject, error)
@@ -45790,6 +46131,67 @@ func (sh *strictHandler) RenameKey(w http.ResponseWriter, r *http.Request, org O
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RenameKeyResponseObject); ok {
 		if err := validResponse.VisitRenameKeyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetMachineReveal operation middleware
+func (sh *strictHandler) GetMachineReveal(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
+	var request GetMachineRevealRequestObject
+
+	request.Org = org
+	request.Project = project
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetMachineReveal(ctx, request.(GetMachineRevealRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetMachineReveal")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetMachineRevealResponseObject); ok {
+		if err := validResponse.VisitGetMachineRevealResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetMachineReveal operation middleware
+func (sh *strictHandler) SetMachineReveal(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
+	var request SetMachineRevealRequestObject
+
+	request.Org = org
+	request.Project = project
+
+	var body SetMachineRevealJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetMachineReveal(ctx, request.(SetMachineRevealRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetMachineReveal")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetMachineRevealResponseObject); ok {
+		if err := validResponse.VisitSetMachineRevealResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

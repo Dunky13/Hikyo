@@ -32,6 +32,8 @@ type GrantService interface {
 
 // SettingsService is the `project-settings` surface.
 type SettingsService interface {
+	GetMachineReveal(ctx context.Context, actor service.Actor, scope domain.Scope) (service.MachineRevealSettings, error)
+	SetMachineReveal(ctx context.Context, actor service.Actor, scope domain.Scope, enabled bool) (service.MachineRevealSettings, error)
 	GetEnvironment(ctx context.Context, actor service.Actor, scope domain.Scope) (service.EnvironmentSettings, error)
 	SetEnvironment(ctx context.Context, actor service.Actor, scope domain.Scope, want service.EnvironmentSettings) (service.EnvironmentSettings, error)
 }
@@ -423,4 +425,20 @@ func (a *API) GetRetentionHealth(ctx context.Context, _ apigen.GetRetentionHealt
 		Stale:             health.Stale,
 		StaleAfterSeconds: apigen.RetentionHealthStaleAfterSeconds(service.PruneStaleAfter / time.Second),
 	}, nil
+}
+
+func (a *API) GetMachineReveal(ctx context.Context, req apigen.GetMachineRevealRequestObject) (apigen.GetMachineRevealResponseObject, error) {
+	got, err := a.Settings.GetMachineReveal(ctx, service.Bearer(bearer(ctx)), projectScope(req.Org, req.Project))
+	if err != nil {
+		return nil, err
+	}
+	return apigen.GetMachineReveal200JSONResponse{Enabled: got.Enabled}, nil
+}
+
+func (a *API) SetMachineReveal(ctx context.Context, req apigen.SetMachineRevealRequestObject) (apigen.SetMachineRevealResponseObject, error) {
+	got, err := a.Settings.SetMachineReveal(ctx, service.Bearer(bearer(ctx)), projectScope(req.Org, req.Project), req.Body.Enabled)
+	if err != nil {
+		return nil, err
+	}
+	return apigen.SetMachineReveal200JSONResponse{Enabled: got.Enabled}, nil
 }

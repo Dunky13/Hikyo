@@ -72,6 +72,10 @@ ORDER BY principal_id;
 SELECT protected, reauth_window_seconds FROM environments WHERE id = sqlc.arg(id);
 
 -- hikyo:authn-resolution
+-- name: ProjectMachineReveal :one
+SELECT machine_reveal FROM projects WHERE id = sqlc.arg(id);
+
+-- hikyo:authn-resolution
 -- name: GetPrincipalClass :one
 SELECT kind, class FROM principals WHERE id = sqlc.arg(id);
 

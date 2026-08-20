@@ -2225,6 +2225,15 @@ export type EnvironmentSettings = {
     reauth_window_seconds?: number | null;
 };
 
+export type MachineRevealSettings = {
+    /**
+     * True while workload and automation principals in this project
+     * may hold `reveal` and receive secret plaintext on fetch.
+     *
+     */
+    enabled: boolean;
+};
+
 export type RetentionPolicy = {
     mode: 'keep-if-either' | 'unlimited';
     /**
@@ -7922,6 +7931,136 @@ export type SetDefinitionsSettingsResponses = {
 };
 
 export type SetDefinitionsSettingsResponse = SetDefinitionsSettingsResponses[keyof SetDefinitionsSettingsResponses];
+
+export type GetMachineRevealData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/machine-reveal';
+};
+
+export type GetMachineRevealErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type GetMachineRevealError = GetMachineRevealErrors[keyof GetMachineRevealErrors];
+
+export type GetMachineRevealResponses = {
+    /**
+     * The opt-in state.
+     */
+    200: MachineRevealSettings;
+};
+
+export type GetMachineRevealResponse = GetMachineRevealResponses[keyof GetMachineRevealResponses];
+
+export type SetMachineRevealData = {
+    body: MachineRevealSettings;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/machine-reveal';
+};
+
+export type SetMachineRevealErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type SetMachineRevealError = SetMachineRevealErrors[keyof SetMachineRevealErrors];
+
+export type SetMachineRevealResponses = {
+    /**
+     * The opt-in state after the write.
+     */
+    200: MachineRevealSettings;
+};
+
+export type SetMachineRevealResponse = SetMachineRevealResponses[keyof SetMachineRevealResponses];
 
 export type ListKeysData = {
     body?: never;

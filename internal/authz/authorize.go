@@ -159,6 +159,21 @@ func (a *TxAuthorizer) authorizeTenant(ctx context.Context, caller Identity, op 
 		a.captureDenial(ctx, principal, op, spec, resolutionResolvable, chain, domain.Scope{})
 		return nil, domain.ErrNotFound
 	}
+	// The machine-reveal conjunct (source-of-truth ADR; machine-identities ADR
+	// "every fetch re-authorizes against current policy"). A workload or
+	// automation principal satisfies a `reveal` atom only while the project's
+	// machine-reveal opt-in is on - read live, in this transaction, never from
+	// the grant rows. Withdrawing the opt-in therefore stops every machine
+	// disclosure on the next request without touching a single grant, and a
+	// grant row that outlived the opt-in is inert rather than a standing
+	// decryption capability. Humans are untouched: their `reveal` is governed
+	// by the reauthentication ceremony, not by this flag.
+	if denied, err := a.machineRevealWithdrawn(ctx, caller, spec.formula, chain); err != nil {
+		return nil, err
+	} else if denied {
+		a.captureDenial(ctx, principal, op, spec, resolutionResolvable, chain, domain.Scope{})
+		return nil, domain.ErrNotFound
+	}
 	if a.assuranceInadequate(caller, op) {
 		// The grant is held; only the session's assurance is short. Revealing
 		// the object's existence is fine — they can reach it — so this is a
@@ -167,6 +182,53 @@ func (a *TxAuthorizer) authorizeTenant(ctx context.Context, caller Identity, op 
 		return nil, domain.ErrUnauthorized
 	}
 	return &proof{kind: kindTenant, op: op, chain: chain, tok: a.tok}, nil
+}
+
+// machineRevealWithdrawn reports whether a machine caller is reaching for a
+// `reveal` atom in a project whose machine-reveal opt-in is off. Formulas
+// without a reveal atom, human callers and instance-scoped chains never
+// consult the project row.
+func (a *TxAuthorizer) machineRevealWithdrawn(ctx context.Context, caller Identity, f Formula, chain domain.Scope) (bool, error) {
+	if !domain.IsServiceAccountKind(caller.Class) || chain.Project == "" {
+		return false, nil
+	}
+	demandsReveal := false
+	for _, atom := range f {
+		if atom.Cap == domain.CapReveal {
+			demandsReveal = true
+			break
+		}
+	}
+	if !demandsReveal {
+		return false, nil
+	}
+	on, err := a.r.ProjectMachineReveal(ctx, string(chain.Project))
+	if errors.Is(err, domain.ErrNotFound) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return !on, nil
+}
+
+// MachineRevealOptIn reports the project's machine-reveal opt-in for callers
+// that project grants per key (the delivery path) rather than per formula.
+// A machine identity without the opt-in is delivered secret presence only,
+// whatever reveal rows it holds. Humans always answer true: the flag governs
+// machine disclosure and nothing else.
+func (a *TxAuthorizer) MachineRevealOptIn(ctx context.Context, caller Identity, project domain.ProjectID) (bool, error) {
+	if !domain.IsServiceAccountKind(caller.Class) {
+		return true, nil
+	}
+	on, err := a.r.ProjectMachineReveal(ctx, string(project))
+	if errors.Is(err, domain.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return on, nil
 }
 
 func (a *TxAuthorizer) authorizeInstance(ctx context.Context, caller Identity, op Operation, spec opSpec) (Proof, error) {

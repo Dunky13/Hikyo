@@ -296,10 +296,12 @@ func runMachineAllowlist(t *testing.T, db *store.DB) {
 		{"workload_project_settings", mchWork, domain.CapProjectSettings, prjScope(), service.ErrMachineCapability},
 		{"workload_manage_projects", mchWork, domain.CapManageProjects, orgAScope, service.ErrMachineCapability},
 		{"workload_instance_config", mchWork, domain.CapInstanceConfig, domain.Scope{}, service.ErrMachineCapability},
-		// The workload class is read-only: `reveal` is admitted by the ADR
-		// only under the source-of-truth ADR's per-project operator opt-in,
-		// which does not exist yet, so it fails closed by name.
-		{"workload_reveal", mchWork, domain.CapReveal, envScope(envA1), service.ErrMachineCapability},
+		// `reveal` is admitted onto a workload only under the source-of-truth
+		// ADR's per-project operator opt-in; the seeded project has it off, so
+		// the refusal names the opt-in (machine_reveal_e2e_test covers the on
+		// side). `reveal-history` stays off the workload allowlist outright.
+		{"workload_reveal", mchWork, domain.CapReveal, envScope(envA1), service.ErrMachineRevealOptIn},
+		{"workload_reveal_history", mchWork, domain.CapRevealHistory, envScope(envA1), service.ErrMachineCapability},
 		{"workload_edit", mchWork, domain.CapEdit, prjScope(), service.ErrMachineCapability},
 		// The automation class holds edit/publish/definitions-edit; mch_a1 is
 		// backfilled to that class by migration 00010.

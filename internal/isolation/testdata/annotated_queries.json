@@ -1195,6 +1195,12 @@
   },
   {
     "engine": "postgres",
+    "name": "ProjectMachineReveal",
+    "annotation": "authn-resolution",
+    "hash": "38b59c7bea361818d952c06e8280ec0a48be37493c0580b40191a8b0125883ab"
+  },
+  {
+    "engine": "postgres",
     "name": "PruneExpiredPlans",
     "annotation": "instance-scoped",
     "hash": "d03e97ce1f6c10f01c2ae49633764972ddbdc2b2685f8ce84b92dd83d14ed011"
@@ -2626,6 +2632,12 @@
     "name": "MaxKnownCredentialEpoch",
     "annotation": "authn-resolution",
     "hash": "927bb4a7a50553e3118b066cb53bcf1299685743daeaaf6c5768d55c6ee68d8f"
+  },
+  {
+    "engine": "sqlite",
+    "name": "ProjectMachineReveal",
+    "annotation": "authn-resolution",
+    "hash": "bb566c178b78f7a827ff20215b8a5412a65422e5b5f5b84f7b85875449f35d10"
   },
   {
     "engine": "sqlite",
