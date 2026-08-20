@@ -104,3 +104,7 @@ SELECT kind, class FROM principals WHERE id = ?;
 -- hikyo:authn-resolution
 -- name: ListGrantOriginsForGrant :many
 SELECT kind, subject FROM grant_origins WHERE grant_id = ? ORDER BY kind, subject;
+
+-- hikyo:authn-resolution
+-- name: CountGrantsForOrg :one
+SELECT COUNT(*) FROM grants WHERE org_id = ?;

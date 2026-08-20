@@ -238,6 +238,14 @@ func (s *Audits) export(
 	insert func(context.Context, store.Repos, authz.Proof, audit.Event) error,
 	page func(context.Context, store.ReadRepos, authz.Proof, store.AuditFilter) ([]store.AuditEvent, error),
 ) error {
+	// The page cap is the same store.AuditMaxPageSize the store enforces; clamp
+	// here so the loop's end-of-data test (len(rows) < pageSize) uses the bound
+	// the reader actually applied, never the caller's larger request. Without
+	// this, a pageSize above the cap reads a clamped short first page, mistakes
+	// it for EOF, and silently truncates the export.
+	if pageSize > store.AuditMaxPageSize {
+		pageSize = store.AuditMaxPageSize
+	}
 	snapshotTime, err := s.DB.AuditExportSnapshotTime(ctx)
 	if err != nil {
 		return err

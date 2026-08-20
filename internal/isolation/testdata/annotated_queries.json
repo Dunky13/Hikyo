@@ -145,6 +145,12 @@
   },
   {
     "engine": "postgres",
+    "name": "CountGrantsForOrg",
+    "annotation": "authn-resolution",
+    "hash": "de2cd352c47c7e563cc87dd404230dbc53c4db4db47e6424fc5764c843c451af"
+  },
+  {
+    "engine": "postgres",
     "name": "CountLiveMachineCredentials",
     "annotation": "authn-resolution",
     "hash": "26b1f388f751e68601c053d52e386f6ad45b35e4f6d63089a7b9d19918c8cb11"
@@ -1498,6 +1504,12 @@
     "name": "CountGrantOrigins",
     "annotation": "authn-resolution",
     "hash": "8cdfcb0b0673b9d4c0e9cfb497752f42e8894170e2a4b0d58a56d55214c1f7e9"
+  },
+  {
+    "engine": "sqlite",
+    "name": "CountGrantsForOrg",
+    "annotation": "authn-resolution",
+    "hash": "3db19a6830a7a9ab88f1ecf4ad477e64927148f69b54dddc495c26a569095a44"
   },
   {
     "engine": "sqlite",

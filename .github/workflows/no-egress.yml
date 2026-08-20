@@ -1,0 +1,46 @@
+# The no-egress boot+idle invariant (mvp-boundary O7; ops-spec §13 / CI
+# invariant 4): `hikyo server` with nothing configured must boot, serve, and
+# originate zero outbound connections. It builds and runs PR code, so it runs as
+# an ordinary read-only `pull_request` workflow with no secrets (the same shape
+# as the CodeQL workflow) — never through the trusted-ci reusable pipeline, which
+# is reserved for base-controlled orchestration. strace records every outbound
+# syscall; the run fails on any non-loopback target. Linux-only by nature.
+name: no-egress
+
+on:
+  pull_request:
+    paths:
+      - "**.go"
+      - "go.mod"
+      - "go.sum"
+      - "cmd/**"
+      - "internal/**"
+      - "scripts/ci/no-egress.sh"
+      - ".github/workflows/no-egress.yml"
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: no-egress-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name != 'push' }}
+
+jobs:
+  no-egress:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Install strace
+        run: sudo apt-get update && sudo apt-get install -y strace
+      - name: Boot+idle originates zero outbound connections
+        run: ./scripts/ci/no-egress.sh

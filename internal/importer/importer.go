@@ -46,19 +46,21 @@ import (
 // Resource exhaustion must be impossible BEFORE a bundle exists, so every
 // bound is checked while parsing, not after.
 const (
-	// MaxFileBytes bounds one export file. A K8s manifest dump, a SOPS file
-	// and an Infisical export are all human-scale documents; four megabytes is
-	// already an order of magnitude past any of them.
-	MaxFileBytes = 4 << 20
+	// MaxFileBytes bounds one export file (ops-catalogue import § "Per-file
+	// size (file mode)": 10 MiB). A K8s manifest dump, a SOPS file and an
+	// Infisical export are all human-scale documents, well under it.
+	MaxFileBytes = 10 << 20
 	// MaxDecodedBytes bounds expansion AFTER decoding — base64 `data` blocks,
 	// YAML alias expansion, a decrypted SOPS tree. The file cap alone does not
 	// bound this: a small document can expand enormously, which is the whole
-	// decompression-bomb class.
-	MaxDecodedBytes = 16 << 20
-	// MaxRecords bounds how many leaves one import may carry. A project's key
-	// catalogue is itself capped at schema.MaxKeysPerProject; this is that
-	// bound with room for a multi-Secret manifest that maps onto fewer keys.
-	MaxRecords = 5000
+	// decompression-bomb class. Ops-catalogue import § "Decoded-bytes cap per
+	// run": 50 MiB.
+	MaxDecodedBytes = 50 << 20
+	// MaxRecords bounds how many leaves one import may carry (ops-catalogue
+	// import § "Record count per run": 50 000). A project's key catalogue is
+	// itself capped at schema.MaxKeysPerProject; this leaves room for a
+	// multi-Secret manifest that maps onto fewer keys.
+	MaxRecords = 50000
 	// MaxDepth bounds the source's tree depth — a SOPS map chain, an Infisical
 	// folder path. It bounds recursion before the record count can.
 	MaxDepth = 32

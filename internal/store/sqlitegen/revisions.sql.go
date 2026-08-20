@@ -9,6 +9,49 @@ import (
 	"context"
 )
 
+const countPendingChangeForCell = `-- name: CountPendingChangeForCell :one
+SELECT COUNT(*) FROM pending_changes
+WHERE org_id = ? AND project_id = ? AND environment_id = ? AND key_id = ? AND owner_id = ?
+`
+
+type CountPendingChangeForCellParams struct {
+	OrgID         string
+	ProjectID     string
+	EnvironmentID string
+	KeyID         string
+	OwnerID       string
+}
+
+func (q *Queries) CountPendingChangeForCell(ctx context.Context, arg CountPendingChangeForCellParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countPendingChangeForCell,
+		arg.OrgID,
+		arg.ProjectID,
+		arg.EnvironmentID,
+		arg.KeyID,
+		arg.OwnerID,
+	)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countPendingChangesForProject = `-- name: CountPendingChangesForProject :one
+SELECT COUNT(*) FROM pending_changes
+WHERE org_id = ? AND project_id = ?
+`
+
+type CountPendingChangesForProjectParams struct {
+	OrgID     string
+	ProjectID string
+}
+
+func (q *Queries) CountPendingChangesForProject(ctx context.Context, arg CountPendingChangesForProjectParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countPendingChangesForProject, arg.OrgID, arg.ProjectID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countRevisionPinsForProject = `-- name: CountRevisionPinsForProject :one
 SELECT COUNT(*) FROM revision_pins WHERE org_id = ? AND project_id = ?
 `

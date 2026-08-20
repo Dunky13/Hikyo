@@ -156,6 +156,17 @@ func (r *Resolver) DeleteGrantRow(ctx context.Context, grantID string, p domain.
 // bans tenant-typed values from store signatures, and the resolution surface
 // is outside the analyzer's Repos/ReadRepos walk — so it holds the rule by
 // construction rather than by being caught.
+// CountGrantsInOrg counts the grant ROWS scoped inside one organization (org,
+// project and env scopes all carry the org id). It is the loud-sanity cap's
+// read (ops-spec § 8: ≤ 1000 grants per org), taken inside the granting
+// transaction so a concurrent mint cannot walk past it.
+func (r *Resolver) CountGrantsInOrg(ctx context.Context, org string) (int64, error) {
+	if r.sq != nil {
+		return r.sq.CountGrantsForOrg(ctx, nullString(org))
+	}
+	return r.pg.CountGrantsForOrg(ctx, pgText(org))
+}
+
 func (r *Resolver) GrantLinesInOrg(ctx context.Context, org string) ([]GrantLine, error) {
 	if r.sq != nil {
 		rows, err := r.sq.ListGrantsWithOriginsForOrg(ctx, nullString(org))

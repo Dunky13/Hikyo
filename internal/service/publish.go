@@ -982,6 +982,13 @@ func materialize(ctx context.Context, r store.Repos, p authz.Proof, sealer *cryp
 		return PublishedEnvironment{}, err
 	}
 
+	// Refused BY NAME at publish, never discovered at delivery: a resolved
+	// environment that would render a target larger than a Kubernetes Secret can
+	// hold cannot be committed (ops-spec § 8 per-target render cap).
+	if err := checkRenderTotal(cells, string(scope.Env)); err != nil {
+		return PublishedEnvironment{}, err
+	}
+
 	// Only now do the published cells move. Validation ran on the resolved
 	// state first so an abort leaves the transaction with nothing to undo
 	// beyond what the engine rolls back anyway.
@@ -1088,6 +1095,34 @@ func materialize(ctx context.Context, r store.Repos, p authz.Proof, sealer *cryp
 		EnvironmentID: string(scope.Env), Revision: revision, ChangeToken: token,
 		SchemaRevision: schemaRevision, ChangedKeys: changes,
 	}, nil
+}
+
+// MaxRenderBytesPerTarget is the ops-spec § 8 per-target render cap: the total
+// delivered bytes for one environment must not exceed the Kubernetes Secret
+// validation limit (1 MiB). A single value is bounded well under it
+// (schema.MaxValueBytes), but a project's key cap (1000) times that is far
+// above it, so the sum is a genuine reachable bound — refused at publish, where
+// the target is not yet committed, rather than at delivery, where it is.
+const MaxRenderBytesPerTarget = 1 << 20
+
+// checkRenderTotal refuses a publish whose resolved environment would render a
+// delivery target larger than a Kubernetes Secret can hold. Kubernetes'
+// ValidateSecret charges the sum of the data VALUE bytes (not the key names)
+// against MaxSecretSize, so that is exactly what is summed — matching the
+// grounding limit avoids refusing a target Kubernetes would accept.
+func checkRenderTotal(cells []resolvedCell, envID string) error {
+	total := 0
+	for _, cell := range cells {
+		if !cell.set {
+			continue
+		}
+		total += len(cell.value)
+		if total > MaxRenderBytesPerTarget {
+			return fmt.Errorf("%w: environment %s renders more than the %d-byte per-target limit",
+				domain.ErrLimitExceeded, envID, MaxRenderBytesPerTarget)
+		}
+	}
+	return nil
 }
 
 // validateResolved is publish's authority, run on the RESOLVED values at the

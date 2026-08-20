@@ -98,9 +98,12 @@ func TestK8sLiveStopsWhileStreamingAtAggregateRecordBound(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests++
 		w.Header().Set("Content-Type", "application/json")
-		start, count, next := 0, 4000, "second"
+		// Two pages summing to MaxRecords+1 (30 000 + 20 001), so the aggregate
+		// record cap trips mid-stream on the SECOND page, never on a third. Each
+		// page stays under the live per-response cap.
+		start, count, next := 0, 30000, "second"
 		if r.URL.Query().Get("continue") == "second" {
-			start, count, next = 4000, 1001, "must-not-be-requested"
+			start, count, next = 30000, 20001, "must-not-be-requested"
 		}
 		fmt.Fprintf(w, `{"apiVersion":"v1","kind":"SecretList","metadata":{"continue":%q},"items":[`, next)
 		for i := 0; i < count; i++ {

@@ -85,9 +85,10 @@ type KeyStore interface {
 // envelopes; there is one master lineage, so the version disambiguates.
 var masterKeyID = []byte("master")
 
-// dekCacheSize bounds the unwrapped project-DEK LRU cache. Ops-spec value;
-// far above the v1 scale envelope either way.
-const dekCacheSize = 128
+// dekCacheSize bounds the unwrapped project-DEK LRU cache. Ops-spec § 9 value
+// (LRU 1 024 entries — effectively every DEK at the envelope, but a declared
+// bound; eviction is a re-unwrap, not a failure).
+const dekCacheSize = 1024
 
 type keyHandle struct {
 	redactor
