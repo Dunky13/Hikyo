@@ -105,13 +105,13 @@ var Registry = []Bound{
 	{"Open plans per project", "ops-spec §8", "domain.ErrLimitExceeded (MaxOpenPlansPerProject)", "isolation definitions_e2e", StatusEnforced},
 	{"Pins quota per project", "ops-spec §8", "invalidDetail (PinQuota)", "conformance revisions_test", StatusEnforced},
 	{"Grants per org", "ops-spec §8", "domain.ErrLimitExceeded (MaxGrantsPerOrg)", "isolation.TestGrantPerOrgCap", StatusEnforced},
-	{"Per-project storage high-water (warn 1 GiB / refuse 4 GiB)", "ops-spec §8 (§141)", "publish refusal + doctor warn + metric + UI banner", "ENFORCEMENT-PENDING: the publish path EXISTS (internal/service/publish.go), but the refusal needs a per-project payload-byte accounting mechanism (SUM over value_entries+snapshot_entries) + a project-scoped store proof action + the 1 GiB doctor/metric surface — net-new infrastructure the v1.0 no-scope-expansion milestone defers. HUMAN-DISPOSITION: build now vs. ticket.", StatusPending},
-	{"Schema-revision rate 60/h per project", "ops-spec §8 (§151)", "loud rate-limit refusal", "ENFORCEMENT-PENDING: the schema-mutation path EXISTS, but the refusal needs a per-principal windowed rate-limit mechanism (the §179 expensive-path budget layer) that is not yet built anywhere. HUMAN-DISPOSITION: build the budget layer now vs. ticket.", StatusPending},
+	{"Per-project storage high-water (warn 1 GiB / refuse 4 GiB)", "ops-spec §8 (§141)", "publish refusal + doctor warn + metric + UI banner", "ENFORCEMENT-PENDING: the publish path EXISTS (internal/service/publish.go), but the refusal needs a per-project payload-byte accounting mechanism (SUM over value_entries+snapshot_entries) + a project-scoped store proof action + the 1 GiB doctor/metric surface — net-new infrastructure the v1.0 no-scope-expansion milestone defers. HUMAN-DISPOSITION -> issue #185.", StatusPending},
+	{"Schema-revision rate 60/h per project", "ops-spec §8 (§151)", "loud rate-limit refusal", "ENFORCEMENT-PENDING: the schema-mutation path EXISTS, but the refusal needs a per-principal windowed rate-limit mechanism (the §179 expensive-path budget layer) that is not yet built anywhere. HUMAN-DISPOSITION -> issue #186.", StatusPending},
 
 	// §9 encryption.
 	{"Reencrypt CAS (no-resurrect)", "ops-spec §9", "row_version CAS conflict", "store authn CAS", StatusEnforced},
 	{"DEK LRU cache", "ops-spec §9", "declared bound, eviction re-unwraps (not a refusal)", "crypto keyring_test (dekCacheSize eviction)", StatusByConstruction},
-	{"Reencrypt chunk 100 rows / 100 ms", "ops-spec §9 (§167)", "chunked background rewrap", "ENFORCEMENT-PENDING: the reencrypt-after-rotation walk is not yet implemented (no reencrypt verb/job); the bound belongs to that feature. Owner: encryption rotation.", StatusPending},
+	{"Reencrypt chunk 100 rows / 100 ms", "ops-spec §9 (§167)", "chunked background rewrap", "ENFORCEMENT-PENDING: the reencrypt-after-rotation walk is not yet implemented (no reencrypt verb/job); the bound belongs to that feature. HUMAN-DISPOSITION -> issue #187 (encryption rotation).", StatusPending},
 
 	// §11 / §12 adapter & backup ops.
 	{"Import per-file / decoded / records / pages", "ops-catalogue §Import", "importer bound errors", "importer connector_test / live_test", StatusEnforced},
@@ -121,7 +121,7 @@ var Registry = []Bound{
 
 	// §20 audit ops.
 	{"Audit free text", "ops-spec §20", "truncation to audit.FreeTextBound", "audit audit_test", StatusSanitize},
-	{"Audit exports 2/org · 6/instance", "ops-spec §20 (§179)", "expensive-path budget refusal", "ENFORCEMENT-PENDING: the audit-export path EXISTS (internal/service/audit.go Export), but the concurrency/rate cap needs the §179 expensive-path budget layer (per-org concurrency + per-principal rate across search/export/publish/sync) that is not yet built anywhere. HUMAN-DISPOSITION: build the budget layer now vs. ticket.", StatusPending},
+	{"Audit exports 2/org · 6/instance", "ops-spec §20 (§179)", "expensive-path budget refusal", "ENFORCEMENT-PENDING: the audit-export path EXISTS (internal/service/audit.go Export), but the concurrency/rate cap needs the §179 expensive-path budget layer (per-org concurrency + per-principal rate across search/export/publish/sync) that is not yet built anywhere. HUMAN-DISPOSITION -> issue #186.", StatusPending},
 
 	// SAML / SCIM wire bounds.
 	{"SAML document bytes / depth / tokens", "ops-catalogue §SAML", "samlsp.ErrDocument* ", "samlsp xml_test", StatusEnforced},
