@@ -330,6 +330,7 @@ type DefinitionsPlan struct {
 	ProvenanceCommit   sql.NullString
 	ProvenanceRef      sql.NullString
 	ProvenanceActor    sql.NullString
+	ScanSnapshot       string
 }
 
 type Environment struct {
@@ -739,6 +740,18 @@ type SamlTransaction struct {
 	CreatedAt           string
 	ExpiresAt           string
 	ConsumedAt          sql.NullString
+}
+
+type ScanningDismissal struct {
+	ID               string
+	OrgID            string
+	ProjectID        string
+	EnvironmentID    string
+	KeyID            string
+	RuleDigest       string
+	ValueFingerprint []byte
+	CreatedAt        string
+	CreatedBy        string
 }
 
 type ScimAttention struct {

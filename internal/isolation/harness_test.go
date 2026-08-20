@@ -431,7 +431,7 @@ func seededDB(t *testing.T, open func(*testing.T) *store.DB) *store.DB {
 func seedValues(t *testing.T, db *store.DB) {
 	t.Helper()
 	if _, err := valueSvc(t, db).Set(t.Context(), service.LocalPrincipal(custodian),
-		scopeEnv(orgA, prjA1, envA1), "SHARED_KEY", "seeded-value"); err != nil {
+		scopeEnv(orgA, prjA1, envA1), "SHARED_KEY", "seeded-value", nil); err != nil {
 		t.Fatalf("seed value: %v", err)
 	}
 }

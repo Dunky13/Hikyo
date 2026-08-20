@@ -41,6 +41,7 @@ func (r sqliteDefinitions) CreatePlan(ctx context.Context, p authz.Proof, plan N
 		ProtectedEnvs:      plan.ProtectedEnvs,
 		Diff:               plan.Diff,
 		Additive:           boolToInt(plan.Additive),
+		ScanSnapshot:       plan.ScanSnapshot,
 	}))
 }
 
@@ -127,6 +128,7 @@ func planFromSQLite(row sqlitegen.DefinitionsPlan) (DefinitionsPlan, error) {
 		CreatedAt: created, ExpiresAt: expires, Bundle: row.Bundle, Digest: row.Digest,
 		BaseSchemaRevision: row.BaseSchemaRevision, EnvRevisions: row.EnvRevisions,
 		ProtectedEnvs: row.ProtectedEnvs, Diff: row.Diff, Additive: row.Additive != 0,
+		ScanSnapshot:     row.ScanSnapshot,
 		AppliedBy:        row.AppliedBy.String,
 		ProvenanceCommit: row.ProvenanceCommit.String,
 		ProvenanceRef:    row.ProvenanceRef.String,
@@ -167,6 +169,7 @@ func (r pgDefinitions) CreatePlan(ctx context.Context, p authz.Proof, plan NewDe
 		ProtectedEnvs:      plan.ProtectedEnvs,
 		Diff:               plan.Diff,
 		Additive:           plan.Additive,
+		ScanSnapshot:       plan.ScanSnapshot,
 	}))
 }
 
@@ -249,6 +252,7 @@ func planFromPG(row pggen.DefinitionsPlan) (DefinitionsPlan, error) {
 		Bundle: row.Bundle, Digest: row.Digest, BaseSchemaRevision: row.BaseSchemaRevision,
 		EnvRevisions: row.EnvRevisions, ProtectedEnvs: row.ProtectedEnvs, Diff: row.Diff,
 		Additive:         row.Additive,
+		ScanSnapshot:     row.ScanSnapshot,
 		AppliedBy:        row.AppliedBy.String,
 		ProvenanceCommit: row.ProvenanceCommit.String,
 		ProvenanceRef:    row.ProvenanceRef.String,

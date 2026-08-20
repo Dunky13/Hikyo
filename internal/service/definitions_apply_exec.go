@@ -34,6 +34,19 @@ func (s *Definitions) Apply(ctx context.Context, actor Actor, scope domain.Scope
 		return ApplyResult{}, err
 	}
 
+	// Surface-2 re-scan on ruleset-snapshot skew (#74 SS3, ADR §7 (c)), BEFORE
+	// prepareSchemaPublish. The publish preparation mints the project DEK on first
+	// use, in its OWN transaction outside the apply write — so a scan that refused
+	// only inside the write transaction would roll the write back but leave that
+	// minted DEK row behind (the F2a orphan-key bug scanSurface2Preflight closes).
+	// This pre-flight reaches the verdict in a read transaction before the mint, so
+	// a skew-blocked apply persists NOTHING but the finding_blocked events. A
+	// same-version apply runs no scan here and returns no overrides.
+	overrides, err := s.scanApplySkew(ctx, actor, scope, planID, opts.Acknowledgements)
+	if err != nil {
+		return ApplyResult{}, err
+	}
+
 	publisher, err := prepareSchemaPublish(ctx, s.DB, s.Keyring, s.Advisory, actor, authz.OpDefinitionsApply, scope)
 	if err != nil {
 		return ApplyResult{}, err
@@ -134,6 +147,12 @@ func (s *Definitions) Apply(ctx context.Context, actor Actor, scope domain.Scope
 		if err := r.Audit().InsertTenant(ctx, p, ev); err != nil {
 			return err
 		}
+		// finding_overridden for each skew re-scan finding the caller acknowledged,
+		// committed in the apply's own transaction (ADR §5,§7). Empty on a
+		// same-version apply, which ran no scan.
+		if err := emitOverrides(ctx, r, p, caller.Principal, overrides); err != nil {
+			return err
+		}
 
 		if err := publisher.fanOut(ctx, r, az, caller, p, scope, "definitions-apply"); err != nil {
 			return err
@@ -153,6 +172,70 @@ func (s *Definitions) Apply(ctx context.Context, actor Actor, scope domain.Scope
 		publisher.announce(scope)
 	}
 	return result, err
+}
+
+// scanApplySkew is the apply-time Surface-2 re-scan (#74 SS3, ADR §7 (c)),
+// reached in a READ-only transaction before prepareSchemaPublish so a refusal
+// mints no project DEK (see Apply's call site). It re-scans the plan's pinned
+// bundle ONLY when the running ruleset snapshot differs from the one the plan
+// recorded — a same-version apply is a scanner no-op (identical bytes, identical
+// ruleset). On a finding it CAPTURES the finding_blocked events (ingress `apply`)
+// and returns *scanRefusalErr; the read wrote nothing else, so settleDenials
+// flushes the blocks while nothing else persists. On acceptance it returns the
+// overridden acks for the caller to emit with the apply's write transaction.
+//
+// An already-applied or expired plan re-scans nothing: the write transaction
+// yields the proper conflict, and blocking a plan that cannot apply would emit
+// spurious events.
+func (s *Definitions) scanApplySkew(ctx context.Context, actor Actor, scope domain.Scope, planID string, acks []string) ([]overrideAck, error) {
+	if s.Scan == nil {
+		return nil, nil // scanning off (pre-#74 test); a booted server always wires it
+	}
+	var overrides []overrideAck
+	err := tx.Read(ctx, s.DB, func(ctx context.Context, r store.ReadRepos, az *authz.TxAuthorizer) error {
+		caller, err := actor.resolve(ctx, az, s.now())
+		if err != nil {
+			return err
+		}
+		p, err := az.Authorize(ctx, caller, authz.OpDefinitionsApply, scope)
+		if err != nil {
+			return err
+		}
+		plan, err := r.Definitions().GetPlan(ctx, p, planID)
+		if err != nil {
+			return err
+		}
+		if plan.Applied || !s.now().Before(plan.ExpiresAt) {
+			return nil // the write transaction produces the applied/expired conflict
+		}
+		if plan.ScanSnapshot == s.Scan.SnapshotVersion() {
+			return nil // no skew: a same-version apply adds no second scan
+		}
+		bundle, err := definitions.Parse([]byte(plan.Bundle))
+		if err != nil {
+			return fmt.Errorf("service: plan %s: stored bundle unreadable: %w", planID, err)
+		}
+		res, err := scanDeclaration(ctx, s.Keyring, s.Scan, bundleLeaves(bundle), newAckSet(acks), s.now(), ingressApply)
+		if err != nil {
+			return err
+		}
+		if res.refuses() {
+			for _, f := range res.blocked {
+				ev, evErr := blockedEvent(ctx, caller.Principal, f)
+				if evErr != nil {
+					return evErr
+				}
+				az.CaptureAudit(audit.TrailTenant, domain.Scope{Org: scope.Org, Project: scope.Project}, ev)
+			}
+			return &scanRefusalErr{blocked: res.blocked, rejections: res.rejections}
+		}
+		overrides = res.overridden
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return overrides, nil
 }
 
 // recheckPins refuses the apply if the file digest or any pinned revision moved
@@ -256,9 +339,9 @@ func (s *Definitions) guardDeletions(ctx context.Context, r store.Repos, az *aut
 	return nil
 }
 
-// enforceReveal runs the inherited reveal gates for every entry whose apply
-// requires reveal: a value-dependent rule change on a secret key, and
-// declassification. A CI identity without reveal fails here, naming the entry.
+// enforceReveal runs the inherited reveal gate for a value-dependent rule
+// change on a secret key. A secret → config update is refused here before the
+// apply executor: only the interactive declassification ceremony may do it.
 func (s *Definitions) enforceReveal(ctx context.Context, r store.Repos, az *authz.TxAuthorizer, caller authz.Identity,
 	p authz.Proof, scope domain.Scope, res definitions.Resolution) error {
 	for _, upd := range res.KeyUpdates {
@@ -279,15 +362,20 @@ func (s *Definitions) enforceReveal(ctx context.Context, r store.Repos, az *auth
 			}
 		}
 		if wasSecret && upd.Desired.Classification == string(schema.Config) {
-			if err := revealGate(ctx, az, caller, scope, authz.OpKeyDeclassify, key, "declassification"); err != nil {
-				return &detailErr{
-					detail: fmt.Sprintf("definitions apply requires reveal for key %q", key.Name),
-					err:    err,
-				}
-			}
+			return refuseApplyDeclassification(key.Name)
 		}
 	}
 	return nil
+}
+
+// refuseApplyDeclassification closes Surface 1 for the definitions Git flow:
+// apply has no plaintext legitimately in process to scan and ADR §6 forbids
+// decrypting it without the disclosure ceremony. The equivalent direct
+// transition also requires revealGate because config values escape the reveal
+// ceremony; allowing apply to perform it would bypass that reauthentication.
+func refuseApplyDeclassification(keyName string) error {
+	detail := fmt.Sprintf("definitions apply cannot declassify key %q from secret to config: apply has no plaintext to run the Surface-1 scanner and must not decrypt it outside ceremony; use interactive `key reclassify` / declassification ceremony, which performs disclosure-class reauthentication and scanning", keyName)
+	return &detailErr{detail: detail, err: fmt.Errorf("%w: %s", domain.ErrInvalid, detail)}
 }
 
 func jsonUnmarshal(s string, v any) error {
@@ -348,8 +436,8 @@ func (s *Definitions) executeResolution(ctx context.Context, r store.Repos, az *
 	now := s.now()
 
 	// 1. Key deletes: clear the key's live values (so the foreign key admits the
-	// delete), drop its presence rows, then delete it. Adapter-pinned keys are
-	// refused, reusing the ceremony's own check.
+	// delete), drop its presence and scanning-dismissal rows, then delete it.
+	// Adapter-pinned keys are refused, reusing the ceremony's own check.
 	for _, del := range res.KeyDeletes {
 		key, err := r.Catalogue().Get(ctx, p, del.ID)
 		if err != nil {
@@ -365,6 +453,9 @@ func (s *Definitions) executeResolution(ctx context.Context, r store.Repos, az *
 			return err
 		}
 		if _, err := r.Pending().DiscardKey(ctx, p, del.ID); err != nil {
+			return err
+		}
+		if _, err := r.ScanningDismissals().DeleteByKey(ctx, p, del.ID); err != nil {
 			return err
 		}
 		if err := r.Catalogue().Delete(ctx, p, del.ID); err != nil {
@@ -758,8 +849,22 @@ func (s *Definitions) updateKey(ctx context.Context, r store.Repos, caller authz
 		if err := refuseAdapterPinnedKey(ctx, r.Catalogue(), p, key); err != nil {
 			return err
 		}
+		if upd.PrevClassification == string(schema.Secret) && k.Classification == string(schema.Config) {
+			// Surface 1 requires declassification to meet the scanner, but apply has
+			// no plaintext in process and ADR §6 forbids decrypt-without-ceremony.
+			// Direct `key reclassify` also requires disclosure-class revealGate;
+			// applying the same transition here would bypass that reauthentication.
+			return refuseApplyDeclassification(k.Name)
+		}
 		if err := r.Catalogue().SetClassification(ctx, p, upd.ID, k.Classification); err != nil {
 			return err
+		}
+		if upd.PrevClassification == string(schema.Config) && k.Classification == string(schema.Secret) {
+			// Tightening config → secret makes the key's dismissals moot and drops
+			// them (ADR §4 lifecycle), so a later declassification re-fires.
+			if _, err := r.ScanningDismissals().DeleteByKey(ctx, p, upd.ID); err != nil {
+				return err
+			}
 		}
 		if err := insertDefinitionEvent(ctx, r, p, caller, audit.EventKeyReclassified, "key", upd.ID, audit.Payload{
 			"name": audit.SanitizeFreeText(k.Name), "previous_classification": upd.PrevClassification,

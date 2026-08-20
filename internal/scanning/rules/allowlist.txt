@@ -1,0 +1,20 @@
+# Committed allowlist of gitleaks rule IDs compiled into the ruleset.
+# Fail-closed: a rule ships only if its ID is on this list AND it passes the
+# import contract (id/regex/keywords only) at generation. A new upstream rule
+# arriving in a pin bump is not compiled until explicitly added here with
+# fixtures. Bare-entropy rules are excluded by the contract (ADR §3).
+#
+# The Hikyo-owned `hik_` rule is not a gitleaks rule and is not listed here;
+# it is added by the generator directly (two-stage, ADR §3).
+#
+# Minimum coverage manifest (ADR §3) — every family below is represented:
+aws-access-token
+github-pat
+github-oauth
+github-app-token
+github-fine-grained-pat
+gitlab-pat
+slack-bot-token
+slack-user-token
+stripe-access-token
+private-key

@@ -14,15 +14,23 @@ import (
 )
 
 // Purpose distinguishes the tier-3 keys: one DEK per project, one instance
-// DEK for rows belonging to no project, and the root token key (derivation
-// only, never encryption). The scanning-fingerprint key (secret-scanning
-// amendment) lands with its ticket; the column set already carries it.
+// DEK for rows belonging to no project, the root token key (derivation
+// only, never encryption), and the scanning-fingerprint key (secret-scanning
+// amendment — derivation only, one instance-scoped key for dismissal
+// fingerprints).
 type Purpose string
 
 const (
 	PurposeProject  Purpose = "project"
 	PurposeInstance Purpose = "instance"
 	PurposeToken    Purpose = "token"
+	// PurposeScanning is the instance-scoped scanning-fingerprint key
+	// (secret-scanning ADR §4, encryption-model amendment): a tier-3 sibling of
+	// the instance DEK and token key, used only to compute dismissal-row value
+	// fingerprints and for nothing else. Like the token key it is derivation
+	// material, never an envelope key, and it wraps under the existing
+	// wrapped_dek kind.
+	PurposeScanning Purpose = "scanning"
 )
 
 // WrappedKey is a stored, wrapped key row. Blob is a versioned ciphertext
@@ -107,6 +115,12 @@ type Keyring struct {
 	tokenMu sync.Mutex
 	token   keyHandle
 
+	// scanningMu guards the scanning-fingerprint key handle against
+	// `rotate-scanning-key` swapping it under a concurrent fingerprint
+	// computation, exactly as tokenMu guards the token key.
+	scanningMu sync.Mutex
+	scanning   keyHandle
+
 	mu   sync.Mutex
 	deks map[string]*list.Element // scope → *list.Element holding *dekEntry
 	lru  *list.List               // front = most recently used
@@ -171,7 +185,41 @@ func LoadKeyring(ctx context.Context, ks KeyStore, root []byte) (*Keyring, error
 	if k.token, err = k.loadTier3(ctx, PurposeToken, "", ""); err != nil {
 		return nil, err
 	}
+	if k.scanning, err = k.loadOrMintScanning(ctx); err != nil {
+		return nil, err
+	}
 	return k, nil
+}
+
+// loadOrMintScanning loads the instance-scoped scanning-fingerprint key,
+// minting it on absence. It is deliberately NOT loadTier3's die-on-missing:
+// the scanning key joined the hierarchy with the secret-scanning ADR, so any
+// hierarchy minted before it — including a restored pre-#74 backup — has no
+// scanning row, and a hard failure there would brick boot on upgrade. A fresh
+// first boot mints it in mintHierarchy; this path covers the upgrade, with the
+// same ErrKeyExists convergence a concurrent minter needs (projectDEK's shape).
+func (k *Keyring) loadOrMintScanning(ctx context.Context) (keyHandle, error) {
+	row, err := k.ks.ActiveTier3(ctx, PurposeScanning, "", "")
+	if errors.Is(err, ErrNoKey) {
+		handle, newRow, mintErr := k.mintTier3(PurposeScanning, "", "")
+		if mintErr != nil {
+			return keyHandle{}, mintErr
+		}
+		switch createErr := k.ks.CreateTier3(ctx, newRow); {
+		case createErr == nil:
+			return handle, nil
+		case errors.Is(createErr, ErrKeyExists):
+			Zero(handle.key)
+			row, err = k.ks.ActiveTier3(ctx, PurposeScanning, "", "")
+		default:
+			Zero(handle.key)
+			return keyHandle{}, createErr
+		}
+	}
+	if err != nil {
+		return keyHandle{}, fmt.Errorf("crypto: load scanning key: %w", err)
+	}
+	return k.unwrapTier3(row)
 }
 
 func (k *Keyring) unwrapMaster(root []byte, wrappers []WrappedKey) (keyHandle, error) {
@@ -218,20 +266,25 @@ func (k *Keyring) mintHierarchy(ctx context.Context, root []byte) error {
 	if err != nil {
 		return err
 	}
+	scanning, scanningRow, err := k.mintTier3(PurposeScanning, "", "")
+	if err != nil {
+		return err
+	}
 
 	err = k.ks.CreateHierarchy(ctx, WrappedKey{
 		Version:      version,
 		RootKeyEpoch: epoch,
 		Blob:         masterBlob,
-	}, []WrappedKey{instanceRow, tokenRow})
+	}, []WrappedKey{instanceRow, tokenRow, scanningRow})
 	if err != nil {
 		Zero(master)
 		Zero(instance.key)
 		Zero(token.key)
+		Zero(scanning.key)
 		k.master = keyHandle{}
 		return err
 	}
-	k.instance, k.token = instance, token
+	k.instance, k.token, k.scanning = instance, token, scanning
 	return nil
 }
 
@@ -270,7 +323,7 @@ func (k *Keyring) mintTier3At(p Purpose, orgID, projectID string, version uint32
 
 // tier3AAD is the one place the tier-3 row → AAD mapping lives: the token
 // key wraps under wrapped_token_key, every DEK-shaped key (project,
-// instance, future scanning) under wrapped_dek.
+// instance, scanning) under wrapped_dek.
 func tier3AAD(row WrappedKey) AAD {
 	if row.Purpose == PurposeToken {
 		return WrappedTokenKeyAAD{TokenKeyVersion: row.Version, MasterKeyVersion: row.MasterKeyVersion}

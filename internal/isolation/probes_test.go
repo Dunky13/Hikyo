@@ -76,34 +76,34 @@ var tenantProbes = []tenantProbe{
 		name: "env_update_note_cross_org", axis: axisCrossOrgHuman, mutation: true,
 		run: func(t *testing.T, db *store.DB) error {
 			_, _, envs := services(t, db)
-			return envs.UpdateNote(tctx(t), service.LocalPrincipal(bob), domain.Scope{Org: orgA, Project: prjA1, Env: envA1}, "pwned")
+			return envs.UpdateNote(tctx(t), service.LocalPrincipal(bob), domain.Scope{Org: orgA, Project: prjA1, Env: envA1}, "pwned", nil)
 		},
 		missing: func(t *testing.T, db *store.DB) error {
 			_, _, envs := services(t, db)
-			return envs.UpdateNote(tctx(t), service.LocalPrincipal(alice), domain.Scope{Org: orgA, Project: prjA1, Env: "env_missing"}, "pwned")
+			return envs.UpdateNote(tctx(t), service.LocalPrincipal(alice), domain.Scope{Org: orgA, Project: prjA1, Env: "env_missing"}, "pwned", nil)
 		},
 	},
 	{
 		name: "env_update_note_cross_project_machine", axis: axisCrossProjectMachine, mutation: true,
 		run: func(t *testing.T, db *store.DB) error {
 			_, _, envs := services(t, db)
-			return envs.UpdateNote(tctx(t), service.LocalPrincipal(mchA1), domain.Scope{Org: orgA, Project: prjA2, Env: envA2}, "pwned")
+			return envs.UpdateNote(tctx(t), service.LocalPrincipal(mchA1), domain.Scope{Org: orgA, Project: prjA2, Env: envA2}, "pwned", nil)
 		},
 		missing: func(t *testing.T, db *store.DB) error {
 			_, _, envs := services(t, db)
-			return envs.UpdateNote(tctx(t), service.LocalPrincipal(mchA1), domain.Scope{Org: orgA, Project: prjA1, Env: "env_missing"}, "pwned")
+			return envs.UpdateNote(tctx(t), service.LocalPrincipal(mchA1), domain.Scope{Org: orgA, Project: prjA1, Env: "env_missing"}, "pwned", nil)
 		},
 	},
 	{
 		name: "env_create_cross_org", axis: axisCrossOrgHuman, mutation: true,
 		run: func(t *testing.T, db *store.DB) error {
 			_, _, envs := services(t, db)
-			_, err := envs.Create(tctx(t), service.LocalPrincipal(bob), domain.Scope{Org: orgA, Project: prjA1}, "intruder")
+			_, err := envs.Create(tctx(t), service.LocalPrincipal(bob), domain.Scope{Org: orgA, Project: prjA1}, "intruder", nil)
 			return err
 		},
 		missing: func(t *testing.T, db *store.DB) error {
 			_, _, envs := services(t, db)
-			_, err := envs.Create(tctx(t), service.LocalPrincipal(alice), domain.Scope{Org: orgA, Project: "prj_missing"}, "intruder")
+			_, err := envs.Create(tctx(t), service.LocalPrincipal(alice), domain.Scope{Org: orgA, Project: "prj_missing"}, "intruder", nil)
 			return err
 		},
 	},
@@ -111,7 +111,7 @@ var tenantProbes = []tenantProbe{
 		name: "env_create_cross_project_machine", axis: axisCrossProjectMachine, mutation: true,
 		run: func(t *testing.T, db *store.DB) error {
 			_, _, envs := services(t, db)
-			_, err := envs.Create(tctx(t), service.LocalPrincipal(mchA1), domain.Scope{Org: orgA, Project: prjA2}, "intruder")
+			_, err := envs.Create(tctx(t), service.LocalPrincipal(mchA1), domain.Scope{Org: orgA, Project: prjA2}, "intruder", nil)
 			return err
 		},
 		missing: func(t *testing.T, db *store.DB) error {
@@ -122,7 +122,7 @@ var tenantProbes = []tenantProbe{
 			// address prjA1 with a missing CHILD are already authorized — the
 			// grant covers the project, only the child is absent.)
 			_, _, envs := services(t, db)
-			_, err := envs.Create(tctx(t), service.LocalPrincipal(alice), domain.Scope{Org: orgA, Project: "prj_missing"}, "intruder")
+			_, err := envs.Create(tctx(t), service.LocalPrincipal(alice), domain.Scope{Org: orgA, Project: "prj_missing"}, "intruder", nil)
 			return err
 		},
 	},
@@ -134,23 +134,23 @@ var tenantProbes = []tenantProbe{
 		name: "env_update_note_read_only_principal", axis: axisCapabilityDenial, mutation: true,
 		run: func(t *testing.T, db *store.DB) error {
 			_, _, envs := services(t, db)
-			return envs.UpdateNote(tctx(t), service.LocalPrincipal(reader), domain.Scope{Org: orgA, Project: prjA1, Env: envA1}, "pwned")
+			return envs.UpdateNote(tctx(t), service.LocalPrincipal(reader), domain.Scope{Org: orgA, Project: prjA1, Env: envA1}, "pwned", nil)
 		},
 		missing: func(t *testing.T, db *store.DB) error {
 			_, _, envs := services(t, db)
-			return envs.UpdateNote(tctx(t), service.LocalPrincipal(alice), domain.Scope{Org: orgA, Project: prjA1, Env: "env_missing"}, "pwned")
+			return envs.UpdateNote(tctx(t), service.LocalPrincipal(alice), domain.Scope{Org: orgA, Project: prjA1, Env: "env_missing"}, "pwned", nil)
 		},
 	},
 	{
 		name: "env_create_read_only_principal", axis: axisCapabilityDenial, mutation: true,
 		run: func(t *testing.T, db *store.DB) error {
 			_, _, envs := services(t, db)
-			_, err := envs.Create(tctx(t), service.LocalPrincipal(reader), domain.Scope{Org: orgA, Project: prjA1}, "intruder")
+			_, err := envs.Create(tctx(t), service.LocalPrincipal(reader), domain.Scope{Org: orgA, Project: prjA1}, "intruder", nil)
 			return err
 		},
 		missing: func(t *testing.T, db *store.DB) error {
 			_, _, envs := services(t, db)
-			_, err := envs.Create(tctx(t), service.LocalPrincipal(alice), domain.Scope{Org: orgA, Project: "prj_missing"}, "intruder")
+			_, err := envs.Create(tctx(t), service.LocalPrincipal(alice), domain.Scope{Org: orgA, Project: "prj_missing"}, "intruder", nil)
 			return err
 		},
 	},
@@ -366,12 +366,12 @@ var tenantProbes = []tenantProbe{
 		name: "env_rename_cross_org", axis: axisCrossOrgHuman, mutation: true,
 		run: func(t *testing.T, db *store.DB) error {
 			_, _, envs := services(t, db)
-			_, err := envs.Rename(tctx(t), service.LocalPrincipal(bob), scopeEnv(orgA, prjA1, envA1), "pwned")
+			_, err := envs.Rename(tctx(t), service.LocalPrincipal(bob), scopeEnv(orgA, prjA1, envA1), "pwned", nil)
 			return err
 		},
 		missing: func(t *testing.T, db *store.DB) error {
 			_, _, envs := services(t, db)
-			_, err := envs.Rename(tctx(t), service.LocalPrincipal(alice), scopeEnv(orgA, prjA1, "env_missing"), "pwned")
+			_, err := envs.Rename(tctx(t), service.LocalPrincipal(alice), scopeEnv(orgA, prjA1, "env_missing"), "pwned", nil)
 			return err
 		},
 	},
@@ -379,12 +379,12 @@ var tenantProbes = []tenantProbe{
 		name: "env_rename_read_only_principal", axis: axisCapabilityDenial, mutation: true,
 		run: func(t *testing.T, db *store.DB) error {
 			_, _, envs := services(t, db)
-			_, err := envs.Rename(tctx(t), service.LocalPrincipal(reader), scopeEnv(orgA, prjA1, envA1), "pwned")
+			_, err := envs.Rename(tctx(t), service.LocalPrincipal(reader), scopeEnv(orgA, prjA1, envA1), "pwned", nil)
 			return err
 		},
 		missing: func(t *testing.T, db *store.DB) error {
 			_, _, envs := services(t, db)
-			_, err := envs.Rename(tctx(t), service.LocalPrincipal(alice), scopeEnv(orgA, prjA1, "env_missing"), "pwned")
+			_, err := envs.Rename(tctx(t), service.LocalPrincipal(alice), scopeEnv(orgA, prjA1, "env_missing"), "pwned", nil)
 			return err
 		},
 	},
@@ -486,33 +486,33 @@ var tenantProbes = []tenantProbe{
 	{
 		name: "folder_create_cross_org", axis: axisCrossOrgHuman, mutation: true,
 		run: func(t *testing.T, db *store.DB) error {
-			_, err := folderSvc(db).Create(tctx(t), service.LocalPrincipal(bob), scopeProject(orgA, prjA1), "intruder")
+			_, err := folderSvc(db).Create(tctx(t), service.LocalPrincipal(bob), scopeProject(orgA, prjA1), "intruder", nil)
 			return err
 		},
 		missing: func(t *testing.T, db *store.DB) error {
-			_, err := folderSvc(db).Create(tctx(t), service.LocalPrincipal(alice), scopeProject(orgA, "prj_missing"), "intruder")
+			_, err := folderSvc(db).Create(tctx(t), service.LocalPrincipal(alice), scopeProject(orgA, "prj_missing"), "intruder", nil)
 			return err
 		},
 	},
 	{
 		name: "folder_create_read_only_principal", axis: axisCapabilityDenial, mutation: true,
 		run: func(t *testing.T, db *store.DB) error {
-			_, err := folderSvc(db).Create(tctx(t), service.LocalPrincipal(reader), scopeProject(orgA, prjA1), "intruder")
+			_, err := folderSvc(db).Create(tctx(t), service.LocalPrincipal(reader), scopeProject(orgA, prjA1), "intruder", nil)
 			return err
 		},
 		missing: func(t *testing.T, db *store.DB) error {
-			_, err := folderSvc(db).Create(tctx(t), service.LocalPrincipal(alice), scopeProject(orgA, "prj_missing"), "intruder")
+			_, err := folderSvc(db).Create(tctx(t), service.LocalPrincipal(alice), scopeProject(orgA, "prj_missing"), "intruder", nil)
 			return err
 		},
 	},
 	{
 		name: "folder_rename_cross_project_machine", axis: axisCrossProjectMachine, mutation: true,
 		run: func(t *testing.T, db *store.DB) error {
-			_, err := folderSvc(db).Rename(tctx(t), service.LocalPrincipal(mchA1), scopeProject(orgA, prjA1), "fld_a2", "pwned")
+			_, err := folderSvc(db).Rename(tctx(t), service.LocalPrincipal(mchA1), scopeProject(orgA, prjA1), "fld_a2", "pwned", nil)
 			return err
 		},
 		missing: func(t *testing.T, db *store.DB) error {
-			_, err := folderSvc(db).Rename(tctx(t), service.LocalPrincipal(mchA1), scopeProject(orgA, prjA1), "fld_missing", "pwned")
+			_, err := folderSvc(db).Rename(tctx(t), service.LocalPrincipal(mchA1), scopeProject(orgA, prjA1), "fld_missing", "pwned", nil)
 			return err
 		},
 	},
@@ -615,12 +615,12 @@ var tenantProbes = []tenantProbe{
 		name: "value_set_cross_org", axis: axisCrossOrgHuman, mutation: true,
 		run: func(t *testing.T, db *store.DB) error {
 			_, err := valueSvc(t, db).Set(tctx(t), service.LocalPrincipal(bob),
-				scopeEnv(orgA, prjA1, envA1), "SHARED_KEY", "pwned")
+				scopeEnv(orgA, prjA1, envA1), "SHARED_KEY", "pwned", nil)
 			return err
 		},
 		missing: func(t *testing.T, db *store.DB) error {
 			_, err := valueSvc(t, db).Set(tctx(t), service.LocalPrincipal(custodian),
-				scopeEnv(orgA, prjA1, "env_missing"), "SHARED_KEY", "pwned")
+				scopeEnv(orgA, prjA1, "env_missing"), "SHARED_KEY", "pwned", nil)
 			return err
 		},
 	},
@@ -628,12 +628,12 @@ var tenantProbes = []tenantProbe{
 		name: "value_set_read_only_principal", axis: axisCapabilityDenial, mutation: true,
 		run: func(t *testing.T, db *store.DB) error {
 			_, err := valueSvc(t, db).Set(tctx(t), service.LocalPrincipal(reader),
-				scopeEnv(orgA, prjA1, envA1), "SHARED_KEY", "pwned")
+				scopeEnv(orgA, prjA1, envA1), "SHARED_KEY", "pwned", nil)
 			return err
 		},
 		missing: func(t *testing.T, db *store.DB) error {
 			_, err := valueSvc(t, db).Set(tctx(t), service.LocalPrincipal(custodian),
-				scopeEnv(orgA, prjA1, "env_missing"), "SHARED_KEY", "pwned")
+				scopeEnv(orgA, prjA1, "env_missing"), "SHARED_KEY", "pwned", nil)
 			return err
 		},
 	},
@@ -696,45 +696,45 @@ var tenantProbes = []tenantProbe{
 		name: "value_clone_cross_org", axis: axisCrossOrgHuman, mutation: true,
 		run: func(t *testing.T, db *store.DB) error {
 			_, _, err := cloneSvc(t, db).Clone(tctx(t), service.LocalPrincipal(bob),
-				scopeProject(orgA, prjA1), "intruder-clone", string(envA1))
+				scopeProject(orgA, prjA1), "intruder-clone", string(envA1), nil)
 			return err
 		},
 		missing: func(t *testing.T, db *store.DB) error {
 			_, _, err := cloneSvc(t, db).Clone(tctx(t), service.LocalPrincipal(custodian),
-				scopeProject(orgA, "prj_missing"), "intruder-clone", string(envA1))
+				scopeProject(orgA, "prj_missing"), "intruder-clone", string(envA1), nil)
 			return err
 		},
 	},
 	{
 		name: "key_create_cross_org", axis: axisCrossOrgHuman, mutation: true,
 		run: func(t *testing.T, db *store.DB) error {
-			_, err := keySvc(t, db).Create(tctx(t), service.LocalPrincipal(bob), scopeProject(orgA, prjA1), probeKeySpec("INTRUDER"))
+			_, err := keySvc(t, db).Create(tctx(t), service.LocalPrincipal(bob), scopeProject(orgA, prjA1), probeKeySpec("INTRUDER"), nil)
 			return err
 		},
 		missing: func(t *testing.T, db *store.DB) error {
-			_, err := keySvc(t, db).Create(tctx(t), service.LocalPrincipal(alice), scopeProject(orgA, "prj_missing"), probeKeySpec("INTRUDER"))
+			_, err := keySvc(t, db).Create(tctx(t), service.LocalPrincipal(alice), scopeProject(orgA, "prj_missing"), probeKeySpec("INTRUDER"), nil)
 			return err
 		},
 	},
 	{
 		name: "key_create_read_only_principal", axis: axisCapabilityDenial, mutation: true,
 		run: func(t *testing.T, db *store.DB) error {
-			_, err := keySvc(t, db).Create(tctx(t), service.LocalPrincipal(reader), scopeProject(orgA, prjA1), probeKeySpec("INTRUDER"))
+			_, err := keySvc(t, db).Create(tctx(t), service.LocalPrincipal(reader), scopeProject(orgA, prjA1), probeKeySpec("INTRUDER"), nil)
 			return err
 		},
 		missing: func(t *testing.T, db *store.DB) error {
-			_, err := keySvc(t, db).Create(tctx(t), service.LocalPrincipal(alice), scopeProject(orgA, "prj_missing"), probeKeySpec("INTRUDER"))
+			_, err := keySvc(t, db).Create(tctx(t), service.LocalPrincipal(alice), scopeProject(orgA, "prj_missing"), probeKeySpec("INTRUDER"), nil)
 			return err
 		},
 	},
 	{
 		name: "key_rename_cross_org", axis: axisCrossOrgHuman, mutation: true,
 		run: func(t *testing.T, db *store.DB) error {
-			_, err := keySvc(t, db).Rename(tctx(t), service.LocalPrincipal(bob), scopeProject(orgA, prjA1), keyA1, "PWNED")
+			_, err := keySvc(t, db).Rename(tctx(t), service.LocalPrincipal(bob), scopeProject(orgA, prjA1), keyA1, "PWNED", nil)
 			return err
 		},
 		missing: func(t *testing.T, db *store.DB) error {
-			_, err := keySvc(t, db).Rename(tctx(t), service.LocalPrincipal(alice), scopeProject(orgA, prjA1), "key_missing", "PWNED")
+			_, err := keySvc(t, db).Rename(tctx(t), service.LocalPrincipal(alice), scopeProject(orgA, prjA1), "key_missing", "PWNED", nil)
 			return err
 		},
 	},
@@ -742,23 +742,23 @@ var tenantProbes = []tenantProbe{
 		name: "key_declaration_cross_project_machine", axis: axisCrossProjectMachine, mutation: true,
 		run: func(t *testing.T, db *store.DB) error {
 			_, err := keySvc(t, db).UpdateDeclaration(tctx(t), service.LocalPrincipal(mchA1),
-				scopeProject(orgA, prjA1), keyA2, probeDeclarationUpdate())
+				scopeProject(orgA, prjA1), keyA2, probeDeclarationUpdate(), nil)
 			return err
 		},
 		missing: func(t *testing.T, db *store.DB) error {
 			_, err := keySvc(t, db).UpdateDeclaration(tctx(t), service.LocalPrincipal(mchA1),
-				scopeProject(orgA, prjA1), "key_missing", probeDeclarationUpdate())
+				scopeProject(orgA, prjA1), "key_missing", probeDeclarationUpdate(), nil)
 			return err
 		},
 	},
 	{
 		name: "key_reclassify_read_only_principal", axis: axisCapabilityDenial, mutation: true,
 		run: func(t *testing.T, db *store.DB) error {
-			_, err := keySvc(t, db).Reclassify(tctx(t), service.LocalPrincipal(reader), scopeProject(orgA, prjA1), keyA1, "secret")
+			_, _, err := keySvc(t, db).Reclassify(tctx(t), service.LocalPrincipal(reader), scopeProject(orgA, prjA1), keyA1, "secret")
 			return err
 		},
 		missing: func(t *testing.T, db *store.DB) error {
-			_, err := keySvc(t, db).Reclassify(tctx(t), service.LocalPrincipal(alice), scopeProject(orgA, prjA1), "key_missing", "secret")
+			_, _, err := keySvc(t, db).Reclassify(tctx(t), service.LocalPrincipal(alice), scopeProject(orgA, prjA1), "key_missing", "secret")
 			return err
 		},
 	},
@@ -774,11 +774,11 @@ var tenantProbes = []tenantProbe{
 	{
 		name: "key_group_create_cross_org", axis: axisCrossOrgHuman, mutation: true,
 		run: func(t *testing.T, db *store.DB) error {
-			_, err := keyGroupSvc(t, db).Create(tctx(t), service.LocalPrincipal(bob), scopeProject(orgA, prjA1), "intruder")
+			_, err := keyGroupSvc(t, db).Create(tctx(t), service.LocalPrincipal(bob), scopeProject(orgA, prjA1), "intruder", nil)
 			return err
 		},
 		missing: func(t *testing.T, db *store.DB) error {
-			_, err := keyGroupSvc(t, db).Create(tctx(t), service.LocalPrincipal(alice), scopeProject(orgA, "prj_missing"), "intruder")
+			_, err := keyGroupSvc(t, db).Create(tctx(t), service.LocalPrincipal(alice), scopeProject(orgA, "prj_missing"), "intruder", nil)
 			return err
 		},
 	},
@@ -916,7 +916,7 @@ func runPositiveControls(t *testing.T, db *store.DB) {
 	if _, err := envs.Get(tctx(t), service.LocalPrincipal(mchA1), domain.Scope{Org: orgA, Project: prjA1, Env: envA1}); err != nil {
 		t.Fatalf("machine principal reading its own project's env: %v", err)
 	}
-	if err := envs.UpdateNote(tctx(t), service.LocalPrincipal(alice), domain.Scope{Org: orgA, Project: prjA1, Env: envA1}, "alice was here"); err != nil {
+	if err := envs.UpdateNote(tctx(t), service.LocalPrincipal(alice), domain.Scope{Org: orgA, Project: prjA1, Env: envA1}, "alice was here", nil); err != nil {
 		t.Fatalf("alice updating note: %v", err)
 	}
 
@@ -928,7 +928,7 @@ func runPositiveControls(t *testing.T, db *store.DB) {
 		t.Fatalf("created project's chain did not come from the proof (org_a rows = %d)", n)
 	}
 
-	env, err := envs.Create(tctx(t), service.LocalPrincipal(mchA1), domain.Scope{Org: orgA, Project: prjA1}, "machine-env")
+	env, err := envs.Create(tctx(t), service.LocalPrincipal(mchA1), domain.Scope{Org: orgA, Project: prjA1}, "machine-env", nil)
 	if err != nil {
 		t.Fatalf("machine creating an env in its own project: %v", err)
 	}
@@ -975,20 +975,20 @@ func runPositiveControls(t *testing.T, db *store.DB) {
 	// alice holds definitions-edit and manage-projects in org A, so the
 	// topology and lifecycle mutations must succeed for her.
 	aliceActor := service.LocalPrincipal(alice)
-	folder, err := folders.Create(tctx(t), aliceActor, scopeProject(orgA, prjA1), "positive/control")
+	folder, err := folders.Create(tctx(t), aliceActor, scopeProject(orgA, prjA1), "positive/control", nil)
 	if err != nil {
 		t.Fatalf("alice creating a folder: %v", err)
 	}
 	if n := queryInt(t, db, "SELECT COUNT(*) FROM folders WHERE id = '"+folder.ID+"' AND org_id = 'org_a' AND project_id = 'prj_a1'"); n != 1 {
 		t.Fatal("created folder's chain did not come from the proof")
 	}
-	if _, err := folders.Rename(tctx(t), aliceActor, scopeProject(orgA, prjA1), folder.ID, "positive/renamed"); err != nil {
+	if _, err := folders.Rename(tctx(t), aliceActor, scopeProject(orgA, prjA1), folder.ID, "positive/renamed", nil); err != nil {
 		t.Fatalf("alice renaming a folder: %v", err)
 	}
 	if err := folders.Delete(tctx(t), aliceActor, scopeProject(orgA, prjA1), folder.ID); err != nil {
 		t.Fatalf("alice deleting a folder: %v", err)
 	}
-	if _, err := envs.Rename(tctx(t), aliceActor, scopeEnv(orgA, prjA1, envA1), "renamed-dev"); err != nil {
+	if _, err := envs.Rename(tctx(t), aliceActor, scopeEnv(orgA, prjA1, envA1), "renamed-dev", nil); err != nil {
 		t.Fatalf("alice renaming an environment: %v", err)
 	}
 	live, err := envs.List(tctx(t), aliceActor, scopeProject(orgA, prjA1))

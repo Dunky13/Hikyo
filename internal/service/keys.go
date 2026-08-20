@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -13,6 +14,7 @@ import (
 	"github.com/Hikyo-Org/hikyo/internal/authz"
 	"github.com/Hikyo-Org/hikyo/internal/crypto"
 	"github.com/Hikyo-Org/hikyo/internal/domain"
+	"github.com/Hikyo-Org/hikyo/internal/scanning"
 	"github.com/Hikyo-Org/hikyo/internal/schema"
 	"github.com/Hikyo-Org/hikyo/internal/store"
 	"github.com/Hikyo-Org/hikyo/internal/store/tx"
@@ -117,6 +119,10 @@ type Keys struct {
 	// they were never validated at.
 	Keyring  *crypto.Keyring
 	Advisory *Advisory
+	// Scan is the secret-scanning ruleset (#74). Surface-2 declaration ingresses
+	// (key create/rename/metadata/declaration edits) block on a finding; the
+	// secret→config declassification leg of Reclassify is a Surface-1 warn.
+	Scan *scanning.Ruleset
 }
 
 // KeyGroups owns the group surface, likewise at project depth.
@@ -124,6 +130,9 @@ type KeyGroups struct {
 	DB       *store.DB
 	Keyring  *crypto.Keyring
 	Advisory *Advisory
+	// Scan: secret-scanning Surface-2 seam (#74). Group names are
+	// author-controlled declaration text.
+	Scan *scanning.Ruleset
 }
 
 type schemaPublisher struct {
@@ -530,7 +539,7 @@ func revealGate(ctx context.Context, az *authz.TxAuthorizer, caller authz.Identi
 // Create declares a key. Typing a key name that does not exist is a key
 // CREATION — an explicit act, never a silent value write (ADR § Closed schema):
 // that is the whole reason a typo'd `DATBASE_URL` is answerable at all.
-func (s *Keys) Create(ctx context.Context, actor Actor, scope domain.Scope, spec KeySpec) (Key, error) {
+func (s *Keys) Create(ctx context.Context, actor Actor, scope domain.Scope, spec KeySpec, acks []string) (Key, error) {
 	if err := checkKeySpec(spec); err != nil {
 		return Key{}, err
 	}
@@ -564,6 +573,21 @@ func (s *Keys) Create(ctx context.Context, actor Actor, scope domain.Scope, spec
 		GroupID:       spec.GroupID,
 		CreatedAt:     store.CanonTime(time.Now()),
 	}
+	// Scan the CANONICAL stored form: the resubmission re-scans the same
+	// canonicalization, so a token binds to what a later read returns byte-for-byte.
+	leafSpec := spec
+	leafSpec.Declaration = stored
+	leaves := keySpecLeaves(leafSpec)
+	// Surface-2 block (#74) reached BEFORE prepareSchemaPublish resolves the
+	// sealer. Key create is a first-mint ingress (a fresh project's first key
+	// mints the project DEK here), so scanning only inside the write transaction
+	// would leave the wrapped-key row behind on a block. The pre-flight refuses
+	// before any mint and returns the acknowledged overrides to emit with the
+	// write (ADR §7; see scanSurface2Preflight).
+	overrides, err := scanSurface2Preflight(ctx, s.DB, s.Keyring, s.Scan, actor, authz.OpKeyCreate, scope, leaves, acks, ingressEdit)
+	if err != nil {
+		return Key{}, err
+	}
 	publisher, err := prepareSchemaPublish(ctx, s.DB, s.Keyring, s.Advisory, actor, authz.OpKeyCreate, scope)
 	if err != nil {
 		return Key{}, err
@@ -595,6 +619,13 @@ func (s *Keys) Create(ctx context.Context, actor Actor, scope domain.Scope, spec
 				domain.ErrLimitExceeded, schema.MaxKeysPerProject)
 		}
 		if err := checkGroupMembership(ctx, r, p, spec.GroupID, id, spec.Presence); err != nil {
+			return err
+		}
+		// Surface-2 acknowledged overrides (#74): the block verdict was reached in
+		// the pre-flight above (before the sealer minted the project DEK); here the
+		// finding_overridden events for acknowledged leaves commit in the write's
+		// own transaction.
+		if err := emitOverrides(ctx, r, p, caller.Principal, overrides); err != nil {
 			return err
 		}
 		// Name uniqueness among LIVE keys is the table's constraint, not a
@@ -729,11 +760,17 @@ func (s *Keys) List(ctx context.Context, actor Actor, scope domain.Scope) ([]Key
 // change — the delivered payload's key set moves — so it advances the schema
 // revision, unlike the hierarchy renames, which move a label nothing is
 // delivered under.
-func (s *Keys) Rename(ctx context.Context, actor Actor, scope domain.Scope, id, name string) (Key, error) {
+func (s *Keys) Rename(ctx context.Context, actor Actor, scope domain.Scope, id, name string, acks []string) (Key, error) {
 	if err := schema.CheckKeyName(name); err != nil {
 		return Key{}, fmt.Errorf("%w: %s", domain.ErrInvalid, err)
 	}
 	var out Key
+	// No scan pre-flight (unlike Keys.Create): rename operates on an EXISTING key,
+	// and a key exists only because its create already minted the project DEK
+	// (Keys.Create → prepareSchemaPublish, the sole key-creation path). So this
+	// ForProject re-reads the wrapped-key row, mints nothing, and a Surface-2
+	// block below leaves no orphan row — the in-transaction scan is safe here. If
+	// key creation ever stops minting the DEK, move to scanSurface2Preflight.
 	publisher, err := prepareSchemaPublish(ctx, s.DB, s.Keyring, s.Advisory, actor, authz.OpKeyRename, scope)
 	if err != nil {
 		return Key{}, err
@@ -760,6 +797,11 @@ func (s *Keys) Rename(ctx context.Context, actor Actor, scope domain.Scope, id, 
 		if err := refuseAdapterPinnedKey(ctx, r.Catalogue(), p, before); err != nil {
 			return err
 		}
+		// Surface-2 block (#74): the new name is scanned before it persists.
+		if err := applyDeclarationScan(ctx, r, p, az, s.Keyring, s.Scan, caller.Principal, scope,
+			nonEmptyLeaf(locKeyName, name), newAckSet(acks), ingressEdit); err != nil {
+			return err
+		}
 		if err := r.Catalogue().Rename(ctx, p, id, name); err != nil {
 			return err
 		}
@@ -784,10 +826,11 @@ func (s *Keys) Rename(ctx context.Context, actor Actor, scope domain.Scope, id, 
 		}
 		return publisher.fanOut(ctx, r, az, caller, p, scope, "key-rename")
 	})
-	if err == nil {
-		publisher.announce(scope)
+	if err != nil {
+		return Key{}, err
 	}
-	return out, err
+	publisher.announce(scope)
+	return out, nil
 }
 
 // UpdateMetadata writes the non-semantic fields. No reveal gate and no publish
@@ -796,7 +839,7 @@ func (s *Keys) Rename(ctx context.Context, actor Actor, scope domain.Scope, id, 
 // DOES advance the schema revision (#70): folder path and deprecation are
 // definitions-bundle desired state, and a revision used as a bundle base must be
 // able to detect they moved.
-func (s *Keys) UpdateMetadata(ctx context.Context, actor Actor, scope domain.Scope, id string, m KeyMetadataUpdate) (Key, error) {
+func (s *Keys) UpdateMetadata(ctx context.Context, actor Actor, scope domain.Scope, id string, m KeyMetadataUpdate, acks []string) (Key, error) {
 	if m.FolderPath != nil {
 		if err := checkKeyFolderPath(*m.FolderPath); err != nil {
 			return Key{}, err
@@ -830,6 +873,11 @@ func (s *Keys) UpdateMetadata(ctx context.Context, actor Actor, scope domain.Sco
 		}
 		before, err := r.Catalogue().Get(ctx, p, id)
 		if err != nil {
+			return err
+		}
+		// Surface-2 block (#74): scan the members actually being written before
+		// the metadata persists.
+		if err := applyDeclarationScan(ctx, r, p, az, s.Keyring, s.Scan, caller.Principal, scope, keyMetadataLeaves(m), newAckSet(acks), ingressEdit); err != nil {
 			return err
 		}
 		// Merge over the stored row: an absent member leaves its column alone.
@@ -868,7 +916,10 @@ func (s *Keys) UpdateMetadata(ctx context.Context, actor Actor, scope domain.Sco
 		}
 		return r.Audit().InsertTenant(ctx, p, ev)
 	})
-	return out, err
+	if err != nil {
+		return Key{}, err
+	}
+	return out, nil
 }
 
 func refuseAdapterPinnedKey(ctx context.Context, catalogue store.CatalogueRepo, p authz.Proof, key store.CatalogueKey) error {
@@ -935,8 +986,14 @@ func readKey(ctx context.Context, r store.Repos, p authz.Proof, row store.Catalo
 // stored values would add a query and a time-of-check/time-of-use window for
 // no gain — and this slice has no value rows at all, so a conditional gate
 // would be dead until #50 and then wrong.
-func (s *Keys) UpdateDeclaration(ctx context.Context, actor Actor, scope domain.Scope, id string, u KeyDeclarationUpdate) (Key, error) {
+func (s *Keys) UpdateDeclaration(ctx context.Context, actor Actor, scope domain.Scope, id string, u KeyDeclarationUpdate, acks []string) (Key, error) {
 	var out Key
+	// No scan pre-flight (unlike Keys.Create): this operates on an EXISTING key,
+	// whose create already minted the project DEK, so ForProject mints nothing and
+	// a Surface-2 block leaves no orphan row (see Keys.Rename). It is also the
+	// wrong shape for a pre-flight — the scan is gated on the DB-derived no-op
+	// short-circuit below, which the §6.1 no-retro-scan rule needs; an
+	// unconditional pre-flight scan would block a canonically-identical resubmit.
 	publisher, err := prepareSchemaPublish(ctx, s.DB, s.Keyring, s.Advisory, actor, authz.OpKeyUpdateDeclaration, scope)
 	if err != nil {
 		return Key{}, err
@@ -1006,6 +1063,16 @@ func (s *Keys) UpdateDeclaration(ctx context.Context, actor Actor, scope domain.
 			out, err = keyOf(before, presence)
 			return err
 		}
+		// Surface-2 block (#74): scan the new CANONICAL declaration before it
+		// persists. Placed after the reveal gate and the no-op short-circuit —
+		// scanning declaration TEXT touches no stored value, so it opens no
+		// abort/success channel, and an unchanged declaration is never re-scanned
+		// (no retro-scan, ADR §6.1).
+		if stored, perr := schema.ParseDeclaration(canonical); perr == nil {
+			if err := applyDeclarationScan(ctx, r, p, az, s.Keyring, s.Scan, caller.Principal, scope, declarationLeaves(stored), newAckSet(acks), ingressEdit); err != nil {
+				return err
+			}
+		}
 		if err := r.Catalogue().UpdateDeclaration(ctx, p, id, store.KeyDeclaration{
 			Declaration:   string(canonical),
 			RequiredMode:  string(u.Presence.Required.Mode),
@@ -1048,10 +1115,11 @@ func (s *Keys) UpdateDeclaration(ctx context.Context, actor Actor, scope domain.
 		}
 		return publisher.fanOut(ctx, r, az, caller, p, scope, "key-declaration")
 	})
-	if err == nil {
-		publisher.announce(scope)
+	if err != nil {
+		return Key{}, err
 	}
-	return out, err
+	publisher.announce(scope)
+	return out, nil
 }
 
 // presenceRowsFor renders one key's explicit sets as store rows keyed to it,
@@ -1075,16 +1143,18 @@ func presenceRowsFor(keyID string, p schema.PresenceRules) []store.KeyPresence {
 // able to see a secret in order to stop it being one. Tightening
 // (`config` → `secret`) does not, and cannot un-disclose what was already
 // served as config; the advisory belongs to the UI (#56+).
-func (s *Keys) Reclassify(ctx context.Context, actor Actor, scope domain.Scope, id, classification string) (Key, error) {
+func (s *Keys) Reclassify(ctx context.Context, actor Actor, scope domain.Scope, id, classification string) (Key, []Finding, error) {
 	if !schema.Classification(classification).Valid() {
-		return Key{}, fmt.Errorf("%w: classification must be `secret` or `config`", domain.ErrInvalid)
+		return Key{}, nil, fmt.Errorf("%w: classification must be `secret` or `config`", domain.ErrInvalid)
 	}
 	var out Key
+	var findings []Finding
 	publisher, err := prepareSchemaPublish(ctx, s.DB, s.Keyring, s.Advisory, actor, authz.OpKeyReclassify, scope)
 	if err != nil {
-		return Key{}, err
+		return Key{}, nil, err
 	}
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+		findings = nil
 		caller, err := actor.resolve(ctx, az, time.Now().UTC())
 		if err != nil {
 			return err
@@ -1134,6 +1204,23 @@ func (s *Keys) Reclassify(ctx context.Context, actor Actor, scope domain.Scope, 
 		if err := r.Catalogue().SetClassification(ctx, p, id, classification); err != nil {
 			return err
 		}
+		if classification == string(schema.Config) {
+			// Surface-1 declassification warn (#74, ADR §2): the ceremony
+			// re-materialises the key's existing occurrences as config, plaintext
+			// legitimately in process under the reveal gate already passed above.
+			// Scan each, warn-only — findings ride the response; the warn events
+			// commit in this ceremony's transaction. Reads are authorised per
+			// environment under the project-level reveal the caller holds.
+			if findings, err = s.scanDeclassified(ctx, r, az, caller, p, publisher.sealer, scope, id); err != nil {
+				return err
+			}
+		} else {
+			// Tightening config → secret makes any dismissal on this key moot and
+			// drops it (ADR §4 lifecycle): a value re-declassified later re-fires.
+			if _, err := r.ScanningDismissals().DeleteByKey(ctx, p, id); err != nil {
+				return err
+			}
+		}
 		// Classification moves what is delivered and, where an adapter routes
 		// by it, where — so it is a semantic schema change and advances the
 		// revision like any other.
@@ -1166,7 +1253,64 @@ func (s *Keys) Reclassify(ctx context.Context, actor Actor, scope domain.Scope, 
 	if err == nil {
 		publisher.announce(scope)
 	}
-	return out, err
+	return out, findings, err
+}
+
+// scanDeclassified runs the Surface-1 warn over a key's existing occurrences at
+// the moment they become config (#74). It reads each environment's value under
+// a per-environment read proof — the caller already holds project-level reveal,
+// which the ceremony gated above — decrypts with the ceremony's project sealer,
+// and scans warn-only.
+//
+// Each finding_warned event commits under a per-environment PUBLISH proof, not
+// the ceremony's project proof: ADR §5 fixes finding_warned at env scope (the
+// value's owning environment) with the org→project→env chain, and the chain a
+// tenant event carries is proof-bound. The reclassification's own fan-out
+// authorises `publish` on every environment in the project immediately before
+// commit, and this scan touches only the subset that holds a value — a strict
+// subset — so minting the env-scoped publish proof here can never deny a
+// reclassification the fan-out would have allowed. No dismissal:
+// OpKeyReclassify's warn-only declassification authorises no dismissal store op.
+func (s *Keys) scanDeclassified(ctx context.Context, r store.Repos, az *authz.TxAuthorizer,
+	caller authz.Identity, p authz.Proof, sealer *crypto.ProjectSealer, scope domain.Scope, keyID string) ([]Finding, error) {
+	envs, err := r.Values().EnvironmentsWithValue(ctx, p, keyID)
+	if err != nil {
+		return nil, err
+	}
+	total := 0
+	var findings []Finding
+	for _, envID := range envs {
+		envScope := domain.Scope{Org: scope.Org, Project: scope.Project, Env: domain.EnvID(envID)}
+		rp, err := az.Authorize(ctx, caller, authz.OpValueList, envScope)
+		if err != nil {
+			return nil, err
+		}
+		entry, err := r.Values().Get(ctx, rp, keyID)
+		if errors.Is(err, domain.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		plain, err := openCell(sealer, entry)
+		if err != nil {
+			return nil, err
+		}
+		// The env-scoped proof the finding_warned event commits under, so its
+		// chain is org→project→env (ADR §5), not the project reclassify chain.
+		warnProof, err := az.Authorize(ctx, caller, authz.OpValuePublish, envScope)
+		if err != nil {
+			return nil, err
+		}
+		f, err := scanConfigValue(ctx, r, warnProof, s.Keyring, s.Scan, envScope, keyID,
+			string(schema.Config), []byte(schema.Normalize(plain)), surfaceDeclassification,
+			caller.Principal, nil, false, &total)
+		if err != nil {
+			return nil, err
+		}
+		findings = append(findings, f...)
+	}
+	return findings, nil
 }
 
 // SetGroup moves a key into a group, or out of every group when groupID is "".
@@ -1303,6 +1447,13 @@ func (s *Keys) Delete(ctx context.Context, actor Actor, scope domain.Scope, id s
 		if _, err := r.Pending().DiscardKey(ctx, p, id); err != nil {
 			return err
 		}
+		// A key's sticky dismissals reference it under the non-cascading composite
+		// FK (#74, ADR §4 lifecycle: "key deletion deletes them"). They go before
+		// the key row: otherwise the FK refuses the delete of any key that ever
+		// carried a warn-then-dismiss, which is a handled case, not an error.
+		if _, err := r.ScanningDismissals().DeleteByKey(ctx, p, id); err != nil {
+			return err
+		}
 		if err := r.Catalogue().Delete(ctx, p, id); err != nil {
 			return err
 		}
@@ -1333,7 +1484,7 @@ func (s *Keys) Delete(ctx context.Context, actor Actor, scope domain.Scope, id s
 // Create declares a key group. Groups exist as vocabulary here; the co-publish
 // closure and the all-or-none presence evaluation that give them teeth are
 // publish-time (#51).
-func (s *KeyGroups) Create(ctx context.Context, actor Actor, scope domain.Scope, name string) (KeyGroupView, error) {
+func (s *KeyGroups) Create(ctx context.Context, actor Actor, scope domain.Scope, name string, acks []string) (KeyGroupView, error) {
 	if err := schema.CheckGroupName(name); err != nil {
 		return KeyGroupView{}, fmt.Errorf("%w: %s", domain.ErrInvalid, err)
 	}
@@ -1364,6 +1515,11 @@ func (s *KeyGroups) Create(ctx context.Context, actor Actor, scope domain.Scope,
 		if n >= schema.MaxKeyGroupsPerProject {
 			return fmt.Errorf("%w: a project declares at most %d key groups",
 				domain.ErrLimitExceeded, schema.MaxKeyGroupsPerProject)
+		}
+		// Surface-2 block (#74): the group name is scanned before it persists.
+		if err := applyDeclarationScan(ctx, r, p, az, s.Keyring, s.Scan, caller.Principal, scope,
+			nonEmptyLeaf(locGroupName, name), newAckSet(acks), ingressEdit); err != nil {
+			return err
 		}
 		if err := r.Catalogue().CreateGroup(ctx, p, store.NewCatalogueGroup{
 			ID: id, Name: name, CreatedAt: created,
@@ -1465,7 +1621,7 @@ func groupView(group store.CatalogueGroup, keys []store.CatalogueKey) KeyGroupVi
 // materializes nothing — but a group name IS definitions-bundle desired state
 // (#70), so the rename advances the definitions revision so a bundle base can
 // detect it.
-func (s *KeyGroups) Rename(ctx context.Context, actor Actor, scope domain.Scope, id, name string) (KeyGroupView, error) {
+func (s *KeyGroups) Rename(ctx context.Context, actor Actor, scope domain.Scope, id, name string, acks []string) (KeyGroupView, error) {
 	if err := schema.CheckGroupName(name); err != nil {
 		return KeyGroupView{}, fmt.Errorf("%w: %s", domain.ErrInvalid, err)
 	}
@@ -1487,6 +1643,11 @@ func (s *KeyGroups) Rename(ctx context.Context, actor Actor, scope domain.Scope,
 		}
 		before, err := r.Catalogue().GetGroup(ctx, p, id)
 		if err != nil {
+			return err
+		}
+		// Surface-2 block (#74): the new group name is scanned before it persists.
+		if err := applyDeclarationScan(ctx, r, p, az, s.Keyring, s.Scan, caller.Principal, scope,
+			nonEmptyLeaf(locGroupName, name), newAckSet(acks), ingressEdit); err != nil {
 			return err
 		}
 		if err := r.Catalogue().RenameGroup(ctx, p, id, name); err != nil {
@@ -1512,7 +1673,10 @@ func (s *KeyGroups) Rename(ctx context.Context, actor Actor, scope domain.Scope,
 		}
 		return r.Audit().InsertTenant(ctx, p, ev)
 	})
-	return out, err
+	if err != nil {
+		return KeyGroupView{}, err
+	}
+	return out, nil
 }
 
 // Delete dissolves a group and releases its members. It never deletes the keys

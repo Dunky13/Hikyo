@@ -332,6 +332,7 @@ type DefinitionsPlan struct {
 	ProvenanceCommit   pgtype.Text
 	ProvenanceRef      pgtype.Text
 	ProvenanceActor    pgtype.Text
+	ScanSnapshot       string
 }
 
 type Environment struct {
@@ -741,6 +742,18 @@ type SamlTransaction struct {
 	CreatedAt           pgtype.Timestamptz
 	ExpiresAt           pgtype.Timestamptz
 	ConsumedAt          pgtype.Timestamptz
+}
+
+type ScanningDismissal struct {
+	ID               string
+	OrgID            string
+	ProjectID        string
+	EnvironmentID    string
+	KeyID            string
+	RuleDigest       string
+	ValueFingerprint []byte
+	CreatedAt        pgtype.Timestamptz
+	CreatedBy        string
 }
 
 type ScimAttention struct {

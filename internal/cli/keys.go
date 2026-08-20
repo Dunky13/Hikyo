@@ -49,7 +49,7 @@ func runKey(ctx context.Context, ios IO, args []string) error {
 		return err
 	}
 
-	var format, name, declaration, classification, folderPath, description, deprecationNote, groupID, requiredIn, forbiddenIn string
+	var format, name, declaration, classification, folderPath, description, deprecationNote, groupID, requiredIn, forbiddenIn, acknowledge string
 	var deprecated bool
 	// `key update` is a PATCH, so it must send only the members the caller
 	// actually typed: sending every flag's zero value would clear the folder
@@ -85,6 +85,10 @@ func runKey(ctx context.Context, ios IO, args []string) error {
 		}
 		if sub == "set-group" {
 			fs.StringVar(&groupID, "group", "", "key group to join, or empty to leave every group")
+		}
+		if sub == "create" || sub == "rename" || sub == "declare" || sub == "update" {
+			fs.StringVar(&acknowledge, "acknowledge", "",
+				"secret-scanning override token(s) from a prior refusal, comma-separated")
 		}
 	})
 	if err != nil {
@@ -178,6 +182,7 @@ func runKey(ctx context.Context, ios IO, args []string) error {
 		body.Description = optional(description)
 		body.DeprecationNote = optional(deprecationNote)
 		body.GroupId = optional(groupID)
+		body.Acknowledgements = acksPtr(acknowledge)
 		if deprecated {
 			body.Deprecated = &deprecated
 		}
@@ -189,14 +194,14 @@ func runKey(ctx context.Context, ios IO, args []string) error {
 
 	case "rename":
 		var key apigen.Key
-		if err := client.Do(ctx, http.MethodPut, target+"/name", apigen.RenameKeyRequest{Name: name}, &key); err != nil {
+		if err := client.Do(ctx, http.MethodPut, target+"/name", apigen.RenameKeyRequest{Name: name, Acknowledgements: acksPtr(acknowledge)}, &key); err != nil {
 			return err
 		}
 		return renderKey(ios, f, key)
 
 	case "declare":
 		var key apigen.Key
-		body := apigen.UpdateKeyDeclarationRequest{Declaration: decl, Presence: presence}
+		body := apigen.UpdateKeyDeclarationRequest{Declaration: decl, Presence: presence, Acknowledgements: acksPtr(acknowledge)}
 		if err := client.Do(ctx, http.MethodPut, target+"/declaration", body, &key); err != nil {
 			return err
 		}
@@ -208,6 +213,7 @@ func runKey(ctx context.Context, ios IO, args []string) error {
 		if err := client.Do(ctx, http.MethodPut, target+"/classification", body, &key); err != nil {
 			return err
 		}
+		warnFindings(ios, key.Findings)
 		return renderKey(ios, f, key)
 
 	case "update":
@@ -233,6 +239,7 @@ func runKey(ctx context.Context, ios IO, args []string) error {
 		if set["deprecation-note"] {
 			body.DeprecationNote = &deprecationNote
 		}
+		body.Acknowledgements = acksPtr(acknowledge)
 		var key apigen.Key
 		if err := client.Do(ctx, http.MethodPatch, target, body, &key); err != nil {
 			return err
@@ -264,11 +271,13 @@ func runKeyGroup(ctx context.Context, ios IO, args []string) error {
 	if err != nil {
 		return err
 	}
-	var format, name string
+	var format, name, acknowledge string
 	st, flags, err := parseCommon("key group "+sub, ios, rest, func(fs *flag.FlagSet) {
 		fs.StringVar(&format, "o", "table", "output format: table or json")
 		if sub == "create" || sub == "rename" {
 			fs.StringVar(&name, "name", "", "key group name")
+			fs.StringVar(&acknowledge, "acknowledge", "",
+				"secret-scanning override token(s) from a prior refusal, comma-separated")
 		}
 	})
 	if err != nil {
@@ -329,14 +338,14 @@ func runKeyGroup(ctx context.Context, ios IO, args []string) error {
 
 	case "create":
 		var group apigen.KeyGroup
-		if err := client.Do(ctx, http.MethodPost, base, apigen.CreateKeyGroupRequest{Name: name}, &group); err != nil {
+		if err := client.Do(ctx, http.MethodPost, base, apigen.CreateKeyGroupRequest{Name: name, Acknowledgements: acksPtr(acknowledge)}, &group); err != nil {
 			return err
 		}
 		return Render(ios.Stdout, f, Table{Columns: keyGroupColumns, Rows: [][]string{keyGroupRow(group)}, JSON: group})
 
 	case "rename":
 		var group apigen.KeyGroup
-		if err := client.Do(ctx, http.MethodPatch, target, apigen.RenameKeyGroupRequest{Name: name}, &group); err != nil {
+		if err := client.Do(ctx, http.MethodPatch, target, apigen.RenameKeyGroupRequest{Name: name, Acknowledgements: acksPtr(acknowledge)}, &group); err != nil {
 			return err
 		}
 		return Render(ios.Stdout, f, Table{Columns: keyGroupColumns, Rows: [][]string{keyGroupRow(group)}, JSON: group})

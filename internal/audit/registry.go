@@ -370,6 +370,27 @@ const (
 	// payload is the new version and nothing else, since a token key is never
 	// exported, displayed or compared.
 	EventTokenKeyRotated EventType = "crypto.token_key_rotated"
+	// crypto.scanning_key_rotated records `rotate-scanning-key` (#74,
+	// secret-scanning ADR section 4), exactly parallel to token_key_rotated:
+	// instance trail, security retention, the new key version and nothing else,
+	// since a scanning key is never exported, displayed or compared. Spelled
+	// `key_version` for the same invariant-4 name-shape reason.
+	EventScanningKeyRotated EventType = "crypto.scanning_key_rotated"
+
+	// scanning.* (#74, secret-scanning ADR section 5) — the four finding events,
+	// declared here with their exact v1 schemas but held in scanningFindingSpecs
+	// rather than the registry map: NO chokepoint emits them yet (the scanner is
+	// wired into the value-write and declaration ingress paths by the scanning
+	// stream), and registering an event no code can truthfully emit is the dead
+	// catalogue the closure invariant forbids — the same disposition
+	// remote.workspace_session_expired took. The scanning integration merges
+	// scanningFindingSpecs into the registry when the emitters land (see the
+	// map's own comment). The constants exist now so the schemas are testable and
+	// referenceable by both streams.
+	EventScanningFindingWarned     EventType = "scanning.finding_warned"
+	EventScanningFindingDismissed  EventType = "scanning.finding_dismissed"
+	EventScanningFindingBlocked    EventType = "scanning.finding_blocked"
+	EventScanningFindingOverridden EventType = "scanning.finding_overridden"
 	// disclosure.value_copied is one event per key per DESTINATION for every
 	// server-side duplication: copy-to, bulk-apply and clone-at-creation. It
 	// records the source environment, because "material this environment's
@@ -1396,6 +1417,17 @@ var registry = map[EventType]TypeSpec{
 			// schema half forbids a `token_`-prefixed payload field, and the
 			// guard is a name-shape rule worth keeping literal rather than
 			// carving an exception into.
+			"key_version": {Kind: KindInt, Required: true},
+		},
+	},
+	// crypto.scanning_key_rotated (#74) — the exact parallel of the token-key
+	// rotation row, emitted by OpRotateScanningKey.
+	EventScanningKeyRotated: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
 			"key_version": {Kind: KindInt, Required: true},
 		},
 	},
@@ -2658,6 +2690,75 @@ func hierarchyFailureEvent(schema Schema) TypeSpec {
 		Trails:        map[Trail]bool{TrailTenant: true},
 		Schema:        schema,
 	}
+}
+
+// scanningFindingSpecs holds the four scanning.finding_* rows (#74,
+// secret-scanning ADR section 5). They are declared here and merged into the
+// live `registry` by init below — the scanning integration (#74 stream C) wires
+// the emitters at the value-write and declaration-ingress chokepoints, so the
+// closure invariant (a registered type must be emittable) now holds. The map
+// stays the source of truth so ScanningFindingSpec keeps exercising the schemas.
+//
+// All four are tenant-trail, security-retention, success-only — the warn cannot
+// fail separately from the write it rides, and a block/refusal IS the event.
+// The scope class is caller-supplied (env for the value events, project for the
+// declaration events) and so is not part of the spec. Every payload carries the
+// rule ID and the finding's own coordinates and NOTHING derived from the
+// matched material: no matched text, offsets, length, excerpts, or fingerprint —
+// the closed schema makes them unrepresentable.
+var scanningFindingSpecs = map[EventType]TypeSpec{
+	// A Surface-1 write or declassification returned a finding, one event per
+	// finding. `surface` says which config-value ingress produced it.
+	EventScanningFindingWarned: hierarchyEvent(Schema{
+		"rule_id": {Kind: KindString, Required: true},
+		"surface": {Kind: KindString, Required: true,
+			Enum: []string{"value_write", "declassification", "import_value"}},
+	}),
+	// An explicit keep-as-config acknowledgement was recorded. `dismissal_id` is
+	// an opaque reference to the dismissal row; the fingerprint itself never
+	// appears (ADR section 5 — it is a stable equality token that would let
+	// audit-read holders correlate by value equality).
+	EventScanningFindingDismissed: hierarchyEvent(Schema{
+		"rule_id":      {Kind: KindString, Required: true},
+		"dismissal_id": {Kind: KindString, Required: true},
+	}),
+	// A declaration ingress was refused for a finding, one event per finding.
+	// `ingress` says which declaration door.
+	EventScanningFindingBlocked: hierarchyEvent(Schema{
+		"rule_id": {Kind: KindString, Required: true},
+		"ingress": {Kind: KindString, Required: true,
+			Enum: []string{"edit", "plan", "apply"}},
+	}),
+	// An acknowledged resubmission committed, one event per acknowledged
+	// finding. `acknowledgement_ref` is the opaque server reference to the
+	// content-bound acknowledgement token (spelled to avoid the invariant-4
+	// `token` name-shape ban, exactly as the token-key event dodges `token_`).
+	EventScanningFindingOverridden: hierarchyEvent(Schema{
+		"rule_id": {Kind: KindString, Required: true},
+		"ingress": {Kind: KindString, Required: true,
+			Enum: []string{"edit", "plan", "apply"}},
+		"acknowledgement_ref": {Kind: KindString, Required: true},
+	}),
+}
+
+// init merges the scanning.finding_* specs into the live registry. Kept as a
+// merge rather than inlined into the registry literal so the exact §5 schemas
+// live in one block the ScanningFindingSpec tests pin field-for-field.
+func init() {
+	for t, s := range scanningFindingSpecs {
+		if _, dup := registry[t]; dup {
+			panic("audit: scanning finding spec already registered: " + string(t))
+		}
+		registry[t] = s
+	}
+}
+
+// ScanningFindingSpec returns a scanning.finding_* spec (#74) from the source
+// map. The same spec is now in the live registry (see init); this accessor
+// stays so the schema tests exercise the declared shapes directly.
+func ScanningFindingSpec(t EventType) (TypeSpec, bool) {
+	spec, ok := scanningFindingSpecs[t]
+	return spec, ok
 }
 
 // renameSchema is the two-name payload: what it was called, and what it is

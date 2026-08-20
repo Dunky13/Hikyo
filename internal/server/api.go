@@ -125,7 +125,7 @@ type OrgService interface {
 type DefinitionsService interface {
 	Export(ctx context.Context, actor service.Actor, scope domain.Scope, portable bool) ([]byte, error)
 	Check(ctx context.Context, actor service.Actor, scope domain.Scope, raw []byte) (service.CheckResult, error)
-	Plan(ctx context.Context, actor service.Actor, scope domain.Scope, raw []byte) (service.PlanView, error)
+	Plan(ctx context.Context, actor service.Actor, scope domain.Scope, raw []byte, acks []string) (service.PlanView, error)
 	GetPlan(ctx context.Context, actor service.Actor, scope domain.Scope, planID string) (service.PlanView, error)
 	Apply(ctx context.Context, actor service.Actor, scope domain.Scope, planID string, opts service.ApplyOptions) (service.ApplyResult, error)
 	GetSettings(ctx context.Context, actor service.Actor, scope domain.Scope) (service.DefinitionsSettings, error)
@@ -454,6 +454,9 @@ func (a *API) CreateOrg(ctx context.Context, req apigen.CreateOrgRequestObject) 
 			BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, "metadata")),
 		}, nil
 	}
+	// req.Body.Acknowledgements is accepted on the wire for shape stability but
+	// ignored: org names are not secret-scanned (#74), so no finding can block a
+	// create and no token can ever apply.
 	org, err := a.Orgs.Create(ctx, service.Bearer(bearer(ctx)), req.Body.Name, active, metadata)
 	if err != nil {
 		// Everything but the metadata leg above goes through the one uniform

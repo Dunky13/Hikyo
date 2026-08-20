@@ -12,6 +12,7 @@ import (
 	"github.com/Hikyo-Org/hikyo/internal/crypto"
 	"github.com/Hikyo-Org/hikyo/internal/definitions"
 	"github.com/Hikyo-Org/hikyo/internal/domain"
+	"github.com/Hikyo-Org/hikyo/internal/scanning"
 	"github.com/Hikyo-Org/hikyo/internal/schema"
 	"github.com/Hikyo-Org/hikyo/internal/store"
 	"github.com/Hikyo-Org/hikyo/internal/store/tx"
@@ -37,7 +38,13 @@ type Definitions struct {
 	DB       *store.DB
 	Keyring  *crypto.Keyring
 	Advisory *Advisory
-	Now      func() time.Time
+	// Scan is the secret-scanning Surface-2 seam (#74 SS3, ADR §7 (b)/(c)): the
+	// plan/apply chokepoints scan every author-controlled bundle leaf before an
+	// immutable plan persists (plan) and re-scan on ruleset-snapshot skew (apply),
+	// and `check` surfaces findings non-persisting. A nil ruleset is scanning-off
+	// (a pre-#74 test); a booted server always wires it.
+	Scan *scanning.Ruleset
+	Now  func() time.Time
 }
 
 func (s *Definitions) now() time.Time {
@@ -47,12 +54,25 @@ func (s *Definitions) now() time.Time {
 	return s.Now().UTC()
 }
 
-// CheckResult is the drift diagnostic (#70 § Drift).
+// scanSnapshot is the ruleset snapshot version a plan is scanned under, recorded
+// so apply can detect skew (#74 SS3). Empty when scanning is off (a pre-#74 test).
+func (s *Definitions) scanSnapshot() string {
+	if s.Scan == nil {
+		return ""
+	}
+	return s.Scan.SnapshotVersion()
+}
+
+// CheckResult is the drift diagnostic (#70 § Drift). Findings carries the
+// non-blocking secret-scanning results of the submitted bundle (#74 SS3): a
+// read-only dry-run that surfaces credential-shaped leaves without persisting or
+// minting a token, so an operator sees a plan would be refused before running it.
 type CheckResult struct {
 	State           string
 	BaseRevision    *int64
 	CurrentRevision int64
 	Differences     definitions.Diff
+	Findings        []Finding
 }
 
 // KeyDeletion is one deleted key with the environments that still hold a live
@@ -100,6 +120,11 @@ type ApplyOptions struct {
 	Commit      string
 	Ref         string
 	Actor       string
+	// Acknowledgements are the secret-scanning override tokens a skew re-scan
+	// honors (#74 SS3, ADR §7 (c)). They are consumed only when apply re-scans —
+	// i.e. the running ruleset snapshot differs from the plan's; a same-version
+	// apply runs no scan and ignores them.
+	Acknowledgements []string
 }
 
 // ApplyResult is the apply response.
@@ -180,11 +205,16 @@ func (s *Definitions) Check(ctx context.Context, actor Actor, scope domain.Scope
 		if err != nil {
 			return err
 		}
+		findings, err := scanBundleForCheck(ctx, s.Scan, bundle)
+		if err != nil {
+			return err
+		}
 		res = CheckResult{
 			State:           string(state),
 			BaseRevision:    bundle.BaseRevision,
 			CurrentRevision: cur.SchemaRevision,
 			Differences:     diff,
+			Findings:        findings,
 		}
 		return nil
 	})

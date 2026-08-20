@@ -227,6 +227,61 @@ func TestWebAuthnRPImportAllowlist(t *testing.T) {
 	}
 }
 
+// scanningHashPrimitivePrefixes are the hash/HMAC primitives the runtime
+// secret-scanning code must never import (secret-scanning ADR §4, SS4): the
+// value fingerprint is a keyed digest computed inside internal/crypto under the
+// dedicated tier-3 scanning key, and the scanning package "never touches a hash
+// or HMAC primitive itself". crypto/hmac and golang.org/x/crypto are already
+// banned everywhere but internal/crypto by the crypto chokepoint above; what
+// SS4 adds is the SHA family (crypto/sha256 is deliberately unrestricted
+// globally — see the chokepoint comment), so this is a separate path-scoped ban.
+var scanningHashPrimitivePrefixes = []string{
+	"crypto/sha256",
+	"crypto/sha512",
+	"crypto/sha1",
+	"crypto/hmac",
+	"golang.org/x/crypto/",
+}
+
+// TestScanningNoHashPrimitives enforces SS4 on the RUNTIME scanning code. Two
+// deliberate scopes:
+//   - PRODUCTION imports only (p.Imports): a test that verifies a vendored-file
+//     hash or independently recomputes crypto's fingerprint for a known-answer
+//     assertion is not runtime scanning code computing its own digest, and the
+//     global hmac/x-crypto ban already covers tests.
+//   - the build-time rule generator (internal/scanning/gen) is excluded: the
+//     seam computes the per-rule semantic digest with SHA-256 AT GENERATION TIME
+//     and emits it as string constants precisely so the runtime package imports
+//     no hash primitive. Banning the generator would forbid the very mechanism
+//     that keeps the runtime clean.
+//
+// The check applies only when internal/scanning exists (a parallel stream
+// authors it and it may be absent at first) and does not fail on its absence.
+func TestScanningNoHashPrimitives(t *testing.T) {
+	scanning := module + "/internal/scanning"
+	generator := scanning + "/gen"
+	saw := false
+	for _, p := range loadPackages(t) {
+		if p.ImportPath != scanning && !strings.HasPrefix(p.ImportPath, scanning+"/") {
+			continue
+		}
+		if p.ImportPath == generator || strings.HasPrefix(p.ImportPath, generator+"/") {
+			continue
+		}
+		saw = true
+		for _, imp := range p.Imports {
+			for _, prefix := range scanningHashPrimitivePrefixes {
+				if imp == strings.TrimSuffix(prefix, "/") || strings.HasPrefix(imp, prefix) {
+					t.Errorf("%s imports %s: runtime scanning code must not touch a hash/HMAC primitive — the fingerprint is computed inside internal/crypto and rule digests are generation-time constants (SS4)", p.ImportPath, imp)
+				}
+			}
+		}
+	}
+	if !saw {
+		t.Log("internal/scanning not present yet; the hash-primitive ban applies once it exists")
+	}
+}
+
 func TestForbiddenEdges(t *testing.T) {
 	for _, p := range loadPackages(t) {
 		for _, rule := range forbidden {

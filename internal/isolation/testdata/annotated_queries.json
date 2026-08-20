@@ -193,6 +193,12 @@
   },
   {
     "engine": "postgres",
+    "name": "DeleteAllScanningDismissals",
+    "annotation": "instance-scoped",
+    "hash": "f72bba027201cf1dd833c4787a90d4c1a58f2d92631e63609f530a55f99550f8"
+  },
+  {
+    "engine": "postgres",
     "name": "DeleteCollectedSnapshotEntries",
     "annotation": "instance-scoped",
     "hash": "5746b73d2e368e4c84a05ccf51f4aec1781cac2b9edb36f8197e1c1c313e549d"
@@ -1540,6 +1546,12 @@
     "name": "CreateRemote",
     "annotation": "instance-scoped",
     "hash": "b49c203a3c38607420b2ec4dc18592cd9f172ab7863f56c08a6ff6b90d898dae"
+  },
+  {
+    "engine": "sqlite",
+    "name": "DeleteAllScanningDismissals",
+    "annotation": "instance-scoped",
+    "hash": "f72bba027201cf1dd833c4787a90d4c1a58f2d92631e63609f530a55f99550f8"
   },
   {
     "engine": "sqlite",

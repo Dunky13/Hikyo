@@ -1,0 +1,50 @@
+-- Secret-scanning dismissal rows (#74, secret-scanning ADR section 4). ASCII
+-- ONLY, matching the sqlite twin.
+--
+-- Tenant-scoped statements bind org_id and project_id from the proof's resolved
+-- chain (the reserved chain_* parameters), never from caller arguments;
+-- environment_id is bound from the proof (chain_env_id) on the
+-- environment-addressed statements. The (key identity, rule digest, value
+-- fingerprint) triple is caller data: the finding's own coordinates.
+
+-- name: InsertScanningDismissal :exec
+INSERT INTO scanning_dismissals (
+    id, org_id, project_id, environment_id, key_id, rule_digest, value_fingerprint, created_at, created_by
+) VALUES (
+    sqlc.arg(id), sqlc.arg(chain_org_id), sqlc.arg(chain_project_id),
+    sqlc.arg(chain_env_id), sqlc.arg(key_id), sqlc.arg(rule_digest),
+    sqlc.arg(value_fingerprint), sqlc.arg(created_at), sqlc.arg(created_by)
+);
+
+-- GetScanningDismissal is the sticky-match lookup: a row for this exact
+-- (env, key, rule digest, fingerprint) means the value was accepted as-is and
+-- the warn must not re-fire. The WHERE names the full UNIQUE tuple, so at most
+-- one row matches: no LIMIT needed, and a nested SELECT EXISTS is rejected by
+-- the predicate analyzer anyway. Absence is pgx.ErrNoRows.
+-- name: GetScanningDismissal :one
+SELECT id FROM scanning_dismissals
+WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id)
+  AND environment_id = sqlc.arg(chain_env_id) AND key_id = sqlc.arg(key_id)
+  AND rule_digest = sqlc.arg(rule_digest) AND value_fingerprint = sqlc.arg(value_fingerprint);
+
+-- DeleteScanningDismissalsForKey drops one key's dismissals across every
+-- environment: reclassification to secret makes them moot, and key deletion
+-- needs them gone before the composite FK will let the key row go.
+-- name: DeleteScanningDismissalsForKey :execrows
+DELETE FROM scanning_dismissals
+WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id)
+  AND key_id = sqlc.arg(key_id);
+
+-- DeleteScanningDismissalsForProject removes a project's dismissals: the ADR's
+-- literal "project deletion removes the project's dismissal rows".
+-- name: DeleteScanningDismissalsForProject :execrows
+DELETE FROM scanning_dismissals
+WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id);
+
+-- DeleteAllScanningDismissals drops every dismissal instance-wide: fingerprint
+-- rotation replaces the scanning key, so every stored fingerprint is now
+-- unrecomputable and must die (re-fire, the safe direction). Cross-tenant by
+-- definition: the operator rotation surface, annotated and pinned.
+-- hikyo:instance-scoped
+-- name: DeleteAllScanningDismissals :execrows
+DELETE FROM scanning_dismissals;

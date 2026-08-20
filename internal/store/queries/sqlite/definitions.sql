@@ -5,13 +5,13 @@
 -- name: CreatePlan :exec
 INSERT INTO definitions_plans (
     id, org_id, project_id, created_by, created_at, expires_at,
-    bundle, digest, base_schema_revision, env_revisions, protected_envs, diff, additive
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+    bundle, digest, base_schema_revision, env_revisions, protected_envs, diff, additive, scan_snapshot
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: GetPlan :one
 SELECT id, org_id, project_id, created_by, created_at, expires_at,
        bundle, digest, base_schema_revision, env_revisions, protected_envs, diff, additive, applied,
-       applied_at, applied_by, provenance_commit, provenance_ref, provenance_actor
+       applied_at, applied_by, provenance_commit, provenance_ref, provenance_actor, scan_snapshot
 FROM definitions_plans
 WHERE org_id = ? AND project_id = ? AND id = ?;
 
@@ -21,7 +21,7 @@ WHERE org_id = ? AND project_id = ? AND id = ?;
 -- name: GetLatestAppliedPlan :one
 SELECT id, org_id, project_id, created_by, created_at, expires_at,
        bundle, digest, base_schema_revision, env_revisions, protected_envs, diff, additive, applied,
-       applied_at, applied_by, provenance_commit, provenance_ref, provenance_actor
+       applied_at, applied_by, provenance_commit, provenance_ref, provenance_actor, scan_snapshot
 FROM definitions_plans
 WHERE org_id = ? AND project_id = ? AND applied = ?
 ORDER BY applied_at DESC

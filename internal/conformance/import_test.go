@@ -144,7 +144,7 @@ func scenarioImportPresence(t *testing.T, db *store.DB) {
 			{Type: schema.TypeInteger}, {Type: schema.TypeString},
 		}},
 		Presence: schema.DefaultPresenceRules(),
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -464,7 +464,7 @@ func scenarioImportMovedState(t *testing.T, db *store.DB) {
 		service.KeyDeclarationUpdate{
 			Declaration: schema.Declaration{Rule: &schema.Rule{Type: schema.TypeString, MinLength: &minLength}},
 			Presence:    schema.DefaultPresenceRules(),
-		}); err != nil {
+		}, nil); err != nil {
 		t.Fatal(err)
 	}
 	_, err = values.Import(t.Context(), actor, prod, service.ImportRequest{
@@ -611,7 +611,7 @@ func scenarioImportUndeclaredTransition(t *testing.T, db *store.DB) {
 		t.Fatalf("phase 1 emitted %d bundle keys, want one", len(plan.Bundle.Keys))
 	}
 	created := mustKey(t, keys, actor, scope, "NEW_KEY", string(schema.Secret), schema.DefaultPresenceRules())
-	if _, err := keys.Reclassify(t.Context(), actor, scope, created.ID, string(schema.Config)); err != nil {
+	if _, _, err := keys.Reclassify(t.Context(), actor, scope, created.ID, string(schema.Config)); err != nil {
 		t.Fatal(err)
 	}
 	_, err := values.Import(t.Context(), actor, prod, importRequestFrom(plan))

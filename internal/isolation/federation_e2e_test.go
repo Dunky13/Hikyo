@@ -173,7 +173,7 @@ func publishDeliveryValues(t *testing.T, db *store.DB, env domain.EnvID, values 
 	sort.Strings(names)
 	versions := make([]string, 0, len(names))
 	for _, name := range names {
-		staged, err := valueSvc(t, db).Set(t.Context(), actor, scope, name, values[name])
+		staged, err := valueSvc(t, db).Set(t.Context(), actor, scope, name, values[name], nil)
 		if err != nil {
 			t.Fatalf("stage %s in %s: %v", name, env, err)
 		}

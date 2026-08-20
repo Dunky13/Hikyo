@@ -88,8 +88,8 @@ func TestFirstBootMintsAndReboots(t *testing.T) {
 	if !bytes.Equal(root, make([]byte, KeySize)) {
 		t.Error("root key not zeroed after load")
 	}
-	if ks.master == nil || len(ks.tier3) != 2 {
-		t.Fatalf("first boot minted master=%v tier3=%d, want master + instance + token", ks.master != nil, len(ks.tier3))
+	if ks.master == nil || len(ks.tier3) != 3 {
+		t.Fatalf("first boot minted master=%v tier3=%d, want master + instance + token + scanning", ks.master != nil, len(ks.tier3))
 	}
 
 	// Seal in boot one, open after reboot: the persisted hierarchy is real.

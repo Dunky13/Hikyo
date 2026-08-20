@@ -93,33 +93,34 @@ func Run(ctx context.Context, io IO, args []string) int {
 // dispatches on it and Verbs (exit.go) is derived from its keys, so a verb
 // cannot exist here without main's dispatch gate admitting it.
 var verbHandlers = map[string]func(context.Context, IO, []string) error{
-	"login":             runLogin,
-	"logout":            runLogout,
-	"whoami":            runWhoami,
-	"account":           runAccount,
-	"context":           runContext,
-	"org":               runOrg,
-	"project":           runProject,
-	"env":               runEnv,
-	"folder":            runFolder,
-	"key":               runKey,
-	"values":            runValues,
-	"revision":          runRevision,
-	"pin":               runPin,
-	"rotate-token-key":  runRotateTokenKey,
-	"instance-config":   runInstanceConfig,
-	"doctor":            runDoctor,
-	"access":            runAccess,
-	"project-settings":  runProjectSettings,
-	"sa":                runServiceAccount,
-	"scim":              runSCIM,
-	"remote":            runRemote,
-	"remote-credential": runRemoteCredential,
-	"import":            runImport,
-	"definitions":       runDefinitions,
-	"adapter":           runAdapter,
-	"run":               runRun,
-	"compose":           runCompose,
+	"login":               runLogin,
+	"logout":              runLogout,
+	"whoami":              runWhoami,
+	"account":             runAccount,
+	"context":             runContext,
+	"org":                 runOrg,
+	"project":             runProject,
+	"env":                 runEnv,
+	"folder":              runFolder,
+	"key":                 runKey,
+	"values":              runValues,
+	"revision":            runRevision,
+	"pin":                 runPin,
+	"rotate-token-key":    runRotateTokenKey,
+	"rotate-scanning-key": runRotateScanningKey,
+	"instance-config":     runInstanceConfig,
+	"doctor":              runDoctor,
+	"access":              runAccess,
+	"project-settings":    runProjectSettings,
+	"sa":                  runServiceAccount,
+	"scim":                runSCIM,
+	"remote":              runRemote,
+	"remote-credential":   runRemoteCredential,
+	"import":              runImport,
+	"definitions":         runDefinitions,
+	"adapter":             runAdapter,
+	"run":                 runRun,
+	"compose":             runCompose,
 }
 
 // Usage is the frozen help text. Its exact bytes are a committed golden
@@ -1199,13 +1200,15 @@ func runOrg(ctx context.Context, ios IO, args []string) error {
 	}
 
 	var (
-		format  string
-		orgName string
+		format      string
+		orgName     string
+		acknowledge string
 	)
 	st, flags, err := parseCommon("org "+sub, ios, rest, func(fs *flag.FlagSet) {
 		fs.StringVar(&format, "o", "table", "output format: table or json")
 		if sub == "create" || sub == "rename" {
 			fs.StringVar(&orgName, "name", "", "organisation name")
+			ackFlag(fs, &acknowledge)
 		}
 	})
 	if err != nil {
@@ -1277,7 +1280,7 @@ func runOrg(ctx context.Context, ios IO, args []string) error {
 	case "create":
 		var org apigen.Org
 		if err := client.Do(ctx, http.MethodPost, api.PathPrefix+"/orgs",
-			apigen.CreateOrgRequest{Name: orgName}, &org); err != nil {
+			apigen.CreateOrgRequest{Name: orgName, Acknowledgements: acksPtr(acknowledge)}, &org); err != nil {
 			return err
 		}
 		return Render(ios.Stdout, f, Table{
@@ -1293,7 +1296,7 @@ func runOrg(ctx context.Context, ios IO, args []string) error {
 		}
 		var org apigen.Org
 		if err := client.Do(ctx, http.MethodPatch, api.PathPrefix+"/orgs/"+url.PathEscape(id),
-			apigen.RenameRequest{Name: orgName}, &org); err != nil {
+			apigen.RenameRequest{Name: orgName, Acknowledgements: acksPtr(acknowledge)}, &org); err != nil {
 			return err
 		}
 		return Render(ios.Stdout, f, Table{

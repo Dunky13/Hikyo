@@ -61,7 +61,7 @@ func runValues(ctx context.Context, ios IO, args []string) error {
 	}
 
 	var format, valueFile, left, right, source, destinations, keyNames, environments string
-	var versions, previewToken, confirmedProtectedEnvironments string
+	var versions, previewToken, confirmedProtectedEnvironments, acknowledge string
 	var revision int64
 	var clear, reveal, stdin, dangerous, confirmProtected bool
 	var outputFile string
@@ -101,6 +101,8 @@ func runValues(ctx context.Context, ios IO, args []string) error {
 		}
 		if sub == "set" {
 			fs.BoolVar(&clear, "clear", false, "clear the value to `absent`")
+			fs.StringVar(&acknowledge, "acknowledge", "",
+				"secret-scanning keep-as-config token(s) from a prior warning, comma-separated")
 		}
 		if sub == "diff" {
 			fs.StringVar(&left, "left", "", "the left environment")
@@ -243,11 +245,12 @@ func runValues(ctx context.Context, ios IO, args []string) error {
 				return err
 			}
 		} else if err := client.Do(ctx, http.MethodPut, target,
-			apigen.SetValueRequest{Value: value}, &staged); err != nil {
+			apigen.SetValueRequest{Value: value, Acknowledgements: acksPtr(acknowledge)}, &staged); err != nil {
 			return err
 		}
 		fmt.Fprintf(ios.Stderr, "staged %s (%s); publish it with: hikyo values publish --versions %s\n",
 			staged.Name, staged.Operation, staged.VersionId)
+		warnFindings(ios, staged.Findings)
 		return Render(ios.Stdout, f, pendingTable(staged))
 
 	case "declare":
@@ -261,6 +264,7 @@ func runValues(ctx context.Context, ios IO, args []string) error {
 		}, &list); err != nil {
 			return err
 		}
+		warnFindings(ios, list.Findings)
 		return Render(ios.Stdout, f, valueTable(list))
 
 	case "diff":
@@ -293,6 +297,7 @@ func runValues(ctx context.Context, ios IO, args []string) error {
 		if err := client.Do(ctx, http.MethodPost, project+"/values/copy", body, &result); err != nil {
 			return err
 		}
+		warnFindings(ios, result.Findings)
 		rows := make([][]string, 0, len(result.Copied))
 		for _, c := range result.Copied {
 			rows = append(rows, []string{c.Key, c.DestinationEnvironmentId})

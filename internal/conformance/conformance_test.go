@@ -332,7 +332,7 @@ func scenarioTenantChain(t *testing.T, db *store.DB) {
 		t.Fatal(err)
 	}
 	envScope := domain.Scope{Org: domain.OrgID(org.ID), Project: domain.ProjectID(proj.ID)}
-	created, err := envs.Create(t.Context(), service.LocalPrincipal(tenant), envScope, "dev")
+	created, err := envs.Create(t.Context(), service.LocalPrincipal(tenant), envScope, "dev", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -350,7 +350,7 @@ func scenarioTenantChain(t *testing.T, db *store.DB) {
 	if got.OrgID != org.ID || got.ProjectID != proj.ID {
 		t.Errorf("chain columns did not come from the proof: %+v", got)
 	}
-	if err := envs.UpdateNote(t.Context(), service.LocalPrincipal(tenant), fullScope, "noted"); err != nil {
+	if err := envs.UpdateNote(t.Context(), service.LocalPrincipal(tenant), fullScope, "noted", nil); err != nil {
 		t.Fatal(err)
 	}
 	got, err = envs.Get(t.Context(), service.LocalPrincipal(tenant), fullScope)
@@ -468,7 +468,7 @@ func scenarioHierarchyCRUD(t *testing.T, db *store.DB) {
 	// Environments: created in order, appended at the end.
 	var created []service.Environment
 	for _, name := range []string{"dev", "staging", "prod"} {
-		env, err := envs.Create(t.Context(), actor, scope, name)
+		env, err := envs.Create(t.Context(), actor, scope, name, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -533,7 +533,7 @@ func scenarioHierarchyCRUD(t *testing.T, db *store.DB) {
 	// Environment rename, read back through the full chain.
 	envScope := scope
 	envScope.Env = domain.EnvID(created[0].ID)
-	if _, err := envs.Rename(t.Context(), actor, envScope, "development"); err != nil {
+	if _, err := envs.Rename(t.Context(), actor, envScope, "development", nil); err != nil {
 		t.Fatal(err)
 	}
 	gotEnv, err := envs.Get(t.Context(), actor, envScope)
@@ -545,12 +545,12 @@ func scenarioHierarchyCRUD(t *testing.T, db *store.DB) {
 	}
 
 	// A duplicate name among live siblings is a conflict, on both engines.
-	if _, err := envs.Create(t.Context(), actor, scope, "prod"); !errors.Is(err, domain.ErrConflict) {
+	if _, err := envs.Create(t.Context(), actor, scope, "prod", nil); !errors.Is(err, domain.ErrConflict) {
 		t.Fatalf("duplicate environment name: err = %v, want ErrConflict", err)
 	}
 
 	// Folders: create, list, rename, delete.
-	folder, err := folders.Create(t.Context(), actor, scope, "services/api")
+	folder, err := folders.Create(t.Context(), actor, scope, "services/api", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -564,7 +564,7 @@ func scenarioHierarchyCRUD(t *testing.T, db *store.DB) {
 	if folderList[0].OrgID != string(scope.Org) || folderList[0].ProjectID != string(scope.Project) {
 		t.Fatalf("folder chain columns did not come from the proof: %+v", folderList[0])
 	}
-	if _, err := folders.Rename(t.Context(), actor, scope, folder.ID, "services/gateway"); err != nil {
+	if _, err := folders.Rename(t.Context(), actor, scope, folder.ID, "services/gateway", nil); err != nil {
 		t.Fatal(err)
 	}
 	gotFolder, err := folders.Get(t.Context(), actor, scope, folder.ID)
@@ -574,7 +574,7 @@ func scenarioHierarchyCRUD(t *testing.T, db *store.DB) {
 	if gotFolder.Path != "services/gateway" {
 		t.Fatalf("folder rename did not persist: %q", gotFolder.Path)
 	}
-	if _, err := folders.Create(t.Context(), actor, scope, "services/gateway"); !errors.Is(err, domain.ErrConflict) {
+	if _, err := folders.Create(t.Context(), actor, scope, "services/gateway", nil); !errors.Is(err, domain.ErrConflict) {
 		t.Fatalf("duplicate folder path: err = %v, want ErrConflict", err)
 	}
 	if err := folders.Delete(t.Context(), actor, scope, folder.ID); err != nil {
@@ -621,11 +621,11 @@ func scenarioEnvironmentCap(t *testing.T, db *store.DB) {
 	who, scope := tenantFixture(t, db, "envcap")
 	actor := service.LocalPrincipal(who)
 	for i := range service.MaxEnvironmentsPerProject {
-		if _, err := envs.Create(t.Context(), actor, scope, fmt.Sprintf("env-%02d", i)); err != nil {
+		if _, err := envs.Create(t.Context(), actor, scope, fmt.Sprintf("env-%02d", i), nil); err != nil {
 			t.Fatalf("creating environment %d of the cap: %v", i, err)
 		}
 	}
-	_, err := envs.Create(t.Context(), actor, scope, "one-too-many")
+	_, err := envs.Create(t.Context(), actor, scope, "one-too-many", nil)
 	if !errors.Is(err, domain.ErrLimitExceeded) {
 		t.Fatalf("environment %d: err = %v, want ErrLimitExceeded", service.MaxEnvironmentsPerProject+1, err)
 	}
@@ -648,7 +648,7 @@ func scenarioDeleteRefusesChildren(t *testing.T, db *store.DB) {
 	who, scope := tenantFixture(t, db, "nocascade")
 	actor := service.LocalPrincipal(who)
 
-	env, err := envs.Create(t.Context(), actor, scope, "dev")
+	env, err := envs.Create(t.Context(), actor, scope, "dev", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -661,7 +661,7 @@ func scenarioDeleteRefusesChildren(t *testing.T, db *store.DB) {
 		t.Fatal(err)
 	}
 
-	folder, err := folders.Create(t.Context(), actor, scope, "shared")
+	folder, err := folders.Create(t.Context(), actor, scope, "shared", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -689,7 +689,7 @@ func scenarioOrderAfterDeletion(t *testing.T, db *store.DB) {
 
 	var created []service.Environment
 	for _, name := range []string{"first", "second", "third"} {
-		env, err := envs.Create(t.Context(), actor, scope, name)
+		env, err := envs.Create(t.Context(), actor, scope, name, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -700,7 +700,7 @@ func scenarioOrderAfterDeletion(t *testing.T, db *store.DB) {
 	if err := envs.Delete(t.Context(), actor, middle); err != nil {
 		t.Fatal(err)
 	}
-	appended, err := envs.Create(t.Context(), actor, scope, "fourth")
+	appended, err := envs.Create(t.Context(), actor, scope, "fourth", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

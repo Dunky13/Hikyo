@@ -93,7 +93,7 @@ func valueFixture(t *testing.T, db *store.DB, label string) (domain.PrincipalID,
 func publishValue(t *testing.T, db *store.DB, values *service.Values, actor service.Actor,
 	env domain.Scope, key, value string) service.PublishResult {
 	t.Helper()
-	staged, err := values.Set(t.Context(), actor, env, key, value)
+	staged, err := values.Set(t.Context(), actor, env, key, value, nil)
 	if err != nil {
 		t.Fatalf("stage %s in %s: %v", key, env.Env, err)
 	}
@@ -171,7 +171,7 @@ func sqlText(s string) string {
 
 func mustEnv(t *testing.T, envs *service.Environments, actor service.Actor, scope domain.Scope, name string) domain.Scope {
 	t.Helper()
-	env, err := envs.Create(t.Context(), actor, scope, name)
+	env, err := envs.Create(t.Context(), actor, scope, name, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +186,7 @@ func mustKey(t *testing.T, keys *service.Keys, actor service.Actor, scope domain
 		Name: name, Classification: classification,
 		Declaration: decl(schema.Rule{Type: schema.TypeString}),
 		Presence:    presence,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,7 +210,7 @@ func scenarioValueDelivery(t *testing.T, db *store.DB) {
 	// STAGING ALONE DELIVERS NOTHING (#51): the draft is saved, and the
 	// environment keeps delivering what it delivered until a publish names the
 	// version id. That is the whole of `edit` conferring no delivery power.
-	staged, err := values.Set(t.Context(), actor, dev, "API_URL", "https://dev.example")
+	staged, err := values.Set(t.Context(), actor, dev, "API_URL", "https://dev.example", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,7 +272,7 @@ func scenarioValueDelivery(t *testing.T, db *store.DB) {
 
 	// A value for a key nobody declared is a KEY CREATION, which is a
 	// different act somewhere else. Never an auto-declare.
-	if _, err := values.Set(t.Context(), actor, dev, "NEVER_DECLARED", "x"); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := values.Set(t.Context(), actor, dev, "NEVER_DECLARED", "x", nil); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("an undeclared key accepted a value: %v", err)
 	}
 	// VALIDATION MOVED TO PUBLISH (schema-model ADR § Validation timing: advisory on
@@ -281,7 +281,7 @@ func scenarioValueDelivery(t *testing.T, db *store.DB) {
 	// external notepads, which for secrets is exactly where it must not go —
 	// and the publish that would commit it is what refuses.
 	mustKey(t, keys, actor, scope, "PORT", string(schema.Config), schema.DefaultPresenceRules())
-	oversized, err := values.Set(t.Context(), actor, dev, "PORT", strings.Repeat("x", schema.MaxValueBytes+1))
+	oversized, err := values.Set(t.Context(), actor, dev, "PORT", strings.Repeat("x", schema.MaxValueBytes+1), nil)
 	if err != nil {
 		t.Fatalf("staging an over-budget value was refused; saving is free: %v", err)
 	}
@@ -301,7 +301,7 @@ func scenarioValueDeclare(t *testing.T, db *store.DB) {
 	mustKey(t, keys, actor, scope, "LOG_LEVEL", string(schema.Config), schema.DefaultPresenceRules())
 
 	ids := []string{string(dev.Env), string(staging.Env), string(prod.Env)}
-	cells, err := values.Declare(t.Context(), actor, scope, ids, "LOG_LEVEL", "info")
+	cells, _, err := values.Declare(t.Context(), actor, scope, ids, "LOG_LEVEL", "info")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -335,13 +335,13 @@ func scenarioValueDeclare(t *testing.T, db *store.DB) {
 		{"publish", dev},
 		{"publish", staging},
 	})
-	if _, err := values.Declare(t.Context(), service.LocalPrincipal(partial), scope, ids, "LOG_LEVEL", "trace"); !errors.Is(err, domain.ErrNotFound) {
+	if _, _, err := values.Declare(t.Context(), service.LocalPrincipal(partial), scope, ids, "LOG_LEVEL", "trace"); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("a partial-authority declare was not refused uniformly: %v", err)
 	}
 
 	// A duplicated environment is refused, NAMING it: one logical cell asked for
 	// twice would double the write, the event and the response row.
-	if _, err := values.Declare(t.Context(), actor, scope,
+	if _, _, err := values.Declare(t.Context(), actor, scope,
 		[]string{string(dev.Env), string(dev.Env)}, "LOG_LEVEL", "x"); err == nil ||
 		!errors.Is(err, domain.ErrInvalid) || !strings.Contains(err.Error(), string(dev.Env)) {
 		t.Fatalf("a duplicated declare environment was not refused naming it: %v", err)
@@ -499,7 +499,7 @@ func scenarioValueClone(t *testing.T, db *store.DB) {
 			Required:  schema.Presence{Mode: schema.PresenceAll},
 			Forbidden: schema.Presence{Mode: schema.PresenceNone},
 		},
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -512,7 +512,7 @@ func scenarioValueClone(t *testing.T, db *store.DB) {
 		{"publish", domain.Scope{Org: scope.Org}},
 		{"definitions-edit", domain.Scope{Org: scope.Org}},
 	})
-	_, _, err := envs.Clone(t.Context(), service.LocalPrincipal(noReveal), scope, "clone-aborted", string(source.Env))
+	_, _, err := envs.Clone(t.Context(), service.LocalPrincipal(noReveal), scope, "clone-aborted", string(source.Env), nil)
 	if err == nil || !strings.Contains(err.Error(), "REQUIRED_TOKEN") {
 		t.Fatalf("a clone stranding a required secret did not abort naming it: %v", err)
 	}
@@ -529,7 +529,7 @@ func scenarioValueClone(t *testing.T, db *store.DB) {
 	// scenario sees the environment it expects.
 	restoreToken := corruptValueCiphertext(t, db, string(source.Env), requiredToken.ID)
 	disclosuresBefore := disclosureEvents(t, db, string(source.Env))
-	_, _, corruptErr := envs.Clone(t.Context(), service.LocalPrincipal(noReveal), scope, "clone-corrupt", string(source.Env))
+	_, _, corruptErr := envs.Clone(t.Context(), service.LocalPrincipal(noReveal), scope, "clone-corrupt", string(source.Env), nil)
 	if corruptErr == nil || !strings.Contains(corruptErr.Error(), "REQUIRED_TOKEN") || !errors.Is(corruptErr, domain.ErrInvalid) {
 		t.Fatalf("a gate-blocked clone over corrupted source material did not abort naming the key: %v", corruptErr)
 	}
@@ -556,10 +556,10 @@ func scenarioValueClone(t *testing.T, db *store.DB) {
 		service.KeyDeclarationUpdate{
 			Declaration: decl(schema.Rule{Type: schema.TypeString}),
 			Presence:    schema.DefaultPresenceRules(),
-		}); err != nil {
+		}, nil); err != nil {
 		t.Fatal(err)
 	}
-	env, result, err := envs.Clone(t.Context(), service.LocalPrincipal(noReveal), scope, "clone-partial", string(source.Env))
+	env, result, err := envs.Clone(t.Context(), service.LocalPrincipal(noReveal), scope, "clone-partial", string(source.Env), nil)
 	if err != nil {
 		t.Fatalf("clone with a blocked source gate should proceed: %v", err)
 	}
@@ -580,7 +580,7 @@ func scenarioValueClone(t *testing.T, db *store.DB) {
 	}
 
 	// The full-authority clone takes everything, re-sealed per row.
-	full, result, err := envs.Clone(t.Context(), actor, scope, "clone-full", string(source.Env))
+	full, result, err := envs.Clone(t.Context(), actor, scope, "clone-full", string(source.Env), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -615,7 +615,7 @@ func scenarioValueClone(t *testing.T, db *store.DB) {
 			Required:  schema.Presence{Mode: schema.PresenceAll},
 			Forbidden: schema.Presence{Mode: schema.PresenceNone},
 		},
-	})
+	}, nil)
 	if !errors.Is(err, domain.ErrInvalid) {
 		t.Fatalf("declaring a `mode: all` required secret no environment can satisfy was accepted: %v", err)
 	}

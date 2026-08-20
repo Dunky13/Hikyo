@@ -818,7 +818,7 @@ func (s stubDefinitions) Check(_ context.Context, _ service.Actor, _ domain.Scop
 	return service.CheckResult{State: "equal", CurrentRevision: 7, Differences: emptyDefinitionsDiff()}, s.err
 }
 
-func (s stubDefinitions) Plan(_ context.Context, _ service.Actor, _ domain.Scope, raw []byte) (service.PlanView, error) {
+func (s stubDefinitions) Plan(_ context.Context, _ service.Actor, _ domain.Scope, raw []byte, _ []string) (service.PlanView, error) {
 	if s.seenBody != nil {
 		*s.seenBody = append((*s.seenBody)[:0], raw...)
 	}
@@ -978,11 +978,11 @@ func (s stubHierarchy) Delete(context.Context, service.Actor, domain.Scope) erro
 // them apart by signature, so the compiler still checks each interface.
 type stubEnvs struct{ stubHierarchy }
 
-func (s stubEnvs) Create(context.Context, service.Actor, domain.Scope, string) (service.Environment, error) {
+func (s stubEnvs) Create(context.Context, service.Actor, domain.Scope, string, []string) (service.Environment, error) {
 	return service.Environment{}, s.outcome()
 }
 
-func (s stubEnvs) Clone(context.Context, service.Actor, domain.Scope, string, string) (service.Environment, service.CloneResult, error) {
+func (s stubEnvs) Clone(context.Context, service.Actor, domain.Scope, string, string, []string) (service.Environment, service.CloneResult, error) {
 	return service.Environment{}, service.CloneResult{}, s.outcome()
 }
 
@@ -994,7 +994,7 @@ func (s stubEnvs) List(context.Context, service.Actor, domain.Scope) ([]service.
 	return nil, s.outcome()
 }
 
-func (s stubEnvs) Rename(context.Context, service.Actor, domain.Scope, string) (service.Environment, error) {
+func (s stubEnvs) Rename(context.Context, service.Actor, domain.Scope, string, []string) (service.Environment, error) {
 	return service.Environment{}, s.outcome()
 }
 
@@ -1015,7 +1015,7 @@ func (s stubValues) List(context.Context, service.Actor, domain.Scope, bool) ([]
 	return nil, s.outcome()
 }
 
-func (s stubValues) Set(context.Context, service.Actor, domain.Scope, string, string) (service.StagedChange, error) {
+func (s stubValues) Set(context.Context, service.Actor, domain.Scope, string, string, []string) (service.StagedChange, error) {
 	return service.StagedChange{}, s.outcome()
 }
 
@@ -1023,8 +1023,8 @@ func (s stubValues) Unset(context.Context, service.Actor, domain.Scope, string) 
 	return service.StagedChange{}, s.outcome()
 }
 
-func (s stubValues) Declare(context.Context, service.Actor, domain.Scope, []string, string, string) ([]service.ValueCell, error) {
-	return nil, s.outcome()
+func (s stubValues) Declare(context.Context, service.Actor, domain.Scope, []string, string, string) ([]service.ValueCell, []service.Finding, error) {
+	return nil, nil, s.outcome()
 }
 
 func (s stubValues) Copy(context.Context, service.Actor, domain.Scope, service.CopyRequest) (service.CopyResult, error) {
@@ -1051,7 +1051,7 @@ func (s stubValues) Import(context.Context, service.Actor, domain.Scope, service
 // oracle the gate exists to close.
 type stubKeys struct{ stubHierarchy }
 
-func (s stubKeys) Create(context.Context, service.Actor, domain.Scope, service.KeySpec) (service.Key, error) {
+func (s stubKeys) Create(context.Context, service.Actor, domain.Scope, service.KeySpec, []string) (service.Key, error) {
 	return service.Key{}, s.outcome()
 }
 
@@ -1063,20 +1063,20 @@ func (s stubKeys) List(context.Context, service.Actor, domain.Scope) ([]service.
 	return nil, 0, s.outcome()
 }
 
-func (s stubKeys) Rename(context.Context, service.Actor, domain.Scope, string, string) (service.Key, error) {
+func (s stubKeys) Rename(context.Context, service.Actor, domain.Scope, string, string, []string) (service.Key, error) {
 	return service.Key{}, s.outcome()
 }
 
-func (s stubKeys) UpdateMetadata(context.Context, service.Actor, domain.Scope, string, service.KeyMetadataUpdate) (service.Key, error) {
+func (s stubKeys) UpdateMetadata(context.Context, service.Actor, domain.Scope, string, service.KeyMetadataUpdate, []string) (service.Key, error) {
 	return service.Key{}, s.outcome()
 }
 
-func (s stubKeys) UpdateDeclaration(context.Context, service.Actor, domain.Scope, string, service.KeyDeclarationUpdate) (service.Key, error) {
+func (s stubKeys) UpdateDeclaration(context.Context, service.Actor, domain.Scope, string, service.KeyDeclarationUpdate, []string) (service.Key, error) {
 	return service.Key{}, s.outcome()
 }
 
-func (s stubKeys) Reclassify(context.Context, service.Actor, domain.Scope, string, string) (service.Key, error) {
-	return service.Key{}, s.outcome()
+func (s stubKeys) Reclassify(context.Context, service.Actor, domain.Scope, string, string) (service.Key, []service.Finding, error) {
+	return service.Key{}, nil, s.outcome()
 }
 
 func (s stubKeys) SetGroup(context.Context, service.Actor, domain.Scope, string, string) (service.Key, error) {
@@ -1089,7 +1089,7 @@ func (s stubKeys) Delete(context.Context, service.Actor, domain.Scope, string) e
 
 type stubKeyGroups struct{ stubHierarchy }
 
-func (s stubKeyGroups) Create(context.Context, service.Actor, domain.Scope, string) (service.KeyGroupView, error) {
+func (s stubKeyGroups) Create(context.Context, service.Actor, domain.Scope, string, []string) (service.KeyGroupView, error) {
 	return service.KeyGroupView{}, s.outcome()
 }
 
@@ -1101,7 +1101,7 @@ func (s stubKeyGroups) List(context.Context, service.Actor, domain.Scope) ([]ser
 	return nil, s.outcome()
 }
 
-func (s stubKeyGroups) Rename(context.Context, service.Actor, domain.Scope, string, string) (service.KeyGroupView, error) {
+func (s stubKeyGroups) Rename(context.Context, service.Actor, domain.Scope, string, string, []string) (service.KeyGroupView, error) {
 	return service.KeyGroupView{}, s.outcome()
 }
 
@@ -1111,7 +1111,7 @@ func (s stubKeyGroups) Delete(context.Context, service.Actor, domain.Scope, stri
 
 type stubFolders struct{ stubHierarchy }
 
-func (s stubFolders) Create(context.Context, service.Actor, domain.Scope, string) (service.Folder, error) {
+func (s stubFolders) Create(context.Context, service.Actor, domain.Scope, string, []string) (service.Folder, error) {
 	return service.Folder{}, s.outcome()
 }
 
@@ -1123,7 +1123,7 @@ func (s stubFolders) List(context.Context, service.Actor, domain.Scope) ([]servi
 	return nil, s.outcome()
 }
 
-func (s stubFolders) Rename(context.Context, service.Actor, domain.Scope, string, string) (service.Folder, error) {
+func (s stubFolders) Rename(context.Context, service.Actor, domain.Scope, string, string, []string) (service.Folder, error) {
 	return service.Folder{}, s.outcome()
 }
 
@@ -1273,6 +1273,10 @@ func (s stubRevisions) Watch(context.Context, service.Actor, domain.Scope) (<-ch
 
 func (s stubRevisions) RotateTokenKey(context.Context, service.Actor) (service.TokenKeyRotation, error) {
 	return service.TokenKeyRotation{}, s.outcome()
+}
+
+func (s stubRevisions) RotateScanningKey(context.Context, service.Actor) (service.ScanningKeyRotation, error) {
+	return service.ScanningKeyRotation{}, s.outcome()
 }
 
 func hierarchyServer(t *testing.T, outcome error) *httptest.Server {

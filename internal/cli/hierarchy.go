@@ -41,11 +41,12 @@ func runProject(ctx context.Context, ios IO, args []string) error {
 		return err
 	}
 
-	var format, name, confirm string
+	var format, name, confirm, acknowledge string
 	st, flags, err := parseCommon("project "+sub, ios, rest, func(fs *flag.FlagSet) {
 		fs.StringVar(&format, "o", "table", "output format: table or json")
 		if sub == "create" || sub == "rename" {
 			fs.StringVar(&name, "name", "", "project name")
+			ackFlag(fs, &acknowledge)
 		}
 		if sub == "delete" {
 			fs.StringVar(&confirm, "confirm", "", "the project's current name, typed out, to confirm an irreversible delete")
@@ -121,7 +122,7 @@ func runProject(ctx context.Context, ios IO, args []string) error {
 
 	case "create":
 		var project apigen.Project
-		if err := client.Do(ctx, http.MethodPost, base, apigen.CreateProjectRequest{Name: name}, &project); err != nil {
+		if err := client.Do(ctx, http.MethodPost, base, apigen.CreateProjectRequest{Name: name, Acknowledgements: acksPtr(acknowledge)}, &project); err != nil {
 			return err
 		}
 		return Render(ios.Stdout, f, Table{Columns: projectColumns, Rows: [][]string{projectRow(project)}, JSON: project})
@@ -133,7 +134,7 @@ func runProject(ctx context.Context, ios IO, args []string) error {
 		}
 		var project apigen.Project
 		if err := client.Do(ctx, http.MethodPatch, base+"/"+url.PathEscape(id),
-			apigen.RenameRequest{Name: name}, &project); err != nil {
+			apigen.RenameRequest{Name: name, Acknowledgements: acksPtr(acknowledge)}, &project); err != nil {
 			return err
 		}
 		return Render(ios.Stdout, f, Table{Columns: projectColumns, Rows: [][]string{projectRow(project)}, JSON: project})
@@ -185,11 +186,12 @@ func runEnv(ctx context.Context, ios IO, args []string) error {
 		return err
 	}
 
-	var format, name, cloneFrom string
+	var format, name, cloneFrom, acknowledge string
 	st, flags, err := parseCommon("env "+sub, ios, rest, func(fs *flag.FlagSet) {
 		fs.StringVar(&format, "o", "table", "output format: table or json")
 		if sub == "create" || sub == "rename" {
 			fs.StringVar(&name, "name", "", "environment name")
+			ackFlag(fs, &acknowledge)
 		}
 		if sub == "create" {
 			fs.StringVar(&cloneFrom, "clone-from", "",
@@ -268,7 +270,7 @@ func runEnv(ctx context.Context, ios IO, args []string) error {
 		if cloneFrom != "" {
 			var cloned apigen.ClonedEnvironment
 			if err := client.Do(ctx, http.MethodPost, base+"/clone",
-				apigen.CloneEnvironmentRequest{Name: name, SourceEnvironmentId: cloneFrom}, &cloned); err != nil {
+				apigen.CloneEnvironmentRequest{Name: name, SourceEnvironmentId: cloneFrom, Acknowledgements: acksPtr(acknowledge)}, &cloned); err != nil {
 				return err
 			}
 			if len(cloned.UncopiedSecrets) > 0 {
@@ -280,7 +282,7 @@ func runEnv(ctx context.Context, ios IO, args []string) error {
 			})
 		}
 		var env apigen.Environment
-		if err := client.Do(ctx, http.MethodPost, base, apigen.CreateEnvironmentRequest{Name: name}, &env); err != nil {
+		if err := client.Do(ctx, http.MethodPost, base, apigen.CreateEnvironmentRequest{Name: name, Acknowledgements: acksPtr(acknowledge)}, &env); err != nil {
 			return err
 		}
 		return Render(ios.Stdout, f, Table{Columns: envColumns, Rows: [][]string{envRow(env)}, JSON: env})
@@ -292,7 +294,7 @@ func runEnv(ctx context.Context, ios IO, args []string) error {
 		}
 		var env apigen.Environment
 		if err := client.Do(ctx, http.MethodPatch, base+"/"+url.PathEscape(id),
-			apigen.RenameRequest{Name: name}, &env); err != nil {
+			apigen.RenameRequest{Name: name, Acknowledgements: acksPtr(acknowledge)}, &env); err != nil {
 			return err
 		}
 		return Render(ios.Stdout, f, Table{Columns: envColumns, Rows: [][]string{envRow(env)}, JSON: env})
@@ -332,11 +334,12 @@ func runFolder(ctx context.Context, ios IO, args []string) error {
 		return err
 	}
 
-	var format, path string
+	var format, path, acknowledge string
 	st, flags, err := parseCommon("folder "+sub, ios, rest, func(fs *flag.FlagSet) {
 		fs.StringVar(&format, "o", "table", "output format: table or json")
 		if sub == "create" || sub == "rename" {
 			fs.StringVar(&path, "path", "", "folder path, slash-separated")
+			ackFlag(fs, &acknowledge)
 		}
 	})
 	if err != nil {
@@ -399,7 +402,7 @@ func runFolder(ctx context.Context, ios IO, args []string) error {
 
 	case "create":
 		var folder apigen.Folder
-		if err := client.Do(ctx, http.MethodPost, base, apigen.CreateFolderRequest{Path: path}, &folder); err != nil {
+		if err := client.Do(ctx, http.MethodPost, base, apigen.CreateFolderRequest{Path: path, Acknowledgements: acksPtr(acknowledge)}, &folder); err != nil {
 			return err
 		}
 		return Render(ios.Stdout, f, Table{Columns: folderColumns, Rows: [][]string{folderRow(folder)}, JSON: folder})
@@ -407,7 +410,7 @@ func runFolder(ctx context.Context, ios IO, args []string) error {
 	case "rename":
 		var folder apigen.Folder
 		if err := client.Do(ctx, http.MethodPatch, base+"/"+url.PathEscape(flags.positional()),
-			apigen.RenameFolderRequest{Path: path}, &folder); err != nil {
+			apigen.RenameFolderRequest{Path: path, Acknowledgements: acksPtr(acknowledge)}, &folder); err != nil {
 			return err
 		}
 		return Render(ios.Stdout, f, Table{Columns: folderColumns, Rows: [][]string{folderRow(folder)}, JSON: folder})

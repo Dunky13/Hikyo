@@ -13,6 +13,7 @@ import (
 	"github.com/Hikyo-Org/hikyo/internal/authz"
 	"github.com/Hikyo-Org/hikyo/internal/crypto"
 	"github.com/Hikyo-Org/hikyo/internal/domain"
+	"github.com/Hikyo-Org/hikyo/internal/scanning"
 	"github.com/Hikyo-Org/hikyo/internal/store"
 	"github.com/Hikyo-Org/hikyo/internal/store/tx"
 )
@@ -133,6 +134,14 @@ type Orgs struct {
 }
 
 // Create publishes a new org through the transactional boundary.
+//
+// Org names and metadata are NOT secret-scanned (#74, ADR §2 Surface 2): the
+// scan surface is "any string in the DEFINITIONS MODEL", and an org is not
+// bundle content — §5 gives declaration events project scope, so an org-scoped
+// scanning event cannot exist compliantly (OpOrgCreate's instance proof cannot
+// even write a tenant scanning event). Folder/environment/group/key fields —
+// the bundle content the ADR actually enumerates — are scanned; org and project
+// names are not. Decision recorded in docs/handoff/74-secret-scanning.md.
 func (s *Orgs) Create(ctx context.Context, actor Actor, name string, active bool, metadata json.RawMessage) (Org, error) {
 	if err := checkName("organisation name", name); err != nil {
 		return Org{}, err
@@ -341,6 +350,7 @@ func (s *Orgs) Rename(ctx context.Context, actor Actor, org domain.OrgID, name s
 		if err != nil {
 			return err
 		}
+		// Org names are not secret-scanned (see Orgs.Create).
 		if err := r.Orgs().Rename(ctx, p, name); err != nil {
 			return err
 		}
@@ -421,6 +431,10 @@ type Projects struct {
 // Create makes a project inside org. The service addresses the scope; the
 // chain the store writes comes from the proof authorize() minted after
 // resolving that scope — never from these arguments.
+//
+// Project names are NOT secret-scanned (#74, ADR §2 Surface 2): a project name
+// is not definitions-bundle content, on the same ground org names are not (see
+// Orgs.Create). Key/folder/environment/group fields are the scanned surface.
 func (s *Projects) Create(ctx context.Context, actor Actor, org domain.OrgID, name string) (Project, error) {
 	if err := checkName("project name", name); err != nil {
 		return Project{}, err
@@ -518,6 +532,7 @@ func (s *Projects) Rename(ctx context.Context, actor Actor, scope domain.Scope, 
 		if err != nil {
 			return err
 		}
+		// Project names are not secret-scanned (see Projects.Create).
 		if err := r.Projects().Rename(ctx, p, name); err != nil {
 			return err
 		}
@@ -609,6 +624,9 @@ type Environments struct {
 	Auth *Auth
 	// Advisory announces the new environment's revision 1, after commit.
 	Advisory *Advisory
+	// Scan: secret-scanning Surface-2 seam (#74). Environment names and notes
+	// are author-controlled declaration text.
+	Scan *scanning.Ruleset
 }
 
 // Environment methods address scope as a domain.Scope — the same shape
@@ -620,8 +638,8 @@ type Environments struct {
 // The count that bounds it is read under the same proof in the same
 // transaction as the insert, so the cap cannot be walked past by two
 // concurrent creates.
-func (s *Environments) Create(ctx context.Context, actor Actor, scope domain.Scope, name string) (Environment, error) {
-	env, _, err := s.create(ctx, actor, scope, name, "")
+func (s *Environments) Create(ctx context.Context, actor Actor, scope domain.Scope, name string, acks []string) (Environment, error) {
+	env, _, err := s.create(ctx, actor, scope, name, "", acks)
 	return env, err
 }
 
@@ -636,18 +654,30 @@ func (s *Environments) Create(ctx context.Context, actor Actor, scope domain.Sco
 // The copy is preflighted, and the preflight can ABORT the creation: see
 // cloneInto. What could not be copied comes back enumerated by name, never
 // silently absent.
-func (s *Environments) Clone(ctx context.Context, actor Actor, scope domain.Scope, name, sourceEnvID string) (Environment, CloneResult, error) {
+func (s *Environments) Clone(ctx context.Context, actor Actor, scope domain.Scope, name, sourceEnvID string, acks []string) (Environment, CloneResult, error) {
 	if sourceEnvID == "" {
 		return Environment{}, CloneResult{}, fmt.Errorf("%w: clone names a source environment", domain.ErrInvalid)
 	}
-	return s.create(ctx, actor, scope, name, sourceEnvID)
+	return s.create(ctx, actor, scope, name, sourceEnvID, acks)
 }
 
-func (s *Environments) create(ctx context.Context, actor Actor, scope domain.Scope, name, sourceEnvID string) (Environment, CloneResult, error) {
+func (s *Environments) create(ctx context.Context, actor Actor, scope domain.Scope, name, sourceEnvID string, acks []string) (Environment, CloneResult, error) {
 	if err := checkName("environment name", name); err != nil {
 		return Environment{}, CloneResult{}, err
 	}
 	id, err := newID("env")
+	if err != nil {
+		return Environment{}, CloneResult{}, err
+	}
+	// Surface-2 block (#74) reached BEFORE the sealer mints the project DEK.
+	// Environment create is a first-mint ingress (a fresh project's first
+	// materialization mints the DEK here), so scanning only inside the write
+	// transaction below would leave the wrapped-key row behind on a block. The
+	// pre-flight authorizes and scans in a read transaction, refuses before any
+	// mint, and returns the acknowledged overrides to emit with the write (ADR
+	// §7; see scanSurface2Preflight).
+	overrides, err := scanSurface2Preflight(ctx, s.DB, s.Keyring, s.Scan, actor, authz.OpEnvCreate, scope,
+		nonEmptyLeaf(locEnvironmentName, name), acks, ingressEdit)
 	if err != nil {
 		return Environment{}, CloneResult{}, err
 	}
@@ -658,10 +688,11 @@ func (s *Environments) create(ctx context.Context, actor Actor, scope domain.Sco
 	//
 	// After authorization, never before: resolving a sealer MINTS the project
 	// data key on first use, and an unauthorized caller must not leave a
-	// wrapped-key row behind (see service.sealerFor). Every create needs one
-	// now, clone or not: an environment is VALIDATED AND MATERIALIZED against
-	// the current schema revision before it becomes fetchable, and a
-	// materialization seals what it publishes.
+	// wrapped-key row behind (see service.sealerFor). The scan pre-flight above
+	// runs before this for the same no-orphan-row reason, one layer earlier.
+	// Every create needs one now, clone or not: an environment is VALIDATED AND
+	// MATERIALIZED against the current schema revision before it becomes
+	// fetchable, and a materialization seals what it publishes.
 	sealer, err := sealerFor(ctx, s.DB, s.Keyring, actor, authz.OpEnvCreate, scope)
 	if err != nil {
 		return Environment{}, CloneResult{}, err
@@ -696,6 +727,12 @@ func (s *Environments) create(ctx context.Context, actor Actor, scope domain.Sco
 		if n >= MaxEnvironmentsPerProject {
 			return fmt.Errorf("%w: a project holds at most %d environments",
 				domain.ErrLimitExceeded, MaxEnvironmentsPerProject)
+		}
+		// Surface-2 acknowledged overrides (#74): the block verdict was reached in
+		// the pre-flight above; here the finding_overridden events for an
+		// acknowledged environment name commit in the write's own transaction.
+		if err := emitOverrides(ctx, r, p, caller.Principal, overrides); err != nil {
+			return err
 		}
 		// Append past the highest position in use, NOT at the row count: a
 		// delete leaves its gap behind on purpose, so [0,1,2] minus the middle
@@ -736,7 +773,7 @@ func (s *Environments) create(ctx context.Context, actor Actor, scope domain.Sco
 			// The row exists now, so the destination half of the copy formula
 			// can be evaluated against the environment being created — which
 			// is what the ADR requires it to be evaluated against.
-			clone, err = cloneInto(ctx, r, az, caller, sealer, scope, sourceEnvID, created.ID,
+			clone, err = cloneInto(ctx, r, az, caller, sealer, s.Keyring, s.Scan, scope, sourceEnvID, created.ID,
 				ceremonyGate(ctx, s.Auth, az, caller, PurposeCopy, sourceEnvID))
 			if err != nil {
 				return err
@@ -809,7 +846,7 @@ func (s *Environments) List(ctx context.Context, actor Actor, scope domain.Scope
 	return list, nil
 }
 
-func (s *Environments) Rename(ctx context.Context, actor Actor, scope domain.Scope, name string) (Environment, error) {
+func (s *Environments) Rename(ctx context.Context, actor Actor, scope domain.Scope, name string, acks []string) (Environment, error) {
 	if err := checkName("environment name", name); err != nil {
 		return Environment{}, err
 	}
@@ -831,6 +868,11 @@ func (s *Environments) Rename(ctx context.Context, actor Actor, scope domain.Sco
 		}
 		before, err := r.Environments().Get(ctx, p)
 		if err != nil {
+			return err
+		}
+		// Surface-2 block (#74): the new environment name is scanned before it persists.
+		if err := applyDeclarationScan(ctx, r, p, az, s.Keyring, s.Scan, caller.Principal,
+			scope, nonEmptyLeaf(locEnvironmentName, name), newAckSet(acks), ingressEdit); err != nil {
 			return err
 		}
 		if err := r.Environments().Rename(ctx, p, name); err != nil {
@@ -1030,7 +1072,7 @@ func (s *Environments) Delete(ctx context.Context, actor Actor, scope domain.Sco
 // demonstration operation from #44 and has no HTTP route of its own; it stays
 // because the isolation probes ride on it to prove that `edit(E)` and
 // `definitions-edit(project)` are enforced as different authorities.
-func (s *Environments) UpdateNote(ctx context.Context, actor Actor, scope domain.Scope, note string) error {
+func (s *Environments) UpdateNote(ctx context.Context, actor Actor, scope domain.Scope, note string, acks []string) error {
 	return tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		caller, err := actor.resolve(ctx, az, time.Now().UTC())
 		if err != nil {
@@ -1038,6 +1080,11 @@ func (s *Environments) UpdateNote(ctx context.Context, actor Actor, scope domain
 		}
 		p, err := az.Authorize(ctx, caller, authz.OpEnvUpdateNote, scope)
 		if err != nil {
+			return err
+		}
+		// Surface-2 block (#74): the note is scanned before it persists.
+		if err := applyDeclarationScan(ctx, r, p, az, s.Keyring, s.Scan, caller.Principal,
+			scope, nonEmptyLeaf(locEnvironmentNote, note), newAckSet(acks), ingressEdit); err != nil {
 			return err
 		}
 		if err := r.Environments().UpdateNote(ctx, p, note); err != nil {
@@ -1076,9 +1123,13 @@ func folderOf(f store.Folder) Folder {
 // resolve inside the project the proof already authorized.
 type Folders struct {
 	DB *store.DB
+	// Keyring and Scan: secret-scanning Surface-2 seam (#74). Folder path
+	// segments are author-controlled declaration text.
+	Keyring *crypto.Keyring
+	Scan    *scanning.Ruleset
 }
 
-func (s *Folders) Create(ctx context.Context, actor Actor, scope domain.Scope, path string) (Folder, error) {
+func (s *Folders) Create(ctx context.Context, actor Actor, scope domain.Scope, path string, acks []string) (Folder, error) {
 	if err := checkFolderPath(path); err != nil {
 		return Folder{}, err
 	}
@@ -1097,6 +1148,11 @@ func (s *Folders) Create(ctx context.Context, actor Actor, scope domain.Scope, p
 			return err
 		}
 		if err := requireDBManagedDefinitions(ctx, r, p); err != nil {
+			return err
+		}
+		// Surface-2 block (#74): the folder path is scanned before it persists.
+		if err := applyDeclarationScan(ctx, r, p, az, s.Keyring, s.Scan, caller.Principal,
+			scope, nonEmptyLeaf(locFolderPath, path), newAckSet(acks), ingressEdit); err != nil {
 			return err
 		}
 		if err := r.Folders().Create(ctx, p, folder); err != nil {
@@ -1166,7 +1222,7 @@ func (s *Folders) List(ctx context.Context, actor Actor, scope domain.Scope) ([]
 // Rename moves a folder to a new path. It renames exactly the row named: a
 // folder is a flat namespace label in v1, not a tree node with children to
 // carry along, so there is no cascade to get wrong.
-func (s *Folders) Rename(ctx context.Context, actor Actor, scope domain.Scope, id, path string) (Folder, error) {
+func (s *Folders) Rename(ctx context.Context, actor Actor, scope domain.Scope, id, path string, acks []string) (Folder, error) {
 	if err := checkFolderPath(path); err != nil {
 		return Folder{}, err
 	}
@@ -1185,6 +1241,11 @@ func (s *Folders) Rename(ctx context.Context, actor Actor, scope domain.Scope, i
 		}
 		before, err := r.Folders().Get(ctx, p, id)
 		if err != nil {
+			return err
+		}
+		// Surface-2 block (#74): the new folder path is scanned before it persists.
+		if err := applyDeclarationScan(ctx, r, p, az, s.Keyring, s.Scan, caller.Principal,
+			scope, nonEmptyLeaf(locFolderPath, path), newAckSet(acks), ingressEdit); err != nil {
 			return err
 		}
 		if err := r.Folders().Rename(ctx, p, id, path); err != nil {

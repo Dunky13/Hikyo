@@ -46,6 +46,7 @@ type RevisionService interface {
 	Export(ctx context.Context, actor service.Actor, scope domain.Scope, revision int64, reveal bool) ([]service.ExportedValue, int64, error)
 	Watch(ctx context.Context, actor service.Actor, scope domain.Scope) (<-chan service.AdvisoryEvent, error)
 	RotateTokenKey(ctx context.Context, actor service.Actor) (service.TokenKeyRotation, error)
+	RotateScanningKey(ctx context.Context, actor service.Actor) (service.ScanningKeyRotation, error)
 }
 
 type PinService interface {
@@ -377,6 +378,17 @@ func (a *API) RotateTokenKey(ctx context.Context, _ apigen.RotateTokenKeyRequest
 	}
 	return apigen.RotateTokenKey200JSONResponse(apigen.TokenKeyRotation{
 		TokenKeyVersion: int64(rotation.Version),
+	}), nil
+}
+
+func (a *API) RotateScanningKey(ctx context.Context, _ apigen.RotateScanningKeyRequestObject) (apigen.RotateScanningKeyResponseObject, error) {
+	rotation, err := a.Revisions.RotateScanningKey(ctx, service.Bearer(bearer(ctx)))
+	if err != nil {
+		return nil, err
+	}
+	return apigen.RotateScanningKey200JSONResponse(apigen.ScanningKeyRotation{
+		ScanningKeyVersion: int64(rotation.Version),
+		DismissalsDropped:  rotation.DismissalsDropped,
 	}), nil
 }
 

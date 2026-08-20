@@ -24,6 +24,7 @@ import (
 	"github.com/Hikyo-Org/hikyo/internal/domain"
 	"github.com/Hikyo-Org/hikyo/internal/oidcfed"
 	"github.com/Hikyo-Org/hikyo/internal/remotefetch"
+	"github.com/Hikyo-Org/hikyo/internal/scanning"
 	"github.com/Hikyo-Org/hikyo/internal/server"
 	"github.com/Hikyo-Org/hikyo/internal/service"
 	"github.com/Hikyo-Org/hikyo/internal/store"
@@ -213,6 +214,15 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 		return nil, fmt.Errorf("boot: refusing to serve: %w", err)
 	}
 
+	// The secret-scanning ruleset compiles once at boot; a Load error refuses to
+	// serve (#74, ADR §7 fail-fast — a binary that ships a half-compiled ruleset
+	// is a scanner that silently is not one).
+	ruleset, err := scanning.Load()
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("boot: refusing to serve: secret-scanning ruleset: %w", err)
+	}
+
 	kdf, limiter, err := AuthComponents(cfg)
 	if err != nil {
 		db.Close()
@@ -284,7 +294,7 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 	adapterService := &service.Adapters{DB: db, Auth: authSvc, Keyring: kr, ProviderModule: func(provider, origin, credential string) (adapter.Module, func(), error) {
 		return deploymentModule(provider, origin, credential, cfg.AdapterEgressPolicy[origin])
 	}}
-	definitionsService := &service.Definitions{DB: db, Keyring: kr, Advisory: advisory}
+	definitionsService := &service.Definitions{DB: db, Keyring: kr, Advisory: advisory, Scan: ruleset}
 
 	api := &server.API{
 		Auth:     authSvc,
@@ -293,10 +303,11 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 		Projects: &service.Projects{DB: db},
 		// The keyring reaches the value surface (#50): clone-at-creation and
 		// every value write re-seal under the project data key, in the
-		// transaction that writes the row.
-		Environments: &service.Environments{DB: db, Keyring: kr, Auth: authSvc, Advisory: advisory},
-		Folders:      &service.Folders{DB: db},
-		Keys:         &service.Keys{DB: db, Keyring: kr, Advisory: advisory},
+		// transaction that writes the row. The ruleset (#74) reaches every
+		// surface that writes a config value or a declaration leaf.
+		Environments: &service.Environments{DB: db, Keyring: kr, Auth: authSvc, Advisory: advisory, Scan: ruleset},
+		Folders:      &service.Folders{DB: db, Keyring: kr, Scan: ruleset},
+		Keys:         &service.Keys{DB: db, Keyring: kr, Advisory: advisory, Scan: ruleset},
 		Definitions:  definitionsService,
 		// The reveal ceremony (#58): the value surface's disclosure routes
 		// consume the SAME reauthentication window machinery the passkey and
@@ -306,11 +317,11 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 		// One Advisory across the value and revision surfaces: staging and
 		// publishing both announce on the same channel, and two channels would
 		// mean a subscriber saw half the events.
-		Values:    &service.Values{DB: db, Keyring: kr, Auth: authSvc, Advisory: advisory},
+		Values:    &service.Values{DB: db, Keyring: kr, Auth: authSvc, Advisory: advisory, Scan: ruleset},
 		Revisions: &service.Revisions{DB: db, Keyring: kr, Auth: authSvc, Advisory: advisory},
 		Pins:      &service.Pins{DB: db, Keyring: kr, Auth: authSvc},
 		Reveal:    &service.Reveal{DB: db, Auth: authSvc},
-		KeyGroups: &service.KeyGroups{DB: db, Keyring: kr, Advisory: advisory},
+		KeyGroups: &service.KeyGroups{DB: db, Keyring: kr, Advisory: advisory, Scan: ruleset},
 		// One Auth across the grant surface, the settings knob and the machine
 		// identity surface: the reauthentication conjunct a machine widening
 		// carries is the SAME window machinery human disclosure consumes, so

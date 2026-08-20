@@ -117,6 +117,10 @@ type ImportResult struct {
 	// Skipped are keys already `set` in the target environment that no
 	// enumerated overwrite named. Listed by name, never silently dropped.
 	Skipped []string
+	// Findings are the Surface-1 warnings the imported CONFIG values produced
+	// (#74, surface import_value), warn-not-block: the import succeeds and each
+	// finding names its rule and key locator. No dismissal token here.
+	Findings []Finding
 }
 
 // movedTokenRefusal is the ONE wording every precondition mismatch produces.
@@ -347,6 +351,7 @@ func (s *Values) Import(ctx context.Context, actor Actor, scope domain.Scope, re
 		result = ImportResult{}
 		published = PublishedEnvironment{}
 		advanced = false
+		total := 0
 		caller, err := actor.resolve(ctx, az, time.Now().UTC())
 		if err != nil {
 			return err
@@ -429,6 +434,16 @@ func (s *Values) Import(ctx context.Context, actor Actor, scope domain.Scope, re
 			if err := r.Audit().InsertTenant(ctx, p, ev); err != nil {
 				return err
 			}
+			// Surface-1 warn (#74), warn-only: an imported CONFIG value is scanned
+			// and its findings ride the import response. OpValueImport licenses
+			// finding_warned; a secret key is a no-op (Surface 3).
+			f, err := scanConfigValue(ctx, r, p, s.Keyring, s.Scan, scope, key.ID,
+				key.Classification, []byte(schema.Normalize(entry.Value)), surfaceImportValue,
+				caller.Principal, nil, false, &total)
+			if err != nil {
+				return err
+			}
+			result.Findings = append(result.Findings, f...)
 			result.Imported = append(result.Imported, entry.Key)
 		}
 		sort.Strings(result.Imported)

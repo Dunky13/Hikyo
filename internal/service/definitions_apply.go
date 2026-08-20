@@ -68,7 +68,7 @@ func sanitizeProvenance(field, s string) (string, error) {
 // Plan diffs a bundle against current state, pins it, and persists an immutable
 // plan. The plan IS the impact preview: it renders deletions concretely and
 // names the entries whose apply will need reveal.
-func (s *Definitions) Plan(ctx context.Context, actor Actor, scope domain.Scope, raw []byte) (PlanView, error) {
+func (s *Definitions) Plan(ctx context.Context, actor Actor, scope domain.Scope, raw []byte, acks []string) (PlanView, error) {
 	var view PlanView
 	err := tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		caller, err := actor.resolve(ctx, az, s.now())
@@ -113,6 +113,17 @@ func (s *Definitions) Plan(ctx context.Context, actor Actor, scope domain.Scope,
 			return err
 		}
 		if err := validateFinalDefinitions(cur, res); err != nil {
+			return err
+		}
+		// Surface-2 block (#74 SS3, ADR §7 (b)): scan every author-controlled leaf
+		// of the bundle BEFORE the immutable plan persists. A finding refuses the
+		// plan (ingress `plan`) — the finding_blocked events flush in their own
+		// transaction while this write rolls back, so nothing else persists; an
+		// acknowledged resubmission commits the plan with finding_overridden. Runs
+		// after Resolve, so a dangling group/environment reference (which would carry
+		// a credential unscanned) has already been refused.
+		if err := applyDeclarationScan(ctx, r, p, az, s.Keyring, s.Scan, caller.Principal, scope,
+			bundleLeaves(bundle), newAckSet(acks), ingressPlan); err != nil {
 			return err
 		}
 		// Open-plan quota.
@@ -289,11 +300,15 @@ func (s *Definitions) persistPlan(ctx context.Context, r store.Repos, az *authz.
 	if err != nil {
 		return PlanView{}, err
 	}
+	// The plan records the ruleset SnapshotVersion it was scanned under (#74 SS3,
+	// ADR §7 (c)): apply re-scans iff the running snapshot differs. Empty means
+	// scanning was off at plan time; a later apply under a wired ruleset then reads
+	// "" != SnapshotVersion() and re-scans, which is the correct fail-safe.
 	newPlan := store.NewDefinitionsPlan{
 		ID: planID, CreatedBy: string(caller.Principal), CreatedAt: now, ExpiresAt: now.Add(PlanTTL),
 		Bundle: string(canonical), Digest: digest, BaseSchemaRevision: cur.SchemaRevision,
 		EnvRevisions: string(envRevsJSON), ProtectedEnvs: string(protectedJSON), Diff: string(diffJSON),
-		Additive: bundle.Additive(),
+		Additive: bundle.Additive(), ScanSnapshot: s.scanSnapshot(),
 	}
 	if err := r.Definitions().CreatePlan(ctx, p, newPlan); err != nil {
 		return PlanView{}, err

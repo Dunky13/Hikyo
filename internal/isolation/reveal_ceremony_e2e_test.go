@@ -141,7 +141,7 @@ func publishValue(t *testing.T, values *service.Values, actor service.Actor,
 	scope domain.Scope, keyName, value string) {
 	t.Helper()
 	ctx := t.Context()
-	staged, err := values.Set(ctx, actor, scope, keyName, value)
+	staged, err := values.Set(ctx, actor, scope, keyName, value, nil)
 	if err != nil {
 		t.Fatalf("stage %s: %v", keyName, err)
 	}
@@ -622,7 +622,7 @@ func runRestorePinAndProtectedPublishTakeCeremonies(t *testing.T, db *store.DB) 
 		t.Fatalf("pin wrote %d disclosure events, want one per historical secret", got-beforePin)
 	}
 
-	staged, err := values.Set(ctx, service.Bearer(token), scope, ceremonySecretB, "protected-publish")
+	staged, err := values.Set(ctx, service.Bearer(token), scope, ceremonySecretB, "protected-publish", nil)
 	if err != nil {
 		t.Fatalf("stage protected publish: %v", err)
 	}

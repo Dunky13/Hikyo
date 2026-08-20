@@ -358,7 +358,7 @@ func buildInstance(t *testing.T, target drillTarget, c custody) (*store.DB, arti
 		Name: "DRILL_PLANTED_SECRET", Classification: string(schema.Secret),
 		Declaration: schema.Declaration{Rule: &schema.Rule{Type: schema.TypeString}},
 		Presence:    schema.DefaultPresenceRules(),
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatalf("create planted secret key: %v", err)
 	}
 	a.secretValue = "the-drill-planted-secret-material-7f3a9c"

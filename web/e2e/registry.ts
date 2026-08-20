@@ -54,6 +54,11 @@ export const FLOWS: readonly Flow[] = [
   },
   { id: 'reveal', spec: 'flows/reveal.spec.ts', surfaces: ['values'] },
   { id: 'matrix', spec: 'flows/matrix.spec.ts', surfaces: ['matrix'] },
+  // Secret-scanning warn dialog (#74, SS2/SS4 [UI]) rides the matrix editing
+  // surface — a config value carrying a credential warns, and the canary never
+  // reaches the DOM or the console. It claims `matrix` too: a surface may carry
+  // more than one flow, and the run log holds each flow's claim independently.
+  { id: 'scanning', spec: 'flows/scanning.spec.ts', surfaces: ['matrix'] },
   { id: 'history', spec: 'flows/history.spec.ts', surfaces: ['history'] },
   {
     id: 'machine-access',

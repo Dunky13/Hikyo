@@ -711,7 +711,7 @@ func publishE2EValues(t *testing.T, db *store.DB, values map[string]string) {
 	sort.Strings(names)
 	versions := make([]string, 0, len(names))
 	for _, name := range names {
-		staged, err := valueSvc(t, db).Set(t.Context(), actor, scope, name, values[name])
+		staged, err := valueSvc(t, db).Set(t.Context(), actor, scope, name, values[name], nil)
 		if err != nil {
 			t.Fatalf("stage %s: %v", name, err)
 		}

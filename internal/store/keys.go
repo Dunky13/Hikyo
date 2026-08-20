@@ -53,6 +53,12 @@ type KeyRepo interface {
 	// grant-evaluated -- an operator holding `rotate-dek` asks for it -- so it
 	// reaches the same rows through a door of its own.
 	RotateTokenKey(ctx context.Context, pf authz.Proof, key crypto.WrappedKey) error
+	// RotateScanningKey retires the active scanning-fingerprint key and installs
+	// its successor, the exact twin of RotateTokenKey for the sixth rotation
+	// operation (#74). Dropping the dismissal rows is the service's, in the same
+	// transaction (StoreScanningDismissalsDeleteAll) — this method owns only the
+	// key swap, so the two concerns stay separately authorized.
+	RotateScanningKey(ctx context.Context, pf authz.Proof, key crypto.WrappedKey) error
 	InsertScopeGeneration(ctx context.Context, pf authz.Proof, p crypto.Purpose, orgID, projectID string) error
 }
 
@@ -75,7 +81,7 @@ func dbVersion(field string, v int64) (uint32, error) {
 
 func parsePurpose(s string) (crypto.Purpose, error) {
 	switch p := crypto.Purpose(s); p {
-	case crypto.PurposeProject, crypto.PurposeInstance, crypto.PurposeToken:
+	case crypto.PurposeProject, crypto.PurposeInstance, crypto.PurposeToken, crypto.PurposeScanning:
 		return p, nil
 	default:
 		return "", fmt.Errorf("store: unknown key purpose %q", s)
@@ -263,6 +269,41 @@ func (k sqliteKeys) RotateTokenKey(ctx context.Context, pf authz.Proof, key cryp
 	return err
 }
 
+func (k sqliteKeys) RotateScanningKey(ctx context.Context, pf authz.Proof, key crypto.WrappedKey) error {
+	if _, err := authz.Verify(pf, authz.StoreKeysRotateScanningKey, k.tok); err != nil {
+		return err
+	}
+	// The fence first, then a compare-and-swap on the predecessor version — the
+	// exact shape RotateTokenKey uses, purpose scanning.
+	if _, err := k.q.AcquireHierarchyGeneration(ctx); err != nil {
+		return err
+	}
+	retired, err := k.q.RetireTier3KeyAtVersion(ctx, sqlitegen.RetireTier3KeyAtVersionParams{
+		Purpose: string(crypto.PurposeScanning), OrgID: "", ProjectID: "",
+		Version: int64(key.Version) - 1,
+	})
+	if err != nil {
+		return err
+	}
+	if retired != 1 {
+		return ErrRotationSuperseded
+	}
+	err = k.q.InsertTier3Key(ctx, sqlitegen.InsertTier3KeyParams{
+		ID:               key.ID,
+		Purpose:          string(key.Purpose),
+		OrgID:            key.OrgID,
+		ProjectID:        key.ProjectID,
+		Version:          int64(key.Version),
+		MasterKeyVersion: int64(key.MasterKeyVersion),
+		Blob:             key.Blob,
+		CreatedAt:        CanonTime(key.CreatedAt).Format(timeFormat),
+	})
+	if sqliteUniqueViolation(err) {
+		return crypto.ErrKeyExists
+	}
+	return err
+}
+
 func (k sqliteKeys) InsertScopeGeneration(ctx context.Context, pf authz.Proof, p crypto.Purpose, orgID, projectID string) error {
 	if _, err := authz.Verify(pf, authz.StoreKeysInsertScopeGeneration, k.tok); err != nil {
 		return err
@@ -419,6 +460,40 @@ func (k pgKeys) RotateTokenKey(ctx context.Context, pf authz.Proof, key crypto.W
 	// Compare-and-swap on the predecessor: see the sqlite twin.
 	retired, err := k.q.RetireTier3KeyAtVersion(ctx, pggen.RetireTier3KeyAtVersionParams{
 		Purpose: string(crypto.PurposeToken), OrgID: "", ProjectID: "",
+		Version: int64(key.Version) - 1,
+	})
+	if err != nil {
+		return err
+	}
+	if retired != 1 {
+		return ErrRotationSuperseded
+	}
+	err = k.q.InsertTier3Key(ctx, pggen.InsertTier3KeyParams{
+		ID:               key.ID,
+		Purpose:          string(key.Purpose),
+		OrgID:            key.OrgID,
+		ProjectID:        key.ProjectID,
+		Version:          int64(key.Version),
+		MasterKeyVersion: int64(key.MasterKeyVersion),
+		Blob:             key.Blob,
+		CreatedAt:        pgtype.Timestamptz{Time: CanonTime(key.CreatedAt), Valid: true},
+	})
+	if pgUniqueViolation(err) {
+		return crypto.ErrKeyExists
+	}
+	return err
+}
+
+func (k pgKeys) RotateScanningKey(ctx context.Context, pf authz.Proof, key crypto.WrappedKey) error {
+	if _, err := authz.Verify(pf, authz.StoreKeysRotateScanningKey, k.tok); err != nil {
+		return err
+	}
+	if _, err := k.q.AcquireHierarchyGeneration(ctx); err != nil {
+		return err
+	}
+	// Compare-and-swap on the predecessor: see the sqlite twin and RotateTokenKey.
+	retired, err := k.q.RetireTier3KeyAtVersion(ctx, pggen.RetireTier3KeyAtVersionParams{
+		Purpose: string(crypto.PurposeScanning), OrgID: "", ProjectID: "",
 		Version: int64(key.Version) - 1,
 	})
 	if err != nil {

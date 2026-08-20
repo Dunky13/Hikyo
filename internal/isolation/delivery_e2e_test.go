@@ -538,7 +538,7 @@ func TestDeliveryChangeTokenTracksTheManifestSQLite(t *testing.T) {
 	// #51 the snapshot is immutable: what a revision delivered is fixed at the
 	// classification it was materialized under, and only a semantic schema
 	// change — which materializes every environment — can move it.
-	if _, err := keySvc(t, db).Reclassify(t.Context(), caller, scopeProject(orgA, prjA1),
+	if _, _, err := keySvc(t, db).Reclassify(t.Context(), caller, scopeProject(orgA, prjA1),
 		"key_fed_url", "secret"); err != nil {
 		t.Fatalf("reclassify: %v", err)
 	}
@@ -569,7 +569,7 @@ func TestDeliveryChangeTokenTracksTheManifestSQLite(t *testing.T) {
 				Required:  schema.Presence{Mode: schema.PresenceNone},
 				Forbidden: schema.Presence{Mode: schema.PresenceExplicit, Environments: []string{string(envProd)}},
 			},
-		}); err != nil {
+		}, nil); err != nil {
 		t.Fatalf("presence-rule change: %v", err)
 	}
 	afterPresence, err := del.FetchAs(t.Context(), caller, env, "", service.FetchOptions{})

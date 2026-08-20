@@ -2224,6 +2224,7 @@ paths:
     parameters:
       - $ref: "#/components/parameters/OrgID"
       - $ref: "#/components/parameters/ProjectID"
+      - $ref: "#/components/parameters/DefinitionsAcknowledgements"
     post:
       operationId: createDefinitionsPlan
       tags: [definitions]
@@ -8226,6 +8227,44 @@ paths:
         "500":
           $ref: "#/components/responses/Internal"
 
+  /api/v1/instance/rotate-scanning-key:
+    post:
+      operationId: rotateScanningKey
+      tags: [instance]
+      summary: Rotate the secret-scanning fingerprint key.
+      description: |
+        Mints a new scanning-fingerprint key, retires the old one, and drops
+        every dismissal row in the same transaction.
+
+        Outright replacement: there is no version keyring and no reencrypt walk,
+        because a fingerprint is a keyed digest, not a ciphertext to preserve.
+        Every stored fingerprint becomes unrecomputable under the new key, so
+        keeping the dismissals would silently suppress warns that must now
+        re-fire - dropping them is the safe direction.
+
+        It rides `rotate-dek`, the same tier-3 rotation authority as
+        `rotate-token-key`.
+      x-hikyo-class: instance
+      x-hikyo-operation: crypto.rotate-scanning-key
+      x-hikyo-formula: [rotate-dek@instance]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "200":
+          description: The rotation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScanningKeyRotation"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
   /api/v1/orgs/{org}/projects/{project}/adapters:
     parameters:
       - $ref: "#/components/parameters/OrgID"
@@ -8774,6 +8813,25 @@ components:
         type: string
         enum: [full, config-only]
         default: full
+    DefinitionsAcknowledgements:
+      name: acknowledge
+      in: query
+      required: false
+      style: form
+      explode: false
+      description: |
+        Secret-scanning override token(s) from a prior `definitions plan` refusal
+        (#74 SS3). One content-bound token per finding, re-scanned against the
+        bundle's leaves; a stale, version-skewed, or surplus token is rejected by
+        name. The plan request body is the canonical bundle bytes, so the tokens
+        ride the query rather than the body — the same exposure surface as the CLI
+        `--acknowledge` flag that carries them. Comma-separated. There is no
+        blanket ignore-all input.
+      schema:
+        type: array
+        maxItems: 100
+        items: {type: string}
+
     DeliveryAcknowledgedKeys:
       name: acknowledged_keys
       in: query
@@ -9356,6 +9414,53 @@ components:
                 Present only on `bad_request`, where it names the offending
                 request member. `null` and absent are equivalent; every other
                 error code omits the member entirely.
+            findings:
+              type: array
+              description: |
+                Secret-scanning refusal detail (#74, Surface 2). Present only on
+                a `bad_request` that a declaration ingress refused because an
+                author-controlled field carried a credential-shaped string. Each
+                entry names the immutable declaration-field locator, the rule id,
+                and a short-lived content-bound acknowledgement token the
+                resubmission presents to override. Never the matched text.
+              items:
+                $ref: "#/components/schemas/ScanFinding"
+
+    ScanFinding:
+      type: object
+      description: |
+        One redacted secret-scanning result (#74, secret-scanning ADR §4). It
+        carries a rule id, the surface/ingress it fired on, an immutable locator
+        (key identity for Surface 1, schema-location class for Surface 2), and —
+        where an acknowledgement is possible — an opaque token. It NEVER carries
+        the matched text, an offset, a length, or an excerpt.
+      required: [rule_id, surface, locator]
+      additionalProperties: false
+      properties:
+        rule_id:
+          type: string
+          description: The matched rule's id (e.g. `aws-access-token`).
+        surface:
+          type: string
+          description: |
+            Which ingress produced the finding. Surface-1 warns carry the value
+            write surface; Surface-2 blocks carry the declaration ingress (`edit`
+            for direct edits, `plan`/`apply` for the definitions Git flow); `check`
+            is the read-only `definitions check` dry-run.
+          enum: [value_write, declassification, import_value, edit, plan, apply, check]
+        locator:
+          type: string
+          description: |
+            The immutable locator. Surface 1: the key identity. Surface 2: the
+            schema-location class of the offending field (e.g.
+            `key.declaration.pattern`), never an instance-derived path.
+        acknowledgement:
+          type: string
+          description: |
+            An opaque, short-lived, content-bound token (Surface-1 keep-as-config
+            dismissal or Surface-2 override). Present only where an
+            acknowledgement is possible. Resubmit the write presenting it in
+            `acknowledgements`. It embeds no plaintext.
 
     ErrorCode:
       type: string
@@ -9807,6 +9912,8 @@ components:
             Free-form operator metadata. `null` and absent both mean "no
             metadata"; the round-trip of absent/null/value is fixture-pinned
             through both the Go and the TypeScript consumer.
+        acknowledgements:
+          $ref: "#/components/schemas/Acknowledgements"
 
     Org:
       type: object
@@ -9891,6 +9998,8 @@ components:
       properties:
         name:
           $ref: "#/components/schemas/EntityName"
+        acknowledgements:
+          $ref: "#/components/schemas/Acknowledgements"
 
     CreateProjectRequest:
       type: object
@@ -9899,6 +10008,8 @@ components:
       properties:
         name:
           $ref: "#/components/schemas/EntityName"
+        acknowledgements:
+          $ref: "#/components/schemas/Acknowledgements"
 
     Project:
       type: object
@@ -9933,6 +10044,8 @@ components:
       properties:
         name:
           $ref: "#/components/schemas/EntityName"
+        acknowledgements:
+          $ref: "#/components/schemas/Acknowledgements"
 
     CloneEnvironmentRequest:
       type: object
@@ -9943,6 +10056,8 @@ components:
           $ref: "#/components/schemas/EntityName"
         source_environment_id:
           $ref: "#/components/schemas/ID"
+        acknowledgements:
+          $ref: "#/components/schemas/Acknowledgements"
 
     ClonedEnvironment:
       type: object
@@ -9963,6 +10078,13 @@ components:
             they are enumerated here.
           items:
             $ref: "#/components/schemas/KeyName"
+        findings:
+          type: array
+          description: |
+            Secret-scanning warnings the cloned config values produced (#74,
+            Surface 1), warn-not-block.
+          items:
+            $ref: "#/components/schemas/ScanFinding"
 
     PendingChange:
       type: object
@@ -9997,6 +10119,14 @@ components:
         created_at:
           type: string
           format: date-time
+        findings:
+          type: array
+          description: |
+            Secret-scanning warnings this save produced (#74, Surface 1). The
+            save SUCCEEDED regardless; each finding carries a keep-as-config
+            acknowledgement token. Absent or empty on a clean save.
+          items:
+            $ref: "#/components/schemas/ScanFinding"
     PendingDraft:
       type: object
       description: |
@@ -10412,6 +10542,24 @@ components:
             change token's public contract carries the SCHEME version, never
             the key version, because a consumer that could tell key versions
             apart could tell a rotation from a content change.
+    ScanningKeyRotation:
+      type: object
+      required: [scanning_key_version, dismissals_dropped]
+      additionalProperties: false
+      properties:
+        scanning_key_version:
+          type: integer
+          format: int64
+          description: |
+            The new scanning-fingerprint key version. Operator bookkeeping only;
+            a fingerprint is never exported, displayed or compared.
+        dismissals_dropped:
+          type: integer
+          format: int64
+          description: |
+            How many dismissal rows the rotation invalidated. Every stored
+            fingerprint became unrecomputable under the new key, so all
+            dismissals were dropped and their warns will re-fire.
     ValueCell:
       type: object
       description: |
@@ -10464,6 +10612,24 @@ components:
         count:
           type: integer
           minimum: 0
+        findings:
+          type: array
+          description: |
+            Secret-scanning warnings the declared config values produced (#74,
+            Surface 1), warn-not-block. Absent or empty when nothing matched.
+          items:
+            $ref: "#/components/schemas/ScanFinding"
+
+    Acknowledgements:
+      type: array
+      description: |
+        Secret-scanning acknowledgement tokens (#74). On a value write, a
+        keep-as-config token dismisses a Surface-1 warning for exactly that
+        value. On a declaration write, one override token per finding is
+        re-scanned against the current content; a stale, version-skewed, or
+        surplus token is rejected by name. There is no blanket ignore-all input.
+      items:
+        type: string
 
     SetValueRequest:
       type: object
@@ -10477,6 +10643,8 @@ components:
             The plaintext. It is validated against the key's declaration
             before it commits, and stored sealed under the project data key
             with associated data binding it to this row alone.
+        acknowledgements:
+          $ref: "#/components/schemas/Acknowledgements"
 
     DeclareValuesRequest:
       type: object
@@ -10543,6 +10711,13 @@ components:
                 $ref: "#/components/schemas/KeyName"
               destination_environment_id:
                 $ref: "#/components/schemas/ID"
+        findings:
+          type: array
+          description: |
+            Secret-scanning warnings the copied config values produced (#74,
+            Surface 1), warn-not-block. Absent or empty when nothing matched.
+          items:
+            $ref: "#/components/schemas/ScanFinding"
 
     ValueOccurrencesRequest:
       type: object
@@ -10709,6 +10884,13 @@ components:
             overwrite named. Listed by name, never silently dropped.
           items:
             $ref: "#/components/schemas/KeyName"
+        findings:
+          type: array
+          description: |
+            Secret-scanning warnings the imported config values produced (#74,
+            Surface 1, surface `import_value`), warn-not-block.
+          items:
+            $ref: "#/components/schemas/ScanFinding"
 
     ValueDiff:
       type: object
@@ -10851,6 +11033,15 @@ components:
         base_revision: {type: integer, format: int64, minimum: 0}
         current_revision: {type: integer, format: int64, minimum: 0}
         differences: {$ref: "#/components/schemas/DefinitionsDiff"}
+        findings:
+          type: array
+          description: |
+            Non-blocking secret-scanning results (#74 SS3): the credential-shaped
+            author-controlled leaves of the submitted bundle. Check is a read-only
+            dry-run, so these carry no acknowledgement token and persist nothing —
+            they warn an operator that a `plan` would be refused. Omitted when the
+            bundle is clean.
+          items: {$ref: "#/components/schemas/ScanFinding"}
 
     DefinitionsKeyDeletion:
       type: object
@@ -10913,6 +11104,7 @@ components:
         commit: {type: string, maxLength: 256}
         ref: {type: string, maxLength: 256}
         actor: {type: string, maxLength: 256}
+        acknowledgements: {$ref: "#/components/schemas/Acknowledgements"}
 
     ApplyDefinitionsPlanResult:
       type: object
@@ -11034,6 +11226,8 @@ components:
       properties:
         path:
           $ref: "#/components/schemas/FolderPath"
+        acknowledgements:
+          $ref: "#/components/schemas/Acknowledgements"
 
     RenameFolderRequest:
       type: object
@@ -11042,6 +11236,8 @@ components:
       properties:
         path:
           $ref: "#/components/schemas/FolderPath"
+        acknowledgements:
+          $ref: "#/components/schemas/Acknowledgements"
 
     Folder:
       type: object
@@ -12155,6 +12351,16 @@ components:
           description: The key's group, or empty when it belongs to none.
         created_at:
           $ref: "#/components/schemas/Timestamp"
+        findings:
+          type: array
+          description: |
+            Secret-scanning warnings (#74, Surface 1). Populated only by the
+            reclassification ceremony when declassifying (`secret` → `config`) a
+            key whose existing values carry a credential-shaped string — the
+            reclassify SUCCEEDS and each finding names its rule and key locator.
+            Absent on every other key response.
+          items:
+            $ref: "#/components/schemas/ScanFinding"
 
     KeyList:
       type: object
@@ -12202,6 +12408,8 @@ components:
           $ref: "#/components/schemas/KeyPresenceRules"
         group_id:
           type: string
+        acknowledgements:
+          $ref: "#/components/schemas/Acknowledgements"
 
     UpdateKeyMetadataRequest:
       type: object
@@ -12219,6 +12427,8 @@ components:
           maxLength: 4096
         classification:
           $ref: "#/components/schemas/KeyClassification"
+        acknowledgements:
+          $ref: "#/components/schemas/Acknowledgements"
 
     RenameKeyRequest:
       type: object
@@ -12227,6 +12437,8 @@ components:
       properties:
         name:
           $ref: "#/components/schemas/KeyName"
+        acknowledgements:
+          $ref: "#/components/schemas/Acknowledgements"
 
     UpdateKeyDeclarationRequest:
       type: object
@@ -12237,6 +12449,8 @@ components:
           $ref: "#/components/schemas/KeyDeclaration"
         presence:
           $ref: "#/components/schemas/KeyPresenceRules"
+        acknowledgements:
+          $ref: "#/components/schemas/Acknowledgements"
 
     ReclassifyKeyRequest:
       type: object
@@ -12303,6 +12517,8 @@ components:
           type: string
           minLength: 1
           maxLength: 128
+        acknowledgements:
+          $ref: "#/components/schemas/Acknowledgements"
 
     RenameKeyGroupRequest:
       type: object
@@ -12313,6 +12529,8 @@ components:
           type: string
           minLength: 1
           maxLength: 128
+        acknowledgements:
+          $ref: "#/components/schemas/Acknowledgements"
 
     AuthMethods:
       type: object
