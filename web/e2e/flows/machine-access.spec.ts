@@ -129,7 +129,7 @@ test.describe('machine access', () => {
     // The policy strip: the per-project opt-in is stated, not offered as a
     // control whose only outcome would be a refusal.
     const policy = page.locator('.machine__policy');
-    await expect(policy).toContainText('per-project opt-in): off in this build');
+    await expect(policy).toContainText('per-project opt-in): off.');
     await expectStatusIsTextAndAria(page, policy);
 
     // The inventory itself: every seeded account, with its immutable kind.
@@ -170,14 +170,15 @@ test.describe('machine access', () => {
     await expect(expansion.getByRole('heading', { name: 'Delivery targets' })).toBeVisible();
     await expect(expansion.getByRole('heading', { name: 'Setup journey' })).toBeVisible();
 
-    // The journey is five steps, and the two this build cannot perform say so
-    // in words rather than offering a control the server refuses.
+    // The journey is five steps. With the project's machine-reveal opt-in off
+    // (the seeded default) step 4 is the next act and step 5 says the grant
+    // API refuses until it is on, in words rather than a dead control.
     const steps = expansion.locator('.journey__step');
     await expect(steps).toHaveCount(5);
     await expect(steps.nth(1)).toContainText(`read granted — development`);
-    await expect(steps.nth(3)).toContainText('not in this build');
-    await expect(steps.nth(3)).toContainText('per-project opt-in');
-    await expect(steps.nth(4)).toContainText('not in this build');
+    await expect(steps.nth(3)).toContainText('Enable the project machine-reveal opt-in');
+    await expect(steps.nth(3)).toContainText('next');
+    await expect(steps.nth(4)).toContainText('refused by the grant API until the opt-in above is on');
 
     // An automation principal has no journey at all: it never delivers to a
     // workload.

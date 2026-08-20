@@ -119,13 +119,13 @@ test.describe('organisation settings', () => {
 
   test('renames the organisation and says who may do it', async () => {
     await page.goto(`/orgs/${drillOrg}/settings`);
-    await expect(page.getByLabel('Name')).toHaveValue(drillName);
+    await expect(page.getByLabel('Name', { exact: true })).toHaveValue(drillName);
     // The standing consequence, stated on the surface rather than discovered
     // as a mysterious refusal: the locked capability set has no org-lifecycle
     // atom, so this is instance-operator work.
     await expect(page.locator('#org-identity')).toContainText('instance-operator work');
 
-    await page.getByLabel('Name').fill(`${drillName} renamed`);
+    await page.getByLabel('Name', { exact: true }).fill(`${drillName} renamed`);
     await page.getByRole('button', { name: 'Rename' }).click();
     const done = page.locator('.notice').filter({ hasText: 'Renamed to' });
     await expectStatusIsTextAndAria(page, done);
@@ -174,7 +174,7 @@ test.describe('organisation settings', () => {
         dispatchEvent(new PopStateEvent('popstate'));
       }, `/orgs/${target.id}/settings`);
       await expect(page).toHaveURL(new RegExp(`${target.id}/settings$`));
-      await expect(page.getByLabel('Name')).toHaveValue('');
+      await expect(page.getByLabel('Name', { exact: true })).toHaveValue('');
       const pendingDanger = page.locator('#org-danger');
       await expect(pendingDanger.getByLabel('Delete this organisation')).toHaveValue('');
       await expect(pendingDanger.getByRole('button', { name: 'Delete organisation' })).toBeDisabled();
@@ -182,7 +182,7 @@ test.describe('organisation settings', () => {
         throw new Error('the organisation-read gate was not installed');
       }
       release();
-      await expect(page.getByLabel('Name')).toHaveValue(targetName);
+      await expect(page.getByLabel('Name', { exact: true })).toHaveValue(targetName);
     } finally {
       if (release !== undefined) {
         release();
@@ -270,7 +270,7 @@ test.describe('project settings', () => {
     await expect(page.getByRole('heading', { name: 'Project settings', level: 1 })).toBeVisible();
     await expect(page.locator('#project-identity')).toContainText(drillProject);
 
-    await page.getByLabel('Name').fill(`${drillName}-renamed`);
+    await page.getByLabel('Name', { exact: true }).fill(`${drillName}-renamed`);
     await page.getByRole('button', { name: 'Rename' }).click();
     await expect(page.locator('.notice').filter({ hasText: 'Renamed to' })).toBeVisible();
     drillName = `${drillName}-renamed`;
@@ -529,7 +529,7 @@ test.describe('project settings', () => {
 
   test('disarms typed-name deletion when route identity changes', async () => {
     await page.goto(`/orgs/${seed.org}/projects/${drillProject}/settings`);
-    await expect(page.getByLabel('Name')).toHaveValue(drillName);
+    await expect(page.getByLabel('Name', { exact: true })).toHaveValue(drillName);
     const danger = page.locator('#project-danger');
     await danger.getByLabel('Delete this project').fill(drillName);
     await expect(danger.getByRole('button', { name: 'Delete project' })).toBeEnabled();
@@ -551,7 +551,7 @@ test.describe('project settings', () => {
         dispatchEvent(new PopStateEvent('popstate'));
       }, target);
       await expect(page).toHaveURL(new RegExp(`${seed.project}/settings$`));
-      await expect(page.getByLabel('Name')).toHaveValue('');
+      await expect(page.getByLabel('Name', { exact: true })).toHaveValue('');
       await expect(page.getByRole('button', { name: 'Rename' })).toBeDisabled();
       const nextDanger = page.locator('#project-danger');
       await expect(nextDanger.getByLabel('Delete this project')).toHaveValue('');
@@ -579,7 +579,7 @@ test.describe('project settings', () => {
       await expect(danger.getByRole('button', { name: 'Delete project' })).toBeEnabled();
 
       await page.goto(`/orgs/${otherOrg.id}/projects/${otherProject.id}/settings`);
-      await expect(page.getByLabel('Name')).toHaveValue(drillName);
+      await expect(page.getByLabel('Name', { exact: true })).toHaveValue(drillName);
       const switched = page.locator('#project-danger');
       await expect(switched.getByLabel('Delete this project')).toHaveValue('');
       await expect(switched.getByRole('button', { name: 'Delete project' })).toBeDisabled();
@@ -606,7 +606,7 @@ test.describe('project settings', () => {
     await browserApi(page, 'DELETE', `${base()}/environments/${drillEnv}`, z.null());
     drillEnv = '';
     await page.reload();
-    await expect(page.getByLabel('Name')).toHaveValue(drillName);
+    await expect(page.getByLabel('Name', { exact: true })).toHaveValue(drillName);
     const again = page.locator('#project-danger');
     await again.getByLabel('Delete this project').fill(drillName);
     await again.getByRole('button', { name: 'Delete project' }).click();

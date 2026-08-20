@@ -129,8 +129,8 @@ export function Shell({ session }: { session: WhoAmI }) {
           // behind its own second factor.
           <p className="sidebar__empty" role="status">
             No organisations yet. An instance administrator creates one under Instance
-            administration (a second factor is required), or with{' '}
-            <code>hikyo org create</code>; you will see it here once you are granted access.
+            administration or with <code>hikyo org create</code>; you will see it here once you
+            are granted access to it.
           </p>
         ) : null}
         {orgs.isError ? (

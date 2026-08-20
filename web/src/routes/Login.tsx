@@ -81,7 +81,7 @@ export function Login() {
               onClick={() => passkey.mutate()}
               disabled={login.isPending || passkey.isPending}
             >
-              {passkey.isPending ? 'Waiting for the passkey…' : 'Sign in with a passkey'}
+              {passkey.isPending ? 'Waiting for the passkey…' : 'Use a passkey instead'}
             </button>
             {passkey.isError ? (
               <p className="alert" role="alert">
