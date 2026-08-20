@@ -212,6 +212,68 @@ func TestWizardFansOutAcrossEnvironments(t *testing.T) {
 	}
 }
 
+// TestWizardCreatesEnvironment: a session that creates its target environment
+// declares it up front, emits a `create environment` bundle line, and authors a
+// tokenless, name-addressed values file and manifest for it.
+func TestWizardCreatesEnvironment(t *testing.T) {
+	res, err := run(t, k8sSource, "k8s-multi.yaml", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	presenceCalled := false
+	host := &scriptHost{
+		t: t, source: k8sSource,
+		reads: []SourceRead{{Result: res, FileDigest: "sha256:a"}},
+		envs:  []NamedEnv{{ID: "env_prod", Name: "prod"}},
+		presence: func(envID string, c []PlannedCandidate) ServerState {
+			presenceCalled = true
+			return undeclaredState(envID, c)
+		},
+		confirm: map[string]bool{
+			"Read live": false, "Map another": false, "Edit this": false,
+			"Downgrade": false, "Declare": false, "overwrite": false, "import the trim": false,
+		},
+		// index 1 is "+ create a new environment" (existing has one entry at 0).
+		choose: map[string]int{"source": 1, "Target environment": 1},
+		line:   map[string]string{"Export file path": "export.yaml", "New environment name": "staging"},
+	}
+	wiz, err := Wizard(host, "prj_1")
+	if err != nil {
+		t.Fatalf("wizard: %v", err)
+	}
+	if presenceCalled {
+		t.Error("a created environment triggered a presence read; it has no state to read")
+	}
+
+	// The bundle carries the create-environment line.
+	foundEnv := false
+	for _, e := range wiz.Bundle.Environments {
+		if e.Name == "staging" {
+			foundEnv = true
+		}
+	}
+	if !foundEnv {
+		t.Errorf("bundle environments = %+v, want a `staging` create line", wiz.Bundle.Environments)
+	}
+
+	// The manifest names it under created_environments, with no occurrence rows.
+	if strings.Join(wiz.Manifest.Target.CreatedEnvironments, ",") != "staging" {
+		t.Errorf("created environments = %v", wiz.Manifest.Target.CreatedEnvironments)
+	}
+	if len(wiz.Manifest.Occurrences) != 0 {
+		t.Errorf("a created environment minted %d occurrences; it is tokenless", len(wiz.Manifest.Occurrences))
+	}
+
+	// The values file is name-addressed, not id-addressed.
+	if wiz.Envs[0].Values.EnvironmentName != "staging" || wiz.Envs[0].Values.Environment != "" {
+		t.Errorf("values file = %+v, want name-addressed", wiz.Envs[0].Values)
+	}
+	encoded := string(mustEncode(t, wiz.Envs[0].Values))
+	if !strings.Contains(encoded, `"environment_name": "staging"`) || strings.Contains(encoded, `"environment":`) {
+		t.Errorf("values serialization does not carry the name alone:\n%s", encoded)
+	}
+}
+
 // mapAnotherOnce answers the "Map another?" confirm true exactly once, so the
 // fan-out loop adds a second environment and then terminates, and picks a fresh
 // existing environment on each "Target environment" choice.

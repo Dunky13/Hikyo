@@ -518,6 +518,21 @@ func BuildProjectPlan(in ProjectPlanInput) (*ProjectPlan, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Created environments are explicit, reviewable bundle lines (ADR § Targeting
+	// and hierarchy creation): `definitions apply` creates them. Deduped and
+	// sorted so the bundle is byte-stable.
+	seenEnv := map[string]bool{}
+	var created []string
+	for _, e := range in.Envs {
+		if e.Create && !seenEnv[e.EnvName] {
+			seenEnv[e.EnvName] = true
+			created = append(created, e.EnvName)
+		}
+	}
+	slices.Sort(created)
+	for _, name := range created {
+		plan.Bundle.Environments = append(plan.Bundle.Environments, definitions.Environment{Name: name})
+	}
 	plan.Bundle, err = definitions.Normalize(plan.Bundle)
 	if err != nil {
 		return nil, fmt.Errorf("import: normalizing definitions bundle: %w", err)
@@ -649,7 +664,13 @@ func planEnvironment(in ProjectPlanInput, e EnvInput, rows []mappedRecord, decis
 	envPlan.Values = ValuesFile{
 		FormatVersion: FormatVersion,
 		Project:       in.Project,
-		Environment:   envID,
+	}
+	// A created environment has no id at phase 1, so its values file carries the
+	// name; `values import` resolves it after `definitions apply`.
+	if e.Create {
+		envPlan.Values.EnvironmentName = e.EnvName
+	} else {
+		envPlan.Values.Environment = envID
 	}
 	for _, row := range rows {
 		rec, target := row.record, row.target
@@ -771,9 +792,14 @@ func buildManifest(in ProjectPlanInput, encodedTemplate []byte, envRows [][]mapp
 	for i, e := range in.Envs {
 		envRef := e.EnvID
 		if e.Create {
+			// Created environments are named, not id'd, and sit in a distinct
+			// field: they are tokenless (no presence read happened), so they
+			// contribute no occurrence row and are outside the precondition.
 			envRef = e.EnvName
+			m.Target.CreatedEnvironments = append(m.Target.CreatedEnvironments, e.EnvName)
+		} else {
+			m.Target.Environments = append(m.Target.Environments, e.EnvID)
 		}
-		m.Target.Environments = append(m.Target.Environments, envRef)
 		m.PhaseCompletion.Imported[envRef] = false
 		state := make(map[string]KeyState, len(e.Keys))
 		for _, k := range e.Keys {
@@ -820,6 +846,7 @@ func buildManifest(in ProjectPlanInput, encodedTemplate []byte, envRows [][]mapp
 	for _, key := range keyOrder {
 		m.Target.Keys = append(m.Target.Keys, TargetKey{Name: key, ID: keyID[key]})
 	}
+	m.Target.Environments = nonNil(m.Target.Environments)
 	m.SourceVersions = nonNil(m.SourceVersions)
 	m.Occurrences = nonNil(m.Occurrences)
 	return m, nil

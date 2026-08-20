@@ -578,28 +578,6 @@ func runValuesImport(ctx context.Context, ios IO, args []string) error {
 	if list := splitList(overwrite); len(list) > 0 {
 		body.Overwrite = &list
 	}
-	if manifestPath != "" {
-		rawManifest, err := importer.ReadFile(manifestPath)
-		if err != nil {
-			return failf(ExitUsage, "reading the run manifest: %v", err)
-		}
-		manifest, err := importer.ParseManifest(rawManifest)
-		if err != nil {
-			return failf(ExitRefused, "%v", err)
-		}
-		pre := apigen.ImportPrecondition{
-			DefinitionsRevision: manifest.DefinitionsRevision,
-			EnvironmentIds:      manifest.Target.Environments,
-		}
-		for _, o := range manifest.Occurrences {
-			pre.Occurrences = append(pre.Occurrences, struct {
-				EnvironmentId apigen.ID      `json:"environment_id"`
-				Key           apigen.KeyName `json:"key"`
-				Token         string         `json:"token"`
-			}{EnvironmentId: o.Environment, Key: o.Key, Token: o.Token})
-		}
-		body.Precondition = &pre
-	}
 
 	client, _, resolved, err := authenticatedTarget(st, ios, flags)
 	if err != nil {
@@ -617,11 +595,65 @@ func runValuesImport(ctx context.Context, ios IO, args []string) error {
 	if err != nil {
 		return err
 	}
-	// The values file binds both target dimensions even without a manifest.
-	// Same environment ids and key names can exist in different projects; a
-	// one-dimensional check would silently retarget reviewed plaintext.
-	if err := validateImportArtifactTargets(values, targetProject, env); err != nil {
-		return err
+
+	// A created-environment values file (authored by a wizard session that will
+	// create the environment) carries the environment NAME, not an id: the id did
+	// not exist at phase 1. `definitions apply` has since created it, so bind by
+	// name against the now-resolved environment. A created environment is
+	// tokenless by construction, so it takes NO precondition — a manifest
+	// precondition, which reviewed no occurrence for it, would reject every key.
+	createdEnvFile := values.EnvironmentName != ""
+	if createdEnvFile {
+		if values.Project != targetProject {
+			return failf(ExitRefused,
+				"the values file was authored for project %s but this invocation targets %s",
+				importer.QuoteName(values.Project), importer.QuoteName(targetProject))
+		}
+		var envObj apigen.Environment
+		if err := client.Do(ctx, http.MethodGet,
+			project+"/environments/"+url.PathEscape(env), nil, &envObj); err != nil {
+			return err
+		}
+		if envObj.Name != values.EnvironmentName {
+			return failf(ExitRefused,
+				"the values file was authored for the environment named %s but %s resolves to %s; "+
+					"apply the definitions bundle so the environment exists, then target it",
+				importer.QuoteName(values.EnvironmentName), env, importer.QuoteName(envObj.Name))
+		}
+		if manifestPath != "" {
+			fmt.Fprintf(ios.Stderr,
+				"note: %s is a created environment and is tokenless; the run manifest's precondition does not apply to it\n",
+				envObj.Name)
+		}
+	} else {
+		// The values file binds both target dimensions even without a manifest.
+		// Same environment ids and key names can exist in different projects; a
+		// one-dimensional check would silently retarget reviewed plaintext.
+		if err := validateImportArtifactTargets(values, targetProject, env); err != nil {
+			return err
+		}
+		if manifestPath != "" {
+			rawManifest, err := importer.ReadFile(manifestPath)
+			if err != nil {
+				return failf(ExitUsage, "reading the run manifest: %v", err)
+			}
+			manifest, err := importer.ParseManifest(rawManifest)
+			if err != nil {
+				return failf(ExitRefused, "%v", err)
+			}
+			pre := apigen.ImportPrecondition{
+				DefinitionsRevision: manifest.DefinitionsRevision,
+				EnvironmentIds:      manifest.Target.Environments,
+			}
+			for _, o := range manifest.Occurrences {
+				pre.Occurrences = append(pre.Occurrences, struct {
+					EnvironmentId apigen.ID      `json:"environment_id"`
+					Key           apigen.KeyName `json:"key"`
+					Token         string         `json:"token"`
+				}{EnvironmentId: o.Environment, Key: o.Key, Token: o.Token})
+			}
+			body.Precondition = &pre
+		}
 	}
 
 	var result apigen.ImportValuesResult
@@ -636,7 +668,13 @@ func runValuesImport(ctx context.Context, ios IO, args []string) error {
 	// not exist, and claiming it here would be a marker for an act nobody
 	// performed.
 	if manifestPath != "" {
-		if err := markImported(manifestPath, env); err != nil {
+		// The manifest keys created environments by name (they had no id at
+		// phase 1) and existing ones by id.
+		ref := env
+		if createdEnvFile {
+			ref = values.EnvironmentName
+		}
+		if err := markImported(manifestPath, ref); err != nil {
 			fmt.Fprintf(ios.Stderr,
 				"the import landed, but the run manifest could not be updated (%v); "+
 					"a resumed migration will read it as not yet imported\n", err)
