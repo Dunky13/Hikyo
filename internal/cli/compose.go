@@ -27,6 +27,7 @@ import (
 	"github.com/Hikyo-Org/hikyo/api/apigen"
 	"github.com/Hikyo-Org/hikyo/internal/compose"
 	"github.com/Hikyo-Org/hikyo/internal/crypto"
+	"github.com/Hikyo-Org/hikyo/internal/disclose"
 )
 
 // The Compose delivery verbs (compose-integration ADR; #63): `hikyo run --`
@@ -58,8 +59,9 @@ const (
 	// bytes are frozen — changing them would pointlessly invalidate live cursors.
 	credentialFingerprintDomain = "hikyo-cursor-cred-v1\x00"
 
-	machineRevealOptIn = "secret plaintext requires the per-project machine-reveal opt-in and then a `reveal` grant; " +
-		"in this build that opt-in is not exposed, so a machine credential cannot receive these secrets yet"
+	machineRevealOptIn = "secret plaintext requires the project's machine-reveal opt-in and then a `reveal` grant on this principal: " +
+		"`hikyo project-settings machine-reveal set --enabled true` (project-settings and reveal, second factor), " +
+		"then `hikyo access grant add --principal <mch_...> --capability reveal --env <env>`; or run with --config-only"
 )
 
 // credentialFingerprint is the local, offline-derivable identity of the
@@ -93,11 +95,13 @@ func runRun(ctx context.Context, ios IO, args []string) error {
 
 	var (
 		configOnly       bool
+		useHumanSession  bool
 		allowOverrideRaw string
 		projectDir       string
 	)
 	st, flags, err := parseCommon("run", ios, hikyoArgs, func(fs *flag.FlagSet) {
 		fs.BoolVar(&configOnly, "config-only", false, "request the config-only projection: no secrets, a distinct authorized mode")
+		fs.BoolVar(&useHumanSession, "use-human-session", false, "the locked #18 exception: run under the stored human session, gated by a TTY, an enumerated confirmation, and a live disclosure window")
 		fs.StringVar(&allowOverrideRaw, "allow-override", "", "comma-separated keys whose inherited value the fetched value may replace")
 		fs.StringVar(&projectDir, "project-directory", "", "directory to look up hikyo-compose.yaml from (walks up); optional")
 	})
@@ -112,6 +116,15 @@ func runRun(ctx context.Context, ios IO, args []string) error {
 	cfg, cfgDir, err := findComposeConfig(startDir(ios, projectDir))
 	if err != nil {
 		return err
+	}
+
+	// The single narrow #18 exception, restated exactly (api-cli-surface ADR line
+	// 96): `run` — and only `run` — may use the stored human session, and only
+	// when ALL of the flag, a TTY, an enumerated confirmation, and the bound
+	// reauth ceremony hold. `render` and `sync` have no human path, so this branch
+	// lives here rather than in resolveMachineTarget.
+	if useHumanSession {
+		return runHumanSession(ctx, ios, st, flags, cfg, childArgs, configOnly, allowOverride)
 	}
 	client, entry, resolved, token, err := resolveMachineTarget(st, ios, flags, cfg, cfgDir, "run")
 	if err != nil {
@@ -217,6 +230,119 @@ func runRun(ctx context.Context, ios IO, args []string) error {
 	// Unreachable on a real unix exec (the process image is replaced); reached
 	// only through the injected test seam, which returns nil to signal capture.
 	return nil
+}
+
+// runHumanSession implements the locked #18 exception for `hikyo run`. All four
+// conditions must hold before the child is launched:
+//
+//  1. the --use-human-session flag (the caller is here, so it is set);
+//  2. stderr is a TTY — an ADDITIONAL refusal, never the control (ADR line 96):
+//     a human session driving a non-interactive process is refused;
+//  3. an enumerated confirmation — the environment and the exact key names to be
+//     injected, printed to the controlling terminal, answered y/N there;
+//  4. the bound reauth ceremony — a live disclosure window for the environment,
+//     which task A2's `reveal` ceremony opens. This verb only CHECKS it; it never
+//     opens one. Under --config-only no secrets are delivered, so the ceremony
+//     does not apply.
+//
+// The offline snapshot machinery is deliberately NOT reached on this path: a
+// human-session snapshot served offline later would bypass the machine-only rule
+// the delivery model rests on, so a human-session run never saves one.
+func runHumanSession(ctx context.Context, ios IO, st *State, flags commonFlags, cfg *compose.Config, childArgs []string, configOnly bool, allowOverride []string) error {
+	// (2) TTY gate, first: a refusal that needs no session and no server.
+	if !onTerminal(ios) {
+		return failf(ExitRefused,
+			"hikyo run --use-human-session requires a controlling terminal for the confirmation and reauth ceremony; there is none")
+	}
+
+	client, session, resolved, err := authenticatedTarget(st, ios, flags)
+	if err != nil {
+		return err
+	}
+	if cfg != nil {
+		for _, d := range []struct {
+			dim Dimension
+			val string
+		}{{DimOrg, cfg.Org}, {DimProject, cfg.Project}, {DimEnv, cfg.Environment}} {
+			if err := foldConfigDim(&resolved, d.dim, d.val, composeConfigName); err != nil {
+				return err
+			}
+		}
+	}
+	project, err := projectBase(resolved)
+	if err != nil {
+		return err
+	}
+	org, env := resolved.Get(DimOrg), resolved.Get(DimEnv)
+	if echo := resolved.Echo(); echo != "" {
+		fmt.Fprintf(ios.Stderr, "target: %s [origin %s, artifact human-session]\n", echo, session.Origin)
+	}
+
+	// (4) Bound reauth ceremony: a live disclosure window must already be open.
+	// Skipped under --config-only, whose projection carries no secrets.
+	if !configOnly {
+		// Opened inline (TOTP) where the environment's window allows it; a
+		// 0-window environment is refused with the browser path named.
+		if err := ensureRevealWindow(ctx, client, st, ios, &session, project, env,
+			failf(ExitAuth, "a live disclosure window is required: run the reveal ceremony first")); err != nil {
+			return err
+		}
+	}
+
+	resp, err := fetchDelivery(ctx, client, org, resolved.Get(DimProject), env, configOnly, nil, "")
+	if err != nil {
+		return err
+	}
+	if !configOnly {
+		if missing := unrevealedSecrets(resp.Keys); len(missing) > 0 {
+			return failf(ExitRefused, "hikyo run: cannot deliver secret(s) %s — %s",
+				strings.Join(missing, ", "), machineRevealOptIn)
+		}
+	}
+	fetched := deliveredValues(resp.Keys)
+
+	// (3) Enumerated confirmation on the controlling terminal.
+	names := mapKeys(fetched)
+	sort.Strings(names)
+	prompt := fmt.Sprintf("About to inject %d value(s) into environment %s and exec %q:\n  %s\nProceed",
+		len(names), env, childArgs[0], strings.Join(names, "\n  "))
+	ok, err := disclose.Confirm(prompt, disclose.Options{OpenTerminal: ios.OpenTerminal})
+	if err != nil {
+		return failf(ExitRefused, "reading the confirmation: %v", err)
+	}
+	if !ok {
+		return failf(ExitRefused, "hikyo run --use-human-session: declined at the confirmation")
+	}
+
+	if refused := compose.RefuseUnacknowledged(mapKeys(fetched), runLoaderControlAck(cfg)); len(refused) > 0 {
+		return failf(ExitRefused, "hikyo run: refusing loader-control key(s) %s; acknowledge each by name in the config's `run.acknowledge_loader_control`",
+			strings.Join(refused, ", "))
+	}
+	merged, _, err := compose.MergeEnv(sanitizedEnviron(), fetched, allowOverride)
+	if err != nil {
+		return &Error{Code: ExitRefused, Err: err}
+	}
+	if ok, detail := compose.ExecPreflight(merged, childArgs, compose.DefaultArgMax()); !ok {
+		return failf(ExitRefused, "hikyo run: %s; reduce the delivered set or shorten the command", detail)
+	}
+	command := childArgs[0]
+	resolvedPath, cerr := resolveChildCommand(command)
+	if cerr != nil {
+		return cerr
+	}
+	if err := ios.exec(resolvedPath, childArgs, merged); err != nil {
+		return failf(ExitCommandNotExecutable, "hikyo run: %s: %v", command, err)
+	}
+	return nil
+}
+
+// runLoaderControlAck is the loader-control acknowledgement in force for a run,
+// from the config's run block (empty when there is no config).
+func runLoaderControlAck(cfg *compose.Config) []string {
+	if cfg == nil {
+		return nil
+	}
+	return cfg.Run.AcknowledgeLoaderControl
 }
 
 // serveRunOffline handles a failed run fetch: if it failed as UNAVAILABLE and
@@ -1027,8 +1153,14 @@ func resolveMachineTarget(st *State, ios IO, flags commonFlags, cfg *compose.Con
 		return nil, TrustEntry{}, Resolved{}, "", err
 	}
 	if token == "" {
+		// `run` has the single locked human-session exception; `render`/`sync` have
+		// no human path at all (api-cli-surface ADR line 96).
+		hint := "render and sync have no human path"
+		if verb == "run" {
+			hint = "pass --use-human-session to run under the stored human session (a TTY, an enumerated confirmation, and a live disclosure window are required)"
+		}
 		return nil, TrustEntry{}, Resolved{}, "", failf(ExitAuth,
-			"hikyo %s accepts only a machine credential (--token-file or HIKYO_TOKEN); the --use-human-session path is not in this build", verb)
+			"hikyo %s accepts only a machine credential (--token-file or HIKYO_TOKEN); %s", verb, hint)
 	}
 	client, err := NewClient(entry, token)
 	if err != nil {

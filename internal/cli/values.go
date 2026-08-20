@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/Hikyo-Org/hikyo/api/apigen"
+	"github.com/Hikyo-Org/hikyo/internal/compose"
 	"github.com/Hikyo-Org/hikyo/internal/disclose"
 )
 
@@ -60,13 +61,21 @@ func runValues(ctx context.Context, ios IO, args []string) error {
 		return runValuesImport(ctx, ios, rest)
 	}
 
-	var format, valueFile, left, right, source, destinations, keyNames, environments string
+	var format, exportFormat, valueFile, left, right, source, destinations, keyNames, environments string
 	var versions, previewToken, confirmedProtectedEnvironments, acknowledge string
 	var revision int64
 	var clear, reveal, stdin, dangerous, confirmProtected bool
 	var outputFile string
 	st, flags, err := parseCommon("values "+sub, ios, rest, func(fs *flag.FlagSet) {
-		fs.StringVar(&format, "o", "table", "output format: table or json")
+		// `export` is an export PATH, so its payload encoding is `--format`
+		// (api-cli-surface ADR: `--format` names the payload on export paths, `-o`
+		// names the envelope on browse paths). Every other verb here is a browse
+		// path and takes `-o`.
+		if sub == "export" {
+			fs.StringVar(&exportFormat, "format", "table", "payload format: table, json, or dotenv")
+		} else {
+			fs.StringVar(&format, "o", "table", "output format: table or json")
+		}
 		if sub == "list" || sub == "get" || sub == "diff" || sub == "export" {
 			fs.BoolVar(&reveal, "reveal", false,
 				"disclose `secret` plaintext; audited per key, and refused without the reveal capability")
@@ -119,7 +128,17 @@ func runValues(ctx context.Context, ios IO, args []string) error {
 	if err != nil {
 		return err
 	}
-	f, err := ParseFormat(format)
+	// `export` carries the extra `dotenv` payload format; everything else is the
+	// two-value envelope. dotenv is resolved in the export case below.
+	dotenvExport := sub == "export" && exportFormat == "dotenv"
+	var f Format
+	if sub == "export" {
+		if !dotenvExport {
+			f, err = ParseFormat(exportFormat)
+		}
+	} else {
+		f, err = ParseFormat(format)
+	}
 	if err != nil {
 		return err
 	}
@@ -184,13 +203,20 @@ func runValues(ctx context.Context, ios IO, args []string) error {
 		}
 	}
 
-	client, _, resolved, err := authenticatedTarget(st, ios, flags)
+	client, artifact, resolved, err := authenticatedTarget(st, ios, flags)
 	if err != nil {
 		return err
 	}
 	project, err := projectBase(resolved)
 	if err != nil {
 		return err
+	}
+	// ceremony wraps a disclosure in the reauthentication ceremony over the
+	// environments it discloses in (reveal_window.go): the call is made, and on
+	// the server's refusal a window is opened by inline TOTP and the call made
+	// once more. Non-revealing reads never go through it.
+	ceremony := func(envs []string, attempt func() error) error {
+		return withRevealCeremony(ctx, client, st, ios, artifact, project, envs, attempt)
 	}
 
 	switch sub {
@@ -201,7 +227,9 @@ func runValues(ctx context.Context, ios IO, args []string) error {
 		}
 		var list apigen.ValueList
 		if reveal {
-			err = client.Do(ctx, http.MethodPost, base+"/reveal", nil, &list)
+			err = ceremony([]string{resolved.Get(DimEnv)}, func() error {
+				return client.Do(ctx, http.MethodPost, base+"/reveal", nil, &list)
+			})
 		} else {
 			err = client.Do(ctx, http.MethodGet, base, nil, &list)
 		}
@@ -221,7 +249,9 @@ func runValues(ctx context.Context, ios IO, args []string) error {
 		target := base + "/" + url.PathEscape(flags.positional())
 		var cell apigen.ValueCell
 		if reveal {
-			err = client.Do(ctx, http.MethodPost, target+"/reveal", nil, &cell)
+			err = ceremony([]string{resolved.Get(DimEnv)}, func() error {
+				return client.Do(ctx, http.MethodPost, target+"/reveal", nil, &cell)
+			})
 		} else {
 			err = client.Do(ctx, http.MethodGet, target, nil, &cell)
 		}
@@ -270,8 +300,10 @@ func runValues(ctx context.Context, ios IO, args []string) error {
 	case "diff":
 		var out apigen.ValueDiff
 		if reveal {
-			err = client.Do(ctx, http.MethodPost, project+"/values/diff/reveal",
-				apigen.RevealDiffRequest{Left: left, Right: right}, &out)
+			err = ceremony([]string{left, right}, func() error {
+				return client.Do(ctx, http.MethodPost, project+"/values/diff/reveal",
+					apigen.RevealDiffRequest{Left: left, Right: right}, &out)
+			})
 		} else {
 			err = client.Do(ctx, http.MethodGet,
 				project+"/values/diff?left="+url.QueryEscape(left)+"&right="+url.QueryEscape(right), nil, &out)
@@ -294,7 +326,13 @@ func runValues(ctx context.Context, ios IO, args []string) error {
 			body.ConfirmProtected = &confirmProtected
 		}
 		var result apigen.CopyValuesResult
-		if err := client.Do(ctx, http.MethodPost, project+"/values/copy", body, &result); err != nil {
+		// A copy that carries secret material opens it under the source
+		// environment's reveal guard (values service: the reveal conjunct
+		// consumes the session's window over the SOURCE); a config-only copy
+		// is refused by nothing here and therefore never prompts.
+		if err := ceremony([]string{source}, func() error {
+			return client.Do(ctx, http.MethodPost, project+"/values/copy", body, &result)
+		}); err != nil {
 			return err
 		}
 		warnFindings(ios, result.Findings)
@@ -360,6 +398,9 @@ func runValues(ctx context.Context, ios IO, args []string) error {
 		if err := client.Do(ctx, http.MethodPost, base+"/values/export", body, &out); err != nil {
 			return err
 		}
+		if dotenvExport {
+			return exportDotenv(ios, out, reveal, deliver)
+		}
 		if reveal {
 			return emitRendered(f, exportTable(out), "exported values", deliver)
 		}
@@ -367,6 +408,55 @@ func runValues(ctx context.Context, ios IO, args []string) error {
 	}
 	// Unreachable: subverb() above admits only the cases enumerated here.
 	return failf(ExitInternal, "hikyo values: unhandled subverb %q", sub)
+}
+
+// exportDotenv renders an export as `NAME=value` lines through
+// internal/compose's raw encoder, so the escaping is byte-identical to what the
+// Compose renderer would deliver. Secrets appear only under `--reveal` (the
+// server returns their plaintext then, and the output goes through the print
+// triad because it may carry secret material); without `--reveal` every secret
+// is omitted and their count is reported on stderr. A value carrying a newline
+// cannot be a raw line and is refused by name, exactly as the Compose delivery
+// path refuses it.
+func exportDotenv(ios IO, out apigen.ExportedValues, reveal bool, deliver disclose.Options) error {
+	var rows []compose.Row
+	omitted := 0
+	for _, item := range out.Items {
+		if item.Value == nil {
+			// An unrevealed secret is omitted and counted; an unset key simply has
+			// no line.
+			if item.Classification == apigen.KeyClassificationSecret {
+				omitted++
+			}
+			continue
+		}
+		rows = append(rows, compose.Row{Name: item.Name, Value: *item.Value})
+	}
+	content, refusals, err := compose.EncodeRaw(rows)
+	if err != nil {
+		return failf(ExitInternal, "encoding the dotenv export: %v", err)
+	}
+	if len(refusals) > 0 {
+		names := make([]string, 0, len(refusals))
+		for _, r := range refusals {
+			names = append(names, fmt.Sprintf("%s (%s)", r.Key, r.Reason))
+		}
+		return failf(ExitRefused,
+			"hikyo values export --format dotenv: %s cannot be represented as a raw dotenv line; export as json instead",
+			strings.Join(names, ", "))
+	}
+	body := strings.TrimRight(string(content), "\n")
+	if reveal {
+		if _, err := disclose.Emit("exported values (dotenv)", body, deliver); err != nil {
+			return failf(ExitRefused, "disclosing the values: %v", err)
+		}
+	} else if _, err := ios.Stdout.Write(content); err != nil {
+		return err
+	}
+	if omitted > 0 {
+		fmt.Fprintf(ios.Stderr, "omitted %d secret(s); re-run with --reveal to include them\n", omitted)
+	}
+	return nil
 }
 
 func publishProtectedIDs(raw string) *[]apigen.ID {

@@ -83,4 +83,55 @@ hikyo values get DATABASE_PASSWORD \
 The output path must not already exist. Consume it, then remove it through your
 normal secure-file procedure.
 
+A disclosure needs a reauthentication window over the environment. When none is
+live the CLI prompts for an authenticator code at the terminal and opens one
+(the session token rotates and is stored). Where the environment's effective
+window is `0` — a protected environment, or an instance that keeps the
+production default `HIKYO_REAUTH_WINDOW_SECONDS=0` — a code cannot open a
+window by design: reveal in the browser with a passkey, or raise the window for
+that environment with `hikyo project-settings set --env <env-id>
+--reauth-window-seconds 300`. `--dev` instances default to a 15-minute window.
+
+## Import an existing `.env`
+
+The schema is closed: `values import` refuses undeclared keys. To onboard a
+`.env` you already have, first scaffold a declaration for every key, review it,
+apply it, then import the values.
+
+```bash
+hikyo definitions scaffold --from .env > definitions-bundle.json
+```
+
+`scaffold` is offline. It contacts no server, reads only the file you give it,
+and emits an additive bundle in which every key is `config` with a
+`TODO: classify` marker — it cannot know which keys are secret, so it does not
+guess. Open the bundle, change each secret key's classification, then apply it:
+
+```bash
+hikyo definitions plan --file definitions-bundle.json
+hikyo definitions apply --plan <plan-id> --file definitions-bundle.json
+```
+
+With the keys declared, import the values through the same strict path:
+
+```bash
+hikyo values import --context production --from-dotenv .env
+```
+
+Any key still not declared is refused by name — that surfaced typo is the point.
+After a successful import the source `.env` is still plaintext on disk; delete
+it once the values have landed.
+
+## Export as a dotenv file
+
+```bash
+hikyo values export --context production --format dotenv --reveal --output-file ./.env
+```
+
+`--format` selects `table`, `json`, or `dotenv`. The dotenv payload is escaped
+exactly as the Compose renderer would deliver it. Without `--reveal` every
+secret is omitted and their count is reported on stderr; with `--reveal` the
+output carries plaintext and obeys the print triad (a new file, the terminal, or
+explicit `--dangerously-print`).
+
 Next: [connect automation](/docs/machine-identities/).

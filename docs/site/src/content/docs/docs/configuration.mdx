@@ -74,6 +74,7 @@ plaintext connections are refused.
 | --- | --- | --- |
 | `HIKYO_ARGON2_MEMORY_KIB` | `65536` | Memory per Argon2id operation. |
 | `HIKYO_ARGON2_TIME` | `3` | Argon2id time cost. |
+| `HIKYO_REAUTH_WINDOW_SECONDS` | `0` (`900` under `--dev`) | Instance-default disclosure reauthentication window. `0` means every reveal takes its own ceremony, which only a passkey can satisfy; a positive value lets an authenticator code open a sliding window. Environments override it in project settings; protected environments are always `0`. |
 | `HIKYO_ARGON2_PARALLELISM` | `2` | Argon2id parallelism. |
 | `HIKYO_ADMISSION_BUDGET_MIB` | `272` | Process-wide memory admission budget. |
 
