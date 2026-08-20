@@ -179,6 +179,10 @@ jobs:
         run: ./scripts/ci/check-chart_test.sh
       - name: Trusted CI scripts fixture
         run: ./scripts/ci/check-trusted-ci-scripts_test.sh
+      - name: Fuzz finding classifier fixture
+        run: ./scripts/ci/classify-fuzz-findings_test.sh
+      - name: Fuzz finding reporter fixture
+        run: ./scripts/ci/report-fuzz-finding_test.sh
       - name: Immutable-tag probe fixture
         run: ./scripts/release/probe-tag-move_test.sh
       - name: Release-tag guard fixture
@@ -773,12 +777,88 @@ jobs:
           fi
           echo "fuzz: $ran targets ran"
           exit "$failed"
+      # Go writes a newly discovered failing input into the package's
+      # testdata/fuzz tree. Preserve only regular, bounded, hash-named corpus
+      # files; PR code remains unable to access an issue-write token.
+      - name: Collect minimized fuzz reproducers
+        id: fuzz-reproducers
+        if: failure()
+        run: |
+          artifact_root="$RUNNER_TEMP/fuzz-reproducers"
+          mkdir -p "$artifact_root"
+          found=false
+          count=0
+          while IFS= read -r -d '' source_path; do
+            path=${source_path#./}
+            # Existing committed seeds are already reproducible from checkout;
+            # only Go's newly written failure files belong in this artifact.
+            if git ls-files --error-unmatch -- "$path" >/dev/null 2>&1; then
+              continue
+            fi
+            if [[ ! "$path" =~ ^([A-Za-z0-9_][A-Za-z0-9._-]*/)*testdata/fuzz/Fuzz[A-Za-z0-9_]+/[0-9a-f]{64}$ ]]; then
+              echo "fuzz: refusing unexpected reproducer path: $path" >&2
+              continue
+            fi
+            if [ ! -f "$path" ] || [ -L "$path" ]; then
+              echo "fuzz: refusing non-regular reproducer: $path" >&2
+              continue
+            fi
+            size=$(stat --format=%s "$path")
+            if [ "$size" -gt 2097152 ]; then
+              echo "fuzz: refusing reproducer larger than 2 MiB: $path" >&2
+              continue
+            fi
+            count=$((count + 1))
+            if [ "$count" -gt 100 ]; then
+              echo "fuzz: refusing more than 100 reproducers" >&2
+              exit 1
+            fi
+            destination="$artifact_root/$path"
+            mkdir -p "$(dirname "$destination")"
+            cp -- "$path" "$destination"
+            found=true
+          done < <(find . -type f -path '*/testdata/fuzz/Fuzz*/*' -print0)
+          echo "found=$found" >>"$GITHUB_OUTPUT"
+      - name: Upload minimized fuzz reproducers
+        if: failure() && steps.fuzz-reproducers.outputs.found == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: fuzz-reproducers-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/fuzz-reproducers/
+          if-no-files-found: error
+          retention-days: 30
       - name: Save fuzz Go cache (main push only)
         if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
           key: ${{ steps.fuzz-go-cache.outputs.cache-primary-key }}
+
+  # Main executes this workflow directly. Keep issue write authority out of the
+  # fuzz job, then consume its untrusted artifact through the validating
+  # reporter script in a separate trusted job.
+  report-main-fuzz-failure:
+    needs: fuzz
+    if: >-
+      ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+      needs.fuzz.result == 'failure' }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Create or update fuzz finding issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: >-
+          ./scripts/ci/report-fuzz-finding.sh main "${{ github.sha }}" "$RUN_URL"
+          "${{ github.run_id }}" "${{ github.run_attempt }}"
 
   # The headline guarantee, as its own named context (#76, mvp-boundary K3):
   # a stolen database and a stolen backup, without the root key, yield no
