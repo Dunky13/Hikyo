@@ -591,6 +591,32 @@ func runValuesImport(ctx context.Context, ios IO, args []string) error {
 		body.Overwrite = &list
 	}
 
+	// The run manifest, if any, is parsed and bound to THIS run before it is
+	// consumed as a precondition or stamped by markImported. It must agree with
+	// the values file on the project: a manifest from an unrelated run must never
+	// be accepted, or it would either forge a precondition for an environment it
+	// never reviewed, or — for a tokenless created environment, where the import
+	// itself proceeds — get its phase-completion marker corrupted for a run this
+	// file is not part of. The project cross-check needs no server contact.
+	var manifest *importer.Manifest
+	if manifestPath != "" {
+		rawManifest, err := importer.ReadFile(manifestPath)
+		if err != nil {
+			return failf(ExitUsage, "reading the run manifest: %v", err)
+		}
+		parsed, err := importer.ParseManifest(rawManifest)
+		if err != nil {
+			return failf(ExitRefused, "%v", err)
+		}
+		if parsed.Target.Project != values.Project {
+			return failf(ExitRefused,
+				"the run manifest was authored for project %s but the values file is for %s; pair the values file "+
+					"with the manifest from the same run",
+				importer.QuoteName(parsed.Target.Project), importer.QuoteName(values.Project))
+		}
+		manifest = &parsed
+	}
+
 	client, _, resolved, err := authenticatedTarget(st, ios, flags)
 	if err != nil {
 		return err
@@ -614,13 +640,17 @@ func runValuesImport(ctx context.Context, ios IO, args []string) error {
 	// name against the now-resolved environment. A created environment is
 	// tokenless by construction, so it takes NO precondition — a manifest
 	// precondition, which reviewed no occurrence for it, would reject every key.
+	// The values file itself must target the resolved project. With the
+	// manifest↔values project cross-check above, this also pins the manifest to
+	// the invocation's project.
+	if values.Project != targetProject {
+		return failf(ExitRefused,
+			"the values file was authored for project %s but this invocation targets %s",
+			importer.QuoteName(values.Project), importer.QuoteName(targetProject))
+	}
+
 	createdEnvFile := values.EnvironmentName != ""
 	if createdEnvFile {
-		if values.Project != targetProject {
-			return failf(ExitRefused,
-				"the values file was authored for project %s but this invocation targets %s",
-				importer.QuoteName(values.Project), importer.QuoteName(targetProject))
-		}
 		var envObj apigen.Environment
 		if err := client.Do(ctx, http.MethodGet,
 			project+"/environments/"+url.PathEscape(env), nil, &envObj); err != nil {
@@ -632,7 +662,17 @@ func runValuesImport(ctx context.Context, ios IO, args []string) error {
 					"apply the definitions bundle so the environment exists, then target it",
 				importer.QuoteName(values.EnvironmentName), env, importer.QuoteName(envObj.Name))
 		}
-		if manifestPath != "" {
+		// A created environment is tokenless, so it takes no precondition. But if a
+		// manifest was supplied, it must actually name this created environment —
+		// otherwise markImported would stamp a marker onto a run this file is not
+		// part of.
+		if manifest != nil {
+			if !slices.Contains(manifest.Target.CreatedEnvironments, values.EnvironmentName) {
+				return failf(ExitRefused,
+					"the run manifest does not name the created environment %s; it records %v — pair the values "+
+						"file with the manifest from the same run",
+					importer.QuoteName(values.EnvironmentName), manifest.Target.CreatedEnvironments)
+			}
 			fmt.Fprintf(ios.Stderr,
 				"note: %s is a created environment and is tokenless; the run manifest's precondition does not apply to it\n",
 				envObj.Name)
@@ -644,15 +684,7 @@ func runValuesImport(ctx context.Context, ios IO, args []string) error {
 		if err := validateImportArtifactTargets(values, targetProject, env); err != nil {
 			return err
 		}
-		if manifestPath != "" {
-			rawManifest, err := importer.ReadFile(manifestPath)
-			if err != nil {
-				return failf(ExitUsage, "reading the run manifest: %v", err)
-			}
-			manifest, err := importer.ParseManifest(rawManifest)
-			if err != nil {
-				return failf(ExitRefused, "%v", err)
-			}
+		if manifest != nil {
 			// The manifest must actually name this environment. Without the check,
 			// a manifest naming only environment A but carrying copied occurrence
 			// rows for B could be presented against B, and the slice below would

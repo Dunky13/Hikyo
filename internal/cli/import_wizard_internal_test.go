@@ -94,6 +94,55 @@ func TestValuesImportRefusesOverwriteForCreatedEnvFile(t *testing.T) {
 	}
 }
 
+// TestValuesImportRefusesMismatchedManifestProject: a values file paired with a
+// run manifest from a DIFFERENT project is refused before any server contact, so
+// the unrelated manifest's phase-completion marker is never corrupted.
+func TestValuesImportRefusesMismatchedManifestProject(t *testing.T) {
+	dir := t.TempDir()
+	valuesBody, err := importer.Encode(importer.ValuesFile{
+		FormatVersion: importer.FormatVersion, Project: "prj_P", Environment: "env_staging",
+		Entries: []importer.ValuesEntry{{Key: "API_KEY", Value: "v"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	valuesPath := filepath.Join(dir, "values-env_staging.json")
+	if err := os.WriteFile(valuesPath, valuesBody, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manifestBody, err := importer.Encode(importer.Manifest{
+		FormatVersion: importer.FormatVersion, ConnectorContractVersion: importer.ConnectorContractVersion,
+		Target: importer.Target{Project: "prj_Q", Environments: []string{"env_staging"}},
+		PhaseCompletion: importer.PhaseCompletion{Authored: true, Imported: map[string]bool{"env_staging": false}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(dir, "run-manifest.json")
+	if err := os.WriteFile(manifestPath, manifestBody, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stateDir := t.TempDir()
+	ios := IO{
+		Stdin: strings.NewReader(""), Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{},
+		Env: Env{Getenv: func(k string) string {
+			if k == "HIKYO_STATE_DIR" {
+				return stateDir
+			}
+			return ""
+		}},
+	}
+	err = runValuesImport(context.Background(), ios,
+		[]string{"--file", valuesPath, "--manifest", manifestPath, "--env", "env_staging", "--instance", "unknown-ref"})
+	var cliErr *Error
+	if !errors.As(err, &cliErr) || cliErr.Code != ExitRefused {
+		t.Fatalf("err = %v, want ExitRefused", err)
+	}
+	if !strings.Contains(err.Error(), "same run") {
+		t.Fatalf("err = %v, want the mispaired-manifest refusal", err)
+	}
+}
+
 func TestTerminalPrompter(t *testing.T) {
 	newP := func(input string) (*terminalPrompter, *bytes.Buffer) {
 		var out bytes.Buffer
