@@ -40,7 +40,7 @@ func scenarioKeyCatalogueCRUD(t *testing.T, db *store.DB) {
 	created, err := keys.Create(t.Context(), actor, scope,
 		keySpec("DATABASE_URL", string(schema.Secret), decl(schema.Rule{
 			Type: schema.TypeURL, Schemes: []string{"postgres"},
-		})))
+		})), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func scenarioKeyCatalogueCRUD(t *testing.T, db *store.DB) {
 	// answered by the UNIQUE index rather than a read-then-write nobody can
 	// serialize.
 	_, err = keys.Create(t.Context(), actor, scope,
-		keySpec("DATABASE_URL", string(schema.Config), decl(schema.Rule{Type: schema.TypeString})))
+		keySpec("DATABASE_URL", string(schema.Config), decl(schema.Rule{Type: schema.TypeString})), nil)
 	if !errors.Is(err, domain.ErrConflict) {
 		t.Fatalf("a duplicate key name was accepted: %v", err)
 	}
@@ -69,7 +69,7 @@ func scenarioKeyCatalogueCRUD(t *testing.T, db *store.DB) {
 				"{  \"required\" : [ \"b\" ] ,\n  \"type\":\"object\"  }")},
 		}},
 		Presence: schema.DefaultPresenceRules(),
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +113,7 @@ func scenarioKeyCatalogueCRUD(t *testing.T, db *store.DB) {
 
 	// Rename changes the delivered payload's key set, so it IS a semantic
 	// change and moves the revision. Identity is the id throughout.
-	renamed, err := keys.Rename(t.Context(), actor, scope, created.ID, "PRIMARY_DATABASE_URL")
+	renamed, err := keys.Rename(t.Context(), actor, scope, created.ID, "PRIMARY_DATABASE_URL", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +131,7 @@ func scenarioKeyCatalogueCRUD(t *testing.T, db *store.DB) {
 	if _, err := keys.UpdateMetadata(t.Context(), actor, scope, created.ID, service.KeyMetadataUpdate{
 		FolderPath: &folder, Description: &description,
 		Deprecated: &deprecated, DeprecationNote: &note,
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatal(err)
 	}
 	got, err := keys.Get(t.Context(), actor, scope, created.ID)
@@ -147,7 +147,7 @@ func scenarioKeyCatalogueCRUD(t *testing.T, db *store.DB) {
 	// refuses, and a partial update is exactly where it hides.
 	onlyDescription := "revised"
 	partial, err := keys.UpdateMetadata(t.Context(), actor, scope, created.ID,
-		service.KeyMetadataUpdate{Description: &onlyDescription})
+		service.KeyMetadataUpdate{Description: &onlyDescription}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +174,7 @@ func scenarioKeyCatalogueCRUD(t *testing.T, db *store.DB) {
 	cleared, notDeprecated := "", false
 	emptied, err := keys.UpdateMetadata(t.Context(), actor, scope, created.ID, service.KeyMetadataUpdate{
 		Description: &cleared, DeprecationNote: &cleared, Deprecated: &notDeprecated,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +194,7 @@ func scenarioKeyCatalogueCRUD(t *testing.T, db *store.DB) {
 		t.Fatal(err)
 	}
 	reused, err := keys.Create(t.Context(), actor, scope,
-		keySpec("PRIMARY_DATABASE_URL", string(schema.Config), decl(schema.Rule{Type: schema.TypeString})))
+		keySpec("PRIMARY_DATABASE_URL", string(schema.Config), decl(schema.Rule{Type: schema.TypeString})), nil)
 	if err != nil {
 		t.Fatalf("a deleted key's name could not be reused: %v", err)
 	}
@@ -244,7 +244,7 @@ func scenarioDeclarationFixtures(t *testing.T, db *store.DB) {
 
 	for _, tc := range cases {
 		created, err := keys.Create(t.Context(), actor, scope,
-			keySpec(tc.name, string(schema.Config), decl(tc.rule)))
+			keySpec(tc.name, string(schema.Config), decl(tc.rule)), nil)
 		if err != nil {
 			t.Fatalf("%s: %v", tc.name, err)
 		}
@@ -309,7 +309,7 @@ func scenarioDeclarationRejections(t *testing.T, db *store.DB) {
 			schema.Rule{Type: schema.TypeString, Pattern: `(?=a)b`}, "pattern"},
 	}
 	for _, tc := range cases {
-		_, err := keys.Create(t.Context(), actor, scope, keySpec(tc.name, string(schema.Config), decl(tc.rule)))
+		_, err := keys.Create(t.Context(), actor, scope, keySpec(tc.name, string(schema.Config), decl(tc.rule)), nil)
 		if !errors.Is(err, domain.ErrInvalid) {
 			t.Fatalf("%s: declaration accepted or wrong class: %v", tc.name, err)
 		}
@@ -331,7 +331,7 @@ func scenarioDeclarationRejections(t *testing.T, db *store.DB) {
 	// A key name outside the canonical grammar is refused by the same
 	// authority — the grammar is a delivery constraint, not a preference.
 	if _, err := keys.Create(t.Context(), actor, scope,
-		keySpec("lower_case", string(schema.Config), decl(schema.Rule{Type: schema.TypeString}))); !errors.Is(err, domain.ErrInvalid) {
+		keySpec("lower_case", string(schema.Config), decl(schema.Rule{Type: schema.TypeString})), nil); !errors.Is(err, domain.ErrInvalid) {
 		t.Fatalf("a lowercase key name was accepted: %v", err)
 	}
 }
@@ -365,12 +365,12 @@ func scenarioSecretRuleChangeNeedsReveal(t *testing.T, db *store.DB) {
 	revealing := service.LocalPrincipal(revealer)
 
 	secret, err := keys.Create(t.Context(), editor, scope,
-		keySpec("API_TOKEN", string(schema.Secret), decl(schema.Rule{Type: schema.TypeString})))
+		keySpec("API_TOKEN", string(schema.Secret), decl(schema.Rule{Type: schema.TypeString})), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	config, err := keys.Create(t.Context(), editor, scope,
-		keySpec("LOG_LEVEL", string(schema.Config), decl(schema.Rule{Type: schema.TypeString})))
+		keySpec("LOG_LEVEL", string(schema.Config), decl(schema.Rule{Type: schema.TypeString})), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -382,7 +382,7 @@ func scenarioSecretRuleChangeNeedsReveal(t *testing.T, db *store.DB) {
 
 	// 1. Without reveal: refused, and refused as the UNIFORM nonexistent
 	// outcome. A distinguishable refusal would itself be the one-bit oracle.
-	if _, err := keys.UpdateDeclaration(t.Context(), editor, scope, secret.ID, tighten); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := keys.UpdateDeclaration(t.Context(), editor, scope, secret.ID, tighten, nil); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("a value-dependent rule change on a secret key without reveal answered %v, want the uniform nonexistent", err)
 	}
 
@@ -393,13 +393,13 @@ func scenarioSecretRuleChangeNeedsReveal(t *testing.T, db *store.DB) {
 		Declaration: decl(schema.Rule{Type: schema.TypeString, Pattern: `(?=x)y`}),
 		Presence:    schema.DefaultPresenceRules(),
 	}
-	if _, err := keys.UpdateDeclaration(t.Context(), editor, scope, secret.ID, broken); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := keys.UpdateDeclaration(t.Context(), editor, scope, secret.ID, broken, nil); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("the gate evaluated the declaration before refusing: %v", err)
 	}
 
 	// 3. The same principal may still tighten a CONFIG key: the gate is about
 	// classification, not about editing.
-	if _, err := keys.UpdateDeclaration(t.Context(), editor, scope, config.ID, tighten); err != nil {
+	if _, err := keys.UpdateDeclaration(t.Context(), editor, scope, config.ID, tighten, nil); err != nil {
 		t.Fatalf("a config key's rule change was gated: %v", err)
 	}
 
@@ -413,7 +413,7 @@ func scenarioSecretRuleChangeNeedsReveal(t *testing.T, db *store.DB) {
 			Forbidden: schema.Presence{Mode: schema.PresenceNone},
 		},
 	}
-	if _, err := keys.UpdateDeclaration(t.Context(), editor, scope, secret.ID, presenceOnly); err != nil {
+	if _, err := keys.UpdateDeclaration(t.Context(), editor, scope, secret.ID, presenceOnly, nil); err != nil {
 		t.Fatalf("a presence-only change on a secret key was gated: %v", err)
 	}
 
@@ -427,7 +427,7 @@ func scenarioSecretRuleChangeNeedsReveal(t *testing.T, db *store.DB) {
 	// the existence-and-classification question the gate refuses. Only a caller
 	// who has PASSED the gate may ever observe the limit.
 	probeKey, err := keys.Create(t.Context(), editor, scope,
-		keySpec("RATE_PROBE", string(schema.Secret), decl(schema.Rule{Type: schema.TypeString})))
+		keySpec("RATE_PROBE", string(schema.Secret), decl(schema.Rule{Type: schema.TypeString})), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -438,7 +438,7 @@ func scenarioSecretRuleChangeNeedsReveal(t *testing.T, db *store.DB) {
 			service.KeyDeclarationUpdate{
 				Declaration: decl(schema.Rule{Type: schema.TypeString, Pattern: "A" + strconv.Itoa(i) + ".*"}),
 				Presence:    schema.DefaultPresenceRules(),
-			})
+			}, nil)
 		return err
 	}
 	first := attempt(editor, 0)
@@ -469,7 +469,7 @@ func scenarioSecretRuleChangeNeedsReveal(t *testing.T, db *store.DB) {
 	}
 	// A different key is a different bucket: the limit is per (principal, key),
 	// so exhausting one must not lock the principal out of the catalogue.
-	if _, err := keys.UpdateDeclaration(t.Context(), revealing, scope, config.ID, tighten); err != nil {
+	if _, err := keys.UpdateDeclaration(t.Context(), revealing, scope, config.ID, tighten, nil); err != nil {
 		t.Fatalf("exhausting one key's gate bucket refused an unrelated key: %v", err)
 	}
 	if err := keys.Delete(t.Context(), editor, scope, probeKey.ID); err != nil {
@@ -477,7 +477,7 @@ func scenarioSecretRuleChangeNeedsReveal(t *testing.T, db *store.DB) {
 	}
 
 	// 5. With reveal: the same tightening lands.
-	tightened, err := keys.UpdateDeclaration(t.Context(), revealing, scope, secret.ID, tighten)
+	tightened, err := keys.UpdateDeclaration(t.Context(), revealing, scope, secret.ID, tighten, nil)
 	if err != nil {
 		t.Fatalf("a reveal holder was refused: %v", err)
 	}
@@ -486,13 +486,13 @@ func scenarioSecretRuleChangeNeedsReveal(t *testing.T, db *store.DB) {
 	}
 
 	// 6. Declassification is likewise reveal-gated; tightening is not.
-	if _, err := keys.Reclassify(t.Context(), editor, scope, secret.ID, string(schema.Config)); !errors.Is(err, domain.ErrNotFound) {
+	if _, _, err := keys.Reclassify(t.Context(), editor, scope, secret.ID, string(schema.Config)); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("declassification without reveal answered %v, want the uniform nonexistent", err)
 	}
-	if _, err := keys.Reclassify(t.Context(), editor, scope, config.ID, string(schema.Secret)); err != nil {
+	if _, _, err := keys.Reclassify(t.Context(), editor, scope, config.ID, string(schema.Secret)); err != nil {
 		t.Fatalf("tightening config to secret was gated: %v", err)
 	}
-	declassified, err := keys.Reclassify(t.Context(), revealing, scope, secret.ID, string(schema.Config))
+	declassified, _, err := keys.Reclassify(t.Context(), revealing, scope, secret.ID, string(schema.Config))
 	if err != nil {
 		t.Fatalf("a reveal holder could not declassify: %v", err)
 	}
@@ -501,7 +501,7 @@ func scenarioSecretRuleChangeNeedsReveal(t *testing.T, db *store.DB) {
 	}
 	// The ceremony refuses a no-op: it would write a disclosure-class record
 	// for an act that never happened.
-	if _, err := keys.Reclassify(t.Context(), revealing, scope, secret.ID, string(schema.Config)); !errors.Is(err, domain.ErrInvalid) {
+	if _, _, err := keys.Reclassify(t.Context(), revealing, scope, secret.ID, string(schema.Config)); !errors.Is(err, domain.ErrInvalid) {
 		t.Fatalf("a no-op reclassification was accepted: %v", err)
 	}
 
@@ -521,7 +521,7 @@ func scenarioPresenceRules(t *testing.T, db *store.DB) {
 	who, scope := tenantFixture(t, db, "presence")
 	actor := service.LocalPrincipal(who)
 
-	env, err := envs.Create(t.Context(), actor, scope, "prod")
+	env, err := envs.Create(t.Context(), actor, scope, "prod", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -536,7 +536,7 @@ func scenarioPresenceRules(t *testing.T, db *store.DB) {
 			Forbidden: schema.Presence{Mode: schema.PresenceAll},
 		},
 	}
-	if _, err := keys.Create(t.Context(), actor, scope, conflicted); !errors.Is(err, domain.ErrInvalid) {
+	if _, err := keys.Create(t.Context(), actor, scope, conflicted, nil); !errors.Is(err, domain.ErrInvalid) {
 		t.Fatalf("a required-and-forbidden key was accepted: %v", err)
 	}
 
@@ -550,7 +550,7 @@ func scenarioPresenceRules(t *testing.T, db *store.DB) {
 			Forbidden: schema.Presence{Mode: schema.PresenceNone},
 		},
 	}
-	if _, err := keys.Create(t.Context(), actor, scope, foreign); !errors.Is(err, domain.ErrConflict) {
+	if _, err := keys.Create(t.Context(), actor, scope, foreign, nil); !errors.Is(err, domain.ErrConflict) {
 		t.Fatalf("a foreign environment id was accepted into a presence set: %v", err)
 	}
 
@@ -567,7 +567,7 @@ func scenarioPresenceRules(t *testing.T, db *store.DB) {
 		Declaration: decl(schema.Rule{Type: schema.TypeString}),
 		Presence:    schema.DefaultPresenceRules(),
 	}
-	created, err := keys.Create(t.Context(), actor, scope, required)
+	created, err := keys.Create(t.Context(), actor, scope, required, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -580,7 +580,7 @@ func scenarioPresenceRules(t *testing.T, db *store.DB) {
 			Required:  schema.Presence{Mode: schema.PresenceExplicit, Environments: []string{env.ID}},
 			Forbidden: schema.Presence{Mode: schema.PresenceNone},
 		},
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatal(err)
 	}
 	got, err := keys.Get(t.Context(), actor, scope, created.ID)
@@ -619,7 +619,7 @@ func scenarioPresenceRules(t *testing.T, db *store.DB) {
 		t.Fatalf("an emptied explicit set kept mode %q", after.Presence.Required.Mode)
 	}
 	if _, err := keys.UpdateDeclaration(t.Context(), actor, scope, created.ID,
-		service.KeyDeclarationUpdate{Declaration: after.Declaration, Presence: after.Presence}); err != nil {
+		service.KeyDeclarationUpdate{Declaration: after.Declaration, Presence: after.Presence}, nil); err != nil {
 		t.Fatalf("the post-cascade declaration cannot be saved back: %v", err)
 	}
 	// The cascade rewrote catalogue content, so the catalogue revision moved.
@@ -642,11 +642,11 @@ func scenarioKeyGroups(t *testing.T, db *store.DB) {
 	who, scope := tenantFixture(t, db, "groups")
 	actor := service.LocalPrincipal(who)
 
-	env, err := envs.Create(t.Context(), actor, scope, "prod")
+	env, err := envs.Create(t.Context(), actor, scope, "prod", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	group, err := groups.Create(t.Context(), actor, scope, "database")
+	group, err := groups.Create(t.Context(), actor, scope, "database", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -673,7 +673,7 @@ func scenarioKeyGroups(t *testing.T, db *store.DB) {
 			Forbidden: schema.Presence{Mode: schema.PresenceExplicit, Environments: []string{env.ID}},
 		},
 		GroupID: group.ID,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -687,7 +687,7 @@ func scenarioKeyGroups(t *testing.T, db *store.DB) {
 			Forbidden: schema.Presence{Mode: schema.PresenceNone},
 		},
 		GroupID: group.ID,
-	})
+	}, nil)
 	if !errors.Is(err, domain.ErrInvalid) {
 		t.Fatalf("a group whose members can never both resolve was accepted: %v", err)
 	}
@@ -704,7 +704,7 @@ func scenarioKeyGroups(t *testing.T, db *store.DB) {
 		Declaration: decl(schema.Rule{Type: schema.TypeString}),
 		Presence:    schema.DefaultPresenceRules(),
 		GroupID:     group.ID,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

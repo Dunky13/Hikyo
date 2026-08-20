@@ -2693,13 +2693,11 @@ func hierarchyFailureEvent(schema Schema) TypeSpec {
 }
 
 // scanningFindingSpecs holds the four scanning.finding_* rows (#74,
-// secret-scanning ADR section 5) declared at the ADR lock but NOT yet in the
-// live registry: no chokepoint emits them until the scanner is wired into the
-// value-write and declaration-ingress paths (the scanning stream), and the
-// closure invariant forbids a registered type no code can emit. The scanning
-// integration merges these into `registry` in the same change that emits them,
-// which is a one-line map merge; until then they are testable through
-// ScanningFindingSpec.
+// secret-scanning ADR section 5). They are declared here and merged into the
+// live `registry` by init below — the scanning integration (#74 stream C) wires
+// the emitters at the value-write and declaration-ingress chokepoints, so the
+// closure invariant (a registered type must be emittable) now holds. The map
+// stays the source of truth so ScanningFindingSpec keeps exercising the schemas.
 //
 // All four are tenant-trail, security-retention, success-only — the warn cannot
 // fail separately from the write it rides, and a block/refusal IS the event.
@@ -2743,10 +2741,21 @@ var scanningFindingSpecs = map[EventType]TypeSpec{
 	}),
 }
 
-// ScanningFindingSpec returns a declared-but-unregistered scanning.finding_*
-// spec (#74). It is the seam the scanning stream reads when it wires the
-// emitters and merges these into the live registry; today it exists so the
-// schemas are asserted executably before any emitter does.
+// init merges the scanning.finding_* specs into the live registry. Kept as a
+// merge rather than inlined into the registry literal so the exact §5 schemas
+// live in one block the ScanningFindingSpec tests pin field-for-field.
+func init() {
+	for t, s := range scanningFindingSpecs {
+		if _, dup := registry[t]; dup {
+			panic("audit: scanning finding spec already registered: " + string(t))
+		}
+		registry[t] = s
+	}
+}
+
+// ScanningFindingSpec returns a scanning.finding_* spec (#74) from the source
+// map. The same spec is now in the live registry (see init); this accessor
+// stays so the schema tests exercise the declared shapes directly.
 func ScanningFindingSpec(t EventType) (TypeSpec, bool) {
 	spec, ok := scanningFindingSpecs[t]
 	return spec, ok

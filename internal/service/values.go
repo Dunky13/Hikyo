@@ -12,6 +12,7 @@ import (
 	"github.com/Hikyo-Org/hikyo/internal/authz"
 	"github.com/Hikyo-Org/hikyo/internal/crypto"
 	"github.com/Hikyo-Org/hikyo/internal/domain"
+	"github.com/Hikyo-Org/hikyo/internal/scanning"
 	"github.com/Hikyo-Org/hikyo/internal/schema"
 	"github.com/Hikyo-Org/hikyo/internal/store"
 	"github.com/Hikyo-Org/hikyo/internal/store/tx"
@@ -79,6 +80,11 @@ type Values struct {
 	// discloses. Nil is a wiring fault and refuses every disclosure loudly
 	// (ErrNoCeremonySeam) rather than disclosing without a ceremony.
 	Auth *Auth
+	// Scan is the secret-scanning ruleset (#74). The Surface-1 config-value
+	// ingresses (stage/declare/copy/clone/import) run it after authorization and
+	// ride any findings on the response. Nil disables the scan (pre-#74 tests); a
+	// booted server always wires it.
+	Scan *scanning.Ruleset
 }
 
 // ValueCell is one `(key, environment)` cell as reported to a reader.
@@ -133,6 +139,11 @@ type CopyRequest struct {
 // CopyResult enumerates what moved, one entry per (key, destination).
 type CopyResult struct {
 	Copied []CopiedValue
+	// Findings are the Surface-1 warnings the copied CONFIG values produced
+	// (#74), warn-not-block: the copy succeeds and each finding names its rule
+	// and key locator. Secret material is never scanned. No dismissal token —
+	// keep-as-config lives on the stage path.
+	Findings []Finding
 }
 
 // CopiedValue is one cell that landed.
@@ -148,6 +159,9 @@ type CopiedValue struct {
 type CloneResult struct {
 	Copied          []string
 	UncopiedSecrets []string
+	// Findings are the Surface-1 warnings the cloned CONFIG values produced
+	// (#74), warn-not-block. Secret material is never scanned.
+	Findings []Finding
 }
 
 // ErrProtectedDestination refuses a copy into a protected environment that
@@ -408,6 +422,11 @@ type StagedChange struct {
 	Operation          string
 	StagedFromRevision int64
 	CreatedAt          time.Time
+	// Findings are the secret-scanning warnings this save produced (#74,
+	// Surface 1). The save SUCCEEDS regardless; each finding names its rule and
+	// key locator and carries a keep-as-config acknowledgement token. Empty on a
+	// clean save, an unscanned (secret) key, or an Unset.
+	Findings []Finding
 }
 
 // Set stages one edit into the caller's own working state.
@@ -423,17 +442,18 @@ type StagedChange struct {
 // be cleared here: a draft is the user's scratchpad, and blocking a save pushes
 // work in progress into external notepads, which for secrets is exactly where
 // it must not go. Every one of those refusals lives at publish instead.
-func (s *Values) Set(ctx context.Context, actor Actor, scope domain.Scope, keyName, value string) (StagedChange, error) {
-	return s.stage(ctx, actor, scope, keyName, store.PendingSet, value)
+func (s *Values) Set(ctx context.Context, actor Actor, scope domain.Scope, keyName, value string, acks []string) (StagedChange, error) {
+	return s.stage(ctx, actor, scope, keyName, store.PendingSet, value, acks)
 }
 
 // Unset stages a clear: the cell goes to `absent` when the draft is published.
+// It writes no value, so it never scans and takes no acknowledgements.
 func (s *Values) Unset(ctx context.Context, actor Actor, scope domain.Scope, keyName string) (StagedChange, error) {
-	return s.stage(ctx, actor, scope, keyName, store.PendingUnset, "")
+	return s.stage(ctx, actor, scope, keyName, store.PendingUnset, "", nil)
 }
 
 func (s *Values) stage(ctx context.Context, actor Actor, scope domain.Scope, keyName string,
-	operation store.PendingOperation, value string) (StagedChange, error) {
+	operation store.PendingOperation, value string, acks []string) (StagedChange, error) {
 	if scope.Env == "" {
 		return StagedChange{}, fmt.Errorf("%w: a value addresses an environment", domain.ErrInvalid)
 	}
@@ -516,11 +536,26 @@ func (s *Values) stage(ctx context.Context, actor Actor, scope domain.Scope, key
 		if err := r.Audit().InsertTenant(ctx, p, ev); err != nil {
 			return err
 		}
+		// Surface-1 warn (#74). Only a Set of a config-classified key scans; the
+		// dismissal store ops this path authorizes make stage the sole dismissal-
+		// capable ingress, so keep-as-config is honoured here. The warn events
+		// commit in this transaction with the staged write (ADR §7).
+		var findings []Finding
+		if operation == store.PendingSet {
+			total := 0
+			findings, err = scanConfigValue(ctx, r, p, s.Keyring, s.Scan, scope, key.ID,
+				key.Classification, []byte(schema.Normalize(value)), surfaceValueWrite,
+				caller.Principal, newAckSet(acks), true, &total)
+			if err != nil {
+				return err
+			}
+		}
 		keyID, keyNameOut, owner = key.ID, key.Name, caller.Principal
 		out = StagedChange{
 			VersionID: versionID, KeyID: key.ID, Name: key.Name,
 			Classification: key.Classification, Operation: string(operation),
 			StagedFromRevision: revision, CreatedAt: now,
+			Findings: findings,
 		}
 		return nil
 	})
@@ -543,33 +578,35 @@ func (s *Values) stage(ctx context.Context, actor Actor, scope domain.Scope, key
 // It is authorized per DESTINATION, exactly as a single write is: holding
 // `edit ∧ publish` on two of three environments does not buy the third, and
 // the whole call is refused rather than partially applied.
-func (s *Values) Declare(ctx context.Context, actor Actor, scope domain.Scope, envIDs []string, keyName, value string) ([]ValueCell, error) {
+func (s *Values) Declare(ctx context.Context, actor Actor, scope domain.Scope, envIDs []string, keyName, value string) ([]ValueCell, []Finding, error) {
 	// The empty/blank/duplicate checks live in declare (below), which Set shares:
 	// stating them twice invites the two spellings to drift.
 	return s.declare(ctx, actor, scope, envIDs, keyName, value)
 }
 
-func (s *Values) declare(ctx context.Context, actor Actor, scope domain.Scope, envIDs []string, keyName, value string) ([]ValueCell, error) {
+func (s *Values) declare(ctx context.Context, actor Actor, scope domain.Scope, envIDs []string, keyName, value string) ([]ValueCell, []Finding, error) {
 	if len(envIDs) == 0 {
-		return nil, fmt.Errorf("%w: a value addresses an environment", domain.ErrInvalid)
+		return nil, nil, fmt.Errorf("%w: a value addresses an environment", domain.ErrInvalid)
 	}
 	if slices.Contains(envIDs, "") {
-		return nil, fmt.Errorf("%w: a value addresses an environment", domain.ErrInvalid)
+		return nil, nil, fmt.Errorf("%w: a value addresses an environment", domain.ErrInvalid)
 	}
 	if dup, ok := firstDuplicate(envIDs); ok {
-		return nil, invalidDetail("environment %q is named more than once", dup)
+		return nil, nil, invalidDetail("environment %q is named more than once", dup)
 	}
 	// Gated on the FIRST destination: a caller who cannot write there cannot
 	// write anywhere in this call, because the whole declare is all-or-nothing.
 	first := domain.Scope{Org: scope.Org, Project: scope.Project, Env: domain.EnvID(envIDs[0])}
 	sealer, err := s.sealer(ctx, actor, authz.OpValueSet, first)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var out []ValueCell
+	var findings []Finding
 	var advanced []PublishedEnvironment
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
-		out, advanced = nil, nil
+		out, advanced, findings = nil, nil, nil
+		total := 0
 		caller, err := actor.resolve(ctx, az, time.Now().UTC())
 		if err != nil {
 			return err
@@ -616,6 +653,16 @@ func (s *Values) declare(ctx context.Context, actor Actor, scope domain.Scope, e
 			if err := r.Audit().InsertTenant(ctx, p, ev); err != nil {
 				return err
 			}
+			// Surface-1 warn (#74), warn-only: declare's operation does not
+			// authorize the dismissal store ops, so a finding rides the response
+			// and emits finding_warned but carries no keep-as-config token.
+			envFindings, err := scanConfigValue(ctx, r, p, s.Keyring, s.Scan, envScope, key.ID,
+				key.Classification, []byte(schema.Normalize(value)), surfaceValueWrite,
+				caller.Principal, nil, false, &total)
+			if err != nil {
+				return err
+			}
+			findings = append(findings, envFindings...)
 			// Declare is a supplied-plaintext write that DELIVERS -- its locked
 			// formula carries `publish` on every destination, and #50 shipped it
 			// as an immediate write. It therefore materializes each destination
@@ -634,10 +681,10 @@ func (s *Values) declare(ctx context.Context, actor Actor, scope domain.Scope, e
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	s.Advisory.published(scope, advanced)
-	return out, nil
+	return out, findings, nil
 }
 
 // Get reads one cell. reveal asks for `secret` plaintext and carries the
@@ -1013,6 +1060,7 @@ func (s *Values) Copy(ctx context.Context, actor Actor, scope domain.Scope, req 
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		out = CopyResult{}
 		advanced = nil
+		total := 0
 		caller, err := actor.resolve(ctx, az, time.Now().UTC())
 		if err != nil {
 			return err
@@ -1052,9 +1100,10 @@ func (s *Values) Copy(ctx context.Context, actor Actor, scope domain.Scope, req 
 		}
 		for _, destID := range req.DestinationEnvironmentIDs {
 			destScope := domain.Scope{Org: scope.Org, Project: scope.Project, Env: domain.EnvID(destID)}
-			copied, err := applyMaterial(ctx, r, az, caller, sealer, destScope,
-				req.SourceEnvironmentID, material, operation)
+			copied, f, err := applyMaterial(ctx, r, az, caller, sealer, s.Keyring, s.Scan, destScope,
+				req.SourceEnvironmentID, material, operation, &total)
 			out.Copied = append(out.Copied, copied...)
+			out.Findings = append(out.Findings, f...)
 			if err != nil {
 				return err
 			}
@@ -1408,9 +1457,10 @@ func withDestination(ctx context.Context, r store.Repos, az *authz.TxAuthorizer,
 // never evaluate the reveal-gated destination operation, or the unreachability
 // the split exists to avoid comes straight back.
 func applyMaterial(ctx context.Context, r store.Repos, az *authz.TxAuthorizer, caller authz.Identity,
-	sealer *crypto.ProjectSealer, destScope domain.Scope, sourceEnvID string,
-	material materialSet, operation string) ([]CopiedValue, error) {
+	sealer *crypto.ProjectSealer, kr *crypto.Keyring, rs *scanning.Ruleset, destScope domain.Scope, sourceEnvID string,
+	material materialSet, operation string, total *int) ([]CopiedValue, []Finding, error) {
 	var out []CopiedValue
+	var findings []Finding
 	legs := []struct {
 		op       authz.Operation
 		material []sourceValue
@@ -1426,15 +1476,16 @@ func applyMaterial(ctx context.Context, r store.Repos, az *authz.TxAuthorizer, c
 		// the project lock this call re-takes; a protected window authorises
 		// exactly one decision, so re-deciding here would be a double-spend.
 		err := withDestination(ctx, r, az, caller, leg.op, destScope, func(p authz.Proof, _ bool) error {
-			copied, err := writeMaterial(ctx, r, p, sealer, caller, destScope, sourceEnvID, leg.material, operation)
+			copied, f, err := writeMaterial(ctx, r, p, sealer, kr, rs, caller, destScope, sourceEnvID, leg.material, operation, total)
 			out = append(out, copied...)
+			findings = append(findings, f...)
 			return err
 		})
 		if err != nil {
-			return out, err
+			return out, findings, err
 		}
 	}
-	return out, nil
+	return out, findings, nil
 }
 
 // writeMaterial re-seals every piece of material into one destination and
@@ -1442,23 +1493,24 @@ func applyMaterial(ctx context.Context, r store.Repos, az *authz.TxAuthorizer, c
 // destination row has its own id, its own environment and therefore its own
 // AAD, so duplication is always decrypt-and-reseal (encryption-model ADR).
 func writeMaterial(ctx context.Context, r store.Repos, p authz.Proof, sealer *crypto.ProjectSealer,
-	caller authz.Identity, destScope domain.Scope, sourceEnvID string,
-	material []sourceValue, operation string) ([]CopiedValue, error) {
+	kr *crypto.Keyring, rs *scanning.Ruleset, caller authz.Identity, destScope domain.Scope, sourceEnvID string,
+	material []sourceValue, operation string, total *int) ([]CopiedValue, []Finding, error) {
 	destID := string(destScope.Env)
 	presence, err := r.Catalogue().ListPresence(ctx, p)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	out := make([]CopiedValue, 0, len(material))
+	var findings []Finding
 	for _, m := range material {
 		if err := checkNotForbidden(m.key, presenceOfKey(m.key, presence), destID); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if err := validateValue(m.key, m.plaintext); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if _, err := writeCell(ctx, r, p, sealer, destScope, m.key, caller.Principal, m.plaintext); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		ev, err := domainEvent(ctx, audit.EventValueCopied, caller.Principal,
 			audit.Object{Type: "key", ID: m.key.ID}, audit.Payload{
@@ -1469,14 +1521,24 @@ func writeMaterial(ctx context.Context, r store.Repos, p authz.Proof, sealer *cr
 				"operation":             operation,
 			})
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if err := r.Audit().InsertTenant(ctx, p, ev); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
+		// Surface-1 warn (#74), warn-only: a copied/cloned CONFIG value is
+		// scanned (scanConfigValue no-ops on a secret key). The config leg runs
+		// under OpValueCopyDestinationConfig, which licenses finding_warned.
+		f, err := scanConfigValue(ctx, r, p, kr, rs, destScope, m.key.ID,
+			m.key.Classification, []byte(schema.Normalize(m.plaintext)), surfaceValueWrite,
+			caller.Principal, nil, false, total)
+		if err != nil {
+			return nil, nil, err
+		}
+		findings = append(findings, f...)
 		out = append(out, CopiedValue{KeyName: m.key.Name, DestinationEnvironment: destID})
 	}
-	return out, nil
+	return out, findings, nil
 }
 
 // cloneInto is clone-at-creation's value half, running in the transaction that
@@ -1504,7 +1566,7 @@ func writeMaterial(ctx context.Context, r store.Repos, p authz.Proof, sealer *cr
 //  4. The planned material is opened and its source disclosures written, then
 //     each destination leg copies its share.
 func cloneInto(ctx context.Context, r store.Repos, az *authz.TxAuthorizer, caller authz.Identity,
-	sealer *crypto.ProjectSealer, scope domain.Scope, sourceEnvID, destEnvID string,
+	sealer *crypto.ProjectSealer, kr *crypto.Keyring, rs *scanning.Ruleset, scope domain.Scope, sourceEnvID, destEnvID string,
 	gate discloseGate) (CloneResult, error) {
 	var out CloneResult
 	sourceScope := domain.Scope{Org: scope.Org, Project: scope.Project, Env: domain.EnvID(sourceEnvID)}
@@ -1592,12 +1654,14 @@ func cloneInto(ctx context.Context, r store.Repos, az *authz.TxAuthorizer, calle
 	}
 	// A brand-new environment cannot be protected — the flag is set after
 	// creation — so the ceremony has nothing to confirm here.
-	copied, err := applyMaterial(ctx, r, az, caller, sealer, destScope, sourceEnvID, material, copyOpClone)
+	total := 0
+	copied, findings, err := applyMaterial(ctx, r, az, caller, sealer, kr, rs, destScope, sourceEnvID, material, copyOpClone, &total)
 	if err != nil {
 		return CloneResult{}, err
 	}
 	for _, c := range copied {
 		out.Copied = append(out.Copied, c.KeyName)
 	}
+	out.Findings = findings
 	return out, nil
 }

@@ -265,7 +265,53 @@ export type Error = {
          *
          */
         detail?: string | null;
+        /**
+         * Secret-scanning refusal detail (#74, Surface 2). Present only on
+         * a `bad_request` that a declaration ingress refused because an
+         * author-controlled field carried a credential-shaped string. Each
+         * entry names the immutable declaration-field locator, the rule id,
+         * and a short-lived content-bound acknowledgement token the
+         * resubmission presents to override. Never the matched text.
+         *
+         */
+        findings?: Array<ScanFinding>;
     };
+};
+
+/**
+ * One redacted secret-scanning result (#74, secret-scanning ADR §4). It
+ * carries a rule id, the surface/ingress it fired on, an immutable locator
+ * (key identity for Surface 1, schema-location class for Surface 2), and —
+ * where an acknowledgement is possible — an opaque token. It NEVER carries
+ * the matched text, an offset, a length, or an excerpt.
+ *
+ */
+export type ScanFinding = {
+    /**
+     * The matched rule's id (e.g. `aws-access-token`).
+     */
+    rule_id: string;
+    /**
+     * Which ingress produced the finding. Surface-1 warns carry the value
+     * write surface; Surface-2 blocks carry the declaration ingress.
+     *
+     */
+    surface: 'value_write' | 'declassification' | 'import_value' | 'edit';
+    /**
+     * The immutable locator. Surface 1: the key identity. Surface 2: the
+     * schema-location class of the offending field (e.g.
+     * `key.declaration.pattern`), never an instance-derived path.
+     *
+     */
+    locator: string;
+    /**
+     * An opaque, short-lived, content-bound token (Surface-1 keep-as-config
+     * dismissal or Surface-2 override). Present only where an
+     * acknowledgement is possible. Resubmit the write presenting it in
+     * `acknowledgements`. It embeds no plaintext.
+     *
+     */
+    acknowledgement?: string;
 };
 
 /**
@@ -594,6 +640,7 @@ export type CreateOrgRequest = {
     metadata?: {
         [key: string]: unknown;
     } | null;
+    acknowledgements?: Acknowledgements;
 };
 
 export type Org = {
@@ -655,10 +702,12 @@ export type EntityName = string;
 
 export type RenameRequest = {
     name: EntityName;
+    acknowledgements?: Acknowledgements;
 };
 
 export type CreateProjectRequest = {
     name: EntityName;
+    acknowledgements?: Acknowledgements;
 };
 
 export type Project = {
@@ -678,11 +727,13 @@ export type ProjectList = {
 
 export type CreateEnvironmentRequest = {
     name: EntityName;
+    acknowledgements?: Acknowledgements;
 };
 
 export type CloneEnvironmentRequest = {
     name: EntityName;
     source_environment_id: Id;
+    acknowledgements?: Acknowledgements;
 };
 
 export type ClonedEnvironment = {
@@ -698,6 +749,12 @@ export type ClonedEnvironment = {
      *
      */
     uncopied_secrets: Array<KeyName>;
+    /**
+     * Secret-scanning warnings the cloned config values produced (#74,
+     * Surface 1), warn-not-block.
+     *
+     */
+    findings?: Array<ScanFinding>;
 };
 
 /**
@@ -725,6 +782,13 @@ export type PendingChange = {
      */
     staged_from_revision: number;
     created_at: string;
+    /**
+     * Secret-scanning warnings this save produced (#74, Surface 1). The
+     * save SUCCEEDED regardless; each finding carries a keep-as-config
+     * acknowledgement token. Absent or empty on a clean save.
+     *
+     */
+    findings?: Array<ScanFinding>;
 };
 
 /**
@@ -1010,6 +1074,22 @@ export type TokenKeyRotation = {
     token_key_version: number;
 };
 
+export type ScanningKeyRotation = {
+    /**
+     * The new scanning-fingerprint key version. Operator bookkeeping only;
+     * a fingerprint is never exported, displayed or compared.
+     *
+     */
+    scanning_key_version: number;
+    /**
+     * How many dismissal rows the rotation invalidated. Every stored
+     * fingerprint became unrecomputable under the new key, so all
+     * dismissals were dropped and their warns will re-fire.
+     *
+     */
+    dismissals_dropped: number;
+};
+
 /**
  * One `(key, environment)` cell.
  *
@@ -1054,7 +1134,23 @@ export type ValueCell = {
 export type ValueList = {
     items: Array<ValueCell>;
     count: number;
+    /**
+     * Secret-scanning warnings the declared config values produced (#74,
+     * Surface 1), warn-not-block. Absent or empty when nothing matched.
+     *
+     */
+    findings?: Array<ScanFinding>;
 };
+
+/**
+ * Secret-scanning acknowledgement tokens (#74). On a value write, a
+ * keep-as-config token dismisses a Surface-1 warning for exactly that
+ * value. On a declaration write, one override token per finding is
+ * re-scanned against the current content; a stale, version-skewed, or
+ * surplus token is rejected by name. There is no blanket ignore-all input.
+ *
+ */
+export type Acknowledgements = Array<string>;
 
 export type SetValueRequest = {
     /**
@@ -1064,6 +1160,7 @@ export type SetValueRequest = {
      *
      */
     value: string;
+    acknowledgements?: Acknowledgements;
 };
 
 export type DeclareValuesRequest = {
@@ -1096,6 +1193,12 @@ export type CopyValuesResult = {
         key: KeyName;
         destination_environment_id: Id;
     }>;
+    /**
+     * Secret-scanning warnings the copied config values produced (#74,
+     * Surface 1), warn-not-block. Absent or empty when nothing matched.
+     *
+     */
+    findings?: Array<ScanFinding>;
 };
 
 export type ValueOccurrencesRequest = {
@@ -1206,6 +1309,12 @@ export type ImportValuesResult = {
      *
      */
     skipped: Array<KeyName>;
+    /**
+     * Secret-scanning warnings the imported config values produced (#74,
+     * Surface 1, surface `import_value`), warn-not-block.
+     *
+     */
+    findings?: Array<ScanFinding>;
 };
 
 export type ValueDiff = {
@@ -1418,10 +1527,12 @@ export type FolderPath = string;
 
 export type CreateFolderRequest = {
     path: FolderPath;
+    acknowledgements?: Acknowledgements;
 };
 
 export type RenameFolderRequest = {
     path: FolderPath;
+    acknowledgements?: Acknowledgements;
 };
 
 export type Folder = {
@@ -2224,6 +2335,15 @@ export type Key = {
      */
     group_id: string;
     created_at: Timestamp;
+    /**
+     * Secret-scanning warnings (#74, Surface 1). Populated only by the
+     * reclassification ceremony when declassifying (`secret` → `config`) a
+     * key whose existing values carry a credential-shaped string — the
+     * reclassify SUCCEEDS and each finding names its rule and key locator.
+     * Absent on every other key response.
+     *
+     */
+    findings?: Array<ScanFinding>;
 };
 
 export type KeyList = {
@@ -2251,6 +2371,7 @@ export type CreateKeyRequest = {
     declaration: KeyDeclaration;
     presence?: KeyPresenceRules;
     group_id?: string;
+    acknowledgements?: Acknowledgements;
 };
 
 export type UpdateKeyMetadataRequest = {
@@ -2259,15 +2380,18 @@ export type UpdateKeyMetadataRequest = {
     deprecated?: boolean;
     deprecation_note?: string;
     classification?: KeyClassification;
+    acknowledgements?: Acknowledgements;
 };
 
 export type RenameKeyRequest = {
     name: KeyName;
+    acknowledgements?: Acknowledgements;
 };
 
 export type UpdateKeyDeclarationRequest = {
     declaration: KeyDeclaration;
     presence: KeyPresenceRules;
+    acknowledgements?: Acknowledgements;
 };
 
 export type ReclassifyKeyRequest = {
@@ -2307,10 +2431,12 @@ export type KeyGroupList = {
 
 export type CreateKeyGroupRequest = {
     name: string;
+    acknowledgements?: Acknowledgements;
 };
 
 export type RenameKeyGroupRequest = {
     name: string;
+    acknowledgements?: Acknowledgements;
 };
 
 export type AuthMethods = {
@@ -16876,6 +17002,50 @@ export type RotateTokenKeyResponses = {
 };
 
 export type RotateTokenKeyResponse = RotateTokenKeyResponses[keyof RotateTokenKeyResponses];
+
+export type RotateScanningKeyData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/instance/rotate-scanning-key';
+};
+
+export type RotateScanningKeyErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type RotateScanningKeyError = RotateScanningKeyErrors[keyof RotateScanningKeyErrors];
+
+export type RotateScanningKeyResponses = {
+    /**
+     * The rotation.
+     */
+    200: ScanningKeyRotation;
+};
+
+export type RotateScanningKeyResponse = RotateScanningKeyResponses[keyof RotateScanningKeyResponses];
 
 export type ListAdaptersData = {
     body?: never;

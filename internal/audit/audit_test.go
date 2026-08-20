@@ -407,18 +407,19 @@ func TestScanningKeyRotatedSchema(t *testing.T) {
 	}
 }
 
-// TestScanningFindingSpecsAreStagedNotRegistered proves the four scanning.*
-// finding events (#74, ADR section 5) are declared with their exact v1 schemas
-// but held OUT of the live registry until an emitter exists (the closure
-// invariant forbids dead catalogue). This is the seam the scanning stream reads.
-func TestScanningFindingSpecsAreStagedNotRegistered(t *testing.T) {
+// TestScanningFindingSpecsAreRegistered proves the four scanning.* finding
+// events (#74, ADR section 5) are now in the live registry with their exact v1
+// schemas — the scanning integration (#74 stream C) wires the emitters, so the
+// closure invariant (a registered type must be emittable) holds. The registered
+// spec must be identical to the declared one.
+func TestScanningFindingSpecsAreRegistered(t *testing.T) {
 	finding := []EventType{
 		EventScanningFindingWarned, EventScanningFindingDismissed,
 		EventScanningFindingBlocked, EventScanningFindingOverridden,
 	}
 	for _, et := range finding {
-		if _, ok := Spec(et); ok {
-			t.Errorf("%s is in the live registry, but no chokepoint emits it yet — it must stay staged", et)
+		if _, ok := Spec(et); !ok {
+			t.Errorf("%s is not in the live registry, but its emitter is wired", et)
 		}
 		spec, ok := ScanningFindingSpec(et)
 		if !ok {

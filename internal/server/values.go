@@ -28,9 +28,9 @@ import (
 type ValueService interface {
 	Get(ctx context.Context, actor service.Actor, scope domain.Scope, keyName string, reveal bool) (service.ValueCell, error)
 	List(ctx context.Context, actor service.Actor, scope domain.Scope, reveal bool) ([]service.ValueCell, error)
-	Set(ctx context.Context, actor service.Actor, scope domain.Scope, keyName, value string) (service.StagedChange, error)
+	Set(ctx context.Context, actor service.Actor, scope domain.Scope, keyName, value string, acks []string) (service.StagedChange, error)
 	Unset(ctx context.Context, actor service.Actor, scope domain.Scope, keyName string) (service.StagedChange, error)
-	Declare(ctx context.Context, actor service.Actor, scope domain.Scope, envIDs []string, keyName, value string) ([]service.ValueCell, error)
+	Declare(ctx context.Context, actor service.Actor, scope domain.Scope, envIDs []string, keyName, value string) ([]service.ValueCell, []service.Finding, error)
 	Copy(ctx context.Context, actor service.Actor, scope domain.Scope, req service.CopyRequest) (service.CopyResult, error)
 	Diff(ctx context.Context, actor service.Actor, scope domain.Scope, left, right string, reveal bool) ([]service.DiffRow, error)
 	Occurrences(ctx context.Context, actor service.Actor, scope domain.Scope, candidates []service.ImportCandidate) (service.ImportPresence, error)
@@ -106,9 +106,13 @@ func (a *API) ImportValues(ctx context.Context, req apigen.ImportValuesRequestOb
 	if err != nil {
 		return nil, err
 	}
-	return apigen.ImportValues200JSONResponse(apigen.ImportValuesResult{
+	out := apigen.ImportValuesResult{
 		Imported: nonNil(result.Imported), Skipped: nonNil(result.Skipped),
-	}), nil
+	}
+	if fs := wireScanFindings(result.Findings); len(fs) > 0 {
+		out.Findings = &fs
+	}
+	return apigen.ImportValues200JSONResponse(out), nil
 }
 
 func (a *API) ListValues(ctx context.Context, req apigen.ListValuesRequestObject) (apigen.ListValuesResponseObject, error) {
@@ -134,7 +138,7 @@ func (a *API) GetValue(ctx context.Context, req apigen.GetValueRequestObject) (a
 // publish names, which is the only thing the caller can act on.
 func (a *API) SetValue(ctx context.Context, req apigen.SetValueRequestObject) (apigen.SetValueResponseObject, error) {
 	staged, err := a.Values.Set(ctx, service.Bearer(bearer(ctx)),
-		envScope(req.Org, req.Project, req.Environment), req.Key, req.Body.Value)
+		envScope(req.Org, req.Project, req.Environment), req.Key, req.Body.Value, derefAcks(req.Body.Acknowledgements))
 	if err != nil {
 		return nil, err
 	}
@@ -151,7 +155,7 @@ func (a *API) ClearValue(ctx context.Context, req apigen.ClearValueRequestObject
 }
 
 func wireStagedChange(c service.StagedChange) apigen.PendingChange {
-	return apigen.PendingChange{
+	out := apigen.PendingChange{
 		VersionId:          c.VersionID,
 		KeyId:              c.KeyID,
 		Name:               c.Name,
@@ -160,15 +164,32 @@ func wireStagedChange(c service.StagedChange) apigen.PendingChange {
 		StagedFromRevision: c.StagedFromRevision,
 		CreatedAt:          c.CreatedAt,
 	}
+	if fs := wireScanFindings(c.Findings); len(fs) > 0 {
+		out.Findings = &fs
+	}
+	return out
 }
 
 func (a *API) DeclareValues(ctx context.Context, req apigen.DeclareValuesRequestObject) (apigen.DeclareValuesResponseObject, error) {
-	cells, err := a.Values.Declare(ctx, service.Bearer(bearer(ctx)),
+	cells, findings, err := a.Values.Declare(ctx, service.Bearer(bearer(ctx)),
 		projectScope(req.Org, req.Project), req.Body.EnvironmentIds, req.Body.Key, req.Body.Value)
 	if err != nil {
 		return nil, err
 	}
-	return apigen.DeclareValues200JSONResponse(wireValueList(cells)), nil
+	out := wireValueList(cells)
+	if fs := wireScanFindings(findings); len(fs) > 0 {
+		out.Findings = &fs
+	}
+	return apigen.DeclareValues200JSONResponse(out), nil
+}
+
+// derefAcks unwraps the optional acknowledgements request member (#74). Absent
+// and empty both mean "no tokens presented".
+func derefAcks(a *apigen.Acknowledgements) []string {
+	if a == nil {
+		return nil
+	}
+	return *a
 }
 
 func (a *API) CopyValues(ctx context.Context, req apigen.CopyValuesRequestObject) (apigen.CopyValuesResponseObject, error) {
@@ -188,6 +209,9 @@ func (a *API) CopyValues(ctx context.Context, req apigen.CopyValuesRequestObject
 			DestinationEnvironmentId apigen.ID      `json:"destination_environment_id"`
 			Key                      apigen.KeyName `json:"key"`
 		}{DestinationEnvironmentId: c.DestinationEnvironment, Key: c.KeyName})
+	}
+	if fs := wireScanFindings(result.Findings); len(fs) > 0 {
+		out.Findings = &fs
 	}
 	return apigen.CopyValues200JSONResponse(out), nil
 }
@@ -252,15 +276,19 @@ func wireDiff(left, right string, rows []service.DiffRow) apigen.ValueDiff {
 
 func (a *API) CloneEnvironment(ctx context.Context, req apigen.CloneEnvironmentRequestObject) (apigen.CloneEnvironmentResponseObject, error) {
 	env, result, err := a.Environments.Clone(ctx, service.Bearer(bearer(ctx)),
-		projectScope(req.Org, req.Project), req.Body.Name, req.Body.SourceEnvironmentId)
+		projectScope(req.Org, req.Project), req.Body.Name, req.Body.SourceEnvironmentId, derefAcks(req.Body.Acknowledgements))
 	if err != nil {
 		return nil, err
 	}
-	return apigen.CloneEnvironment201JSONResponse{
+	resp := apigen.CloneEnvironment201JSONResponse{
 		Environment:     wireEnvironment(env),
 		Copied:          nonNil(result.Copied),
 		UncopiedSecrets: nonNil(result.UncopiedSecrets),
-	}, nil
+	}
+	if fs := wireScanFindings(result.Findings); len(fs) > 0 {
+		resp.Findings = &fs
+	}
+	return resp, nil
 }
 
 // nonNil renders a nil slice as an empty one on the wire. `[]` says "nothing

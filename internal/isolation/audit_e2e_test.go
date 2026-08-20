@@ -153,7 +153,7 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 	})
 
 	t.Run("domain_event_committed_in_transaction", func(t *testing.T) {
-		proj, err := projects.Create(tctx(t), service.LocalPrincipal(alice), orgA, "audited-project")
+		proj, err := projects.Create(tctx(t), service.LocalPrincipal(alice), orgA, "audited-project", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -375,7 +375,7 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 		// The administrator can now perform the first audited mutating
 		// operation — the demo criterion, exercised through the real grants
 		// the admin template wrote.
-		if _, err := orgsSvc.Create(ctx, service.LocalPrincipal(id.Principal), "bootstrapped-org", true, []byte(`{}`)); err != nil {
+		if _, err := orgsSvc.Create(ctx, service.LocalPrincipal(id.Principal), "bootstrapped-org", true, []byte(`{}`), nil); err != nil {
 			t.Fatalf("the bootstrapped administrator cannot administer: %v", err)
 		}
 
@@ -436,10 +436,10 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 		if _, err := orgsSvc.List(tctx(t), service.LocalPrincipal(root)); err != nil {
 			t.Fatal(err)
 		}
-		if err := envs.UpdateNote(tctx(t), service.LocalPrincipal(alice), domain.Scope{Org: orgA, Project: prjA1, Env: envA1}, "noted"); err != nil {
+		if err := envs.UpdateNote(tctx(t), service.LocalPrincipal(alice), domain.Scope{Org: orgA, Project: prjA1, Env: envA1}, "noted", nil); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := envs.Create(tctx(t), service.LocalPrincipal(alice), domain.Scope{Org: orgA, Project: prjA1}, "audited-env"); err != nil {
+		if _, err := envs.Create(tctx(t), service.LocalPrincipal(alice), domain.Scope{Org: orgA, Project: prjA1}, "audited-env", nil); err != nil {
 			t.Fatal(err)
 		}
 		retentionNow := time.Date(2026, 8, 15, 12, 0, 0, 0, time.UTC)
@@ -460,7 +460,7 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 		if _, err := retention.GetHealth(tctx(t), service.LocalPrincipal(root)); err != nil {
 			t.Fatalf("emit retention health-read event: %v", err)
 		}
-		org, err := orgsSvc.Create(tctx(t), service.LocalPrincipal(root), "audited-org", true, []byte(`{}`))
+		org, err := orgsSvc.Create(tctx(t), service.LocalPrincipal(root), "audited-org", true, []byte(`{}`), nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -497,6 +497,10 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 		// the restore epoch and then reconciles the principals it made inert,
 		// one call per principal, leaving the fixture authorizing again.
 		runBackupLifecycle(t, db)
+		// Secret scanning (#74): the four scanning.finding_* types get a real
+		// emitter — warned, dismissed, blocked and overridden — driven end to end
+		// through the scanning-enabled value and declaration services.
+		runScanningLifecycle(t, db)
 		for _, typ := range audit.Types() {
 			spec, _ := audit.Spec(typ)
 			seen := int64(0)
@@ -528,7 +532,7 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 			Name: "GATED_PROBE", Classification: string(schema.Secret),
 			Declaration: schema.Declaration{Rule: &schema.Rule{Type: schema.TypeString}},
 			Presence:    schema.DefaultPresenceRules(),
-		})
+		}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -546,7 +550,7 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 
 		// 1. Refused. The transaction rolls back; the attempt and the denial
 		// both survive, both naming the key.
-		if _, err := keys.UpdateDeclaration(tctx(t), service.LocalPrincipal(alice), scope, secret.ID, tighten("A.*")); !errors.Is(err, domain.ErrNotFound) {
+		if _, err := keys.UpdateDeclaration(tctx(t), service.LocalPrincipal(alice), scope, secret.ID, tighten("A.*"), nil); !errors.Is(err, domain.ErrNotFound) {
 			t.Fatalf("a reveal-less rule change on a secret key answered %v", err)
 		}
 		if n := queryInt(t, db, "SELECT COUNT(*) FROM audit_tenant_events WHERE type = 'grant.denied' AND object_id = '"+secret.ID+"'"); n != 1 {
@@ -568,7 +572,7 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 		}
 		// RE2 has no lookahead, so the declaration cannot compile — and it is
 		// examined only AFTER the gate, which is the ordering this exercises.
-		_, err = keys.UpdateDeclaration(tctx(t), service.LocalPrincipal(revealer), scope, secret.ID, tighten(`(?=x)y`))
+		_, err = keys.UpdateDeclaration(tctx(t), service.LocalPrincipal(revealer), scope, secret.ID, tighten(`(?=x)y`), nil)
 		if !errors.Is(err, domain.ErrInvalid) {
 			t.Fatalf("an uncompilable declaration from a reveal holder answered %v", err)
 		}
@@ -925,18 +929,18 @@ func runHierarchyLifecycle(t *testing.T, db *store.DB, org domain.OrgID) {
 	}
 	actor := service.LocalPrincipal(who)
 
-	proj, err := projects.Create(ctx, actor, org, "audited-project")
+	proj, err := projects.Create(ctx, actor, org, "audited-project", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	scope := domain.Scope{Org: org, Project: domain.ProjectID(proj.ID)}
-	env, err := envs.Create(ctx, actor, scope, "audited-environment")
+	env, err := envs.Create(ctx, actor, scope, "audited-environment", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	envScope := scope
 	envScope.Env = domain.EnvID(env.ID)
-	if _, err := envs.Rename(ctx, actor, envScope, "audited-environment-renamed"); err != nil {
+	if _, err := envs.Rename(ctx, actor, envScope, "audited-environment-renamed", nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := envs.Reorder(ctx, actor, scope, []string{env.ID}); err != nil {
@@ -945,11 +949,11 @@ func runHierarchyLifecycle(t *testing.T, db *store.DB, org domain.OrgID) {
 	if err := envs.Delete(ctx, actor, envScope); err != nil {
 		t.Fatal(err)
 	}
-	folder, err := folders.Create(ctx, actor, scope, "audited-folder")
+	folder, err := folders.Create(ctx, actor, scope, "audited-folder", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := folders.Rename(ctx, actor, scope, folder.ID, "audited-folder-renamed"); err != nil {
+	if _, err := folders.Rename(ctx, actor, scope, folder.ID, "audited-folder-renamed", nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := folders.Delete(ctx, actor, scope, folder.ID); err != nil {
@@ -957,18 +961,18 @@ func runHierarchyLifecycle(t *testing.T, db *store.DB, org domain.OrgID) {
 	}
 	runValueLifecycle(t, db, actor, who, scope)
 	runCatalogueLifecycle(t, db, actor, scope)
-	if _, err := projects.Rename(ctx, actor, scope, "audited-project-renamed"); err != nil {
+	if _, err := projects.Rename(ctx, actor, scope, "audited-project-renamed", nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := projects.Delete(ctx, actor, scope); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := orgs.Rename(ctx, service.LocalPrincipal(root), org, "audited-org-renamed"); err != nil {
+	if _, err := orgs.Rename(ctx, service.LocalPrincipal(root), org, "audited-org-renamed", nil); err != nil {
 		t.Fatal(err)
 	}
 	// The org still holds this fixture's grants, so it cannot be deleted here.
 	// A throwaway org with nothing pointing at it supplies settings.org_deleted.
-	throwaway, err := orgs.Create(ctx, service.LocalPrincipal(root), "audited-org-throwaway", true, []byte(`{}`))
+	throwaway, err := orgs.Create(ctx, service.LocalPrincipal(root), "audited-org-throwaway", true, []byte(`{}`), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -991,11 +995,11 @@ func runValueLifecycle(t *testing.T, db *store.DB, actor service.Actor, who doma
 	envs := &service.Environments{DB: db, Keyring: kr}
 	values := &service.Values{DB: db, Keyring: kr}
 
-	source, err := envs.Create(ctx, actor, scope, "audited-values-source")
+	source, err := envs.Create(ctx, actor, scope, "audited-values-source", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	dest, err := envs.Create(ctx, actor, scope, "audited-values-dest")
+	dest, err := envs.Create(ctx, actor, scope, "audited-values-dest", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1008,7 +1012,7 @@ func runValueLifecycle(t *testing.T, db *store.DB, actor service.Actor, who doma
 		Name: "AUDITED_VALUE", Classification: string(schema.Secret),
 		Declaration: schema.Declaration{Rule: &schema.Rule{Type: schema.TypeString}},
 		Presence:    schema.DefaultPresenceRules(),
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1017,7 +1021,7 @@ func runValueLifecycle(t *testing.T, db *store.DB, actor service.Actor, who doma
 	// need a real emitter behind them here — value.staged for the draft,
 	// revision.published for the materialization it commits.
 	revisions := &service.Revisions{DB: db, Keyring: kr}
-	staged, err := values.Set(ctx, actor, sourceScope, key.Name, "audited-material")
+	staged, err := values.Set(ctx, actor, sourceScope, key.Name, "audited-material", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1149,7 +1153,7 @@ func runCatalogueLifecycle(t *testing.T, db *store.DB, actor service.Actor, scop
 		FolderPath:     "audited",
 		Declaration:    schema.Declaration{Rule: &schema.Rule{Type: schema.TypeString}},
 		Presence:       schema.DefaultPresenceRules(),
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1158,18 +1162,18 @@ func runCatalogueLifecycle(t *testing.T, db *store.DB, actor service.Actor, scop
 		Classification: string(schema.Config),
 		Declaration:    schema.Declaration{Rule: &schema.Rule{Type: schema.TypeBoolean}},
 		Presence:       schema.DefaultPresenceRules(),
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := keys.Rename(ctx, actor, scope, secret.ID, "AUDITED_SECRET_RENAMED"); err != nil {
+	if _, err := keys.Rename(ctx, actor, scope, secret.ID, "AUDITED_SECRET_RENAMED", nil); err != nil {
 		t.Fatal(err)
 	}
 	folder, description, note, deprecated := "audited/moved", "documented", "superseded", true
 	if _, err := keys.UpdateMetadata(ctx, actor, scope, secret.ID, service.KeyMetadataUpdate{
 		FolderPath: &folder, Description: &description,
 		Deprecated: &deprecated, DeprecationNote: &note,
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatal(err)
 	}
 	// A tightened rule on a SECRET key: the reveal gate fires here, which is
@@ -1178,17 +1182,17 @@ func runCatalogueLifecycle(t *testing.T, db *store.DB, actor service.Actor, scop
 	if _, err := keys.UpdateDeclaration(ctx, actor, scope, secret.ID, service.KeyDeclarationUpdate{
 		Declaration: schema.Declaration{Rule: &schema.Rule{Type: schema.TypeString, MinLength: &minLength}},
 		Presence:    schema.DefaultPresenceRules(),
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatal(err)
 	}
-	group, err := groups.Create(ctx, actor, scope, "audited-group")
+	group, err := groups.Create(ctx, actor, scope, "audited-group", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := keys.SetGroup(ctx, actor, scope, secret.ID, group.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := groups.Rename(ctx, actor, scope, group.ID, "audited-group-renamed"); err != nil {
+	if _, err := groups.Rename(ctx, actor, scope, group.ID, "audited-group-renamed", nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := groups.Delete(ctx, actor, scope, group.ID); err != nil {
@@ -1196,7 +1200,7 @@ func runCatalogueLifecycle(t *testing.T, db *store.DB, actor service.Actor, scop
 	}
 	// Declassification: the second reveal gate, plus the reclassification
 	// record itself.
-	if _, err := keys.Reclassify(ctx, actor, scope, secret.ID, string(schema.Config)); err != nil {
+	if _, _, err := keys.Reclassify(ctx, actor, scope, secret.ID, string(schema.Config)); err != nil {
 		t.Fatal(err)
 	}
 	for _, id := range []string{secret.ID, config.ID} {

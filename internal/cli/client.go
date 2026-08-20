@@ -207,6 +207,14 @@ func errorFromResponse(status int, payload []byte) error {
 	if body.Error.Detail != nil && *body.Error.Detail != "" {
 		message += " (" + *body.Error.Detail + ")"
 	}
+	// A Surface-2 secret-scanning refusal (#74) carries a typed findings array.
+	// Render each finding's rule id, locator and fresh acknowledgement token so
+	// the operator can resubmit with --acknowledge; never any matched text.
+	if body.Error.Findings != nil && len(*body.Error.Findings) > 0 {
+		message += fmt.Sprintf("\nsecret-scanning refused this write: %d finding(s):\n%s\n"+
+			"resubmit with --acknowledge <token>[,<token>] to override, or remove the credential.",
+			len(*body.Error.Findings), formatFindings(*body.Error.Findings))
+	}
 	switch code {
 	case apigen.ErrorCodeUnauthenticated:
 		return failf(ExitAuth, "%s", message)

@@ -87,6 +87,28 @@ func errorBody(code apigen.ErrorCode, detail string) apigen.Error {
 	return body
 }
 
+// wireScanFindings maps the service's redacted findings onto the wire type
+// (#74). It carries the rule id, surface, locator and — where present — the
+// opaque acknowledgement token, and NOTHING derived from the matched material.
+func wireScanFindings(findings []service.Finding) []apigen.ScanFinding {
+	if len(findings) == 0 {
+		return nil
+	}
+	out := make([]apigen.ScanFinding, len(findings))
+	for i, f := range findings {
+		out[i] = apigen.ScanFinding{
+			RuleId:  f.RuleID,
+			Surface: apigen.ScanFindingSurface(f.Surface),
+			Locator: f.Locator,
+		}
+		if f.Acknowledgement != "" {
+			ack := f.Acknowledgement
+			out[i].Acknowledgement = &ack
+		}
+	}
+	return out
+}
+
 // writeError renders a refusal. It never writes anything derived from the
 // cause beyond the code itself; the cause is the process log's business.
 func writeError(w http.ResponseWriter, code apigen.ErrorCode, detail string) {

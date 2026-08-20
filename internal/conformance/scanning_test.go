@@ -41,7 +41,7 @@ func scenarioScanningKeyRotation(t *testing.T, db *store.DB) {
 	})
 	kr := sharedKeyring(t, db)
 	actor := service.LocalPrincipal(who)
-	env, err := (&service.Environments{DB: db, Keyring: kr}).Create(ctx, actor, scope, "scanrot-env")
+	env, err := (&service.Environments{DB: db, Keyring: kr}).Create(ctx, actor, scope, "scanrot-env", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func scenarioScanningKeyRotation(t *testing.T, db *store.DB) {
 		Name: "TOKEN_URL", Classification: string(schema.Config),
 		Declaration: schema.Declaration{Rule: &schema.Rule{Type: schema.TypeString}},
 		Presence:    schema.DefaultPresenceRules(),
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +114,7 @@ func scenarioScanningDismissals(t *testing.T, db *store.DB) {
 	envs := &service.Environments{DB: db, Keyring: kr}
 	keys := &service.Keys{DB: db, Keyring: kr}
 
-	env, err := envs.Create(ctx, actor, scope, "scanning-env")
+	env, err := envs.Create(ctx, actor, scope, "scanning-env", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func scenarioScanningDismissals(t *testing.T, db *store.DB) {
 		Name: "API_URL", Classification: string(schema.Config),
 		Declaration: schema.Declaration{Rule: &schema.Rule{Type: schema.TypeString}},
 		Presence:    schema.DefaultPresenceRules(),
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

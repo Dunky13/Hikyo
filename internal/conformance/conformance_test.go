@@ -178,7 +178,7 @@ func resetPostgres(t *testing.T, cfg store.Config) {
 func scenarioRoundtrip(t *testing.T, db *store.DB) {
 	orgs := &service.Orgs{DB: db}
 	meta := json.RawMessage(`{"tier":"gold","limits":{"projects":3}}`)
-	created, err := orgs.Create(t.Context(), service.LocalPrincipal(admin), "roundtrip", true, meta)
+	created, err := orgs.Create(t.Context(), service.LocalPrincipal(admin), "roundtrip", true, meta, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,7 +195,7 @@ func scenarioRoundtrip(t *testing.T, db *store.DB) {
 	if !got.Active {
 		t.Error("active=true did not round-trip")
 	}
-	inactive, err := orgs.Create(t.Context(), service.LocalPrincipal(admin), "roundtrip-inactive", false, json.RawMessage(`{}`))
+	inactive, err := orgs.Create(t.Context(), service.LocalPrincipal(admin), "roundtrip-inactive", false, json.RawMessage(`{}`), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +221,7 @@ func scenarioRoundtrip(t *testing.T, db *store.DB) {
 func scenarioListOrder(t *testing.T, db *store.DB) {
 	orgs := &service.Orgs{DB: db}
 	for _, name := range []string{"zebra", "alpha", "mango"} {
-		if _, err := orgs.Create(t.Context(), service.LocalPrincipal(admin), name, false, json.RawMessage(`{}`)); err != nil {
+		if _, err := orgs.Create(t.Context(), service.LocalPrincipal(admin), name, false, json.RawMessage(`{}`), nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -272,17 +272,17 @@ func scenarioRollback(t *testing.T, db *store.DB) {
 
 func scenarioDuplicate(t *testing.T, db *store.DB) {
 	orgs := &service.Orgs{DB: db}
-	if _, err := orgs.Create(t.Context(), service.LocalPrincipal(admin), "dupe", false, json.RawMessage(`{}`)); err != nil {
+	if _, err := orgs.Create(t.Context(), service.LocalPrincipal(admin), "dupe", false, json.RawMessage(`{}`), nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := orgs.Create(t.Context(), service.LocalPrincipal(admin), "dupe", false, json.RawMessage(`{}`)); err == nil {
+	if _, err := orgs.Create(t.Context(), service.LocalPrincipal(admin), "dupe", false, json.RawMessage(`{}`), nil); err == nil {
 		t.Fatal("duplicate org name must be refused by the unique constraint")
 	}
 }
 
 func scenarioInvalidMetadata(t *testing.T, db *store.DB) {
 	orgs := &service.Orgs{DB: db}
-	if _, err := orgs.Create(t.Context(), service.LocalPrincipal(admin), "badjson", false, json.RawMessage(`{not json`)); err == nil {
+	if _, err := orgs.Create(t.Context(), service.LocalPrincipal(admin), "badjson", false, json.RawMessage(`{not json`), nil); err == nil {
 		t.Fatal("invalid JSON metadata must be refused at the boundary")
 	}
 }
@@ -305,7 +305,7 @@ func scenarioTenantChain(t *testing.T, db *store.DB) {
 	projects := &service.Projects{DB: db}
 	envs := &service.Environments{DB: db, Keyring: sharedKeyring(t, db)}
 
-	org, err := orgs.Create(t.Context(), service.LocalPrincipal(admin), "tenant-chain", true, json.RawMessage(`{}`))
+	org, err := orgs.Create(t.Context(), service.LocalPrincipal(admin), "tenant-chain", true, json.RawMessage(`{}`), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -327,12 +327,12 @@ func scenarioTenantChain(t *testing.T, db *store.DB) {
 		 VALUES ('grt_ct_pub', 'usr_conformance_tenant', 'publish', '` + org.ID + `', NULL, NULL, '2026-01-01T00:00:00Z')`,
 	})
 
-	proj, err := projects.Create(t.Context(), service.LocalPrincipal(tenant), domain.OrgID(org.ID), "conformance-project")
+	proj, err := projects.Create(t.Context(), service.LocalPrincipal(tenant), domain.OrgID(org.ID), "conformance-project", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	envScope := domain.Scope{Org: domain.OrgID(org.ID), Project: domain.ProjectID(proj.ID)}
-	created, err := envs.Create(t.Context(), service.LocalPrincipal(tenant), envScope, "dev")
+	created, err := envs.Create(t.Context(), service.LocalPrincipal(tenant), envScope, "dev", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -350,7 +350,7 @@ func scenarioTenantChain(t *testing.T, db *store.DB) {
 	if got.OrgID != org.ID || got.ProjectID != proj.ID {
 		t.Errorf("chain columns did not come from the proof: %+v", got)
 	}
-	if err := envs.UpdateNote(t.Context(), service.LocalPrincipal(tenant), fullScope, "noted"); err != nil {
+	if err := envs.UpdateNote(t.Context(), service.LocalPrincipal(tenant), fullScope, "noted", nil); err != nil {
 		t.Fatal(err)
 	}
 	got, err = envs.Get(t.Context(), service.LocalPrincipal(tenant), fullScope)
@@ -378,7 +378,7 @@ func scenarioConcurrent(t *testing.T, db *store.DB) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := orgs.Create(context.Background(), service.LocalPrincipal(admin), fmt.Sprintf("concurrent-%d", i), true, json.RawMessage(`{}`))
+			_, err := orgs.Create(context.Background(), service.LocalPrincipal(admin), fmt.Sprintf("concurrent-%d", i), true, json.RawMessage(`{}`), nil)
 			errs <- err
 		}()
 	}
@@ -406,7 +406,7 @@ func tenantFixture(t *testing.T, db *store.DB, label string) (domain.PrincipalID
 	t.Helper()
 	orgs := &service.Orgs{DB: db}
 	projects := &service.Projects{DB: db}
-	org, err := orgs.Create(t.Context(), service.LocalPrincipal(admin), label, true, json.RawMessage(`{}`))
+	org, err := orgs.Create(t.Context(), service.LocalPrincipal(admin), label, true, json.RawMessage(`{}`), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -424,7 +424,7 @@ func tenantFixture(t *testing.T, db *store.DB, label string) (domain.PrincipalID
 			label, i, principal, capability, org.ID))
 	}
 	seed(t, db, stmts)
-	proj, err := projects.Create(t.Context(), service.LocalPrincipal(principal), domain.OrgID(org.ID), label+"-project")
+	proj, err := projects.Create(t.Context(), service.LocalPrincipal(principal), domain.OrgID(org.ID), label+"-project", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -450,7 +450,7 @@ func scenarioHierarchyCRUD(t *testing.T, db *store.DB) {
 	if len(list) != 1 || list[0].ID != string(scope.Project) {
 		t.Fatalf("project list = %+v, want exactly the created project", list)
 	}
-	renamedProject, err := projects.Rename(t.Context(), actor, scope, "hierarchy-renamed")
+	renamedProject, err := projects.Rename(t.Context(), actor, scope, "hierarchy-renamed", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -468,7 +468,7 @@ func scenarioHierarchyCRUD(t *testing.T, db *store.DB) {
 	// Environments: created in order, appended at the end.
 	var created []service.Environment
 	for _, name := range []string{"dev", "staging", "prod"} {
-		env, err := envs.Create(t.Context(), actor, scope, name)
+		env, err := envs.Create(t.Context(), actor, scope, name, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -533,7 +533,7 @@ func scenarioHierarchyCRUD(t *testing.T, db *store.DB) {
 	// Environment rename, read back through the full chain.
 	envScope := scope
 	envScope.Env = domain.EnvID(created[0].ID)
-	if _, err := envs.Rename(t.Context(), actor, envScope, "development"); err != nil {
+	if _, err := envs.Rename(t.Context(), actor, envScope, "development", nil); err != nil {
 		t.Fatal(err)
 	}
 	gotEnv, err := envs.Get(t.Context(), actor, envScope)
@@ -545,12 +545,12 @@ func scenarioHierarchyCRUD(t *testing.T, db *store.DB) {
 	}
 
 	// A duplicate name among live siblings is a conflict, on both engines.
-	if _, err := envs.Create(t.Context(), actor, scope, "prod"); !errors.Is(err, domain.ErrConflict) {
+	if _, err := envs.Create(t.Context(), actor, scope, "prod", nil); !errors.Is(err, domain.ErrConflict) {
 		t.Fatalf("duplicate environment name: err = %v, want ErrConflict", err)
 	}
 
 	// Folders: create, list, rename, delete.
-	folder, err := folders.Create(t.Context(), actor, scope, "services/api")
+	folder, err := folders.Create(t.Context(), actor, scope, "services/api", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -564,7 +564,7 @@ func scenarioHierarchyCRUD(t *testing.T, db *store.DB) {
 	if folderList[0].OrgID != string(scope.Org) || folderList[0].ProjectID != string(scope.Project) {
 		t.Fatalf("folder chain columns did not come from the proof: %+v", folderList[0])
 	}
-	if _, err := folders.Rename(t.Context(), actor, scope, folder.ID, "services/gateway"); err != nil {
+	if _, err := folders.Rename(t.Context(), actor, scope, folder.ID, "services/gateway", nil); err != nil {
 		t.Fatal(err)
 	}
 	gotFolder, err := folders.Get(t.Context(), actor, scope, folder.ID)
@@ -574,7 +574,7 @@ func scenarioHierarchyCRUD(t *testing.T, db *store.DB) {
 	if gotFolder.Path != "services/gateway" {
 		t.Fatalf("folder rename did not persist: %q", gotFolder.Path)
 	}
-	if _, err := folders.Create(t.Context(), actor, scope, "services/gateway"); !errors.Is(err, domain.ErrConflict) {
+	if _, err := folders.Create(t.Context(), actor, scope, "services/gateway", nil); !errors.Is(err, domain.ErrConflict) {
 		t.Fatalf("duplicate folder path: err = %v, want ErrConflict", err)
 	}
 	if err := folders.Delete(t.Context(), actor, scope, folder.ID); err != nil {
@@ -601,7 +601,7 @@ func scenarioHierarchyCRUD(t *testing.T, db *store.DB) {
 	}
 	// The org still holds this principal's grants, so its delete is refused —
 	// deletes never cascade. Renaming it still works.
-	if _, err := orgs.Rename(t.Context(), service.LocalPrincipal(admin), scope.Org, "hierarchy-renamed-org"); err != nil {
+	if _, err := orgs.Rename(t.Context(), service.LocalPrincipal(admin), scope.Org, "hierarchy-renamed-org", nil); err != nil {
 		t.Fatal(err)
 	}
 	got, err := orgs.Get(t.Context(), service.LocalPrincipal(admin), scope.Org)
@@ -621,11 +621,11 @@ func scenarioEnvironmentCap(t *testing.T, db *store.DB) {
 	who, scope := tenantFixture(t, db, "envcap")
 	actor := service.LocalPrincipal(who)
 	for i := range service.MaxEnvironmentsPerProject {
-		if _, err := envs.Create(t.Context(), actor, scope, fmt.Sprintf("env-%02d", i)); err != nil {
+		if _, err := envs.Create(t.Context(), actor, scope, fmt.Sprintf("env-%02d", i), nil); err != nil {
 			t.Fatalf("creating environment %d of the cap: %v", i, err)
 		}
 	}
-	_, err := envs.Create(t.Context(), actor, scope, "one-too-many")
+	_, err := envs.Create(t.Context(), actor, scope, "one-too-many", nil)
 	if !errors.Is(err, domain.ErrLimitExceeded) {
 		t.Fatalf("environment %d: err = %v, want ErrLimitExceeded", service.MaxEnvironmentsPerProject+1, err)
 	}
@@ -648,7 +648,7 @@ func scenarioDeleteRefusesChildren(t *testing.T, db *store.DB) {
 	who, scope := tenantFixture(t, db, "nocascade")
 	actor := service.LocalPrincipal(who)
 
-	env, err := envs.Create(t.Context(), actor, scope, "dev")
+	env, err := envs.Create(t.Context(), actor, scope, "dev", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -661,7 +661,7 @@ func scenarioDeleteRefusesChildren(t *testing.T, db *store.DB) {
 		t.Fatal(err)
 	}
 
-	folder, err := folders.Create(t.Context(), actor, scope, "shared")
+	folder, err := folders.Create(t.Context(), actor, scope, "shared", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -689,7 +689,7 @@ func scenarioOrderAfterDeletion(t *testing.T, db *store.DB) {
 
 	var created []service.Environment
 	for _, name := range []string{"first", "second", "third"} {
-		env, err := envs.Create(t.Context(), actor, scope, name)
+		env, err := envs.Create(t.Context(), actor, scope, name, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -700,7 +700,7 @@ func scenarioOrderAfterDeletion(t *testing.T, db *store.DB) {
 	if err := envs.Delete(t.Context(), actor, middle); err != nil {
 		t.Fatal(err)
 	}
-	appended, err := envs.Create(t.Context(), actor, scope, "fourth")
+	appended, err := envs.Create(t.Context(), actor, scope, "fourth", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -144,10 +144,10 @@ func runWebAuthnRoundtrip(t *testing.T, db *store.DB) {
 	// The passkey session passes an MFA-mandatory operation (org create is
 	// instance-config); the password-only session is refused for inadequate
 	// assurance.
-	if _, err := orgs.Create(ctx, service.Bearer(login.SessionToken), "passkey-org", true, []byte(`{}`)); err != nil {
+	if _, err := orgs.Create(ctx, service.Bearer(login.SessionToken), "passkey-org", true, []byte(`{}`), nil); err != nil {
 		t.Fatalf("a webauthn session must pass an MFA-mandatory op: %v", err)
 	}
-	if _, err := orgs.Create(ctx, service.Bearer(passwordSession), "pw-org", true, []byte(`{}`)); !errors.Is(err, domain.ErrUnauthorized) {
+	if _, err := orgs.Create(ctx, service.Bearer(passwordSession), "pw-org", true, []byte(`{}`), nil); !errors.Is(err, domain.ErrUnauthorized) {
 		t.Fatalf("a password-only session must be refused an MFA-mandatory op, got %v", err)
 	}
 }

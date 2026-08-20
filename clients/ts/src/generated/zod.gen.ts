@@ -299,6 +299,26 @@ export const zAdapterMove = z.object({
 });
 
 /**
+ * One redacted secret-scanning result (#74, secret-scanning ADR §4). It
+ * carries a rule id, the surface/ingress it fired on, an immutable locator
+ * (key identity for Surface 1, schema-location class for Surface 2), and —
+ * where an acknowledgement is possible — an opaque token. It NEVER carries
+ * the matched text, an offset, a length, or an excerpt.
+ *
+ */
+export const zScanFinding = z.object({
+    rule_id: z.string(),
+    surface: z.enum([
+        'value_write',
+        'declassification',
+        'import_value',
+        'edit'
+    ]),
+    locator: z.string(),
+    acknowledgement: z.string().optional()
+});
+
+/**
  * Closed set — never grows. Clients branch on this, not on prose.
  */
 export const zErrorCode = z.enum([
@@ -316,7 +336,8 @@ export const zError = z.object({
     error: z.object({
         code: zErrorCode,
         message: z.string(),
-        detail: z.string().nullish()
+        detail: z.string().nullish(),
+        findings: z.array(zScanFinding).optional()
     })
 });
 
@@ -509,12 +530,6 @@ export const zRecoveryCodesResult = z.object({
     login: zLoginResult
 });
 
-export const zCreateOrgRequest = z.object({
-    name: z.string().min(1).max(128),
-    active: z.boolean().optional().default(true),
-    metadata: z.record(z.string(), z.unknown()).nullish()
-});
-
 export const zOrg = z.object({
     id: zId,
     name: z.string(),
@@ -564,14 +579,6 @@ export const zMyOrgList = z.object({
  */
 export const zEntityName = z.string().min(1).max(128);
 
-export const zRenameRequest = z.object({
-    name: zEntityName
-});
-
-export const zCreateProjectRequest = z.object({
-    name: zEntityName
-});
-
 export const zProject = z.object({
     id: zId,
     org_id: zId,
@@ -582,15 +589,6 @@ export const zProject = z.object({
 export const zProjectList = z.object({
     items: z.array(zProject),
     count: z.int().gte(0)
-});
-
-export const zCreateEnvironmentRequest = z.object({
-    name: zEntityName
-});
-
-export const zCloneEnvironmentRequest = z.object({
-    name: zEntityName,
-    source_environment_id: zId
 });
 
 export const zRevisionPinRequest = z.object({
@@ -642,8 +640,52 @@ export const zTokenKeyRotation = z.object({
     token_key_version: z.coerce.bigint().min(BigInt('-9223372036854775808'), { error: 'Invalid value: Expected int64 to be >= -9223372036854775808' }).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' })
 });
 
+export const zScanningKeyRotation = z.object({
+    scanning_key_version: z.coerce.bigint().min(BigInt('-9223372036854775808'), { error: 'Invalid value: Expected int64 to be >= -9223372036854775808' }).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }),
+    dismissals_dropped: z.coerce.bigint().min(BigInt('-9223372036854775808'), { error: 'Invalid value: Expected int64 to be >= -9223372036854775808' }).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' })
+});
+
+/**
+ * Secret-scanning acknowledgement tokens (#74). On a value write, a
+ * keep-as-config token dismisses a Surface-1 warning for exactly that
+ * value. On a declaration write, one override token per finding is
+ * re-scanned against the current content; a stale, version-skewed, or
+ * surplus token is rejected by name. There is no blanket ignore-all input.
+ *
+ */
+export const zAcknowledgements = z.array(z.string());
+
+export const zCreateOrgRequest = z.object({
+    name: z.string().min(1).max(128),
+    active: z.boolean().optional().default(true),
+    metadata: z.record(z.string(), z.unknown()).nullish(),
+    acknowledgements: zAcknowledgements.optional()
+});
+
+export const zRenameRequest = z.object({
+    name: zEntityName,
+    acknowledgements: zAcknowledgements.optional()
+});
+
+export const zCreateProjectRequest = z.object({
+    name: zEntityName,
+    acknowledgements: zAcknowledgements.optional()
+});
+
+export const zCreateEnvironmentRequest = z.object({
+    name: zEntityName,
+    acknowledgements: zAcknowledgements.optional()
+});
+
+export const zCloneEnvironmentRequest = z.object({
+    name: zEntityName,
+    source_environment_id: zId,
+    acknowledgements: zAcknowledgements.optional()
+});
+
 export const zSetValueRequest = z.object({
-    value: z.string().max(65536)
+    value: z.string().max(65536),
+    acknowledgements: zAcknowledgements.optional()
 });
 
 export const zRevealDiffRequest = z.object({
@@ -805,11 +847,13 @@ export const zEnvironmentOrderRequest = z.object({
 export const zFolderPath = z.string().min(1).max(256);
 
 export const zCreateFolderRequest = z.object({
-    path: zFolderPath
+    path: zFolderPath,
+    acknowledgements: zAcknowledgements.optional()
 });
 
 export const zRenameFolderRequest = z.object({
-    path: zFolderPath
+    path: zFolderPath,
+    acknowledgements: zAcknowledgements.optional()
 });
 
 export const zFolder = z.object({
@@ -1201,7 +1245,8 @@ export const zKeyName = z.string().min(1).max(128).regex(/^[A-Z_][A-Z0-9_]*$/);
 export const zClonedEnvironment = z.object({
     environment: zEnvironment,
     copied: z.array(zKeyName),
-    uncopied_secrets: z.array(zKeyName)
+    uncopied_secrets: z.array(zKeyName),
+    findings: z.array(zScanFinding).optional()
 });
 
 export const zRollbackRequest = z.object({
@@ -1269,7 +1314,8 @@ export const zCopyValuesResult = z.object({
     copied: z.array(z.object({
         key: zKeyName,
         destination_environment_id: zId
-    }))
+    })),
+    findings: z.array(zScanFinding).optional()
 });
 
 /**
@@ -1300,7 +1346,8 @@ export const zImportValuesRequest = z.object({
 
 export const zImportValuesResult = z.object({
     imported: z.array(zKeyName),
-    skipped: z.array(zKeyName)
+    skipped: z.array(zKeyName),
+    findings: z.array(zScanFinding).optional()
 });
 
 /**
@@ -1328,7 +1375,8 @@ export const zPendingChange = z.object({
     classification: zKeyClassification,
     operation: z.enum(['set', 'unset']),
     staged_from_revision: z.coerce.bigint().min(BigInt('-9223372036854775808'), { error: 'Invalid value: Expected int64 to be >= -9223372036854775808' }).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }),
-    created_at: z.iso.datetime()
+    created_at: z.iso.datetime(),
+    findings: z.array(zScanFinding).optional()
 });
 
 /**
@@ -1457,7 +1505,8 @@ export const zValueCell = z.object({
 
 export const zValueList = z.object({
     items: z.array(zValueCell),
-    count: z.int().gte(0)
+    count: z.int().gte(0),
+    findings: z.array(zScanFinding).optional()
 });
 
 export const zValueOccurrenceCandidate = z.object({
@@ -1679,7 +1728,8 @@ export const zKey = z.object({
     declaration: zKeyDeclaration,
     presence: zKeyPresenceRules,
     group_id: z.string(),
-    created_at: zTimestamp
+    created_at: zTimestamp,
+    findings: z.array(zScanFinding).optional()
 });
 
 export const zKeyList = z.object({
@@ -1697,7 +1747,8 @@ export const zCreateKeyRequest = z.object({
     deprecation_note: z.string().max(4096).optional(),
     declaration: zKeyDeclaration,
     presence: zKeyPresenceRules.optional(),
-    group_id: z.string().optional()
+    group_id: z.string().optional(),
+    acknowledgements: zAcknowledgements.optional()
 });
 
 export const zUpdateKeyMetadataRequest = z.object({
@@ -1705,16 +1756,19 @@ export const zUpdateKeyMetadataRequest = z.object({
     description: z.string().max(4096).optional(),
     deprecated: z.boolean().optional(),
     deprecation_note: z.string().max(4096).optional(),
-    classification: zKeyClassification.optional()
+    classification: zKeyClassification.optional(),
+    acknowledgements: zAcknowledgements.optional()
 });
 
 export const zRenameKeyRequest = z.object({
-    name: zKeyName
+    name: zKeyName,
+    acknowledgements: zAcknowledgements.optional()
 });
 
 export const zUpdateKeyDeclarationRequest = z.object({
     declaration: zKeyDeclaration,
-    presence: zKeyPresenceRules
+    presence: zKeyPresenceRules,
+    acknowledgements: zAcknowledgements.optional()
 });
 
 export const zReclassifyKeyRequest = z.object({
@@ -1741,11 +1795,13 @@ export const zKeyGroupList = z.object({
 });
 
 export const zCreateKeyGroupRequest = z.object({
-    name: z.string().min(1).max(128)
+    name: z.string().min(1).max(128),
+    acknowledgements: zAcknowledgements.optional()
 });
 
 export const zRenameKeyGroupRequest = z.object({
-    name: z.string().min(1).max(128)
+    name: z.string().min(1).max(128),
+    acknowledgements: zAcknowledgements.optional()
 });
 
 export const zOidcStartRequest = z.object({
@@ -4726,6 +4782,11 @@ export const zWatchProjectEventsResponse = z.string();
  * The rotation.
  */
 export const zRotateTokenKeyResponse = zTokenKeyRotation;
+
+/**
+ * The rotation.
+ */
+export const zRotateScanningKeyResponse = zScanningKeyRotation;
 
 export const zListAdaptersPath = z.object({
     org: zId,

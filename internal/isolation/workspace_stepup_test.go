@@ -494,7 +494,7 @@ func runStepUpRevealIsSpentByValuePath(t *testing.T, db *store.DB) {
 	values := &service.Values{DB: db, Keyring: probeKeyring(t, db), Auth: ws.Reauth}
 	valueScope := scopeEnv(orgA, prjA1, envA1)
 	staged, err := values.Set(ctx, service.LocalPrincipal(custodian),
-		valueScope, keyName, "workspace-secret")
+		valueScope, keyName, "workspace-secret", nil)
 	if err != nil {
 		t.Fatalf("seed workspace reveal value: %v", err)
 	}

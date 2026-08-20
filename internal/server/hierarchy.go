@@ -37,30 +37,30 @@ import (
 // authorize() takes — so a wrong-depth address is refused at the chokepoint
 // rather than silently widened here.
 type ProjectService interface {
-	Create(ctx context.Context, actor service.Actor, org domain.OrgID, name string) (service.Project, error)
+	Create(ctx context.Context, actor service.Actor, org domain.OrgID, name string, acks []string) (service.Project, error)
 	Get(ctx context.Context, actor service.Actor, scope domain.Scope) (service.Project, error)
 	List(ctx context.Context, actor service.Actor, org domain.OrgID) ([]service.Project, error)
-	Rename(ctx context.Context, actor service.Actor, scope domain.Scope, name string) (service.Project, error)
+	Rename(ctx context.Context, actor service.Actor, scope domain.Scope, name string, acks []string) (service.Project, error)
 	Delete(ctx context.Context, actor service.Actor, scope domain.Scope) error
 }
 
 type EnvironmentService interface {
-	Create(ctx context.Context, actor service.Actor, scope domain.Scope, name string) (service.Environment, error)
+	Create(ctx context.Context, actor service.Actor, scope domain.Scope, name string, acks []string) (service.Environment, error)
 	// Clone is create-with-clone-at-creation (#50). It is a separate method
 	// because its RESULT is different: a clone reports what it could not take.
-	Clone(ctx context.Context, actor service.Actor, scope domain.Scope, name, sourceEnvID string) (service.Environment, service.CloneResult, error)
+	Clone(ctx context.Context, actor service.Actor, scope domain.Scope, name, sourceEnvID string, acks []string) (service.Environment, service.CloneResult, error)
 	Get(ctx context.Context, actor service.Actor, scope domain.Scope) (service.Environment, error)
 	List(ctx context.Context, actor service.Actor, scope domain.Scope) ([]service.Environment, error)
-	Rename(ctx context.Context, actor service.Actor, scope domain.Scope, name string) (service.Environment, error)
+	Rename(ctx context.Context, actor service.Actor, scope domain.Scope, name string, acks []string) (service.Environment, error)
 	Reorder(ctx context.Context, actor service.Actor, scope domain.Scope, ordered []string) ([]service.Environment, error)
 	Delete(ctx context.Context, actor service.Actor, scope domain.Scope) error
 }
 
 type FolderService interface {
-	Create(ctx context.Context, actor service.Actor, scope domain.Scope, path string) (service.Folder, error)
+	Create(ctx context.Context, actor service.Actor, scope domain.Scope, path string, acks []string) (service.Folder, error)
 	Get(ctx context.Context, actor service.Actor, scope domain.Scope, id string) (service.Folder, error)
 	List(ctx context.Context, actor service.Actor, scope domain.Scope) ([]service.Folder, error)
-	Rename(ctx context.Context, actor service.Actor, scope domain.Scope, id, path string) (service.Folder, error)
+	Rename(ctx context.Context, actor service.Actor, scope domain.Scope, id, path string, acks []string) (service.Folder, error)
 	Delete(ctx context.Context, actor service.Actor, scope domain.Scope, id string) error
 }
 
@@ -124,6 +124,21 @@ func (a *API) writeHandlerError(w http.ResponseWriter, r *http.Request, err erro
 	if errors.As(err, &sd) {
 		detail = sd.SafeDetail()
 	}
+	// A Surface-2 secret-scanning refusal (#74) carries a typed findings array
+	// alongside the bad_request code: each blocked field's locator, rule id and a
+	// fresh content-bound acknowledgement token. It is machine-consumable and
+	// frozen; never the matched text.
+	var sf interface{ Findings() []service.Finding }
+	if errors.As(err, &sf) {
+		body := errorBody(code, detail)
+		if fs := wireScanFindings(sf.Findings()); len(fs) > 0 {
+			body.Error.Findings = &fs
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(statuses[code])
+		_ = json.NewEncoder(w).Encode(body)
+		return
+	}
 	writeError(w, code, detail)
 }
 
@@ -132,7 +147,7 @@ func (a *API) writeHandlerError(w http.ResponseWriter, r *http.Request, err erro
 // ---------------------------------------------------------------------------
 
 func (a *API) RenameOrg(ctx context.Context, req apigen.RenameOrgRequestObject) (apigen.RenameOrgResponseObject, error) {
-	org, err := a.Orgs.Rename(ctx, service.Bearer(bearer(ctx)), domain.OrgID(req.Org), req.Body.Name)
+	org, err := a.Orgs.Rename(ctx, service.Bearer(bearer(ctx)), domain.OrgID(req.Org), req.Body.Name, derefAcks(req.Body.Acknowledgements))
 	if err != nil {
 		return nil, err
 	}
@@ -163,7 +178,7 @@ func (a *API) ListProjects(ctx context.Context, req apigen.ListProjectsRequestOb
 }
 
 func (a *API) CreateProject(ctx context.Context, req apigen.CreateProjectRequestObject) (apigen.CreateProjectResponseObject, error) {
-	project, err := a.Projects.Create(ctx, service.Bearer(bearer(ctx)), domain.OrgID(req.Org), req.Body.Name)
+	project, err := a.Projects.Create(ctx, service.Bearer(bearer(ctx)), domain.OrgID(req.Org), req.Body.Name, derefAcks(req.Body.Acknowledgements))
 	if err != nil {
 		return nil, err
 	}
@@ -179,7 +194,7 @@ func (a *API) GetProject(ctx context.Context, req apigen.GetProjectRequestObject
 }
 
 func (a *API) RenameProject(ctx context.Context, req apigen.RenameProjectRequestObject) (apigen.RenameProjectResponseObject, error) {
-	project, err := a.Projects.Rename(ctx, service.Bearer(bearer(ctx)), projectScope(req.Org, req.Project), req.Body.Name)
+	project, err := a.Projects.Rename(ctx, service.Bearer(bearer(ctx)), projectScope(req.Org, req.Project), req.Body.Name, derefAcks(req.Body.Acknowledgements))
 	if err != nil {
 		return nil, err
 	}
@@ -206,7 +221,7 @@ func (a *API) ListEnvironments(ctx context.Context, req apigen.ListEnvironmentsR
 }
 
 func (a *API) CreateEnvironment(ctx context.Context, req apigen.CreateEnvironmentRequestObject) (apigen.CreateEnvironmentResponseObject, error) {
-	env, err := a.Environments.Create(ctx, service.Bearer(bearer(ctx)), projectScope(req.Org, req.Project), req.Body.Name)
+	env, err := a.Environments.Create(ctx, service.Bearer(bearer(ctx)), projectScope(req.Org, req.Project), req.Body.Name, derefAcks(req.Body.Acknowledgements))
 	if err != nil {
 		return nil, err
 	}
@@ -232,7 +247,7 @@ func (a *API) GetEnvironment(ctx context.Context, req apigen.GetEnvironmentReque
 
 func (a *API) RenameEnvironment(ctx context.Context, req apigen.RenameEnvironmentRequestObject) (apigen.RenameEnvironmentResponseObject, error) {
 	env, err := a.Environments.Rename(ctx, service.Bearer(bearer(ctx)),
-		envScope(req.Org, req.Project, req.Environment), req.Body.Name)
+		envScope(req.Org, req.Project, req.Environment), req.Body.Name, derefAcks(req.Body.Acknowledgements))
 	if err != nil {
 		return nil, err
 	}
@@ -264,7 +279,7 @@ func (a *API) ListFolders(ctx context.Context, req apigen.ListFoldersRequestObje
 }
 
 func (a *API) CreateFolder(ctx context.Context, req apigen.CreateFolderRequestObject) (apigen.CreateFolderResponseObject, error) {
-	folder, err := a.Folders.Create(ctx, service.Bearer(bearer(ctx)), projectScope(req.Org, req.Project), req.Body.Path)
+	folder, err := a.Folders.Create(ctx, service.Bearer(bearer(ctx)), projectScope(req.Org, req.Project), req.Body.Path, derefAcks(req.Body.Acknowledgements))
 	if err != nil {
 		return nil, err
 	}
@@ -281,7 +296,7 @@ func (a *API) GetFolder(ctx context.Context, req apigen.GetFolderRequestObject) 
 
 func (a *API) RenameFolder(ctx context.Context, req apigen.RenameFolderRequestObject) (apigen.RenameFolderResponseObject, error) {
 	folder, err := a.Folders.Rename(ctx, service.Bearer(bearer(ctx)),
-		projectScope(req.Org, req.Project), req.Folder, req.Body.Path)
+		projectScope(req.Org, req.Project), req.Folder, req.Body.Path, derefAcks(req.Body.Acknowledgements))
 	if err != nil {
 		return nil, err
 	}

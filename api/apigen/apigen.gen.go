@@ -1305,6 +1305,30 @@ func (e SamlStartRequestPurpose) Valid() bool {
 	}
 }
 
+// Defines values for ScanFindingSurface.
+const (
+	Declassification ScanFindingSurface = "declassification"
+	Edit             ScanFindingSurface = "edit"
+	ImportValue      ScanFindingSurface = "import_value"
+	ValueWrite       ScanFindingSurface = "value_write"
+)
+
+// Valid indicates whether the value is a known member of the ScanFindingSurface enum.
+func (e ScanFindingSurface) Valid() bool {
+	switch e {
+	case Declassification:
+		return true
+	case Edit:
+		return true
+	case ImportValue:
+		return true
+	case ValueWrite:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ScimAttentionState.
 const (
 	ScimAttentionStateInertMapping        ScimAttentionState = "inert_mapping"
@@ -1586,6 +1610,13 @@ func (e ShowAdapterTargetParamsFormat) Valid() bool {
 		return false
 	}
 }
+
+// Acknowledgements Secret-scanning acknowledgement tokens (#74). On a value write, a
+// keep-as-config token dismisses a Surface-1 warning for exactly that
+// value. On a declaration write, one override token per finding is
+// re-scanned against the current content; a stale, version-skewed, or
+// surplus token is rejected by name. There is no blanket ignore-all input.
+type Acknowledgements = []string
 
 // ActiveSession One of the caller's own sessions. Metadata only; no verifier is ever returned.
 type ActiveSession struct {
@@ -2144,6 +2175,13 @@ type ChangedKeyChange string
 
 // CloneEnvironmentRequest defines model for CloneEnvironmentRequest.
 type CloneEnvironmentRequest struct {
+	// Acknowledgements Secret-scanning acknowledgement tokens (#74). On a value write, a
+	// keep-as-config token dismisses a Surface-1 warning for exactly that
+	// value. On a declaration write, one override token per finding is
+	// re-scanned against the current content; a stale, version-skewed, or
+	// surplus token is rejected by name. There is no blanket ignore-all input.
+	Acknowledgements *Acknowledgements `json:"acknowledgements,omitempty"`
+
 	// Name A display name for an organisation, project or environment. Identity is
 	// the immutable id, so this is a label and a rename never breaks a
 	// reference. The 128-byte bound is the one the organisation contract has
@@ -2173,6 +2211,10 @@ type ClonedEnvironment struct {
 	// anywhere: the flat-model ADR deleted both, and every value is explicit
 	// per environment.
 	Environment Environment `json:"environment"`
+
+	// Findings Secret-scanning warnings the cloned config values produced (#74,
+	// Surface 1), warn-not-block.
+	Findings *[]ScanFinding `json:"findings,omitempty"`
 
 	// UncopiedSecrets The `secret` key names the source-material gate blocked. They land
 	// `absent` in the new environment - never silently, which is why
@@ -2211,6 +2253,10 @@ type CopyValuesResult struct {
 		// here and bytes in the service; the grammar is ASCII, so they agree.
 		Key KeyName `json:"key"`
 	} `json:"copied"`
+
+	// Findings Secret-scanning warnings the copied config values produced (#74,
+	// Surface 1), warn-not-block. Absent or empty when nothing matched.
+	Findings *[]ScanFinding `json:"findings,omitempty"`
 }
 
 // CreateAdapterRequest defines model for CreateAdapterRequest.
@@ -2256,6 +2302,13 @@ type CreateBindingRequest struct {
 
 // CreateEnvironmentRequest defines model for CreateEnvironmentRequest.
 type CreateEnvironmentRequest struct {
+	// Acknowledgements Secret-scanning acknowledgement tokens (#74). On a value write, a
+	// keep-as-config token dismisses a Surface-1 warning for exactly that
+	// value. On a declaration write, one override token per finding is
+	// re-scanned against the current content; a stale, version-skewed, or
+	// surplus token is rejected by name. There is no blanket ignore-all input.
+	Acknowledgements *Acknowledgements `json:"acknowledgements,omitempty"`
+
 	// Name A display name for an organisation, project or environment. Identity is
 	// the immutable id, so this is a label and a rename never breaks a
 	// reference. The 128-byte bound is the one the organisation contract has
@@ -2304,6 +2357,13 @@ type CreateFederationIssuerRequest struct {
 
 // CreateFolderRequest defines model for CreateFolderRequest.
 type CreateFolderRequest struct {
+	// Acknowledgements Secret-scanning acknowledgement tokens (#74). On a value write, a
+	// keep-as-config token dismisses a Surface-1 warning for exactly that
+	// value. On a declaration write, one override token per finding is
+	// re-scanned against the current content; a stale, version-skewed, or
+	// surplus token is rejected by name. There is no blanket ignore-all input.
+	Acknowledgements *Acknowledgements `json:"acknowledgements,omitempty"`
+
 	// Path A slash-separated namespace: no leading or trailing separator, no empty
 	// segment, no `.` or `..` segment, at most 32 segments. Organizational
 	// only — no grant is scoped to a folder and no value attaches to one.
@@ -2330,11 +2390,24 @@ type CreateGrantRequest struct {
 
 // CreateKeyGroupRequest defines model for CreateKeyGroupRequest.
 type CreateKeyGroupRequest struct {
-	Name string `json:"name"`
+	// Acknowledgements Secret-scanning acknowledgement tokens (#74). On a value write, a
+	// keep-as-config token dismisses a Surface-1 warning for exactly that
+	// value. On a declaration write, one override token per finding is
+	// re-scanned against the current content; a stale, version-skewed, or
+	// surplus token is rejected by name. There is no blanket ignore-all input.
+	Acknowledgements *Acknowledgements `json:"acknowledgements,omitempty"`
+	Name             string            `json:"name"`
 }
 
 // CreateKeyRequest defines model for CreateKeyRequest.
 type CreateKeyRequest struct {
+	// Acknowledgements Secret-scanning acknowledgement tokens (#74). On a value write, a
+	// keep-as-config token dismisses a Surface-1 warning for exactly that
+	// value. On a declaration write, one override token per finding is
+	// re-scanned against the current content; a stale, version-skewed, or
+	// surplus token is rejected by name. There is no blanket ignore-all input.
+	Acknowledgements *Acknowledgements `json:"acknowledgements,omitempty"`
+
 	// Classification Classification IS the sensitivity boundary. A matrix row is uniformly
 	// secret or config; it changes only through the reclassification
 	// ceremony. Closed, deliberately: a third value would be a third
@@ -2373,7 +2446,13 @@ type CreateKeyRequest struct {
 
 // CreateOrgRequest defines model for CreateOrgRequest.
 type CreateOrgRequest struct {
-	Active *bool `json:"active,omitempty"`
+	// Acknowledgements Secret-scanning acknowledgement tokens (#74). On a value write, a
+	// keep-as-config token dismisses a Surface-1 warning for exactly that
+	// value. On a declaration write, one override token per finding is
+	// re-scanned against the current content; a stale, version-skewed, or
+	// surplus token is rejected by name. There is no blanket ignore-all input.
+	Acknowledgements *Acknowledgements `json:"acknowledgements,omitempty"`
+	Active           *bool             `json:"active,omitempty"`
 
 	// Metadata Free-form operator metadata. `null` and absent both mean "no
 	// metadata"; the round-trip of absent/null/value is fixture-pinned
@@ -2384,6 +2463,13 @@ type CreateOrgRequest struct {
 
 // CreateProjectRequest defines model for CreateProjectRequest.
 type CreateProjectRequest struct {
+	// Acknowledgements Secret-scanning acknowledgement tokens (#74). On a value write, a
+	// keep-as-config token dismisses a Surface-1 warning for exactly that
+	// value. On a declaration write, one override token per finding is
+	// re-scanned against the current content; a stale, version-skewed, or
+	// surplus token is rejected by name. There is no blanket ignore-all input.
+	Acknowledgements *Acknowledgements `json:"acknowledgements,omitempty"`
+
 	// Name A display name for an organisation, project or environment. Identity is
 	// the immutable id, so this is a label and a rename never breaks a
 	// reference. The 128-byte bound is the one the organisation contract has
@@ -2868,6 +2954,14 @@ type Error struct {
 		// error code omits the member entirely.
 		Detail *string `json:"detail,omitempty"`
 
+		// Findings Secret-scanning refusal detail (#74, Surface 2). Present only on
+		// a `bad_request` that a declaration ingress refused because an
+		// author-controlled field carried a credential-shaped string. Each
+		// entry names the immutable declaration-field locator, the rule id,
+		// and a short-lived content-bound acknowledgement token the
+		// resubmission presents to override. Never the matched text.
+		Findings *[]ScanFinding `json:"findings,omitempty"`
+
 		// Message Fixed per code. Never derived from the request, so two
 		// refusals of the same class are byte-identical.
 		Message string `json:"message"`
@@ -3310,7 +3404,10 @@ type ImportValuesRequest struct {
 
 // ImportValuesResult defines model for ImportValuesResult.
 type ImportValuesResult struct {
-	Imported []KeyName `json:"imported"`
+	// Findings Secret-scanning warnings the imported config values produced (#74,
+	// Surface 1, surface `import_value`), warn-not-block.
+	Findings *[]ScanFinding `json:"findings,omitempty"`
+	Imported []KeyName      `json:"imported"`
 
 	// Skipped Keys already `set` in the target environment that no enumerated
 	// overwrite named. Listed by name, never silently dropped.
@@ -3400,6 +3497,13 @@ type Key struct {
 	Deprecated      bool           `json:"deprecated"`
 	DeprecationNote string         `json:"deprecation_note"`
 	Description     string         `json:"description"`
+
+	// Findings Secret-scanning warnings (#74, Surface 1). Populated only by the
+	// reclassification ceremony when declassifying (`secret` → `config`) a
+	// key whose existing values carry a credential-shaped string — the
+	// reclassify SUCCEEDS and each finding names its rule and key locator.
+	// Absent on every other key response.
+	Findings *[]ScanFinding `json:"findings,omitempty"`
 
 	// FolderPath The key's namespace within the project. Organizational only: a plain
 	// slash-separated path, empty for the catalogue root. It is a PATH, not a
@@ -3934,6 +4038,11 @@ type PendingChange struct {
 	Classification KeyClassification `json:"classification"`
 	CreatedAt      time.Time         `json:"created_at"`
 
+	// Findings Secret-scanning warnings this save produced (#74, Surface 1). The
+	// save SUCCEEDED regardless; each finding carries a keep-as-config
+	// acknowledgement token. Absent or empty on a clean save.
+	Findings *[]ScanFinding `json:"findings,omitempty"`
+
 	// KeyId A prefixed UUIDv7, e.g. `org_0198…`.
 	KeyId ID `json:"key_id"`
 
@@ -4253,6 +4362,13 @@ type RemoteList struct {
 
 // RenameFolderRequest defines model for RenameFolderRequest.
 type RenameFolderRequest struct {
+	// Acknowledgements Secret-scanning acknowledgement tokens (#74). On a value write, a
+	// keep-as-config token dismisses a Surface-1 warning for exactly that
+	// value. On a declaration write, one override token per finding is
+	// re-scanned against the current content; a stale, version-skewed, or
+	// surplus token is rejected by name. There is no blanket ignore-all input.
+	Acknowledgements *Acknowledgements `json:"acknowledgements,omitempty"`
+
 	// Path A slash-separated namespace: no leading or trailing separator, no empty
 	// segment, no `.` or `..` segment, at most 32 segments. Organizational
 	// only — no grant is scoped to a folder and no value attaches to one.
@@ -4267,11 +4383,24 @@ type RenameFolderRequest struct {
 
 // RenameKeyGroupRequest defines model for RenameKeyGroupRequest.
 type RenameKeyGroupRequest struct {
-	Name string `json:"name"`
+	// Acknowledgements Secret-scanning acknowledgement tokens (#74). On a value write, a
+	// keep-as-config token dismisses a Surface-1 warning for exactly that
+	// value. On a declaration write, one override token per finding is
+	// re-scanned against the current content; a stale, version-skewed, or
+	// surplus token is rejected by name. There is no blanket ignore-all input.
+	Acknowledgements *Acknowledgements `json:"acknowledgements,omitempty"`
+	Name             string            `json:"name"`
 }
 
 // RenameKeyRequest defines model for RenameKeyRequest.
 type RenameKeyRequest struct {
+	// Acknowledgements Secret-scanning acknowledgement tokens (#74). On a value write, a
+	// keep-as-config token dismisses a Surface-1 warning for exactly that
+	// value. On a declaration write, one override token per finding is
+	// re-scanned against the current content; a stale, version-skewed, or
+	// surplus token is rejected by name. There is no blanket ignore-all input.
+	Acknowledgements *Acknowledgements `json:"acknowledgements,omitempty"`
+
 	// Name The canonical key grammar: uppercase ASCII, digits and underscore, no
 	// leading digit. It is the environment-variable-safe grammar every
 	// delivery surface assumes - an execve environment block, a Kubernetes
@@ -4302,6 +4431,13 @@ type RenameRemoteRequest struct {
 
 // RenameRequest defines model for RenameRequest.
 type RenameRequest struct {
+	// Acknowledgements Secret-scanning acknowledgement tokens (#74). On a value write, a
+	// keep-as-config token dismisses a Surface-1 warning for exactly that
+	// value. On a declaration write, one override token per finding is
+	// re-scanned against the current content; a stale, version-skewed, or
+	// surplus token is rejected by name. There is no blanket ignore-all input.
+	Acknowledgements *Acknowledgements `json:"acknowledgements,omitempty"`
+
 	// Name A display name for an organisation, project or environment. Identity is
 	// the immutable id, so this is a label and a rename never breaks a
 	// reference. The 128-byte bound is the one the organisation contract has
@@ -4724,6 +4860,35 @@ type SamlStartResult struct {
 	RedirectUrl string `json:"redirect_url"`
 }
 
+// ScanFinding One redacted secret-scanning result (#74, secret-scanning ADR §4). It
+// carries a rule id, the surface/ingress it fired on, an immutable locator
+// (key identity for Surface 1, schema-location class for Surface 2), and —
+// where an acknowledgement is possible — an opaque token. It NEVER carries
+// the matched text, an offset, a length, or an excerpt.
+type ScanFinding struct {
+	// Acknowledgement An opaque, short-lived, content-bound token (Surface-1 keep-as-config
+	// dismissal or Surface-2 override). Present only where an
+	// acknowledgement is possible. Resubmit the write presenting it in
+	// `acknowledgements`. It embeds no plaintext.
+	Acknowledgement *string `json:"acknowledgement,omitempty"`
+
+	// Locator The immutable locator. Surface 1: the key identity. Surface 2: the
+	// schema-location class of the offending field (e.g.
+	// `key.declaration.pattern`), never an instance-derived path.
+	Locator string `json:"locator"`
+
+	// RuleId The matched rule's id (e.g. `aws-access-token`).
+	RuleId string `json:"rule_id"`
+
+	// Surface Which ingress produced the finding. Surface-1 warns carry the value
+	// write surface; Surface-2 blocks carry the declaration ingress.
+	Surface ScanFindingSurface `json:"surface"`
+}
+
+// ScanFindingSurface Which ingress produced the finding. Surface-1 warns carry the value
+// write surface; Surface-2 blocks carry the declaration ingress.
+type ScanFindingSurface string
+
 // ScanningKeyRotation defines model for ScanningKeyRotation.
 type ScanningKeyRotation struct {
 	// DismissalsDropped How many dismissal rows the rotation invalidated. Every stored
@@ -5097,6 +5262,13 @@ type SetProjectRetentionRequest struct {
 
 // SetValueRequest defines model for SetValueRequest.
 type SetValueRequest struct {
+	// Acknowledgements Secret-scanning acknowledgement tokens (#74). On a value write, a
+	// keep-as-config token dismisses a Surface-1 warning for exactly that
+	// value. On a declaration write, one override token per finding is
+	// re-scanned against the current content; a stale, version-skewed, or
+	// surplus token is rejected by name. There is no blanket ignore-all input.
+	Acknowledgements *Acknowledgements `json:"acknowledgements,omitempty"`
+
 	// Value The plaintext. It is validated against the key's declaration
 	// before it commits, and stored sealed under the project data key
 	// with associated data binding it to this row alone.
@@ -5260,6 +5432,13 @@ type UpdateFederationIssuerRequest struct {
 
 // UpdateKeyDeclarationRequest defines model for UpdateKeyDeclarationRequest.
 type UpdateKeyDeclarationRequest struct {
+	// Acknowledgements Secret-scanning acknowledgement tokens (#74). On a value write, a
+	// keep-as-config token dismisses a Surface-1 warning for exactly that
+	// value. On a declaration write, one override token per finding is
+	// re-scanned against the current content; a stale, version-skewed, or
+	// surplus token is rejected by name. There is no blanket ignore-all input.
+	Acknowledgements *Acknowledgements `json:"acknowledgements,omitempty"`
+
 	// Declaration Exactly one of `rule` or `any_of`. `any_of` is a bounded union whose
 	// value is valid if it satisfies AT LEAST ONE alternative - deliberately
 	// not `oneOf`, whose JSON Schema meaning is exactly-one, because two
@@ -5275,6 +5454,13 @@ type UpdateKeyDeclarationRequest struct {
 
 // UpdateKeyMetadataRequest defines model for UpdateKeyMetadataRequest.
 type UpdateKeyMetadataRequest struct {
+	// Acknowledgements Secret-scanning acknowledgement tokens (#74). On a value write, a
+	// keep-as-config token dismisses a Surface-1 warning for exactly that
+	// value. On a declaration write, one override token per finding is
+	// re-scanned against the current content; a stale, version-skewed, or
+	// surplus token is rejected by name. There is no blanket ignore-all input.
+	Acknowledgements *Acknowledgements `json:"acknowledgements,omitempty"`
+
 	// Classification Classification IS the sensitivity boundary. A matrix row is uniformly
 	// secret or config; it changes only through the reclassification
 	// ceremony. Closed, deliberately: a third value would be a third
@@ -5393,8 +5579,12 @@ type ValueDiffRow struct {
 
 // ValueList defines model for ValueList.
 type ValueList struct {
-	Count int         `json:"count"`
-	Items []ValueCell `json:"items"`
+	Count int `json:"count"`
+
+	// Findings Secret-scanning warnings the declared config values produced (#74,
+	// Surface 1), warn-not-block. Absent or empty when nothing matched.
+	Findings *[]ScanFinding `json:"findings,omitempty"`
+	Items    []ValueCell    `json:"items"`
 }
 
 // ValueOccurrence defines model for ValueOccurrence.

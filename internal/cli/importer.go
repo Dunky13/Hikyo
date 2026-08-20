@@ -633,6 +633,7 @@ func runValuesImport(ctx context.Context, ios IO, args []string) error {
 		project+"/environments/"+url.PathEscape(env)+"/values/import", body, &result); err != nil {
 		return err
 	}
+	warnFindings(ios, result.Findings)
 	// The manifest's phase-completion marker is what lets a resumed migration
 	// know where it stopped, so a run that completed says so. `applied` stays
 	// false: that transition belongs to `definitions apply` (#70), which does

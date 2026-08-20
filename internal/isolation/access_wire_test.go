@@ -71,7 +71,7 @@ func newAccessWireEnv(t *testing.T, db *store.DB) accessWireEnv {
 	token = stepUpPasskey(t, auth, ctx, token, dev)
 
 	orgs := &service.Orgs{DB: db}
-	org, err := orgs.Create(ctx, service.Bearer(token), "wire-org", true, []byte(`{}`))
+	org, err := orgs.Create(ctx, service.Bearer(token), "wire-org", true, []byte(`{}`), nil)
 	if err != nil {
 		t.Fatalf("create org: %v", err)
 	}

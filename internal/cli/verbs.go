@@ -1200,13 +1200,15 @@ func runOrg(ctx context.Context, ios IO, args []string) error {
 	}
 
 	var (
-		format  string
-		orgName string
+		format      string
+		orgName     string
+		acknowledge string
 	)
 	st, flags, err := parseCommon("org "+sub, ios, rest, func(fs *flag.FlagSet) {
 		fs.StringVar(&format, "o", "table", "output format: table or json")
 		if sub == "create" || sub == "rename" {
 			fs.StringVar(&orgName, "name", "", "organisation name")
+			ackFlag(fs, &acknowledge)
 		}
 	})
 	if err != nil {
@@ -1278,7 +1280,7 @@ func runOrg(ctx context.Context, ios IO, args []string) error {
 	case "create":
 		var org apigen.Org
 		if err := client.Do(ctx, http.MethodPost, api.PathPrefix+"/orgs",
-			apigen.CreateOrgRequest{Name: orgName}, &org); err != nil {
+			apigen.CreateOrgRequest{Name: orgName, Acknowledgements: acksPtr(acknowledge)}, &org); err != nil {
 			return err
 		}
 		return Render(ios.Stdout, f, Table{
@@ -1294,7 +1296,7 @@ func runOrg(ctx context.Context, ios IO, args []string) error {
 		}
 		var org apigen.Org
 		if err := client.Do(ctx, http.MethodPatch, api.PathPrefix+"/orgs/"+url.PathEscape(id),
-			apigen.RenameRequest{Name: orgName}, &org); err != nil {
+			apigen.RenameRequest{Name: orgName, Acknowledgements: acksPtr(acknowledge)}, &org); err != nil {
 			return err
 		}
 		return Render(ios.Stdout, f, Table{

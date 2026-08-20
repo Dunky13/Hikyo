@@ -149,7 +149,7 @@ func runRecoveryFlow(t *testing.T, db *store.DB) {
 	}
 	// Mid-reset: an MFA-mandatory op attempted with the authority (which is not
 	// a session) is refused — the authority carries no assurance and no session.
-	if _, err := orgs.Create(ctx, service.Bearer(rec.Authority), "reveal-attempt", true, []byte(`{}`)); !errors.Is(err, domain.ErrUnauthenticated) {
+	if _, err := orgs.Create(ctx, service.Bearer(rec.Authority), "reveal-attempt", true, []byte(`{}`), nil); !errors.Is(err, domain.ErrUnauthenticated) {
 		t.Fatalf("the recovery authority authorized an MFA-mandatory op: %v", err)
 	}
 
@@ -240,7 +240,7 @@ func runStepUpElevates(t *testing.T, db *store.DB) {
 	}
 	// The admin HOLDS instance-config, but a password-only session is short of
 	// the MFA-mandatory rule: refused for want of assurance, not of the grant.
-	if _, err := orgs.Create(ctx, service.Bearer(login.SessionToken), "too-weak", true, []byte(`{}`)); !errors.Is(err, domain.ErrUnauthorized) {
+	if _, err := orgs.Create(ctx, service.Bearer(login.SessionToken), "too-weak", true, []byte(`{}`), nil); !errors.Is(err, domain.ErrUnauthorized) {
 		t.Fatalf("a password-only session created an org: %v", err)
 	}
 
@@ -262,7 +262,7 @@ func runStepUpElevates(t *testing.T, db *store.DB) {
 		t.Fatalf("stepped-up session carries %v, want both password and totp", stepped.Assurance.Factors)
 	}
 	// The elevated session now satisfies the MFA-mandatory rule.
-	if _, err := orgs.Create(ctx, service.Bearer(stepped.SessionToken), "now-elevated", true, []byte(`{}`)); err != nil {
+	if _, err := orgs.Create(ctx, service.Bearer(stepped.SessionToken), "now-elevated", true, []byte(`{}`), nil); err != nil {
 		t.Fatalf("a two-factor session was still refused: %v", err)
 	}
 }

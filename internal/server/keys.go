@@ -26,22 +26,22 @@ import (
 // exposes. Scopes are addressed as domain.Scope, the same shape authorize()
 // takes, so a wrong-depth address is refused at the chokepoint.
 type KeyService interface {
-	Create(ctx context.Context, actor service.Actor, scope domain.Scope, spec service.KeySpec) (service.Key, error)
+	Create(ctx context.Context, actor service.Actor, scope domain.Scope, spec service.KeySpec, acks []string) (service.Key, error)
 	Get(ctx context.Context, actor service.Actor, scope domain.Scope, id string) (service.Key, error)
 	List(ctx context.Context, actor service.Actor, scope domain.Scope) ([]service.Key, int64, error)
-	Rename(ctx context.Context, actor service.Actor, scope domain.Scope, id, name string) (service.Key, error)
-	UpdateMetadata(ctx context.Context, actor service.Actor, scope domain.Scope, id string, m service.KeyMetadataUpdate) (service.Key, error)
-	UpdateDeclaration(ctx context.Context, actor service.Actor, scope domain.Scope, id string, u service.KeyDeclarationUpdate) (service.Key, error)
-	Reclassify(ctx context.Context, actor service.Actor, scope domain.Scope, id, classification string) (service.Key, error)
+	Rename(ctx context.Context, actor service.Actor, scope domain.Scope, id, name string, acks []string) (service.Key, error)
+	UpdateMetadata(ctx context.Context, actor service.Actor, scope domain.Scope, id string, m service.KeyMetadataUpdate, acks []string) (service.Key, error)
+	UpdateDeclaration(ctx context.Context, actor service.Actor, scope domain.Scope, id string, u service.KeyDeclarationUpdate, acks []string) (service.Key, error)
+	Reclassify(ctx context.Context, actor service.Actor, scope domain.Scope, id, classification string) (service.Key, []service.Finding, error)
 	SetGroup(ctx context.Context, actor service.Actor, scope domain.Scope, id, groupID string) (service.Key, error)
 	Delete(ctx context.Context, actor service.Actor, scope domain.Scope, id string) error
 }
 
 type KeyGroupService interface {
-	Create(ctx context.Context, actor service.Actor, scope domain.Scope, name string) (service.KeyGroupView, error)
+	Create(ctx context.Context, actor service.Actor, scope domain.Scope, name string, acks []string) (service.KeyGroupView, error)
 	Get(ctx context.Context, actor service.Actor, scope domain.Scope, id string) (service.KeyGroupView, error)
 	List(ctx context.Context, actor service.Actor, scope domain.Scope) ([]service.KeyGroupView, error)
-	Rename(ctx context.Context, actor service.Actor, scope domain.Scope, id, name string) (service.KeyGroupView, error)
+	Rename(ctx context.Context, actor service.Actor, scope domain.Scope, id, name string, acks []string) (service.KeyGroupView, error)
 	Delete(ctx context.Context, actor service.Actor, scope domain.Scope, id string) error
 }
 
@@ -73,7 +73,7 @@ func (a *API) CreateKey(ctx context.Context, req apigen.CreateKeyRequestObject) 
 		Presence:        domainPresence(req.Body.Presence),
 		GroupID:         deref(req.Body.GroupId),
 	}
-	key, err := a.Keys.Create(ctx, service.Bearer(bearer(ctx)), projectScope(req.Org, req.Project), spec)
+	key, err := a.Keys.Create(ctx, service.Bearer(bearer(ctx)), projectScope(req.Org, req.Project), spec, derefAcks(req.Body.Acknowledgements))
 	if err != nil {
 		return nil, err
 	}
@@ -107,7 +107,7 @@ func (a *API) UpdateKeyMetadata(ctx context.Context, req apigen.UpdateKeyMetadat
 			Description:     req.Body.Description,
 			Deprecated:      req.Body.Deprecated,
 			DeprecationNote: req.Body.DeprecationNote,
-		})
+		}, derefAcks(req.Body.Acknowledgements))
 	if err != nil {
 		return nil, err
 	}
@@ -116,7 +116,7 @@ func (a *API) UpdateKeyMetadata(ctx context.Context, req apigen.UpdateKeyMetadat
 
 func (a *API) RenameKey(ctx context.Context, req apigen.RenameKeyRequestObject) (apigen.RenameKeyResponseObject, error) {
 	key, err := a.Keys.Rename(ctx, service.Bearer(bearer(ctx)),
-		projectScope(req.Org, req.Project), req.Key, req.Body.Name)
+		projectScope(req.Org, req.Project), req.Key, req.Body.Name, derefAcks(req.Body.Acknowledgements))
 	if err != nil {
 		return nil, err
 	}
@@ -131,7 +131,7 @@ func (a *API) UpdateKeyDeclaration(ctx context.Context, req apigen.UpdateKeyDecl
 	presence := domainPresence(&req.Body.Presence)
 	key, err := a.Keys.UpdateDeclaration(ctx, service.Bearer(bearer(ctx)),
 		projectScope(req.Org, req.Project), req.Key,
-		service.KeyDeclarationUpdate{Declaration: declaration, Presence: presence})
+		service.KeyDeclarationUpdate{Declaration: declaration, Presence: presence}, derefAcks(req.Body.Acknowledgements))
 	if err != nil {
 		return nil, err
 	}
@@ -139,12 +139,18 @@ func (a *API) UpdateKeyDeclaration(ctx context.Context, req apigen.UpdateKeyDecl
 }
 
 func (a *API) ReclassifyKey(ctx context.Context, req apigen.ReclassifyKeyRequestObject) (apigen.ReclassifyKeyResponseObject, error) {
-	key, err := a.Keys.Reclassify(ctx, service.Bearer(bearer(ctx)),
+	key, findings, err := a.Keys.Reclassify(ctx, service.Bearer(bearer(ctx)),
 		projectScope(req.Org, req.Project), req.Key, string(req.Body.Classification))
 	if err != nil {
 		return nil, err
 	}
-	return apigen.ReclassifyKey200JSONResponse(wireKey(key)), nil
+	// Declassification (secret → config) can carry Surface-1 warnings for the
+	// re-materialised occurrences (#74); every other reclassify carries none.
+	out := wireKey(key)
+	if fs := wireScanFindings(findings); len(fs) > 0 {
+		out.Findings = &fs
+	}
+	return apigen.ReclassifyKey200JSONResponse(out), nil
 }
 
 func (a *API) SetKeyGroup(ctx context.Context, req apigen.SetKeyGroupRequestObject) (apigen.SetKeyGroupResponseObject, error) {
@@ -176,7 +182,7 @@ func (a *API) ListKeyGroups(ctx context.Context, req apigen.ListKeyGroupsRequest
 }
 
 func (a *API) CreateKeyGroup(ctx context.Context, req apigen.CreateKeyGroupRequestObject) (apigen.CreateKeyGroupResponseObject, error) {
-	group, err := a.KeyGroups.Create(ctx, service.Bearer(bearer(ctx)), projectScope(req.Org, req.Project), req.Body.Name)
+	group, err := a.KeyGroups.Create(ctx, service.Bearer(bearer(ctx)), projectScope(req.Org, req.Project), req.Body.Name, derefAcks(req.Body.Acknowledgements))
 	if err != nil {
 		return nil, err
 	}
@@ -193,7 +199,7 @@ func (a *API) GetKeyGroup(ctx context.Context, req apigen.GetKeyGroupRequestObje
 
 func (a *API) RenameKeyGroup(ctx context.Context, req apigen.RenameKeyGroupRequestObject) (apigen.RenameKeyGroupResponseObject, error) {
 	group, err := a.KeyGroups.Rename(ctx, service.Bearer(bearer(ctx)),
-		projectScope(req.Org, req.Project), req.Group, req.Body.Name)
+		projectScope(req.Org, req.Project), req.Group, req.Body.Name, derefAcks(req.Body.Acknowledgements))
 	if err != nil {
 		return nil, err
 	}

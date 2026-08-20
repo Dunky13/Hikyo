@@ -131,7 +131,7 @@ func scenarioPublishEnqueuesAdapterSync(t *testing.T, db *store.DB) {
 		fmt.Sprintf(`INSERT INTO adapter_targets (id,org_id,project_id,environment_id,adapter_id,destination_kind,destination_owner,destination_name,destination_id,name_prefix,generation,state,sync_status,created_at) VALUES ('tgt_publish_prod','%s','%s','%s','adp_publish_hook','repository','acme','prod',4102,'PROD_',1,'active','never','2026-08-17T00:00:00Z')`, scope.Org, scope.Project, prod.Env),
 	})
 
-	staged, err := values.Set(t.Context(), actor, dev, "SYNCED", "one")
+	staged, err := values.Set(t.Context(), actor, dev, "SYNCED", "one", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +143,7 @@ func scenarioPublishEnqueuesAdapterSync(t *testing.T, db *store.DB) {
 	assertAdapterPublishState(t, db, "tgt_publish_dev", 2, 1, string(who), canonicalNow)
 	assertAdapterPublishState(t, db, "tgt_publish_prod", 1, 0, string(who), time.Time{})
 
-	if _, err := keys.Rename(t.Context(), actor, scope, key.ID, "SYNCED_RENAMED"); err != nil {
+	if _, err := keys.Rename(t.Context(), actor, scope, key.ID, "SYNCED_RENAMED", nil); err != nil {
 		t.Fatal(err)
 	}
 	assertAdapterPublishState(t, db, "tgt_publish_dev", 3, 2, string(who), time.Time{})
@@ -210,7 +210,7 @@ func scenarioPendingDraftPreview(t *testing.T, db *store.DB) {
 	publishValue(t, db, values, actor, dev, "RESTORED_SECRET", "historical secret")
 	historicalSecretRevision := latestRevisionOf(t, db, string(dev.Env))
 	grantOrg(t, db, who, scope.Org, "pendingpreviewhistory", "reveal-history")
-	if _, err := keys.Reclassify(t.Context(), actor, scope, restoredKey.ID, string(schema.Config)); err != nil {
+	if _, _, err := keys.Reclassify(t.Context(), actor, scope, restoredKey.ID, string(schema.Config)); err != nil {
 		t.Fatal(err)
 	}
 	publishValue(t, db, values, actor, dev, "RESTORED_SECRET", "current config")
@@ -222,11 +222,11 @@ func scenarioPendingDraftPreview(t *testing.T, db *store.DB) {
 		t.Fatalf("historical secret restore staged %d changes, want 1: %+v", len(restored.Changes), restored)
 	}
 
-	config, err := values.Set(t.Context(), actor, dev, "CONFIG_SET", "draft config")
+	config, err := values.Set(t.Context(), actor, dev, "CONFIG_SET", "draft config", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	secret, err := values.Set(t.Context(), actor, dev, "SECRET_SET", "draft secret")
+	secret, err := values.Set(t.Context(), actor, dev, "SECRET_SET", "draft secret", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +237,7 @@ func scenarioPendingDraftPreview(t *testing.T, db *store.DB) {
 	other := newPrincipal(t, db, "usr_pending_preview_other_"+string(scope.Project), []grantSpec{
 		{capability: "read", scope: scope}, {capability: "edit", scope: scope},
 	})
-	if _, err := values.Set(t.Context(), service.LocalPrincipal(other), dev, "OTHER_CONFIG", "not yours"); err != nil {
+	if _, err := values.Set(t.Context(), service.LocalPrincipal(other), dev, "OTHER_CONFIG", "not yours", nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -276,7 +276,7 @@ func scenarioPendingDraftPreview(t *testing.T, db *store.DB) {
 	// time: a config draft staged before a config->secret reclassification is
 	// secret material from the moment the key is, and the preview must stop
 	// showing it without anybody re-staging.
-	if _, err := keys.Reclassify(t.Context(), actor, scope, configSetKey.ID, string(schema.Secret)); err != nil {
+	if _, _, err := keys.Reclassify(t.Context(), actor, scope, configSetKey.ID, string(schema.Secret)); err != nil {
 		t.Fatal(err)
 	}
 	drafts, err = revisionSvc(t, db).PendingDrafts(t.Context(), actor, dev)
@@ -311,7 +311,7 @@ func scenarioRestoreSideSpecificSecretFormula(t *testing.T, db *store.DB) {
 	historicalSecret := mustKey(t, keys, actor, scope, "HISTORICAL_SECRET", string(schema.Secret), schema.DefaultPresenceRules())
 	publishValue(t, db, values, actor, dev, "HISTORICAL_SECRET", "secret-before")
 	historicalSecretRevision := latestRevisionOf(t, db, string(dev.Env))
-	if _, err := keys.Reclassify(t.Context(), actor, scope, historicalSecret.ID, string(schema.Config)); err != nil {
+	if _, _, err := keys.Reclassify(t.Context(), actor, scope, historicalSecret.ID, string(schema.Config)); err != nil {
 		t.Fatal(err)
 	}
 	publishValue(t, db, values, actor, dev, "HISTORICAL_SECRET", "config-now")
@@ -331,7 +331,7 @@ func scenarioRestoreSideSpecificSecretFormula(t *testing.T, db *store.DB) {
 	publishValue(t, db, values, actor, dev, "CURRENT_SECRET", "config-before")
 	historicalConfigRevision := latestRevisionOf(t, db, string(dev.Env))
 	unpublishValue(t, db, values, actor, dev, "CURRENT_SECRET")
-	if _, err := keys.Reclassify(t.Context(), actor, scope, historicalConfig.ID, string(schema.Secret)); err != nil {
+	if _, _, err := keys.Reclassify(t.Context(), actor, scope, historicalConfig.ID, string(schema.Secret)); err != nil {
 		t.Fatal(err)
 	}
 	publishValue(t, db, values, actor, dev, "CURRENT_SECRET", "secret-now")
@@ -365,7 +365,7 @@ func scenarioSecretClassificationSurvivesCollection(t *testing.T, db *store.DB) 
 	dev := mustEnv(t, envs, actor, scope, "dev")
 	key := mustKey(t, keys, actor, scope, "STICKY_SECRET", string(schema.Secret), schema.DefaultPresenceRules())
 	publishValue(t, db, values, actor, dev, "STICKY_SECRET", "same-occurrence")
-	if _, err := keys.Reclassify(t.Context(), actor, scope, key.ID, string(schema.Config)); err != nil {
+	if _, _, err := keys.Reclassify(t.Context(), actor, scope, key.ID, string(schema.Config)); err != nil {
 		t.Fatal(err)
 	}
 	target := latestRevisionOf(t, db, string(dev.Env))
@@ -466,7 +466,7 @@ func scenarioSchemaFailingRestore(t *testing.T, db *store.DB) {
 	if _, err := keys.UpdateDeclaration(t.Context(), actor, scope, key.ID, service.KeyDeclarationUpdate{
 		Declaration: decl(schema.Rule{Type: schema.TypeInteger}),
 		Presence:    schema.DefaultPresenceRules(),
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatal(err)
 	}
 	restored, err := revisionSvc(t, db).Restore(t.Context(), actor, dev, target, "WORKERS")
@@ -510,7 +510,7 @@ func scenarioSchemaFailingRestore(t *testing.T, db *store.DB) {
 	if _, err := keys.UpdateDeclaration(t.Context(), actor, scope, secretKey.ID, service.KeyDeclarationUpdate{
 		Declaration: schema.Declaration{Rule: &schema.Rule{Type: schema.TypeString, MinLength: &minLength}},
 		Presence:    schema.DefaultPresenceRules(),
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatal(err)
 	}
 	disclosuresBeforeRefusal := auditEventCount(t, db, string(dev.Env), "disclosure.value_revealed")
@@ -793,7 +793,7 @@ func scenarioRestoreWrittenTimeClassification(t *testing.T, db *store.DB) {
 	publishValue(t, db, values, actor, dev, "PAYMENT_PIN", "old-pin")
 	target := latestRevisionOf(t, db, string(dev.Env))
 	publishValue(t, db, values, actor, dev, "PAYMENT_PIN", "new-pin")
-	if _, err := keys.Reclassify(t.Context(), actor, scope, key.ID, string(schema.Config)); err != nil {
+	if _, _, err := keys.Reclassify(t.Context(), actor, scope, key.ID, string(schema.Config)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -912,11 +912,11 @@ func scenarioPublishSerialization(t *testing.T, db *store.DB) {
 	// Both drafts are staged against the SAME baseline before either publishes.
 	// That is the precondition the ADR describes; staging them in sequence with
 	// a publish in between would test nothing.
-	alpha, err := values.Set(t.Context(), actor, dev, "ALPHA", "a2")
+	alpha, err := values.Set(t.Context(), actor, dev, "ALPHA", "a2", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	beta, err := values.Set(t.Context(), actor, dev, "BETA", "b2")
+	beta, err := values.Set(t.Context(), actor, dev, "BETA", "b2", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1019,7 +1019,7 @@ func scenarioSelectivePublish(t *testing.T, db *store.DB) {
 	actor := service.LocalPrincipal(who)
 	dev := mustEnv(t, envs, actor, scope, "dev")
 	groups := &service.KeyGroups{DB: db, Keyring: sharedKeyring(t, db)}
-	group, err := groups.Create(t.Context(), actor, scope, "database")
+	group, err := groups.Create(t.Context(), actor, scope, "database", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1035,11 +1035,11 @@ func scenarioSelectivePublish(t *testing.T, db *store.DB) {
 	// `absent` is invalid, so a group cannot be populated one publish at a time.
 	// That is the state half of the coupling, and it is already load-bearing
 	// before the closure assertions below get to the timing half.
-	seedUser, err := values.Set(t.Context(), actor, dev, "DB_USER", "app")
+	seedUser, err := values.Set(t.Context(), actor, dev, "DB_USER", "app", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	seedPassword, err := values.Set(t.Context(), actor, dev, "DB_PASSWORD", "pw1")
+	seedPassword, err := values.Set(t.Context(), actor, dev, "DB_PASSWORD", "pw1", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1047,15 +1047,15 @@ func scenarioSelectivePublish(t *testing.T, db *store.DB) {
 	publishValue(t, db, values, actor, dev, "UNRELATED", "keep")
 
 	// Three drafts; the publish names ONE of them.
-	user, err := values.Set(t.Context(), actor, dev, "DB_USER", "app2")
+	user, err := values.Set(t.Context(), actor, dev, "DB_USER", "app2", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	password, err := values.Set(t.Context(), actor, dev, "DB_PASSWORD", "pw2")
+	password, err := values.Set(t.Context(), actor, dev, "DB_PASSWORD", "pw2", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	unrelated, err := values.Set(t.Context(), actor, dev, "UNRELATED", "changed")
+	unrelated, err := values.Set(t.Context(), actor, dev, "UNRELATED", "changed", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1103,10 +1103,10 @@ func scenarioSelectivePublish(t *testing.T, db *store.DB) {
 		{"edit", domain.Scope{Org: scope.Org}},
 		{"publish", domain.Scope{Org: scope.Org}},
 	})
-	if _, err := values.Set(t.Context(), service.LocalPrincipal(other), dev, "DB_USER", "theirs"); err != nil {
+	if _, err := values.Set(t.Context(), service.LocalPrincipal(other), dev, "DB_USER", "theirs", nil); err != nil {
 		t.Fatal(err)
 	}
-	mine, err := values.Set(t.Context(), actor, dev, "DB_PASSWORD", "pw3")
+	mine, err := values.Set(t.Context(), actor, dev, "DB_PASSWORD", "pw3", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1126,7 +1126,7 @@ func scenarioSelectivePublish(t *testing.T, db *store.DB) {
 	// other principal stage the exact grouped cell Alice selected. Closure must
 	// inspect the selected member too; skipping it is a cross-owner bypass.
 	deletePendingCell(t, db, string(dev.Env), keyIDByName(t, keys, actor, scope, "DB_USER"), string(other))
-	if _, err := values.Set(t.Context(), service.LocalPrincipal(other), dev, "DB_PASSWORD", "theirs-too"); err != nil {
+	if _, err := values.Set(t.Context(), service.LocalPrincipal(other), dev, "DB_PASSWORD", "theirs-too", nil); err != nil {
 		t.Fatal(err)
 	}
 	_, err = revisionSvc(t, db).Publish(t.Context(), actor, dev, []string{mine.VersionID})
@@ -1188,7 +1188,7 @@ func scenarioRevisionCiphertextBinding(t *testing.T, db *store.DB) {
 	mustKey(t, keys, actor, scope, "SOURCE", string(schema.Config), schema.DefaultPresenceRules())
 	mustKey(t, keys, actor, scope, "TARGET", string(schema.Config), schema.DefaultPresenceRules())
 
-	draft, err := values.Set(t.Context(), actor, dev, "SOURCE", "draft-material")
+	draft, err := values.Set(t.Context(), actor, dev, "SOURCE", "draft-material", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1238,14 +1238,14 @@ func scenarioAdvisoryAuthorization(t *testing.T, db *store.DB) {
 		VALUES ($1, $2, 'read', $3, $4, $5, '2026-01-01T00:00:00Z')`,
 		"grt_advisory_scoped_"+string(scope.Project), string(reader), string(scope.Org), string(scope.Project), string(dev.Env))
 
-	prodDraft, err := values.Set(t.Context(), actor, prod, "NOTICE", "hidden")
+	prodDraft, err := values.Set(t.Context(), actor, prod, "NOTICE", "hidden", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := revisions.Publish(t.Context(), actor, prod, []string{prodDraft.VersionID}); err != nil {
 		t.Fatal(err)
 	}
-	devDraft, err := values.Set(t.Context(), actor, dev, "NOTICE", "visible")
+	devDraft, err := values.Set(t.Context(), actor, dev, "NOTICE", "visible", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1511,7 +1511,7 @@ func scenarioPublishSignals(t *testing.T, db *store.DB) {
 	// changed and that is a pinned input.
 	devBefore = latestRevisionOf(t, db, string(dev.Env))
 	prodBefore = latestRevisionOf(t, db, string(prod.Env))
-	if _, err := keys.Rename(t.Context(), actor, scope, key.ID, "SIGNAL_RENAMED"); err != nil {
+	if _, err := keys.Rename(t.Context(), actor, scope, key.ID, "SIGNAL_RENAMED", nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := latestRevisionOf(t, db, string(dev.Env)); got != devBefore+1 {
@@ -1552,7 +1552,7 @@ func scenarioRequiredInVeto(t *testing.T, db *store.DB) {
 			Required:  schema.Presence{Mode: schema.PresenceExplicit, Environments: []string{string(dev.Env)}},
 			Forbidden: schema.Presence{Mode: schema.PresenceNone},
 		},
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatal(err)
 	}
 

@@ -977,7 +977,7 @@ var operations = map[Operation]opSpec{
 		class:    ClassInstance,
 		formula:  Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
 		storeOps: map[StoreOp]bool{StoreOrgsCreate: true, StoreAuditInstanceInsert: true},
-		events:   []audit.EventType{audit.EventOrgCreated},
+		events:   []audit.EventType{audit.EventOrgCreated, audit.EventScanningFindingBlocked, audit.EventScanningFindingOverridden},
 	},
 	OpOrgList: {
 		class:    ClassInstance,
@@ -1012,7 +1012,7 @@ var operations = map[Operation]opSpec{
 		level:    domain.LevelOrg,
 		formula:  Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
 		storeOps: map[StoreOp]bool{StoreOrgsGet: true, StoreOrgsRename: true, StoreAuditTenantInsert: true},
-		events:   []audit.EventType{audit.EventOrgRenamed},
+		events:   []audit.EventType{audit.EventOrgRenamed, audit.EventScanningFindingBlocked, audit.EventScanningFindingOverridden},
 	},
 	OpOrgDelete: {
 		class:    ClassTenant,
@@ -1162,7 +1162,7 @@ var operations = map[Operation]opSpec{
 		level:    domain.LevelOrg,
 		formula:  Formula{{Cap: domain.CapManageProjects, At: domain.LevelOrg}},
 		storeOps: map[StoreOp]bool{StoreProjectsCreate: true, StoreAuditTenantInsert: true},
-		events:   []audit.EventType{audit.EventProjectCreated},
+		events:   []audit.EventType{audit.EventProjectCreated, audit.EventScanningFindingBlocked, audit.EventScanningFindingOverridden},
 	},
 	OpProjectGet: {
 		class:       ClassTenant,
@@ -1183,7 +1183,7 @@ var operations = map[Operation]opSpec{
 		level:    domain.LevelProject,
 		formula:  Formula{{Cap: domain.CapManageProjects, At: domain.LevelOrg}},
 		storeOps: map[StoreOp]bool{StoreProjectsGet: true, StoreProjectsRename: true, StoreAuditTenantInsert: true},
-		events:   []audit.EventType{audit.EventProjectRenamed},
+		events:   []audit.EventType{audit.EventProjectRenamed, audit.EventScanningFindingBlocked, audit.EventScanningFindingOverridden},
 	},
 	OpProjectDelete: {
 		class:   ClassTenant,
@@ -1216,7 +1216,7 @@ var operations = map[Operation]opSpec{
 			StoreEnvironmentsNextOrder: true, StoreEnvironmentsCreate: true,
 			StoreCatalogueRevisionBump: true, StoreAuditTenantInsert: true,
 		},
-		events: []audit.EventType{audit.EventEnvCreated},
+		events: []audit.EventType{audit.EventEnvCreated, audit.EventScanningFindingBlocked, audit.EventScanningFindingOverridden},
 	},
 	OpEnvRead: {
 		class:    ClassTenant,
@@ -1247,7 +1247,7 @@ var operations = map[Operation]opSpec{
 			StoreEnvironmentsGet: true, StoreEnvironmentsRename: true,
 			StoreCatalogueRevisionBump: true, StoreAuditTenantInsert: true,
 		},
-		events: []audit.EventType{audit.EventEnvRenamed},
+		events: []audit.EventType{audit.EventEnvRenamed, audit.EventScanningFindingBlocked, audit.EventScanningFindingOverridden},
 	},
 	// Reorder addresses the PROJECT: it rewrites the whole ordered set in one
 	// transaction, so no caller can observe a duplicate or a gap, and there is
@@ -1298,7 +1298,7 @@ var operations = map[Operation]opSpec{
 		level:    domain.LevelEnv,
 		formula:  Formula{{Cap: domain.CapEdit, At: domain.LevelEnv}},
 		storeOps: map[StoreOp]bool{StoreEnvironmentsUpdateNote: true, StoreAuditTenantInsert: true},
-		events:   []audit.EventType{audit.EventEnvNoteChanged},
+		events:   []audit.EventType{audit.EventEnvNoteChanged, audit.EventScanningFindingBlocked, audit.EventScanningFindingOverridden},
 	},
 
 	// The key catalogue (#49). Every mutation takes the project row first
@@ -1327,7 +1327,7 @@ var operations = map[Operation]opSpec{
 			StoreCataloguePresenceReplace: true, StoreCatalogueRevisionBump: true,
 			StoreAuditTenantInsert: true,
 		},
-		events: []audit.EventType{audit.EventKeyCreated},
+		events: []audit.EventType{audit.EventKeyCreated, audit.EventScanningFindingBlocked, audit.EventScanningFindingOverridden},
 	},
 	OpKeyGet: {
 		class:   ClassTenant,
@@ -1365,7 +1365,7 @@ var operations = map[Operation]opSpec{
 			StoreCatalogueRevisionBump: true, StoreCataloguePresenceList: true,
 			StoreAuditTenantInsert: true,
 		},
-		events: []audit.EventType{audit.EventKeyRenamed},
+		events: []audit.EventType{audit.EventKeyRenamed, audit.EventScanningFindingBlocked, audit.EventScanningFindingOverridden},
 	},
 	OpKeyUpdateDeclaration: {
 		class:   ClassTenant,
@@ -1384,7 +1384,7 @@ var operations = map[Operation]opSpec{
 			// one it started from.
 			StoreCatalogueRevisionGet: true, StoreAuditTenantInsert: true,
 		},
-		events: []audit.EventType{audit.EventKeyDeclarationChanged},
+		events: []audit.EventType{audit.EventKeyDeclarationChanged, audit.EventScanningFindingBlocked, audit.EventScanningFindingOverridden},
 	},
 	// Metadata is the schema-model ADR's one delivery exemption: description,
 	// deprecated, deprecation_note and folder path change nothing an environment
@@ -1404,7 +1404,7 @@ var operations = map[Operation]opSpec{
 			StoreCatalogueRevisionBump: true,
 			StoreCataloguePresenceList: true, StoreAuditTenantInsert: true,
 		},
-		events: []audit.EventType{audit.EventKeyMetadataChanged},
+		events: []audit.EventType{audit.EventKeyMetadataChanged, audit.EventScanningFindingBlocked, audit.EventScanningFindingOverridden},
 	},
 	OpKeySetGroup: {
 		class:   ClassTenant,
@@ -1468,8 +1468,13 @@ var operations = map[Operation]opSpec{
 			// Reclassifying a key to secret makes its dismissals moot and drops
 			// them (#74, ADR section 4 lifecycle).
 			StoreScanningDismissalsDeleteByKey: true,
+			// Declassifying (secret → config) re-materialises the key's existing
+			// occurrences and scans them warn-only (#74, ADR §2 Surface 1): the
+			// ceremony enumerates the environments holding a value; each value is
+			// read under a per-environment OpValueList proof.
+			StoreValuesEnvironmentsWithValue: true,
 		},
-		events: []audit.EventType{audit.EventKeyReclassified},
+		events: []audit.EventType{audit.EventKeyReclassified, audit.EventScanningFindingWarned},
 	},
 	// The reveal gates. Their formula is `reveal` alone: the acting principal
 	// has ALREADY passed `definitions-edit` on the operation this gate guards,
@@ -1714,7 +1719,7 @@ var operations = map[Operation]opSpec{
 			StoreCataloguePresenceList: true, StoreValuesPut: true,
 			StoreAuditTenantInsert: true,
 		},
-		events: []audit.EventType{audit.EventValueSet},
+		events: []audit.EventType{audit.EventValueSet, audit.EventScanningFindingWarned},
 	},
 	OpValueClear: {
 		class: ClassTenant,
@@ -1787,7 +1792,9 @@ var operations = map[Operation]opSpec{
 			StoreCataloguePresenceList: true, StoreEnvironmentsGetSettings: true,
 			StoreValuesPut: true, StoreAuditTenantInsert: true,
 		},
-		events: []audit.EventType{audit.EventValueCopied},
+		// The config leg is where a copied/cloned config value is scanned
+		// warn-only (#74, Surface 1); the secret leg never scans.
+		events: []audit.EventType{audit.EventValueCopied, audit.EventScanningFindingWarned},
 	},
 
 	// Phase 1's read. HUMAN-ONLY: `import` joins `adopt`, `scaffold`,
@@ -1843,7 +1850,7 @@ var operations = map[Operation]opSpec{
 		// event: a trail that spelled an imported write differently would make
 		// "which principal set this value" answerable only by knowing how it
 		// arrived. The import as a RUN is recorded by its own event beside it.
-		events: []audit.EventType{audit.EventValueSet, audit.EventValueImported},
+		events: []audit.EventType{audit.EventValueSet, audit.EventValueImported, audit.EventScanningFindingWarned},
 	},
 
 	// DRAFTS AND PUBLISHING (#51).
@@ -1868,7 +1875,7 @@ var operations = map[Operation]opSpec{
 			// this is the store authority that write path needs.
 			StoreScanningDismissalsExists: true, StoreScanningDismissalsInsert: true,
 		},
-		events: []audit.EventType{audit.EventValueStaged},
+		events: []audit.EventType{audit.EventValueStaged, audit.EventScanningFindingWarned, audit.EventScanningFindingDismissed},
 	},
 	// `publish` alone commits. It reaches everything a materialization touches
 	// because it IS the materialization: the published cells, the immutable
@@ -2128,7 +2135,7 @@ var operations = map[Operation]opSpec{
 			StoreCatalogueGroupCreate: true, StoreCatalogueRevisionBump: true,
 			StoreAuditTenantInsert: true,
 		},
-		events: []audit.EventType{audit.EventKeyGroupCreated},
+		events: []audit.EventType{audit.EventKeyGroupCreated, audit.EventScanningFindingBlocked, audit.EventScanningFindingOverridden},
 	},
 	OpKeyGroupGet: {
 		class:   ClassTenant,
@@ -2163,7 +2170,7 @@ var operations = map[Operation]opSpec{
 			StoreCatalogueRevisionBump: true,
 			StoreAuditTenantInsert:     true,
 		},
-		events: []audit.EventType{audit.EventKeyGroupRenamed},
+		events: []audit.EventType{audit.EventKeyGroupRenamed, audit.EventScanningFindingBlocked, audit.EventScanningFindingOverridden},
 	},
 	// Deleting a group dissolves a coupling and releases its members; it never
 	// deletes the keys it coupled, which is why ClearGroupMembers sits beside
@@ -2197,7 +2204,7 @@ var operations = map[Operation]opSpec{
 		level:    domain.LevelProject,
 		formula:  Formula{{Cap: domain.CapDefinitionsEdit, At: domain.LevelProject}},
 		storeOps: map[StoreOp]bool{StoreProjectsGet: true, StoreFoldersCreate: true, StoreAuditTenantInsert: true},
-		events:   []audit.EventType{audit.EventFolderCreated},
+		events:   []audit.EventType{audit.EventFolderCreated, audit.EventScanningFindingBlocked, audit.EventScanningFindingOverridden},
 	},
 	OpFolderGet: {
 		class:       ClassTenant,
@@ -2218,7 +2225,7 @@ var operations = map[Operation]opSpec{
 		level:    domain.LevelProject,
 		formula:  Formula{{Cap: domain.CapDefinitionsEdit, At: domain.LevelProject}},
 		storeOps: map[StoreOp]bool{StoreProjectsGet: true, StoreFoldersGet: true, StoreFoldersRename: true, StoreAuditTenantInsert: true},
-		events:   []audit.EventType{audit.EventFolderRenamed},
+		events:   []audit.EventType{audit.EventFolderRenamed, audit.EventScanningFindingBlocked, audit.EventScanningFindingOverridden},
 	},
 	OpFolderDelete: {
 		class:    ClassTenant,
