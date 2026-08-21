@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/Hikyo-Org/hikyo/api/apigen"
@@ -58,19 +59,26 @@ func grantSpec(scope domain.Scope, principal, capability string) service.GrantSp
 	}
 }
 
-func wireGrantResult(r service.GrantResult, capability domain.Capability) apigen.GrantResult {
+func wireGrantResult(r service.GrantResult, capability domain.Capability) (apigen.GrantResult, error) {
+	if !r.Outcome.Valid() {
+		return apigen.GrantResult{}, errors.New("invalid grant outcome")
+	}
 	return apigen.GrantResult{
 		GrantId: r.GrantID, Capability: string(capability),
-		Created: r.Created, OriginAdded: r.OriginAdded,
-	}
+		Outcome: r.Outcome,
+	}, nil
 }
 
-func wireGrantResults(results []service.GrantResult, caps []domain.Capability) apigen.GrantResultList {
+func wireGrantResults(results []service.GrantResult, caps []domain.Capability) (apigen.GrantResultList, error) {
 	items := make([]apigen.GrantResult, 0, len(results))
 	for i, r := range results {
-		items = append(items, wireGrantResult(r, caps[i]))
+		item, err := wireGrantResult(r, caps[i])
+		if err != nil {
+			return apigen.GrantResultList{}, err
+		}
+		items = append(items, item)
 	}
-	return apigen.GrantResultList{Items: items, Count: len(items)}
+	return apigen.GrantResultList{Items: items, Count: len(items)}, nil
 }
 
 func wireGrantScope(s domain.Scope) apigen.GrantScope {
@@ -132,7 +140,7 @@ func (a *API) applyTemplate(ctx context.Context, scope domain.Scope, principal, 
 	if len(results) != len(caps) {
 		return apigen.GrantResultList{}, domain.ErrInvalid
 	}
-	return wireGrantResults(results, caps), nil
+	return wireGrantResults(results, caps)
 }
 
 // ---------------------------------------------------------------------------
@@ -153,7 +161,11 @@ func (a *API) CreateInstanceGrant(ctx context.Context, req apigen.CreateInstance
 	if err != nil {
 		return nil, err
 	}
-	return apigen.CreateInstanceGrant200JSONResponse(wireGrantResult(res, spec.Capability)), nil
+	out, err := wireGrantResult(res, spec.Capability)
+	if err != nil {
+		return nil, err
+	}
+	return apigen.CreateInstanceGrant200JSONResponse(out), nil
 }
 
 func (a *API) RevokeInstanceGrant(ctx context.Context, req apigen.RevokeInstanceGrantRequestObject) (apigen.RevokeInstanceGrantResponseObject, error) {
@@ -190,7 +202,11 @@ func (a *API) CreateOrgGrant(ctx context.Context, req apigen.CreateOrgGrantReque
 	if err != nil {
 		return nil, err
 	}
-	return apigen.CreateOrgGrant200JSONResponse(wireGrantResult(res, spec.Capability)), nil
+	out, err := wireGrantResult(res, spec.Capability)
+	if err != nil {
+		return nil, err
+	}
+	return apigen.CreateOrgGrant200JSONResponse(out), nil
 }
 
 func (a *API) RevokeOrgGrant(ctx context.Context, req apigen.RevokeOrgGrantRequestObject) (apigen.RevokeOrgGrantResponseObject, error) {
@@ -227,7 +243,11 @@ func (a *API) CreateProjectGrant(ctx context.Context, req apigen.CreateProjectGr
 	if err != nil {
 		return nil, err
 	}
-	return apigen.CreateProjectGrant200JSONResponse(wireGrantResult(res, spec.Capability)), nil
+	out, err := wireGrantResult(res, spec.Capability)
+	if err != nil {
+		return nil, err
+	}
+	return apigen.CreateProjectGrant200JSONResponse(out), nil
 }
 
 func (a *API) RevokeProjectGrant(ctx context.Context, req apigen.RevokeProjectGrantRequestObject) (apigen.RevokeProjectGrantResponseObject, error) {
@@ -256,7 +276,11 @@ func (a *API) CreateEnvGrant(ctx context.Context, req apigen.CreateEnvGrantReque
 	if err != nil {
 		return nil, err
 	}
-	return apigen.CreateEnvGrant200JSONResponse(wireGrantResult(res, spec.Capability)), nil
+	out, err := wireGrantResult(res, spec.Capability)
+	if err != nil {
+		return nil, err
+	}
+	return apigen.CreateEnvGrant200JSONResponse(out), nil
 }
 
 func (a *API) RevokeEnvGrant(ctx context.Context, req apigen.RevokeEnvGrantRequestObject) (apigen.RevokeEnvGrantResponseObject, error) {

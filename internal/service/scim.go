@@ -489,15 +489,17 @@ func (s *SCIM) applyMappings(
 			if err != nil {
 				return nil, 0, err
 			}
-			if !out.Created && !out.OriginAdded {
+			var typ audit.EventType
+			switch out.Outcome {
+			case GrantUnchanged():
 				continue // already held by this exact origin: nothing happened
-			}
-			if out.Created {
+			case GrantCreated():
 				created++
-			}
-			typ := audit.EventGrantModified
-			if out.Created {
 				typ = audit.EventGrantCreated
+			case GrantOriginAdded():
+				typ = audit.EventGrantModified
+			default:
+				return nil, 0, fmt.Errorf("invalid grant outcome %q", out.Outcome)
 			}
 			events = append(events, grantEventInput{
 				typ:    typ,

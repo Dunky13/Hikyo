@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Hikyo-Org/hikyo/api"
 	"github.com/Hikyo-Org/hikyo/internal/audit"
 	"github.com/Hikyo-Org/hikyo/internal/authz"
 	"github.com/Hikyo-Org/hikyo/internal/domain"
@@ -134,16 +135,17 @@ type GrantSpec struct {
 	Scope domain.Scope
 }
 
-// GrantResult reports what a create actually did, so the caller can render
-// "granted" versus "already held, now also held by you" without a second read.
+type GrantOutcome = api.GrantOutcome
+
+func GrantCreated() GrantOutcome     { return api.GrantOutcomeCreated() }
+func GrantOriginAdded() GrantOutcome { return api.GrantOutcomeOriginAdded() }
+func GrantUnchanged() GrantOutcome   { return api.GrantOutcomeUnchanged() }
+
+// GrantResult reports what a create actually did, so callers can render the
+// result without interpreting combinations of independently-set booleans.
 type GrantResult struct {
 	GrantID string
-	// Created is false when an existing row was deduplicated and this call
-	// only attached an origin to it.
-	Created bool
-	// OriginAdded is false when the caller's own origin already held the row —
-	// a genuinely idempotent repeat.
-	OriginAdded bool
+	Outcome GrantOutcome
 }
 
 // grantOps maps an addressed scope depth to the (create, revoke, list,
@@ -305,15 +307,19 @@ func (s *Grants) grantOne(
 	}
 
 	// F5: the lifecycle event must match the state transition. A repeat that
-	// created no row and attached no origin changed nothing — emitting
-	// `grant.modified` for it would put a modification in the trail that never
-	// happened, and an investigator counting modifications would count polls.
-	if !out.Created && !out.OriginAdded {
+	// changed nothing emits no event, or an investigator would count polls as
+	// modifications.
+	if out.Outcome == GrantUnchanged() {
 		return out, nil, nil
 	}
-	typ := audit.EventGrantModified
-	if out.Created {
+	var typ audit.EventType
+	switch out.Outcome {
+	case GrantCreated():
 		typ = audit.EventGrantCreated
+	case GrantOriginAdded():
+		typ = audit.EventGrantModified
+	default:
+		return zero, nil, fmt.Errorf("invalid grant outcome %q", out.Outcome)
 	}
 	payload := audit.Payload{
 		"target_principal": string(spec.Target),
@@ -709,7 +715,7 @@ func writeGrantRow(ctx context.Context, az *authz.TxAuthorizer, spec GrantSpec, 
 		return GrantResult{}, err
 	}
 	existing := findGrant(rows, spec.Capability, spec.Scope)
-	out.Created = existing == nil
+	out.Outcome = GrantUnchanged()
 	if existing != nil {
 		out.GrantID = existing.ID
 	} else {
@@ -736,6 +742,7 @@ func writeGrantRow(ctx context.Context, az *authz.TxAuthorizer, spec GrantSpec, 
 			return GrantResult{}, err
 		}
 		out.GrantID = grantID
+		out.Outcome = GrantCreated()
 	}
 
 	// Attaching an origin that already holds the row is a genuine no-op, not
@@ -757,7 +764,9 @@ func writeGrantRow(ctx context.Context, az *authz.TxAuthorizer, spec GrantSpec, 
 		if err := az.AddGrantOrigin(ctx, originID, out.GrantID, spec.Target, origin, now); err != nil {
 			return GrantResult{}, err
 		}
-		out.OriginAdded = true
+		if existing != nil {
+			out.Outcome = GrantOriginAdded()
+		}
 	}
 
 	// Every EFFECTIVE authority change kills the grantee's sessions in the
@@ -771,7 +780,7 @@ func writeGrantRow(ctx context.Context, az *authz.TxAuthorizer, spec GrantSpec, 
 	// bookkeeping. The trail still records it as `grant.modified`, which is
 	// what it is. (Symmetric with revoke, where the advance is gated on the
 	// row actually dying.)
-	if out.Created {
+	if out.Outcome == GrantCreated() {
 		if err := az.AdvanceGeneration(ctx, spec.Target); err != nil {
 			return GrantResult{}, err
 		}
@@ -1060,13 +1069,15 @@ func (s *Grants) ApplyTemplate(ctx context.Context, actor Actor, template domain
 			results = append(results, res)
 			events = append(events, evs...)
 			names = append(names, string(capability))
-			switch {
-			case res.Created:
+			switch res.Outcome {
+			case GrantCreated():
 				created++
-			case res.OriginAdded:
+			case GrantOriginAdded():
 				joined++
-			default:
+			case GrantUnchanged():
 				unchanged++
+			default:
+				return fmt.Errorf("invalid grant outcome %q", res.Outcome)
 			}
 		}
 		out = results
@@ -1395,6 +1406,15 @@ func (s *Grants) BreakGlassGrant(ctx context.Context, spec GrantSpec) (GrantResu
 		// break-glass credential reset does: there is no proof to bind it to,
 		// and it commits in the same transaction as the grant, so durability
 		// holds.
+		var grantCreated bool
+		switch out.Outcome {
+		case GrantCreated():
+			grantCreated = true
+		case GrantOriginAdded(), GrantUnchanged():
+			grantCreated = false
+		default:
+			return fmt.Errorf("invalid grant outcome %q", out.Outcome)
+		}
 		e, err := newAuditEvent(ctx, audit.EventBreakGlassGrant, "",
 			audit.Object{Type: "grant", ID: out.GrantID}, audit.OutcomeSuccess, "",
 			audit.Payload{
@@ -1402,7 +1422,7 @@ func (s *Grants) BreakGlassGrant(ctx context.Context, spec GrantSpec) (GrantResu
 				"capability":       string(spec.Capability),
 				"scope":            renderScope(spec.Scope),
 				"authority":        "local-host",
-				"grant_created":    out.Created,
+				"grant_created":    grantCreated,
 			})
 		if err != nil {
 			return err
@@ -1477,10 +1497,17 @@ func cureIfMemberManagement(
 	ctx context.Context, az *authz.TxAuthorizer, clear clearRetentionAttention,
 	capability domain.Capability, scope domain.Scope, res GrantResult,
 ) ([]CureResult, []grantEventInput, error) {
-	if capability != domain.CapManageMembers || !res.Created {
+	if capability != domain.CapManageMembers {
 		return nil, nil, nil
 	}
-	return cureLockoutRetentions(ctx, az, clear, res.GrantID, scope)
+	switch res.Outcome {
+	case GrantCreated():
+		return cureLockoutRetentions(ctx, az, clear, res.GrantID, scope)
+	case GrantOriginAdded(), GrantUnchanged():
+		return nil, nil, nil
+	default:
+		return nil, nil, fmt.Errorf("invalid grant outcome %q", res.Outcome)
+	}
 }
 
 // retentionAttentionClearer builds the cure's audited exit path for a caller

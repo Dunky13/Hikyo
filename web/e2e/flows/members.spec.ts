@@ -324,7 +324,7 @@ test.describe('members and grants', () => {
       await dialog.getByLabel('Scope').selectOption(`env:${seed.project}:${seed.dev}`);
       await dialog.getByRole('button', { name: 'Grant', exact: true }).click();
 
-      const partial = page.getByRole('alert').filter({ hasText: 'Granted: read, edit' });
+      const partial = page.getByRole('alert').filter({ hasText: 'Completed 2 of 3' });
       await expect(partial).toContainText('2 of 3');
       await expect(partial).toContainText('pin was refused');
       await expect(partial).toContainText('live and listed below');

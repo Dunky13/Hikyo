@@ -49,6 +49,41 @@ func TestAdapterTargetSchemaCarriesPendingConflictArtifacts(t *testing.T) {
 	}
 }
 
+func TestGrantResultUsesClosedOutcome(t *testing.T) {
+	doc, err := api.Doc()
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema := doc.Components.Schemas["GrantResult"].Value
+	if schema == nil {
+		t.Fatal("GrantResult schema is missing")
+	}
+	if !slices.Contains(schema.Required, "outcome") {
+		t.Fatalf("GrantResult required fields = %v, want outcome", schema.Required)
+	}
+	for _, legacy := range []string{"created", "origin_added"} {
+		if _, exists := schema.Properties[legacy]; exists {
+			t.Errorf("GrantResult still exposes legacy boolean %q", legacy)
+		}
+	}
+	outcome := schema.Properties["outcome"]
+	if outcome == nil || outcome.Value == nil {
+		t.Fatal("GrantResult outcome schema is missing")
+	}
+	got := make([]string, 0, len(outcome.Value.Enum))
+	for _, value := range outcome.Value.Enum {
+		text, ok := value.(string)
+		if !ok {
+			t.Fatalf("GrantResult outcome enum contains non-string %T", value)
+		}
+		got = append(got, text)
+	}
+	want := []string{"created", "origin_added", "unchanged"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("GrantResult outcomes = %v, want %v", got, want)
+	}
+}
+
 func TestCollectedRevisionOperationsDeclareConflict(t *testing.T) {
 	doc, err := api.Doc()
 	if err != nil {

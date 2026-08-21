@@ -10,6 +10,7 @@ import { generatePath, Link } from 'react-router';
 import {
   capabilitiesAt,
   grantFailureText,
+  grantOutcomeSummary,
   grantScopeLabel,
   templatesAt,
   useApplyTemplate,
@@ -169,13 +170,13 @@ export function InstanceAdmin() {
         const principal = grantPrincipal.trim();
         if (grantTemplate !== '') {
           applyTemplate.mutate({ scope: { kind: 'instance' }, principal, template: grantTemplate }, {
-            onSuccess: (created) => { setGrantTemplate(''); ok(`Created ${String(created.count)} instance grant line${created.count === 1 ? '' : 's'} for ${principal}.`); },
+            onSuccess: (result) => { setGrantTemplate(''); ok(`Result for ${String(result.count)} instance grant line${result.count === 1 ? '' : 's'} for ${principal}: ${grantOutcomeSummary(result.items)}`); },
             onError: (error) => report(new SurfaceMessage(grantFailureText(error))),
           });
           return;
         }
         createGrants.mutate({ scope: { kind: 'instance' }, principal, capabilities: selectedCapabilities }, {
-          onSuccess: (created) => { setSelectedCapabilities([]); ok(`Created ${String(created.length)} instance grant line${created.length === 1 ? '' : 's'} for ${principal}.`); },
+          onSuccess: (result) => { setSelectedCapabilities([]); ok(`Result for ${String(result.length)} instance grant line${result.length === 1 ? '' : 's'} for ${principal}: ${grantOutcomeSummary(result)}`); },
           onError: (error) => {
             report(new SurfaceMessage(grantFailureText(error)));
           },

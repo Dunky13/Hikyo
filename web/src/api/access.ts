@@ -14,6 +14,7 @@ import {
   revokeOrgGrantOp,
   revokeProjectGrantOp,
 } from '@hikyo/operations';
+import type { GrantResult } from '@hikyo/client';
 import { zGrantList } from '@hikyo/zod';
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import type { z } from 'zod';
@@ -581,6 +582,7 @@ export function useInstanceGrants(): UseQueryResult<GrantList> {
 }
 
 type GrantInput = { readonly principal: string; readonly capability: string };
+type GrantOutcomeView = Pick<GrantResult, 'capability' | 'outcome'>;
 
 function createOne(scope: ScopeRef, input: GrantInput) {
   const body = { principal: input.principal, capability: input.capability };
@@ -603,31 +605,55 @@ export class GrantPartialFailure extends Error {
   override readonly cause: unknown;
 
   constructor(
-    readonly granted: readonly string[],
+    readonly completed: readonly GrantOutcomeView[],
     readonly failedCapability: string,
     readonly total: number,
     cause: unknown,
   ) {
-    super(`granting ${failedCapability} failed after ${granted.length} earlier capabilities`, { cause });
+    super(`granting ${failedCapability} failed after ${completed.length} earlier capabilities`, { cause });
     this.name = 'GrantPartialFailure';
     this.cause = cause;
   }
 }
 
-export async function createGrantsSequentially(
+export async function createGrantsSequentially<Result extends GrantOutcomeView>(
   capabilities: readonly string[],
-  create: (capability: string) => Promise<unknown>,
-): Promise<readonly string[]> {
-  const granted: string[] = [];
+  create: (capability: string) => Promise<Result>,
+): Promise<readonly Result[]> {
+  const results: Result[] = [];
   for (const capability of capabilities) {
     try {
-      await create(capability);
+      results.push(await create(capability));
     } catch (error) {
-      throw new GrantPartialFailure(granted, capability, capabilities.length, error);
+      throw new GrantPartialFailure(results, capability, capabilities.length, error);
     }
-    granted.push(capability);
   }
-  return granted;
+  return results;
+}
+
+export function grantOutcomeSummary(results: readonly GrantOutcomeView[]): string {
+  const created: string[] = [];
+  const originAdded: string[] = [];
+  const unchanged: string[] = [];
+  for (const result of results) {
+    switch (result.outcome) {
+      case 'created':
+        created.push(result.capability);
+        break;
+      case 'origin_added':
+        originAdded.push(result.capability);
+        break;
+      case 'unchanged':
+        unchanged.push(result.capability);
+        break;
+      default: {
+        const impossible: never = result.outcome;
+        return impossible;
+      }
+    }
+  }
+  const render = (items: readonly string[]) => (items.length === 0 ? 'none' : items.join(', '));
+  return `Created: ${render(created)}. Origin added: ${render(originAdded)}. Unchanged: ${render(unchanged)}.`;
 }
 
 /**
@@ -743,12 +769,12 @@ export function useRevokeGrant() {
  */
 export function grantFailureText(error: unknown): string {
   if (error instanceof GrantPartialFailure) {
-    if (error.granted.length === 0) {
+    if (error.completed.length === 0) {
       return grantFailureText(error.cause);
     }
-    const granted = error.granted.join(', ');
     return (
-      `Granted: ${granted} (${String(error.granted.length)} of ${String(error.total)}, live and listed below). ` +
+      `Completed ${String(error.completed.length)} of ${String(error.total)} (live and listed below). ` +
+      `${grantOutcomeSummary(error.completed)} ` +
       `${error.failedCapability} was refused: ${grantFailureText(error.cause)}`
     );
   }

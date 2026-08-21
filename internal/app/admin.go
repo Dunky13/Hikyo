@@ -312,9 +312,16 @@ func runAdminGrant(ctx context.Context, cfg *config.Config, log *slog.Logger, ar
 	}
 	// The grant id, not the capability value: there is nothing secret here, and
 	// the operator needs the id to revoke it again through the ordinary surface.
-	verb := "joined"
-	if res.Created {
+	var verb string
+	switch res.Outcome {
+	case service.GrantCreated():
 		verb = "created"
+	case service.GrantOriginAdded():
+		verb = "origin added"
+	case service.GrantUnchanged():
+		verb = "unchanged"
+	default:
+		return fmt.Errorf("invalid grant outcome %q", res.Outcome)
 	}
 	fmt.Fprintf(stderr, "break-glass grant %s: %s (%s at %s) for %s\n",
 		verb, res.GrantID, *capability, scopeLabel(scope), *principal)
