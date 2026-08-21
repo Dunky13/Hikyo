@@ -81,7 +81,7 @@ func buildBudgetClassification() map[authz.Operation]budgetClassification {
 	add(budgetClassDefaultExpensive, "crypto rewrap proportional to every stored/historical row",
 		authz.OpReencryptProject, authz.OpReencryptInstance)
 	add(budgetClassDefaultExpensive, "bulk value fan-out across environments/keys",
-		authz.OpValueImport, authz.OpImportPresence,
+		authz.OpValueImport,
 		authz.OpValueCopySource, authz.OpValueCopyDestination, authz.OpValueCopyDestinationConfig)
 	add(budgetClassDefaultExpensive, "whole-project materialization / bulk offline flush",
 		authz.OpDefinitionsExport, authz.OpDeliveryReconcileOffline)
@@ -113,6 +113,9 @@ func buildBudgetClassification() map[authz.Operation]budgetClassification {
 		authz.OpEnvRead, authz.OpEnvList, authz.OpEnvReorder, authz.OpEnvUpdateNote,
 		authz.OpEnvSettingsRead, authz.OpEnvSettingsUpdate,
 		authz.OpFolderCreate, authz.OpFolderGet, authz.OpFolderList, authz.OpFolderRename, authz.OpFolderDelete,
+		// import presence/occurrence PREVIEW (Values.Occurrences); the bulk write
+		// authorizes OpValueImport (default-expensive) which carries the charge
+		authz.OpImportPresence,
 		// key / key-group reads (the mutating ones are schema-revision above)
 		authz.OpKeyGet, authz.OpKeyList, authz.OpKeyDeclassify, authz.OpKeySecretRuleChange,
 		authz.OpKeyGroupGet, authz.OpKeyGroupList,
