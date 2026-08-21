@@ -3,7 +3,7 @@
 ## Stack position
 
 - Stack root: PR #274 (`d253e65614713f94377a738611e143da5a8c1702`)
-- Immediate base: PR #281 (`5df66fe5eb00f58fda2fbcf5e279d99cc304c0cd`)
+- Immediate base: PR #281 (`b6c0df2cde0522ab5793f05a7280f3a27a7e24cc`)
 - Issue: #218
 - Generated outputs: none
 
