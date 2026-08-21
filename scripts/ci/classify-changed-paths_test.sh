@@ -159,6 +159,7 @@ for dependency_or_config in \
 	'go.sum' \
 	'web/pnpm-lock.yaml' \
 	'clients/ts/package.json' \
+	'clients/ts/pnpm-workspace.yaml' \
 	'docs/site/package.json' \
 	'.goreleaser.yaml'; do
 	dependency_actual=$(printf '%s\n' "$dependency_or_config" | "$classifier" --files)
