@@ -107,6 +107,8 @@ test.describe('app chrome', () => {
           last_prune_success: lastSuccess,
           stale: true,
           stale_after_seconds: 86400,
+          peak_project_bytes: 0,
+          storage_warn: false,
         }),
       }),
     );
@@ -117,6 +119,28 @@ test.describe('app chrome', () => {
     await expect(warning).toContainText('Payload pruning has not succeeded since');
     await expect(warning).toContainText('retention bounds are not being enforced.');
     await expect(warning.locator('time')).toHaveAttribute('datetime', lastSuccess);
+  });
+
+  test('warns when a project reaches the storage high-water', async ({ page }) => {
+    await page.route('**/api/v1/instance/retention-health', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          last_prune_success: '2026-08-20T10:00:00Z',
+          stale: false,
+          stale_after_seconds: 86400,
+          peak_project_bytes: 1_500_000_000,
+          storage_warn: true,
+        }),
+      }),
+    );
+    await page.reload();
+
+    const warning = page.locator('.retention-warning');
+    await expect(warning).toHaveAttribute('role', 'alert');
+    await expect(warning).toContainText('1.40 GiB of stored payload');
+    await expect(warning).toContainText('new publishes are refused at 4 GiB');
   });
 
   for (const status of [403, 404]) {
