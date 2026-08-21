@@ -135,10 +135,10 @@ var pinnedRemoteSurface = map[string]bool{
 	"POST /api/v1/instance/workspace-origins":   true,
 	"DELETE /api/v1/instance/workspace-origins": true,
 
-	"POST /api/v1/auth/workspace/start":                 true,
-	"GET /api/v1/auth/workspace/transactions/{state}":   true,
-	"POST /api/v1/auth/workspace/approve":               true,
-	"POST /api/v1/auth/workspace/redeem":                true,
+	"POST /api/v1/auth/workspace/start":               true,
+	"GET /api/v1/auth/workspace/transactions/{state}": true,
+	"POST /api/v1/auth/workspace/approve":             true,
+	"POST /api/v1/auth/workspace/redeem":              true,
 }
 
 func TestRemoteContractSurfaceIsPinned(t *testing.T) {

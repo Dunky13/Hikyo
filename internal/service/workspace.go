@@ -868,18 +868,51 @@ func (s *Workspace) ShowHandoff(ctx context.Context, actor Actor, state string) 
 	}
 	now := s.now()
 	var out HandoffView
-	err := tx.Read(ctx, s.DB, func(ctx context.Context, _ store.ReadRepos, az *authz.TxAuthorizer) error {
-		// A human session on THIS instance, or nothing. The approve page is
-		// signed in for a step-up; requiring it keeps a stolen state from
-		// reading a transaction's shape from outside the ceremony.
-		if _, err := az.Authenticate(ctx, actor.bearer, now); err != nil {
+	// A write transaction, not a read: the successful read is AUDITED
+	// (remote.workspace_handoff_read), which the audit ADR forces for an
+	// authenticated instance-class read of ceremony state — a caller can read
+	// then close the popup, so no approval or issuance event subsumes it.
+	err := tx.Write(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
+		// A human session on THIS instance, or nothing (401).
+		caller, err := az.Authenticate(ctx, actor.bearer, now)
+		if err != nil {
 			return err
 		}
 		h, err := az.WorkspaceHandoffByState(ctx, crypto.ArtifactVerifier(state))
 		if err != nil {
 			return ErrHandoffInvalid
 		}
+		// ONLY a step-up is readable here. An establishment binds no session, so
+		// there is nothing to anchor ownership on — and the approve page never
+		// reads one (it shows an establishment its plain Authorize button). A
+		// bare establishment state presented here is treated as not found.
+		if h.Purpose != authz.HandoffStepUp {
+			return ErrHandoffInvalid
+		}
 		if !h.Live(now) {
+			return ErrHandoffInvalid
+		}
+		// OWNERSHIP, and it is the whole point of the endpoint's security.
+		// `StartHandoff` is pre-authentication, so anyone may open a step-up
+		// transaction naming ANY session id; resolving that bound session within
+		// the CALLER's own sessions is what stops one human — or one tenant —
+		// reading another's bound environment and enumerated key set from a
+		// leaked state. The refusal is the SAME `ErrHandoffInvalid` (a 404) as an
+		// unknown state, so the endpoint never distinguishes "not yours" from
+		// "not there". Mirrors the ownership check `elevate` performs at
+		// redemption, moved earlier so a read cannot outrun it.
+		rows, err := az.SessionsForPrincipal(ctx, caller.Principal)
+		if err != nil {
+			return err
+		}
+		owned := false
+		for _, row := range rows {
+			if row.ID == h.SessionID {
+				owned = true
+				break
+			}
+		}
+		if !owned {
 			return ErrHandoffInvalid
 		}
 		out = HandoffView{
@@ -892,7 +925,15 @@ func (s *Workspace) ShowHandoff(ctx context.Context, actor Actor, state string) 
 		if h.KeySet != "" {
 			out.KeySet = splitKeySet(h.KeySet)
 		}
-		return nil
+		// The trail records THAT this human read the transaction's shape, keyed
+		// by the handoff id — never the key set, the environment or any value.
+		e, err := domainEvent(ctx, audit.EventRemoteWorkspaceHandoffRead, caller.Principal,
+			audit.Object{Type: "workspace_handoff", ID: h.ID},
+			audit.Payload{"handoff_id": h.ID, "origin": h.Origin})
+		if err != nil {
+			return err
+		}
+		return az.RecordAuthEvent(ctx, e)
 	})
 	if err != nil {
 		return HandoffView{}, err

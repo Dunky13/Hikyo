@@ -194,6 +194,30 @@ func runRemoteLifecycle(t *testing.T, db *store.DB) {
 		t.Fatalf("remote.workspace_session_issued: %v", err)
 	}
 
+	// A step-up transaction, and the approve page reading its bound policy back:
+	// remote.workspace_handoff_read. Only START + READ here — the elevation
+	// itself needs the reauthentication seam this lifecycle deliberately leaves
+	// unwired; the read does not, and it is the audited act under test.
+	stepUp, err := workspace.StartHandoff(ctx, service.HandoffRequest{
+		Origin: "https://shell.example", RedirectURI: "https://shell.example/workspace/callback",
+		PKCEChallenge: challenge, Purpose: authn.HandoffStepUp,
+		SessionID: ws.SessionID, Operation: string(authz.OpValueReveal),
+		EnvID: "env_lifecycle", KeySet: "key_x",
+	})
+	if err != nil {
+		t.Fatalf("start step-up handoff: %v", err)
+	}
+	if _, err := workspace.ShowHandoff(ctx, service.Bearer(humanBearer), stepUp.State); err != nil {
+		t.Fatalf("remote.workspace_handoff_read: %v", err)
+	}
+	// Ownership: a DIFFERENT human, with a valid session but not the one the
+	// transaction bound, is refused as if the state did not exist — the leak the
+	// endpoint's session check exists to close.
+	otherBearer := seedCLISession(t, db, custodian)
+	if _, err := workspace.ShowHandoff(ctx, service.Bearer(otherBearer), stepUp.State); !errors.Is(err, service.ErrHandoffInvalid) {
+		t.Fatalf("a step-up transaction read by a non-owner must be refused, got %v", err)
+	}
+
 	// Single use: the same code again is refused, and the refusal is audited
 	// as a redeem-stage failure.
 	if _, err := workspace.RedeemHandoff(ctx, code, verifier, "https://shell.example"); !errors.Is(err, service.ErrHandoffInvalid) {

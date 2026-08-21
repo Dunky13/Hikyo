@@ -609,8 +609,9 @@ var wireEvents = map[string][]audit.EventType{
 	// pre-authentication audit obligation, which no operation can carry for
 	// them: start and redeem authenticate nobody, and a handoff FAILURE
 	// predates any session at every stage.
-	"http:POST /api/v1/auth/workspace/start":   {audit.EventRemoteHandoffFailed},
-	"http:POST /api/v1/auth/workspace/approve": {audit.EventRemoteHandoffFailed},
+	"http:POST /api/v1/auth/workspace/start":               {audit.EventRemoteHandoffFailed},
+	"http:GET /api/v1/auth/workspace/transactions/{state}": {audit.EventRemoteWorkspaceHandoffRead},
+	"http:POST /api/v1/auth/workspace/approve":             {audit.EventRemoteHandoffFailed},
 	// Redeem carries two shapes, because a redemption is two acts: an
 	// establishment ISSUES a workspace session, while a step-up ELEVATES the one
 	// it was bound to and mints nothing — the trail records that as the ordinary

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -489,7 +490,7 @@ func runShowHandoffReturnsBoundPolicy(t *testing.T, db *store.DB) {
 		Origin: stepUpOrigin, RedirectURI: stepUpOrigin + "/workspace/callback",
 		PKCEChallenge: challenge, Purpose: service.HandoffStepUp,
 		SessionID: established.SessionID, Operation: string(authz.OpValueReveal),
-		EnvID: string(envProd), KeySet: "key_one",
+		EnvID: string(envProd), KeySet: "key_one\nkey_two",
 	})
 	if err != nil {
 		t.Fatalf("start step-up handoff: %v", err)
@@ -508,8 +509,11 @@ func runShowHandoffReturnsBoundPolicy(t *testing.T, db *store.DB) {
 	if view.EnvID != string(envProd) {
 		t.Errorf("environment = %q, want %q", view.EnvID, envProd)
 	}
-	if len(view.KeySet) != 1 || view.KeySet[0] != "key_one" {
-		t.Errorf("key set = %v, want [key_one]", view.KeySet)
+	// The whole key set comes back, split — the reason the endpoint exists is to
+	// carry a set a URL could not.
+	if got := append([]string(nil), view.KeySet...); len(got) != 2 ||
+		!slices.Contains(got, "key_one") || !slices.Contains(got, "key_two") {
+		t.Errorf("key set = %v, want both key_one and key_two", view.KeySet)
 	}
 
 	// No session, no read — the numbers here are the ceremony's, not the world's.
@@ -517,10 +521,31 @@ func runShowHandoffReturnsBoundPolicy(t *testing.T, db *store.DB) {
 		t.Errorf("show handoff without a session: err = %v, want ErrUnauthenticated", err)
 	}
 
+	// A DIFFERENT human, authenticated but not the transaction's owner, is
+	// refused as if the state did not exist — one human (or tenant) must not read
+	// another's bound environment and key set from a leaked state.
+	other := seedSessionFactors(t, db, custodian, `["password","totp"]`)
+	if _, err := ws.ShowHandoff(ctx, service.Bearer(other), started.State); !errors.Is(err, service.ErrHandoffInvalid) {
+		t.Errorf("show handoff by a non-owner: err = %v, want ErrHandoffInvalid", err)
+	}
+
 	// A malformed or unknown state is a uniform invalid-handoff refusal (a 404 at
 	// the transport), never a partial answer.
 	if _, err := ws.ShowHandoff(ctx, service.Bearer(approver), "not-a-state"); !errors.Is(err, service.ErrHandoffInvalid) {
 		t.Errorf("show handoff with a bogus state: err = %v, want ErrHandoffInvalid", err)
+	}
+
+	// An establishment transaction has no bound session to anchor ownership on
+	// and is not readable here — the approve page never asks for one.
+	establishment, err := ws.StartHandoff(ctx, service.HandoffRequest{
+		Origin: stepUpOrigin, RedirectURI: stepUpOrigin + "/workspace/callback",
+		PKCEChallenge: challenge, Purpose: service.HandoffEstablishment,
+	})
+	if err != nil {
+		t.Fatalf("start establishment handoff: %v", err)
+	}
+	if _, err := ws.ShowHandoff(ctx, service.Bearer(approver), establishment.State); !errors.Is(err, service.ErrHandoffInvalid) {
+		t.Errorf("show handoff for an establishment: err = %v, want ErrHandoffInvalid", err)
 	}
 }
 
