@@ -89,9 +89,8 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
-          key: go-lint-v1.7.12-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: go-lint-v1.7.12-${{ runner.os }}-${{ hashFiles('go.sum') }}
           restore-keys: |
-            go-lint-v1.7.12-${{ runner.os }}-${{ hashFiles('go.sum') }}-
             go-lint-v1.7.12-${{ runner.os }}-
       - name: Shellcheck (pinned archive)
         env:
@@ -110,7 +109,9 @@ jobs:
       - name: Actionlint
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
       - name: Save lint Go cache
-        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: >-
+          success() && github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+          steps.lint-go-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
@@ -217,9 +218,8 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
-          key: go-release-snapshot-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: go-release-snapshot-${{ runner.os }}-${{ hashFiles('go.sum') }}
           restore-keys: |
-            go-release-snapshot-${{ runner.os }}-${{ hashFiles('go.sum') }}-
             go-release-snapshot-${{ runner.os }}-
       - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
         with:
@@ -243,7 +243,9 @@ jobs:
       - name: Classify complete snapshot manifest
         run: ./scripts/release/snapshot-manifest_test.sh
       - name: Save release-snapshot Go cache
-        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: >-
+          success() && github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+          steps.release-snapshot-go-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
@@ -272,9 +274,8 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
-          key: go-generated-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: go-generated-${{ runner.os }}-${{ hashFiles('go.sum') }}
           restore-keys: |
-            go-generated-${{ runner.os }}-${{ hashFiles('go.sum') }}-
             go-generated-${{ runner.os }}-
       - name: Format
         run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
@@ -293,7 +294,9 @@ jobs:
           # git diff misses newly generated untracked files
           test -z "$(git status --porcelain --untracked-files=all -- chart/hikyo/crds internal/operator/api)"
       - name: Save generated-code Go cache
-        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: >-
+          success() && github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+          steps.generated-go-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
@@ -444,9 +447,8 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
-          key: go-web-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: go-web-${{ runner.os }}-${{ hashFiles('go.sum') }}
           restore-keys: |
-            go-web-${{ runner.os }}-${{ hashFiles('go.sum') }}-
             go-web-${{ runner.os }}-
       - name: Enable pnpm
         run: corepack enable
@@ -532,7 +534,7 @@ jobs:
       - name: Save web Go cache
         if: >-
           success() && github.event_name == 'push' && github.ref == 'refs/heads/main' &&
-          matrix.project == 'desktop'
+          matrix.project == 'desktop' && steps.web-go-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
@@ -588,9 +590,8 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
-          key: go-test-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: go-test-${{ runner.os }}-${{ hashFiles('go.sum') }}
           restore-keys: |
-            go-test-${{ runner.os }}-${{ hashFiles('go.sum') }}-
             go-test-${{ runner.os }}-
 
       - name: Populate shared Go module cache
@@ -624,7 +625,9 @@ jobs:
       - name: Secret-scanning benchmark runs (relative regression guard)
         run: go test ./internal/scanning/ -run '^$' -bench BenchmarkScan -benchtime 3x
       - name: Save test Go cache
-        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: >-
+          success() && github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+          steps.test-go-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
@@ -669,9 +672,8 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
-          key: go-k8s-e2e-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: go-k8s-e2e-${{ runner.os }}-${{ hashFiles('go.sum') }}
           restore-keys: |
-            go-k8s-e2e-${{ runner.os }}-${{ hashFiles('go.sum') }}-
             go-k8s-e2e-${{ runner.os }}-
       # A pinned, checksummed binary download (the shellcheck pattern above):
       # the repository's Actions allowlist is deliberately narrow, and kind is
@@ -693,7 +695,9 @@ jobs:
       - name: Operator kind e2e
         run: ./scripts/ci/k8s-e2e.sh
       - name: Save k8s-e2e Go cache
-        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: >-
+          success() && github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+          steps.k8s-e2e-go-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
@@ -741,16 +745,17 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
-          key: go-race-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: go-race-${{ runner.os }}-${{ hashFiles('go.sum') }}
           restore-keys: |
-            go-race-${{ runner.os }}-${{ hashFiles('go.sum') }}-
             go-race-${{ runner.os }}-
       - name: Race detector (all packages except the isolation suite)
         env:
           HIKYO_TEST_POSTGRES_DSN: postgres://hikyo:hikyo@127.0.0.1:5432/hikyo_test
         run: go list ./... | grep -v '/internal/isolation$' | xargs go test -race -count=1
       - name: Save race Go cache (main push only)
-        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: >-
+          success() && github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+          steps.race-go-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
@@ -781,9 +786,8 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
-          key: go-fuzz-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: go-fuzz-${{ runner.os }}-${{ hashFiles('go.sum') }}
           restore-keys: |
-            go-fuzz-${{ runner.os }}-${{ hashFiles('go.sum') }}-
             go-fuzz-${{ runner.os }}-
       - name: Fuzz every target for a bounded time
         run: |
@@ -870,7 +874,9 @@ jobs:
           if-no-files-found: error
           retention-days: 30
       - name: Save fuzz Go cache (main push only)
-        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: >-
+          success() && github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+          steps.fuzz-go-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
@@ -928,9 +934,8 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
-          key: go-test-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: go-test-${{ runner.os }}-${{ hashFiles('go.sum') }}
           restore-keys: |
-            go-test-${{ runner.os }}-${{ hashFiles('go.sum') }}-
             go-test-${{ runner.os }}-
       - name: Container round-trip, stanza exclusivity and truncation refusal
         run: go test -count=1 ./internal/crypto/backup/
