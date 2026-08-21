@@ -106,7 +106,7 @@ var Registry = []Bound{
 	{"Pins quota per project", "ops-spec §8", "invalidDetail (PinQuota)", "conformance revisions_test", StatusEnforced},
 	{"Grants per org", "ops-spec §8", "domain.ErrLimitExceeded (MaxGrantsPerOrg)", "isolation.TestGrantPerOrgCap", StatusEnforced},
 	{"Per-project storage high-water (warn 1 GiB / refuse 4 GiB)", "ops-spec §8 (§141)", "domain.ErrLimitExceeded (MaxProjectStorageBytes) at publish + doctor/metric/UI-banner warn (ProjectStorageWarnBytes)", "isolation.TestProjectStorageHighWater", StatusEnforced},
-	{"Schema-revision rate 60/h per project", "ops-spec §8 (§151)", "loud rate-limit refusal", "ENFORCEMENT-PENDING: the schema-mutation path EXISTS, but the refusal needs a per-principal windowed rate-limit mechanism (the §179 expensive-path budget layer) that is not yet built anywhere. HUMAN-DISPOSITION -> issue #186.", StatusPending},
+	{"Schema-revision rate 60/h per project", "ops-spec §8 (§151)", "admission.ErrOverloaded (uniform 429) via service.Budget", "conformance scenarioSchemaRevisionRateLimit + service.TestBudgetRateWindowSlides", StatusEnforced},
 
 	// §9 encryption.
 	{"Reencrypt CAS (no-resurrect)", "ops-spec §9", "row_version CAS conflict", "store authn CAS", StatusEnforced},
@@ -121,7 +121,8 @@ var Registry = []Bound{
 
 	// §20 audit ops.
 	{"Audit free text", "ops-spec §20", "truncation to audit.FreeTextBound", "audit audit_test", StatusSanitize},
-	{"Audit exports 2/org · 6/instance", "ops-spec §20 (§179)", "expensive-path budget refusal", "ENFORCEMENT-PENDING: the audit-export path EXISTS (internal/service/audit.go Export), but the concurrency/rate cap needs the §179 expensive-path budget layer (per-org concurrency + per-principal rate across search/export/publish/sync) that is not yet built anywhere. HUMAN-DISPOSITION -> issue #186.", StatusPending},
+	{"Audit exports 2/org · 6/instance", "ops-spec §20 (§179)", "admission.ErrOverloaded (uniform 429) via service.Budget", "service.TestAuditExportChargesExpensiveBudget + service.TestBudgetInstanceConcurrencyIsSeparateFromOrg", StatusEnforced},
+	{"Expensive-path fail-closed default 60/min·principal · 8/org", "ops-spec §10 (§179)", "budgetDefault charged at each default-expensive method; classification totality closes 'unbudgeted by omission' at build time", "conformance TestBudgetClassificationIsTotal (every authz op classified — build breaks on a new unclassified op) + scenarioDefaultBudgetChargedEndToEnd (a default-expensive method really trips the default 429) + service.TestBudgetDefaultEnforces (mechanism)", StatusEnforced},
 
 	// SAML / SCIM wire bounds.
 	{"SAML document bytes / depth / tokens", "ops-catalogue §SAML", "samlsp.ErrDocument* ", "samlsp xml_test", StatusEnforced},
@@ -203,6 +204,22 @@ func TestReconciledBoundsMatchOpsSpecValues(t *testing.T) {
 		// Per-project storage high-water (#185).
 		{"service.MaxProjectStorageBytes", service.MaxProjectStorageBytes, 4 << 30},
 		{"service.ProjectStorageWarnBytes", service.ProjectStorageWarnBytes, 1 << 30},
+		// §179 / §20 / §151 expensive-path budget family (#186). Pinned as one
+		// table so a future edit that drifts any family value off spec fails here.
+		{"service.BudgetSearchRatePerMin", service.BudgetSearchRatePerMin, 30},
+		{"service.BudgetSearchOrgConcurrency", service.BudgetSearchOrgConcurrency, 4},
+		{"service.BudgetExportRatePerMin", service.BudgetExportRatePerMin, 5},
+		{"service.BudgetExportOrgConcurrency", service.BudgetExportOrgConcurrency, 2},
+		{"service.BudgetExportInstanceConcurrency", service.BudgetExportInstanceConcurrency, 6},
+		{"service.BudgetPublishRatePerMin", service.BudgetPublishRatePerMin, 10},
+		{"service.BudgetPublishOrgConcurrency", service.BudgetPublishOrgConcurrency, 4},
+		{"service.BudgetAdapterRatePerMin", service.BudgetAdapterRatePerMin, 10},
+		{"service.BudgetAdapterOrgConcurrency", service.BudgetAdapterOrgConcurrency, 4},
+		{"service.BudgetMachineFetchOrgPerMin", service.BudgetMachineFetchOrgPerMin, 300},
+		{"service.BudgetMachineFetchInstancePerMin", service.BudgetMachineFetchInstancePerMin, 1000},
+		{"service.BudgetDefaultRatePerMin", service.BudgetDefaultRatePerMin, 60},
+		{"service.BudgetDefaultOrgConcurrency", service.BudgetDefaultOrgConcurrency, 8},
+		{"service.BudgetSchemaRevisionPerHour", service.BudgetSchemaRevisionPerHour, 60},
 		// Already-conformant bounds, pinned so they cannot drift unnoticed.
 		{"schema.MaxKeysPerProject", schema.MaxKeysPerProject, 1000},
 		{"schema.MaxKeyGroupsPerProject", schema.MaxKeyGroupsPerProject, 100},

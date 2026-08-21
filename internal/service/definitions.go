@@ -38,6 +38,9 @@ type Definitions struct {
 	DB       *store.DB
 	Keyring  *crypto.Keyring
 	Advisory *Advisory
+	// Budget applies the § 151 schema-revision rate limit (60/h per project) to
+	// the definitions-apply path, via prepareSchemaPublish. Nil disables it.
+	Budget *Budget
 	// Scan is the secret-scanning Surface-2 seam (#74 SS3, ADR §7 (b)/(c)): the
 	// plan/apply chokepoints scan every author-controlled bundle leaf before an
 	// immutable plan persists (plan) and re-scan on ruleset-snapshot skew (apply),
@@ -155,8 +158,16 @@ type DefinitionsSettings struct {
 // the server-owned ids and the base revision, producing a template that applies
 // cleanly to a fresh instance.
 func (s *Definitions) Export(ctx context.Context, actor Actor, scope domain.Scope, portable bool) ([]byte, error) {
+	// §179 fail-closed default: a whole-project bundle materialization with no
+	// named category. Authorized-then-acquired at entry (rate + concurrency), so
+	// an unauthorized caller cannot occupy the org's slots by guessing its id.
+	release, err := chargeDefaultAtEntry(ctx, s.DB, s.Budget, actor, authz.OpDefinitionsExport, authz.OpDefinitionsExport, scope, s.now)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	var out []byte
-	err := tx.Read(ctx, s.DB, func(ctx context.Context, r store.ReadRepos, az *authz.TxAuthorizer) error {
+	err = tx.Read(ctx, s.DB, func(ctx context.Context, r store.ReadRepos, az *authz.TxAuthorizer) error {
 		caller, err := actor.resolve(ctx, az, s.now())
 		if err != nil {
 			return err
@@ -183,8 +194,17 @@ func (s *Definitions) Export(ctx context.Context, actor Actor, scope domain.Scop
 // Check classifies drift between a submitted bundle and current state, with no
 // persistence. It is the diagnostic; plan is the gate.
 func (s *Definitions) Check(ctx context.Context, actor Actor, scope domain.Scope, raw []byte) (CheckResult, error) {
+	// §179 fail-closed default: Check materializes the whole project state, lists
+	// every key/presence/group/environment and parses every declaration, plus
+	// scans the submitted bundle — the same fan-out Export is, so it takes the
+	// same default budget (authorized-then-acquired at entry).
+	release, err := chargeDefaultAtEntry(ctx, s.DB, s.Budget, actor, authz.OpDefinitionsCheck, authz.OpDefinitionsCheck, scope, s.now)
+	if err != nil {
+		return CheckResult{}, err
+	}
+	defer release()
 	var res CheckResult
-	err := tx.Read(ctx, s.DB, func(ctx context.Context, r store.ReadRepos, az *authz.TxAuthorizer) error {
+	err = tx.Read(ctx, s.DB, func(ctx context.Context, r store.ReadRepos, az *authz.TxAuthorizer) error {
 		caller, err := actor.resolve(ctx, az, s.now())
 		if err != nil {
 			return err

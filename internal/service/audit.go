@@ -21,6 +21,9 @@ import (
 // page read in its own transaction under a fresh proof.
 type Audits struct {
 	DB *store.DB
+	// Budget applies the ops-spec § 179 / § 20 expensive-path budget to exports:
+	// 5/min per principal, 2 concurrent per org, 6 per instance. Nil disables it.
+	Budget *Budget
 }
 
 func auditQueryOp(scope domain.Scope) (authz.Operation, error) {
@@ -204,6 +207,14 @@ func (s *Audits) Export(ctx context.Context, principal domain.PrincipalID, scope
 	if pageSize <= 0 {
 		return fmt.Errorf("service: export page size must be positive")
 	}
+	// § 179 / § 20 expensive-path budget: 5/min per principal, 2 concurrent per
+	// org, 6 per instance. Acquired here, at entry, and held for the whole
+	// stream — a running export occupies its concurrency slot until it ends.
+	release, err := s.Budget.acquire(budgetExport, budgetKeys{Principal: principal, Org: scope.Org})
+	if err != nil {
+		return err
+	}
+	defer release()
 	insertTenant := func(ctx context.Context, r store.Repos, p authz.Proof, ev audit.Event) error {
 		return r.Audit().InsertTenant(ctx, p, ev)
 	}
@@ -218,6 +229,15 @@ func (s *Audits) InstanceExport(ctx context.Context, principal domain.PrincipalI
 	if pageSize <= 0 {
 		return fmt.Errorf("service: export page size must be positive")
 	}
+	// Instance export has no org: it is bounded by 5/min per principal and the
+	// 6-per-instance concurrency only (budgetExportInstance), never the 2-per-org
+	// bound, which would otherwise collapse every instance export into one "" org
+	// bucket.
+	release, err := s.Budget.acquire(budgetExportInstance, budgetKeys{Principal: principal})
+	if err != nil {
+		return err
+	}
+	defer release()
 	insertInstance := func(ctx context.Context, r store.Repos, p authz.Proof, ev audit.Event) error {
 		return r.Audit().InsertInstance(ctx, p, ev)
 	}

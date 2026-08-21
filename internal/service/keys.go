@@ -119,6 +119,9 @@ type Keys struct {
 	// they were never validated at.
 	Keyring  *crypto.Keyring
 	Advisory *Advisory
+	// Budget applies the § 151 schema-revision rate limit (60/h per project) to
+	// every semantic schema mutation, via prepareSchemaPublish. Nil disables it.
+	Budget *Budget
 	// Scan is the secret-scanning ruleset (#74). Surface-2 declaration ingresses
 	// (key create/rename/metadata/declaration edits) block on a finding; the
 	// secret→config declassification leg of Reclassify is a Surface-1 warn.
@@ -130,6 +133,7 @@ type KeyGroups struct {
 	DB       *store.DB
 	Keyring  *crypto.Keyring
 	Advisory *Advisory
+	Budget   *Budget
 	// Scan: secret-scanning Surface-2 seam (#74). Group names are
 	// author-controlled declaration text.
 	Scan *scanning.Ruleset
@@ -592,6 +596,7 @@ func (s *Keys) Create(ctx context.Context, actor Actor, scope domain.Scope, spec
 	if err != nil {
 		return Key{}, err
 	}
+	var rateCharged bool
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		caller, err := actor.resolve(ctx, az, time.Now().UTC())
 		if err != nil {
@@ -635,6 +640,11 @@ func (s *Keys) Create(ctx context.Context, actor Actor, scope domain.Scope, spec
 			return err
 		}
 		if err := r.Catalogue().ReplacePresence(ctx, p, id, presenceRows(spec.Presence)); err != nil {
+			return err
+		}
+		// § 151 schema-revision rate (60/h per project), charged immediately
+		// before the bump so only a real revision counts — see Keys.UpdateMetadata.
+		if err := s.Budget.chargeOnce(&rateCharged, budgetSchemaRevision, budgetKeys{Project: scope.Project}); err != nil {
 			return err
 		}
 		if err := r.Catalogue().BumpSchemaRevision(ctx, p); err != nil {
@@ -775,6 +785,7 @@ func (s *Keys) Rename(ctx context.Context, actor Actor, scope domain.Scope, id, 
 	if err != nil {
 		return Key{}, err
 	}
+	var rateCharged bool
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		caller, err := actor.resolve(ctx, az, time.Now().UTC())
 		if err != nil {
@@ -803,6 +814,10 @@ func (s *Keys) Rename(ctx context.Context, actor Actor, scope domain.Scope, id, 
 			return err
 		}
 		if err := r.Catalogue().Rename(ctx, p, id, name); err != nil {
+			return err
+		}
+		// § 151 schema-revision rate (see Keys.UpdateMetadata).
+		if err := s.Budget.chargeOnce(&rateCharged, budgetSchemaRevision, budgetKeys{Project: scope.Project}); err != nil {
 			return err
 		}
 		if err := r.Catalogue().BumpSchemaRevision(ctx, p); err != nil {
@@ -856,6 +871,7 @@ func (s *Keys) UpdateMetadata(ctx context.Context, actor Actor, scope domain.Sco
 		}
 	}
 	var out Key
+	var rateCharged bool
 	err := tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		caller, err := actor.resolve(ctx, az, time.Now().UTC())
 		if err != nil {
@@ -893,6 +909,15 @@ func (s *Keys) UpdateMetadata(ctx context.Context, actor Actor, scope domain.Sco
 			return err
 		}
 		if err := r.Catalogue().UpdateMetadata(ctx, p, id, merged); err != nil {
+			return err
+		}
+		// § 151 schema-revision rate (60/h per project): a metadata change bumps
+		// the revision, so it is a revision and must charge the same per-project
+		// budget key create/rename/declaration edits do — otherwise a script
+		// alternates metadata to mint revisions past the bound. Charged only on
+		// the mutating path (the no-op above returned already) and once across
+		// the retry loop, keyed by project.
+		if err := s.Budget.chargeOnce(&rateCharged, budgetSchemaRevision, budgetKeys{Project: scope.Project}); err != nil {
 			return err
 		}
 		if err := r.Catalogue().BumpSchemaRevision(ctx, p); err != nil {
@@ -998,6 +1023,7 @@ func (s *Keys) UpdateDeclaration(ctx context.Context, actor Actor, scope domain.
 	if err != nil {
 		return Key{}, err
 	}
+	var rateCharged bool
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		caller, err := actor.resolve(ctx, az, time.Now().UTC())
 		if err != nil {
@@ -1086,6 +1112,11 @@ func (s *Keys) UpdateDeclaration(ctx context.Context, actor Actor, scope domain.
 		if err := r.Catalogue().ReplacePresence(ctx, p, id, presenceRows(u.Presence)); err != nil {
 			return err
 		}
+		// § 151 schema-revision rate (see Keys.UpdateMetadata). Placed past this
+		// method's no-op early return, so an unchanged declaration charges nothing.
+		if err := s.Budget.chargeOnce(&rateCharged, budgetSchemaRevision, budgetKeys{Project: scope.Project}); err != nil {
+			return err
+		}
 		if err := r.Catalogue().BumpSchemaRevision(ctx, p); err != nil {
 			return err
 		}
@@ -1153,6 +1184,7 @@ func (s *Keys) Reclassify(ctx context.Context, actor Actor, scope domain.Scope, 
 	if err != nil {
 		return Key{}, nil, err
 	}
+	var rateCharged bool
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		findings = nil
 		caller, err := actor.resolve(ctx, az, time.Now().UTC())
@@ -1224,6 +1256,10 @@ func (s *Keys) Reclassify(ctx context.Context, actor Actor, scope domain.Scope, 
 		// Classification moves what is delivered and, where an adapter routes
 		// by it, where — so it is a semantic schema change and advances the
 		// revision like any other.
+		// § 151 schema-revision rate (see Keys.UpdateMetadata).
+		if err := s.Budget.chargeOnce(&rateCharged, budgetSchemaRevision, budgetKeys{Project: scope.Project}); err != nil {
+			return err
+		}
 		if err := r.Catalogue().BumpSchemaRevision(ctx, p); err != nil {
 			return err
 		}
@@ -1324,6 +1360,7 @@ func (s *Keys) SetGroup(ctx context.Context, actor Actor, scope domain.Scope, id
 	if err != nil {
 		return Key{}, err
 	}
+	var rateCharged bool
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		caller, err := actor.resolve(ctx, az, time.Now().UTC())
 		if err != nil {
@@ -1364,6 +1401,11 @@ func (s *Keys) SetGroup(ctx context.Context, actor Actor, scope domain.Scope, id
 		if err := r.Catalogue().SetGroup(ctx, p, id, groupID); err != nil {
 			return err
 		}
+		// § 151 schema-revision rate (see Keys.UpdateMetadata). Past this method's
+		// no-op early return, so a no-change SetGroup charges nothing.
+		if err := s.Budget.chargeOnce(&rateCharged, budgetSchemaRevision, budgetKeys{Project: scope.Project}); err != nil {
+			return err
+		}
 		if err := r.Catalogue().BumpSchemaRevision(ctx, p); err != nil {
 			return err
 		}
@@ -1399,6 +1441,7 @@ func (s *Keys) Delete(ctx context.Context, actor Actor, scope domain.Scope, id s
 	if err != nil {
 		return err
 	}
+	var rateCharged bool
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		caller, err := actor.resolve(ctx, az, time.Now().UTC())
 		if err != nil {
@@ -1457,6 +1500,10 @@ func (s *Keys) Delete(ctx context.Context, actor Actor, scope domain.Scope, id s
 		if err := r.Catalogue().Delete(ctx, p, id); err != nil {
 			return err
 		}
+		// § 151 schema-revision rate (see Keys.UpdateMetadata).
+		if err := s.Budget.chargeOnce(&rateCharged, budgetSchemaRevision, budgetKeys{Project: scope.Project}); err != nil {
+			return err
+		}
 		if err := r.Catalogue().BumpSchemaRevision(ctx, p); err != nil {
 			return err
 		}
@@ -1493,6 +1540,7 @@ func (s *KeyGroups) Create(ctx context.Context, actor Actor, scope domain.Scope,
 		return KeyGroupView{}, err
 	}
 	created := store.CanonTime(time.Now())
+	var rateCharged bool
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		caller, err := actor.resolve(ctx, az, time.Now().UTC())
 		if err != nil {
@@ -1524,6 +1572,11 @@ func (s *KeyGroups) Create(ctx context.Context, actor Actor, scope domain.Scope,
 		if err := r.Catalogue().CreateGroup(ctx, p, store.NewCatalogueGroup{
 			ID: id, Name: name, CreatedAt: created,
 		}); err != nil {
+			return err
+		}
+		// § 151 schema-revision rate: a group create bumps the revision, so it
+		// charges the per-project budget too (see UpdateMetadata).
+		if err := s.Budget.chargeOnce(&rateCharged, budgetSchemaRevision, budgetKeys{Project: scope.Project}); err != nil {
 			return err
 		}
 		if err := r.Catalogue().BumpSchemaRevision(ctx, p); err != nil {
@@ -1626,6 +1679,7 @@ func (s *KeyGroups) Rename(ctx context.Context, actor Actor, scope domain.Scope,
 		return KeyGroupView{}, fmt.Errorf("%w: %s", domain.ErrInvalid, err)
 	}
 	var out KeyGroupView
+	var rateCharged bool
 	err := tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		caller, err := actor.resolve(ctx, az, time.Now().UTC())
 		if err != nil {
@@ -1651,6 +1705,11 @@ func (s *KeyGroups) Rename(ctx context.Context, actor Actor, scope domain.Scope,
 			return err
 		}
 		if err := r.Catalogue().RenameGroup(ctx, p, id, name); err != nil {
+			return err
+		}
+		// § 151 schema-revision rate: a group rename bumps the revision (see
+		// UpdateMetadata).
+		if err := s.Budget.chargeOnce(&rateCharged, budgetSchemaRevision, budgetKeys{Project: scope.Project}); err != nil {
 			return err
 		}
 		if err := r.Catalogue().BumpSchemaRevision(ctx, p); err != nil {
@@ -1687,6 +1746,7 @@ func (s *KeyGroups) Delete(ctx context.Context, actor Actor, scope domain.Scope,
 	if err != nil {
 		return err
 	}
+	var rateCharged bool
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		caller, err := actor.resolve(ctx, az, time.Now().UTC())
 		if err != nil {
@@ -1720,6 +1780,10 @@ func (s *KeyGroups) Delete(ctx context.Context, actor Actor, scope domain.Scope,
 			return err
 		}
 		if err := r.Catalogue().DeleteGroup(ctx, p, id); err != nil {
+			return err
+		}
+		// § 151 schema-revision rate (see Keys.UpdateMetadata).
+		if err := s.Budget.chargeOnce(&rateCharged, budgetSchemaRevision, budgetKeys{Project: scope.Project}); err != nil {
 			return err
 		}
 		if err := r.Catalogue().BumpSchemaRevision(ctx, p); err != nil {

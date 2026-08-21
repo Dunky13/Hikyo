@@ -91,6 +91,10 @@ type Values struct {
 	// ride any findings on the response. Nil disables the scan (pre-#74 tests); a
 	// booted server always wires it.
 	Scan *scanning.Ruleset
+	// Budget applies the §179 fail-closed default (60/min·principal, 8/org) to
+	// the two bulk value fan-outs with no named category — Import and Copy. Nil
+	// disables it.
+	Budget *Budget
 }
 
 // ValueCell is one `(key, environment)` cell as reported to a reader.
@@ -1083,6 +1087,14 @@ func (s *Values) Copy(ctx context.Context, actor Actor, scope domain.Scope, req 
 	if err != nil {
 		return CopyResult{}, err
 	}
+	// §179 fail-closed default: a value fan-out across environments/keys with no
+	// named category. Authorized (source read) then acquired at entry (rate +
+	// concurrency), so an unauthorized caller cannot occupy the org's slots.
+	release, err := chargeDefaultAtEntry(ctx, s.DB, s.Budget, actor, authz.OpValueList, authz.OpValueCopySource, sourceScope, func() time.Time { return time.Now().UTC() })
+	if err != nil {
+		return CopyResult{}, err
+	}
+	defer release()
 	var out CopyResult
 	var advanced []PublishedEnvironment
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {

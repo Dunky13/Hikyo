@@ -19,9 +19,13 @@ import (
 )
 
 type Adapters struct {
-	DB             *store.DB
-	Auth           *Auth
-	Keyring        *crypto.Keyring
+	DB      *store.DB
+	Auth    *Auth
+	Keyring *crypto.Keyring
+	// Budget applies the § 179 adapter sync/trigger concurrency bound (4 per
+	// org). Nil disables it. The per-principal 10/min rate is deferred (see
+	// budget.go).
+	Budget         *Budget
 	Now            func() time.Time
 	PlanModule     func(origin, credential string) (adapter.Module, func(), error)
 	ProviderModule func(provider, origin, credential string) (adapter.Module, func(), error)
@@ -524,9 +528,19 @@ func (s *Adapters) UpdateTarget(ctx context.Context, actor Actor, scope domain.S
 	if err := s.preflightTargetRouting(ctx, actor, scope, request); err != nil {
 		return store.AdapterTarget{}, err
 	}
+	// § 179 adapter sync/trigger concurrency: 4 per org, held for the reconfigure
+	// exactly as SyncTarget holds it — a reconfigure that re-syncs is an adapter
+	// trigger, so it takes the same concurrency slot, not just the rate. Acquired
+	// at entry (before the provider fence retries), released on return.
+	release, err := s.Budget.acquire(budgetAdapter, budgetKeys{Org: scope.Org})
+	if err != nil {
+		return store.AdapterTarget{}, err
+	}
+	defer release()
 	now := store.CanonTime(s.now())
 	var out store.AdapterTarget
-	err := retryAdapterProviderFence(ctx, func() error {
+	var rateCharged bool
+	err = retryAdapterProviderFence(ctx, func() error {
 		return tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 			caller, err := actor.resolve(ctx, az, now)
 			if err != nil {
@@ -578,6 +592,17 @@ func (s *Adapters) UpdateTarget(ctx context.Context, actor Actor, scope domain.S
 				return err
 			}
 			out = updated.Target
+			// § 179 adapter sync/trigger rate: a reconfigure that re-syncs enqueues
+			// a "trigger":"manual" job just like SyncTarget, so it charges the same
+			// 10/min per-principal budget — otherwise a script re-toggles a target's
+			// keys to trigger syncs past the bound. Charged only when a job was
+			// actually enqueued (a pure config edit that re-syncs nothing does not),
+			// once across the fence/tx retry loops; a refusal rolls the enqueue back.
+			if updated.Enqueue.JobID != "" {
+				if err := s.Budget.chargeOnce(&rateCharged, budgetAdapterRate, budgetKeys{Principal: caller.Principal}); err != nil {
+					return err
+				}
+			}
 			payload := audit.Payload{"mutation": "target-update", "authority": updated.AuthorityPrincipalID}
 			if full {
 				payload["previous_authority"] = updated.PreviousAuthorityPrincipalID
@@ -1066,9 +1091,16 @@ func (s *Adapters) SyncTarget(ctx context.Context, actor Actor, scope domain.Sco
 	if scope.Project == "" || scope.Env != "" || targetID == "" {
 		return store.AdapterEnqueueResult{}, fmt.Errorf("%w: manual adapter sync requires project scope and target id", domain.ErrInvalid)
 	}
+	// § 179 adapter sync/trigger concurrency: 4 per org. Held for the enqueue.
+	release, err := s.Budget.acquire(budgetAdapter, budgetKeys{Org: scope.Org})
+	if err != nil {
+		return store.AdapterEnqueueResult{}, err
+	}
+	defer release()
 	now := store.CanonTime(s.now())
 	var result store.AdapterEnqueueResult
-	err := retryAdapterProviderFence(ctx, func() error {
+	var rateCharged bool
+	err = retryAdapterProviderFence(ctx, func() error {
 		return tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 			caller, err := actor.resolve(ctx, az, now)
 			if err != nil {
@@ -1076,6 +1108,12 @@ func (s *Adapters) SyncTarget(ctx context.Context, actor Actor, scope domain.Sco
 			}
 			proof, err := az.Authorize(ctx, caller, authz.OpAdapterSync, scope)
 			if err != nil {
+				return err
+			}
+			// § 179 adapter sync/trigger rate: 10/min per principal, charged once
+			// across both the provider-fence and tx retry loops. The per-org
+			// concurrency was taken at entry.
+			if err := s.Budget.chargeOnce(&rateCharged, budgetAdapterRate, budgetKeys{Principal: caller.Principal}); err != nil {
 				return err
 			}
 			target, err := r.Adapters().Target(ctx, proof, targetID)

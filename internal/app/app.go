@@ -260,6 +260,11 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 	// The advisory channel is in-process fan-out: one per server, wired into
 	// every surface that announces a change.
 	advisory := service.NewAdvisory()
+	// The expensive-path budget (ops-spec § 179 / § 20 / § 151): one per server,
+	// in-memory like admission, wired into every surface that owns a named
+	// expensive category — export, publish, adapter sync, machine fetch, and
+	// schema revision.
+	budget := service.NewBudget()
 	authSvc := &service.Auth{DB: db, Keyring: kr, KDF: kdf, Admission: limiter, Log: log, ExternalOrigin: cfg.ExternalOrigin, ReauthWindow: cfg.ReauthWindow}
 	samlProviders := &service.SAMLProviders{DB: db, Keyring: kr, ExternalOrigin: cfg.ExternalOrigin}
 	// RP ID + expected origins are immutable instance config derived from the
@@ -308,7 +313,7 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 		return nil, fmt.Errorf("boot: outbound directory client: %w", err)
 	}
 	retentionSvc := &service.Retention{DB: db}
-	reencryptSvc := &service.Reencrypt{DB: db, Keyring: kr}
+	reencryptSvc := &service.Reencrypt{DB: db, Keyring: kr, Budget: budget}
 	adapterRuntime := store.NewAdapterRuntime(db, func(ctx context.Context, job adapter.Job, _ adapter.Effect) error {
 		return tx.Read(ctx, db, func(ctx context.Context, _ store.ReadRepos, az *authz.TxAuthorizer) error {
 			_, err := az.Authorize(ctx, authz.Identity{Principal: domain.PrincipalID(job.AuthorityPrincipal), Class: domain.ClassHuman}, authz.OpAdapterPush, domain.Scope{
@@ -321,10 +326,10 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 		Store: adapterRuntime, Loader: &adapterLoader{runtime: adapterRuntime, keyring: kr, egressPolicy: cfg.AdapterEgressPolicy},
 		ID: "adapter-worker-" + uuid.Must(uuid.NewV7()).String(), Poll: time.Second, Log: log,
 	}
-	adapterService := &service.Adapters{DB: db, Auth: authSvc, Keyring: kr, ProviderModule: func(provider, origin, credential string) (adapter.Module, func(), error) {
+	adapterService := &service.Adapters{DB: db, Auth: authSvc, Keyring: kr, Budget: budget, ProviderModule: func(provider, origin, credential string) (adapter.Module, func(), error) {
 		return deploymentModule(provider, origin, credential, cfg.AdapterEgressPolicy[origin])
 	}}
-	definitionsService := &service.Definitions{DB: db, Keyring: kr, Advisory: advisory, Scan: ruleset}
+	definitionsService := &service.Definitions{DB: db, Keyring: kr, Advisory: advisory, Budget: budget, Scan: ruleset}
 
 	api := &server.API{
 		Auth:     authSvc,
@@ -335,9 +340,9 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 		// every value write re-seal under the project data key, in the
 		// transaction that writes the row. The ruleset (#74) reaches every
 		// surface that writes a config value or a declaration leaf.
-		Environments: &service.Environments{DB: db, Keyring: kr, Auth: authSvc, Advisory: advisory, Scan: ruleset},
+		Environments: &service.Environments{DB: db, Keyring: kr, Auth: authSvc, Advisory: advisory, Budget: budget, Scan: ruleset},
 		Folders:      &service.Folders{DB: db, Keyring: kr, Scan: ruleset},
-		Keys:         &service.Keys{DB: db, Keyring: kr, Advisory: advisory, Scan: ruleset},
+		Keys:         &service.Keys{DB: db, Keyring: kr, Advisory: advisory, Budget: budget, Scan: ruleset},
 		Definitions:  definitionsService,
 		// The reveal ceremony (#58): the value surface's disclosure routes
 		// consume the SAME reauthentication window machinery the passkey and
@@ -347,13 +352,13 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 		// One Advisory across the value and revision surfaces: staging and
 		// publishing both announce on the same channel, and two channels would
 		// mean a subscriber saw half the events.
-		Values:    &service.Values{DB: db, Keyring: kr, Auth: authSvc, Advisory: advisory, Scan: ruleset},
-		Revisions: &service.Revisions{DB: db, Keyring: kr, Auth: authSvc, Advisory: advisory},
-		Rotation:  &service.Rotation{DB: db, Keyring: kr, RootKey: rootKeySource{cfg: cfg, log: log}},
+		Values:    &service.Values{DB: db, Keyring: kr, Auth: authSvc, Advisory: advisory, Scan: ruleset, Budget: budget},
+		Revisions: &service.Revisions{DB: db, Keyring: kr, Auth: authSvc, Advisory: advisory, Budget: budget},
+		Rotation:  &service.Rotation{DB: db, Keyring: kr, RootKey: rootKeySource{cfg: cfg, log: log}, Budget: budget},
 		Reencrypt: reencryptSvc,
 		Pins:      &service.Pins{DB: db, Keyring: kr, Auth: authSvc},
 		Reveal:    &service.Reveal{DB: db, Auth: authSvc},
-		KeyGroups: &service.KeyGroups{DB: db, Keyring: kr, Advisory: advisory, Scan: ruleset},
+		KeyGroups: &service.KeyGroups{DB: db, Keyring: kr, Advisory: advisory, Budget: budget, Scan: ruleset},
 		// One Auth across the grant surface, the settings knob and the machine
 		// identity surface: the reauthentication conjunct a machine widening
 		// carries is the SAME window machinery human disclosure consumes, so
@@ -368,7 +373,7 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 		// by putting the trigger under the instance-wide budget.
 		Federation: federation,
 		Delivery: &service.Delivery{
-			DB: db, Keyring: kr, Federation: federation,
+			DB: db, Keyring: kr, Federation: federation, Budget: budget,
 		},
 		// The settings knob calls LowerEffectiveWindow, which is the Auth
 		// service's library — one Auth, so the window the knob writes and the

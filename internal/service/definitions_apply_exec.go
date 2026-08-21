@@ -53,6 +53,7 @@ func (s *Definitions) Apply(ctx context.Context, actor Actor, scope domain.Scope
 	}
 
 	var result ApplyResult
+	var rateCharged bool
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		now := s.now()
 		caller, err := actor.resolve(ctx, az, now)
@@ -113,6 +114,12 @@ func (s *Definitions) Apply(ctx context.Context, actor Actor, scope domain.Scope
 		}
 
 		if err := s.executeResolution(ctx, r, az, caller, p, scope, res, cur, cur.SchemaRevision+1); err != nil {
+			return err
+		}
+		// § 151 schema-revision rate: charged only for a non-empty plan (the
+		// empty-plan no-op returned above), once across the retry loop — see
+		// Keys.UpdateMetadata.
+		if err := s.Budget.chargeOnce(&rateCharged, budgetSchemaRevision, budgetKeys{Project: scope.Project}); err != nil {
 			return err
 		}
 		if err := r.Catalogue().BumpSchemaRevision(ctx, p); err != nil {
