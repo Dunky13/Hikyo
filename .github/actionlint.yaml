@@ -1,6 +1,0 @@
-# Blacksmith runner labels are custom self-hosted labels, so actionlint cannot
-# infer them from GitHub's hosted-label list. Declare every label used by
-# `runs-on:` in .github/workflows so the runner-label rule stays enforced.
-self-hosted-runner:
-  labels:
-    - blacksmith-4vcpu-ubuntu-2404-arm
