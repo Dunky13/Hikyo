@@ -1369,6 +1369,18 @@
   },
   {
     "engine": "postgres",
+    "name": "SumSnapshotPayloadByProject",
+    "annotation": "instance-scoped",
+    "hash": "2c98ca3910e31be8709383f7a9c3d298e69a75f005bcd74fdc275319883f86bf"
+  },
+  {
+    "engine": "postgres",
+    "name": "SumValuePayloadByProject",
+    "annotation": "instance-scoped",
+    "hash": "bc7fd275f2fa9a57f8fda1aeadfa66ccff7f8447653899f685df2464b990a7bd"
+  },
+  {
+    "engine": "postgres",
     "name": "TouchInstanceConnection",
     "annotation": "authn-resolution",
     "hash": "3085ba4d0d99821110d446340b88eb828a2b265d0ae3e1c69c14b6d43e404232"
@@ -2806,6 +2818,18 @@
     "name": "StrandedRevealPrincipalsForEnvironment",
     "annotation": "authn-resolution",
     "hash": "95cd1f8c392587ce7700fa672088cb243f4b5581ec98a9537ec54e909eb1cdee"
+  },
+  {
+    "engine": "sqlite",
+    "name": "SumSnapshotPayloadByProject",
+    "annotation": "instance-scoped",
+    "hash": "a43b437e8e153424482be2fc0349f70ac19ca9b63cdb95b0ef0094d36c5d39f2"
+  },
+  {
+    "engine": "sqlite",
+    "name": "SumValuePayloadByProject",
+    "annotation": "instance-scoped",
+    "hash": "96b047627eb885a33a63a9546f7c0cf480b6ed198d2152ffe5fca898375e6c35"
   },
   {
     "engine": "sqlite",

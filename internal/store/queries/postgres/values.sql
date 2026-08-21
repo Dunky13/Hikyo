@@ -100,3 +100,22 @@ ORDER BY id LIMIT sqlc.arg(page_limit);
 UPDATE value_entries SET ciphertext = sqlc.arg(new_ciphertext)
 WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id)
   AND id = sqlc.arg(id) AND ciphertext = sqlc.arg(old_ciphertext);
+
+-- SumValuePayloadForProject totals the ciphertext bytes of a project's live
+-- value cells across every environment. It backs the per-project storage
+-- high-water refusal at publish (ops-spec section 8 / section 141). The
+-- COALESCE keeps an empty project's NULL sum a plain 0; the ::bigint cast
+-- matches the sqlite twin's integer shape. Fully chain-scoped, no annotation.
+-- name: SumValuePayloadForProject :one
+SELECT COALESCE(SUM(OCTET_LENGTH(ciphertext)), 0)::bigint FROM value_entries
+WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id);
+
+-- SumValuePayloadByProject groups the live value-cell ciphertext bytes by owning
+-- project across the whole instance -- the operator storage surface (doctor warn,
+-- metric). Cross-tenant by definition: it addresses no tenant and carries no
+-- chain conjunct, so it is annotated instance-scoped and content-pinned.
+-- hikyo:instance-scoped
+-- name: SumValuePayloadByProject :many
+SELECT org_id, project_id, COALESCE(SUM(OCTET_LENGTH(ciphertext)), 0)::bigint AS bytes
+FROM value_entries
+GROUP BY org_id, project_id;

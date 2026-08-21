@@ -4698,9 +4698,15 @@ type ResumeAdapterTargetMoveRequestVisibility string
 
 // RetentionHealth defines model for RetentionHealth.
 type RetentionHealth struct {
-	LastPruneSuccess  *time.Time                       `json:"last_prune_success"`
+	LastPruneSuccess *time.Time `json:"last_prune_success"`
+
+	// PeakProjectBytes Largest per-project stored payload across the instance, in bytes (ciphertext of value cells plus published snapshot entries). The per-project storage high-water surface.
+	PeakProjectBytes  int                              `json:"peak_project_bytes"`
 	Stale             bool                             `json:"stale"`
 	StaleAfterSeconds RetentionHealthStaleAfterSeconds `json:"stale_after_seconds"`
+
+	// StorageWarn True once peak_project_bytes reaches the 1 GiB warn threshold, well before the 4 GiB publish refusal.
+	StorageWarn bool `json:"storage_warn"`
 }
 
 // RetentionHealthStaleAfterSeconds defines model for RetentionHealth.StaleAfterSeconds.

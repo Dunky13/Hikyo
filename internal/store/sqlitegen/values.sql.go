@@ -356,3 +356,65 @@ func (q *Queries) ReencryptValueEntry(ctx context.Context, arg ReencryptValueEnt
 	}
 	return result.RowsAffected()
 }
+
+const sumValuePayloadByProject = `-- name: SumValuePayloadByProject :many
+SELECT org_id, project_id, CAST(COALESCE(SUM(LENGTH(ciphertext)), 0) AS INTEGER) AS bytes
+FROM value_entries
+GROUP BY org_id, project_id
+`
+
+type SumValuePayloadByProjectRow struct {
+	OrgID     string
+	ProjectID string
+	Bytes     int64
+}
+
+// SumValuePayloadByProject groups the live value-cell ciphertext bytes by owning
+// project across the whole instance -- the operator storage surface (doctor warn,
+// metric). Cross-tenant by definition: it addresses no tenant and carries no
+// chain conjunct, so it is annotated instance-scoped and content-pinned.
+// hikyo:instance-scoped
+func (q *Queries) SumValuePayloadByProject(ctx context.Context) ([]SumValuePayloadByProjectRow, error) {
+	rows, err := q.db.QueryContext(ctx, sumValuePayloadByProject)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SumValuePayloadByProjectRow
+	for rows.Next() {
+		var i SumValuePayloadByProjectRow
+		if err := rows.Scan(&i.OrgID, &i.ProjectID, &i.Bytes); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const sumValuePayloadForProject = `-- name: SumValuePayloadForProject :one
+SELECT CAST(COALESCE(SUM(LENGTH(ciphertext)), 0) AS INTEGER) FROM value_entries
+WHERE org_id = ? AND project_id = ?
+`
+
+type SumValuePayloadForProjectParams struct {
+	OrgID     string
+	ProjectID string
+}
+
+// SumValuePayloadForProject totals the ciphertext bytes of a project's live
+// value cells across every environment. It backs the per-project storage
+// high-water refusal at publish (ops-spec section 8 / section 141). LENGTH on a
+// BLOB is its byte count; the CAST(COALESCE(...)) keeps an empty project's NULL
+// sum a plain integer 0. Fully chain-scoped, so no annotation is needed.
+func (q *Queries) SumValuePayloadForProject(ctx context.Context, arg SumValuePayloadForProjectParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, sumValuePayloadForProject, arg.OrgID, arg.ProjectID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}

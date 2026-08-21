@@ -424,6 +424,8 @@ func (a *API) GetRetentionHealth(ctx context.Context, _ apigen.GetRetentionHealt
 		LastPruneSuccess:  last,
 		Stale:             health.Stale,
 		StaleAfterSeconds: apigen.RetentionHealthStaleAfterSeconds(service.PruneStaleAfter / time.Second),
+		PeakProjectBytes:  int(health.PeakProjectBytes),
+		StorageWarn:       health.StorageWarn,
 	}, nil
 }
 

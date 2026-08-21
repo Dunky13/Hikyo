@@ -373,6 +373,33 @@ func (r sqliteSnapshots) ProjectRevisions(ctx context.Context, p authz.Proof) (m
 	return out, nil
 }
 
+func (r sqliteSnapshots) PayloadBytesForProject(ctx context.Context, p authz.Proof) (int64, error) {
+	chain, err := authz.Verify(p, authz.StoreSnapshotsPayloadBytesForProject, r.tok)
+	if err != nil {
+		return 0, err
+	}
+	return r.q.SumSnapshotPayloadForProject(ctx, sqlitegen.SumSnapshotPayloadForProjectParams{
+		OrgID:     string(chain.Org),
+		ProjectID: string(chain.Project),
+	})
+}
+
+func (r sqliteSnapshots) InstancePayloadByProject(ctx context.Context, p authz.Proof) ([]ProjectPayloadBytes, error) {
+	// No chain: instance-scope proof, no tenant conjunct, annotated instance-scoped.
+	if _, err := authz.Verify(p, authz.StoreSnapshotsInstancePayloadByProject, r.tok); err != nil {
+		return nil, err
+	}
+	rows, err := r.q.SumSnapshotPayloadByProject(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ProjectPayloadBytes, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, ProjectPayloadBytes{OrgID: row.OrgID, ProjectID: row.ProjectID, Bytes: row.Bytes})
+	}
+	return out, nil
+}
+
 func (r sqliteSnapshots) AtRevision(ctx context.Context, p authz.Proof, revision int64) (Snapshot, error) {
 	chain, err := authz.Verify(p, authz.StoreSnapshotsAtRevision, r.tok)
 	if err != nil {
@@ -1132,6 +1159,32 @@ func (r pgSnapshots) ProjectRevisions(ctx context.Context, p authz.Proof) (map[s
 		if row.Revision > out[row.EnvironmentID] {
 			out[row.EnvironmentID] = row.Revision
 		}
+	}
+	return out, nil
+}
+
+func (r pgSnapshots) PayloadBytesForProject(ctx context.Context, p authz.Proof) (int64, error) {
+	chain, err := authz.Verify(p, authz.StoreSnapshotsPayloadBytesForProject, r.tok)
+	if err != nil {
+		return 0, err
+	}
+	return r.q.SumSnapshotPayloadForProject(ctx, pggen.SumSnapshotPayloadForProjectParams{
+		ChainOrgID:     string(chain.Org),
+		ChainProjectID: string(chain.Project),
+	})
+}
+
+func (r pgSnapshots) InstancePayloadByProject(ctx context.Context, p authz.Proof) ([]ProjectPayloadBytes, error) {
+	if _, err := authz.Verify(p, authz.StoreSnapshotsInstancePayloadByProject, r.tok); err != nil {
+		return nil, err
+	}
+	rows, err := r.q.SumSnapshotPayloadByProject(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ProjectPayloadBytes, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, ProjectPayloadBytes{OrgID: row.OrgID, ProjectID: row.ProjectID, Bytes: row.Bytes})
 	}
 	return out, nil
 }

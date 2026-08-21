@@ -65,6 +65,21 @@ type Revisions struct {
 	// publish transactions to overlap around the project lock. Production
 	// leaves it nil; it decides no behavior and sees no material.
 	PublishProbe PublishConformanceProbe
+	// ProjectStorageHighWater overrides the per-project storage high-water for
+	// the cross-engine conformance test, which cannot seed 4 GiB. Zero (the
+	// production default) means MaxProjectStorageBytes; the override can only
+	// TIGHTEN the bound — a value at or above MaxProjectStorageBytes is ignored,
+	// so no misconfiguration can relax the ops-spec refusal in production.
+	ProjectStorageHighWater int64
+}
+
+// storageLimit is the effective per-project storage high-water: the pinned
+// MaxProjectStorageBytes, unless a conformance override tightens it below that.
+func (s *Revisions) storageLimit() int64 {
+	if s.ProjectStorageHighWater > 0 && s.ProjectStorageHighWater < MaxProjectStorageBytes {
+		return s.ProjectStorageHighWater
+	}
+	return MaxProjectStorageBytes
 }
 
 // PublishConformanceProbe exposes only the two checkpoints needed to prove
@@ -375,7 +390,7 @@ func (s *Revisions) PublishPlanned(ctx context.Context, actor Actor, scope domai
 				applies[i].value = string(plain)
 			}
 			published, err := materialize(ctx, r, ep, sealer, s.Keyring, envScope,
-				caller.Principal, now, applies)
+				caller.Principal, now, applies, s.storageLimit())
 			if err != nil {
 				return err
 			}
@@ -657,7 +672,10 @@ func republish(ctx context.Context, r store.Repos, az *authz.TxAuthorizer, calle
 	if err != nil {
 		return PublishedEnvironment{}, err
 	}
-	published, err := materialize(ctx, r, p, sealer, kr, scope, caller.Principal, now, nil)
+	// republish covers the non-draft payload-advancing paths (declare-into-env,
+	// import, copy, clone, env creation, schema fan-out); each enforces the
+	// production high-water — only the direct publish path is conformance-tunable.
+	published, err := materialize(ctx, r, p, sealer, kr, scope, caller.Principal, now, nil, MaxProjectStorageBytes)
 	if err != nil {
 		return PublishedEnvironment{}, err
 	}
@@ -924,7 +942,7 @@ func currentRevision(ctx context.Context, r store.Repos, p authz.Proof) (int64, 
 // and is that legal".
 func materialize(ctx context.Context, r store.Repos, p authz.Proof, sealer *crypto.ProjectSealer,
 	kr *crypto.Keyring, scope domain.Scope, publisher domain.PrincipalID, now time.Time,
-	applies []pendingApply) (PublishedEnvironment, error) {
+	applies []pendingApply, storageLimit int64) (PublishedEnvironment, error) {
 	keys, err := r.Catalogue().List(ctx, p)
 	if err != nil {
 		return PublishedEnvironment{}, err
@@ -986,6 +1004,17 @@ func materialize(ctx context.Context, r store.Repos, p authz.Proof, sealer *cryp
 	// environment that would render a target larger than a Kubernetes Secret can
 	// hold cannot be committed (ops-spec § 8 per-target render cap).
 	if err := checkRenderTotal(cells, string(scope.Env)); err != nil {
+		return PublishedEnvironment{}, err
+	}
+
+	// Per-project storage high-water (ops-spec § 8 / § 141): a project already
+	// holding MaxProjectStorageBytes of stored payload refuses new publishes,
+	// naming what holds the space. Checked here — the single chokepoint every
+	// payload-advancing path routes through — BEFORE this env's bytes move, so a
+	// project over the water cannot grow further. The read is project-scoped, so
+	// it sees a multi-environment publish's earlier envs already committed in this
+	// transaction.
+	if err := checkProjectStorage(ctx, r, p, storageLimit); err != nil {
 		return PublishedEnvironment{}, err
 	}
 
@@ -1113,6 +1142,39 @@ func materialize(ctx context.Context, r store.Repos, p authz.Proof, sealer *cryp
 // above it, so the sum is a genuine reachable bound — refused at publish, where
 // the target is not yet committed, rather than at delivery, where it is.
 const MaxRenderBytesPerTarget = 1 << 20
+
+// MaxProjectStorageBytes is the ops-spec § 8 / § 141 per-project storage
+// high-water: a project holding this much stored payload (value cells plus
+// published snapshot entries, ciphertext bytes) refuses NEW publishes. Pinned,
+// cross-checked against the ops-spec value by the bound registry.
+const MaxProjectStorageBytes = 4 << 30 // 4 GiB
+
+// ProjectStorageWarnBytes is the ops-spec § 8 / § 141 warn threshold: at this
+// much stored payload the operator surfaces (doctor, metric, UI banner) warn,
+// well before the hard refusal at MaxProjectStorageBytes.
+const ProjectStorageWarnBytes = 1 << 30 // 1 GiB
+
+// checkProjectStorage refuses a publish into a project already at the storage
+// high-water. It sums the two payload-bearing tables (live value cells and
+// published snapshot entries) under the publish proof's project chain and, at or
+// over the limit, refuses by name — pointing the operator at the retention and
+// pin settings that hold the space, since dropping either is how the space comes
+// back.
+func checkProjectStorage(ctx context.Context, r store.Repos, p authz.Proof, limit int64) error {
+	values, err := r.Values().PayloadBytesForProject(ctx, p)
+	if err != nil {
+		return err
+	}
+	snapshots, err := r.Snapshots().PayloadBytesForProject(ctx, p)
+	if err != nil {
+		return err
+	}
+	if total := values + snapshots; total >= limit {
+		return fmt.Errorf("%w: project holds %d bytes of stored payload, at the %d-byte storage high-water; lower the project's retention window or release pinned revisions to reclaim space",
+			domain.ErrLimitExceeded, total, limit)
+	}
+	return nil
+}
 
 // checkRenderTotal refuses a publish whose resolved environment would render a
 // delivery target larger than a Kubernetes Secret can hold. Kubernetes'

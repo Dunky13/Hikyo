@@ -175,6 +175,11 @@ func TestInvariant06OperationRegistryCompleteness(t *testing.T) {
 		authz.StoreAuditTenantInsert:    true,
 		authz.StoreAuditInstanceInsert:  true,
 		authz.StoreRetentionLastSuccess: true,
+		// The storage high-water instance sums are dual-use like the health read:
+		// the audited operator read reaches them via retention.health-read, the
+		// unauthenticated /metrics scrape via the scheduler mint site (#185).
+		authz.StoreValuesInstancePayloadByProject:    true,
+		authz.StoreSnapshotsInstancePayloadByProject: true,
 	}
 	seenShared := map[authz.StoreOp]bool{}
 	for method := range expected {
@@ -323,6 +328,10 @@ func TestInvariant11SystemProofEnumeration(t *testing.T) {
 		// definitions plans. This deliberate system-proof widening is therefore
 		// pinned here for ADR review rather than hidden behind a side effect.
 		authz.StoreDefinitionsPlanPrune: true,
+		// The /metrics storage high-water gauge reads the instance's per-project
+		// byte sums under scheduler authority (#185): a reviewed widening, pinned.
+		authz.StoreValuesInstancePayloadByProject:    true,
+		authz.StoreSnapshotsInstancePayloadByProject: true,
 	}
 	for site, ops := range sites {
 		if !want[site] {

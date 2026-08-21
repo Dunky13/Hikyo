@@ -73,6 +73,12 @@ func doctorResults(providers apigen.SamlProviderList, health apigen.RetentionHea
 	if prune.Severity == "warn" {
 		result.Status = "warning"
 	}
+	storage := doctorStorageFinding(health)
+	result.Findings = append(result.Findings, storage)
+	rows = append(rows, []string{storage.Severity, storage.Provider, storage.Code, storage.EffectiveAt, storage.Message})
+	if storage.Severity == "warn" && result.Status == "ok" {
+		result.Status = "warning"
+	}
 	providerRowStart := len(rows)
 	for _, provider := range providers.Providers {
 		for _, warning := range provider.Warnings {
@@ -116,4 +122,30 @@ func doctorPruneFinding(health apigen.RetentionHealth, now time.Time) doctorFind
 	}
 	finding.Message = fmt.Sprintf("last_prune_success is %s old", age)
 	return finding
+}
+
+// doctorStorageFinding surfaces the per-project storage high-water (#185): a
+// warn once the instance's peak project reaches the 1 GiB threshold, so the
+// operator sees it long before the 4 GiB publish refusal. The server owns the
+// threshold; storage_warn is its verdict.
+func doctorStorageFinding(health apigen.RetentionHealth) doctorFinding {
+	finding := doctorFinding{Provider: "-", Code: "project-storage", Severity: "ok", EffectiveAt: "-"}
+	peak := formatBytesGiB(health.PeakProjectBytes)
+	if health.StorageWarn {
+		finding.Severity = "warn"
+		finding.Message = fmt.Sprintf("peak project holds %s, at or over the 1 GiB warn (4 GiB refuses new publishes)", peak)
+		return finding
+	}
+	finding.Message = fmt.Sprintf("peak project holds %s", peak)
+	return finding
+}
+
+// formatBytesGiB renders a byte count for operator eyes: GiB with two decimals
+// once past a gibibyte, MiB below that.
+func formatBytesGiB(bytes int) string {
+	const gib = 1 << 30
+	if bytes >= gib {
+		return fmt.Sprintf("%.2f GiB", float64(bytes)/float64(gib))
+	}
+	return fmt.Sprintf("%.1f MiB", float64(bytes)/float64(1<<20))
 }

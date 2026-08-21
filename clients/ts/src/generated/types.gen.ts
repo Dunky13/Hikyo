@@ -2266,6 +2266,14 @@ export type RetentionHealth = {
     last_prune_success: string | null;
     stale: boolean;
     stale_after_seconds: 86400;
+    /**
+     * Largest per-project stored payload across the instance, in bytes (ciphertext of value cells plus published snapshot entries). The per-project storage high-water surface.
+     */
+    peak_project_bytes: number;
+    /**
+     * True once peak_project_bytes reaches the 1 GiB warn threshold, well before the 4 GiB publish refusal.
+     */
+    storage_warn: boolean;
 };
 
 export type ProjectRetentionPolicy = {
