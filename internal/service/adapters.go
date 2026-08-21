@@ -528,10 +528,19 @@ func (s *Adapters) UpdateTarget(ctx context.Context, actor Actor, scope domain.S
 	if err := s.preflightTargetRouting(ctx, actor, scope, request); err != nil {
 		return store.AdapterTarget{}, err
 	}
+	// § 179 adapter sync/trigger concurrency: 4 per org, held for the reconfigure
+	// exactly as SyncTarget holds it — a reconfigure that re-syncs is an adapter
+	// trigger, so it takes the same concurrency slot, not just the rate. Acquired
+	// at entry (before the provider fence retries), released on return.
+	release, err := s.Budget.acquire(budgetAdapter, budgetKeys{Org: scope.Org})
+	if err != nil {
+		return store.AdapterTarget{}, err
+	}
+	defer release()
 	now := store.CanonTime(s.now())
 	var out store.AdapterTarget
 	var rateCharged bool
-	err := retryAdapterProviderFence(ctx, func() error {
+	err = retryAdapterProviderFence(ctx, func() error {
 		return tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 			caller, err := actor.resolve(ctx, az, now)
 			if err != nil {
