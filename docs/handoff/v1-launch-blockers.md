@@ -33,6 +33,7 @@ motivated it: `docs/handoff/v1-readiness-audit.md`.
 
 - Workload `reveal-history` under a pin (permission-model ADR: "`reveal-history` only where a pin requires it") is not grantable — the pre-existing machine allowlist refuses it outright; this PR only adds the opt-in conjunct at the chokepoint for both disclosure atoms. Follow-up ticket needed.
 
-- Codex cross-model review (gpt-5.6-sol, high): R1 NOT CLEAN (1 BLOCKING / 5 HIGH) → fixed in `fix: address cross-model review R1…` → R2 one item open → R3 **SOUND-WITH-DISPOSITIONS** (#3, the CLI zero-window browser handoff, dispositioned to the owner). PR #194.
+- Codex cross-model review (gpt-5.6-sol, high): R1 NOT CLEAN (1 BLOCKING / 5 HIGH) → fixed in `fix: address cross-model review R1…` → R2 one item open → R3 **SOUND-WITH-DISPOSITIONS** (#3, the CLI zero-window browser handoff). The owner chose to implement #3; the handoff slice had its own R1 (1 BLOCKING / 3 HIGH / 1 MEDIUM → fixed: dispatch by enrolment, honest TOTP scope, act-bound units, passkey-binding e2e) → R2 SOUND-WITH-DISPOSITIONS (residuals fixed) → R3 **SOUND-WITH-DISPOSITIONS** (no slice-blocking items). PR #194.
+- Remaining owner disposition: OIDC re-run reauthentication is not implemented for any disclosure ceremony (browser or handoff) — a pre-existing gap of the reveal ceremony (`Ceremony.tsx` offers passkey/TOTP only); follow-up ticket.
 - Playwright desktop suite green locally after repinning copy/selectors; the mobile project and the k8s operator e2e (the only live exercise of operator secret delivery under the opt-in) run in CI on #194.
 - Docker quick path, chart root-key/Ingress, `hikyo init`, field-level error detail: audit option B, not in this PR.
