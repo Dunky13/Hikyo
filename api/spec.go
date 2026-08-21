@@ -224,33 +224,21 @@ func AuthorizationOperationAdmitsArtifact(id, class string) (admitted, described
 
 type operationContextKey struct{}
 
-// WithRequestOperation resolves a request through the embedded contract and
-// attaches only its operationId. Consumers re-read the immutable cached row;
-// no caller can inject a parallel artifact list through context.
-func WithRequestOperation(ctx context.Context, r *http.Request) (context.Context, bool) {
-	op, ok := OperationFor(r)
-	if !ok {
-		return ctx, false
-	}
-	return context.WithValue(ctx, operationContextKey{}, op.ID), true
-}
-
 // OperationFromContext returns the contract row attached at HTTP admission.
 // Absence means an in-process caller rather than an unclassified HTTP route.
 func OperationFromContext(ctx context.Context) (Operation, bool) {
-	id, ok := ctx.Value(operationContextKey{}).(string)
-	if !ok {
-		return Operation{}, false
-	}
-	loadOnce.Do(load)
-	if loadErr != nil {
-		return Operation{}, false
-	}
-	op, ok := operations[id]
-	if !ok {
+	op, ok := ctx.Value(operationContextKey{}).(Operation)
+	if !ok || op.ID == "" {
 		return Operation{}, false
 	}
 	return cloneOperation(op), true
+}
+
+func withOperation(ctx context.Context, op Operation) context.Context {
+	if op.ID == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, operationContextKey{}, cloneOperation(op))
 }
 
 // Operations returns every operation in the contract, keyed by operationId.
@@ -328,27 +316,88 @@ type ValidationError struct {
 func (e *ValidationError) Error() string { return e.Err.Error() }
 func (e *ValidationError) Unwrap() error { return e.Err }
 
-// ValidateRequest checks a request against the contract and reports the
-// offending member on failure.
+type resolvedRequest struct {
+	request *http.Request
+	route   *routers.Route
+	params  map[string]string
+	op      Operation
+}
+
+func resolveRequest(r *http.Request) (*resolvedRequest, error) {
+	loadOnce.Do(load)
+	if loadErr != nil {
+		return nil, loadErr
+	}
+	route, params, err := router.FindRoute(r)
+	if err != nil {
+		return nil, ErrNoRoute
+	}
+	if route == nil || route.Operation == nil {
+		return nil, fmt.Errorf("api: matched route %q has no OpenAPI operation", r.URL.Path)
+	}
+	op, ok := operations[route.Operation.OperationID]
+	if !ok {
+		return nil, fmt.Errorf("api: matched operation %q is absent from the contract registry", route.Operation.OperationID)
+	}
+	return &resolvedRequest{request: r, route: route, params: params, op: cloneOperation(op)}, nil
+}
+
+// MatchedRequest is one request's single resolution through the contract:
+// the route the OpenAPI router matched, its path parameters, and a cloned
+// immutable operation row. The mutable kin-openapi values stay attempt-local
+// and never enter a request context.
+type MatchedRequest struct {
+	request *http.Request
+	route   *routers.Route
+	params  map[string]string
+	op      Operation
+}
+
+// ValidatedRequest carries the original request and the cloned operation row
+// proven by its validation. Its fields are private, so another package cannot
+// construct an alternate row or attach one to a different request.
+type ValidatedRequest struct {
+	request *http.Request
+	op      Operation
+}
+
+// MatchRequest resolves a request through the embedded contract exactly once.
+// A request the contract does not describe is ErrNoRoute — the caller's 404,
+// distinct from a described route carrying a bad request.
+func MatchRequest(r *http.Request) (*MatchedRequest, error) {
+	resolved, err := resolveRequest(r)
+	if err != nil {
+		return nil, err
+	}
+	return &MatchedRequest{
+		request: resolved.request,
+		route:   resolved.route,
+		params:  resolved.params,
+		op:      resolved.op,
+	}, nil
+}
+
+// Operation returns a copy of the immutable contract row this request matched.
+// Consumers may hold and read it; editing the copy changes nothing.
+func (m *MatchedRequest) Operation() Operation { return cloneOperation(m.op) }
+
+// Validate checks the matched request against the contract and reports the
+// offending member on failure. The request is validated AS MATCHED: a caller
+// that replaces r.Body on the same *http.Request between MatchRequest and
+// Validate (the SCIM wire body bound does) is honoured; one that swaps in a
+// different request must match again.
 //
 // Authentication is deliberately NOT evaluated here: the security scheme is
 // satisfied by resolving a session row inside the request's own transaction
 // at the authorization chokepoint, never by a middleware that decides
 // "authenticated" before one exists. The filter is told to accept every
-// security requirement so it validates shape only.
-func ValidateRequest(r *http.Request) error {
-	loadOnce.Do(load)
-	if loadErr != nil {
-		return loadErr
-	}
-	route, params, err := router.FindRoute(r)
-	if err != nil {
-		return ErrNoRoute
-	}
+// security requirement so it validates shape only. Only successful validation
+// returns a value capable of attaching the matched operation to context.
+func (m *MatchedRequest) Validate() (*ValidatedRequest, error) {
 	input := &openapi3filter.RequestValidationInput{
-		Request:    r,
-		PathParams: params,
-		Route:      route,
+		Request:    m.request,
+		PathParams: m.params,
+		Route:      m.route,
 		Options: &openapi3filter.Options{
 			AuthenticationFunc: openapi3filter.NoopAuthenticationFunc,
 			// The SCIM WIRE routes' bodies are validated by the protocol layer,
@@ -365,13 +414,42 @@ func ValidateRequest(r *http.Request) error {
 			// check only ever rejected "not a JSON object" — which
 			// `scimproto.DecodeUser`/`DecodeGroup`/`ParsePatch` reject
 			// themselves, post-auth, as an RFC 7644 `invalidSyntax`.
-			ExcludeRequestBody: IsSCIMWireOperation(route.Operation.OperationID),
+			ExcludeRequestBody: IsSCIMWireOperation(m.op.ID),
 		},
 	}
-	if err := openapi3filter.ValidateRequest(r.Context(), input); err != nil {
-		return &ValidationError{Member: offendingMember(err), Err: err}
+	if err := openapi3filter.ValidateRequest(m.request.Context(), input); err != nil {
+		return nil, &ValidationError{Member: offendingMember(err), Err: err}
 	}
-	return nil
+	return &ValidatedRequest{request: m.request, op: cloneOperation(m.op)}, nil
+}
+
+// Operation returns a copy of the operation row proven by validation.
+func (v *ValidatedRequest) Operation() Operation {
+	if v == nil {
+		return Operation{}
+	}
+	return cloneOperation(v.op)
+}
+
+// Request returns the request that passed validation with its immutable
+// operation row attached. It deliberately accepts no request or context: a
+// caller cannot validate route A and attach that result to request B.
+func (v *ValidatedRequest) Request() *http.Request {
+	if v == nil || v.request == nil {
+		return nil
+	}
+	return v.request.WithContext(withOperation(v.request.Context(), v.op))
+}
+
+// ValidateRequest matches and validates once, returning the immutable row that
+// passed validation. Admission uses the two-step form because SCIM body policy
+// must run between matching and shape validation.
+func ValidateRequest(r *http.Request) (*ValidatedRequest, error) {
+	match, err := MatchRequest(r)
+	if err != nil {
+		return nil, err
+	}
+	return match.Validate()
 }
 
 // IsSCIMWireOperation reports whether a contract operation is one of the
@@ -392,19 +470,15 @@ func IsSCIMWireOperation(operationID string) bool {
 // the CI wire-response duty: contract tests assert what actually went over
 // the socket, not what a handler intended.
 func ValidateResponse(r *http.Request, status int, header http.Header, body []byte) error {
-	loadOnce.Do(load)
-	if loadErr != nil {
-		return loadErr
-	}
-	route, params, err := router.FindRoute(r)
+	resolved, err := resolveRequest(r)
 	if err != nil {
-		return ErrNoRoute
+		return err
 	}
 	return openapi3filter.ValidateResponse(r.Context(), &openapi3filter.ResponseValidationInput{
 		RequestValidationInput: &openapi3filter.RequestValidationInput{
 			Request:    r,
-			PathParams: params,
-			Route:      route,
+			PathParams: resolved.params,
+			Route:      resolved.route,
 			Options: &openapi3filter.Options{
 				AuthenticationFunc: openapi3filter.NoopAuthenticationFunc,
 			},
@@ -419,38 +493,15 @@ func ValidateResponse(r *http.Request, status int, header http.Header, body []by
 	})
 }
 
-// OperationIDFor reports which contract operation a request resolves to, so
-// the transport layer can look up its artifact eligibility and minimum
-// revision without a second routing table.
-func OperationIDFor(r *http.Request) (string, bool) {
-	loadOnce.Do(load)
-	if loadErr != nil {
-		return "", false
-	}
-	route, _, err := router.FindRoute(r)
-	if err != nil || route.Operation == nil {
-		return "", false
-	}
-	return route.Operation.OperationID, true
-}
-
 // OperationFor reports the full contract row for the request. Artifact
 // admission consumes this row at runtime, so the same embedded OpenAPI bytes
 // drive both request validation and bearer-class eligibility.
 func OperationFor(r *http.Request) (Operation, bool) {
-	loadOnce.Do(load)
-	if loadErr != nil {
+	resolved, err := resolveRequest(r)
+	if err != nil {
 		return Operation{}, false
 	}
-	route, _, err := router.FindRoute(r)
-	if err != nil || route.Operation == nil {
-		return Operation{}, false
-	}
-	op, ok := operations[route.Operation.OperationID]
-	if !ok {
-		return Operation{}, false
-	}
-	return cloneOperation(op), true
+	return cloneOperation(resolved.op), true
 }
 
 // jsonPointerInReason recovers the offending member from a schema error.

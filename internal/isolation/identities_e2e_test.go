@@ -960,13 +960,18 @@ func runIdentityLifecycle(t *testing.T, db *store.DB) {
 	// #113's named authentication refusal: drive a live machine credential
 	// through a human-session-only contract row before revoking it. This is the
 	// real admission emitter the audit registry's runtime-closure check needs.
+	// These IDs exercise the public wire contract. The service call below keeps
+	// using the isolation fixture's database scope; admission only consumes the
+	// validated operation row carried by this request.
 	request := httptest.NewRequest(http.MethodGet,
-		api.PathPrefix+"/orgs/"+string(orgA)+"/projects/"+string(prjA1)+
-			"/environments/"+string(envA1), nil)
-	admissionCtx, ok := api.WithRequestOperation(ctx, request)
-	if !ok {
-		t.Fatal("getEnvironment did not resolve through the embedded contract")
+		api.PathPrefix+"/orgs/org_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0fee/"+
+			"projects/prj_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0fdd/"+
+			"environments/env_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0fcc", nil).WithContext(ctx)
+	validated, err := api.ValidateRequest(request)
+	if err != nil {
+		t.Fatalf("getEnvironment did not validate through the embedded contract: %v", err)
 	}
+	admissionCtx := validated.Request().Context()
 	if _, err := (&service.Environments{DB: db}).Get(admissionCtx,
 		service.Bearer(minted.Value), envScope(envA1)); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("auth.artifact_class_refused: %v", err)

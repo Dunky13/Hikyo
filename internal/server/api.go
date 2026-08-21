@@ -696,53 +696,60 @@ func (a *API) extractBearer(next http.Handler) http.Handler {
 const MaxRequestBytes = 1 << 20
 
 func (a *API) validateAgainstContract(next http.Handler) http.Handler {
+	return a.validateAgainstContractWith(api.MatchRequest, next)
+}
+
+func (a *API) validateAgainstContractWith(
+	matchRequest func(*http.Request) (*api.MatchedRequest, error),
+	next http.Handler,
+) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// ONE route match per request, here. Everything downstream — the SCIM
+		// wire decision, shape validation, the artifact allowlist enforced at
+		// the authorization chokepoint — consumes this one matched row, so no
+		// two lookups can disagree about which operation a request is.
+		match, err := matchRequest(r)
+		if err != nil {
+			if errors.Is(err, api.ErrNoRoute) {
+				// A path the contract does not describe. 404, like any other
+				// thing that is not there.
+				writeError(w, wirePolicyForCode(apigen.ErrorCodeNotFound), "")
+				return
+			}
+			writeError(w, wirePolicyForCode(apigen.ErrorCodeInternal), "")
+			return
+		}
 		// The SCIM wire bounds and shape-checks its own body, BEFORE contract
 		// validation and with its refusal ranked behind authentication.
 		// http.MaxBytesReader cannot be used there: it fails the read, and the
 		// contract validator's own body handling turns that into a
 		// pre-authentication Hikyo 400 describing the request — which is the
 		// thing the wire must never do.
-		wire := isSCIMWireRequest(r)
-		if wire {
+		operation := match.Operation()
+		if api.IsSCIMWireOperation(operation.ID) {
 			if !a.scimBodyIsOneValue(w, r) {
 				return
 			}
 		} else if r.Body != nil {
 			r.Body = http.MaxBytesReader(w, r.Body, MaxRequestBytes)
 		}
-		err := api.ValidateRequest(r)
-		switch {
-		case err == nil:
-			ctx, ok := api.WithRequestOperation(r.Context(), r)
-			if !ok {
-				writeError(w, wirePolicyForCode(apigen.ErrorCodeInternal), "")
-				return
-			}
-			next.ServeHTTP(w, r.WithContext(ctx))
-		case errors.Is(err, api.ErrNoRoute):
-			// A path the contract does not describe. 404, like any other
-			// thing that is not there.
-			writeError(w, wirePolicyForCode(apigen.ErrorCodeNotFound), "")
-		default:
+		validated, err := match.Validate()
+		if err != nil {
 			var verr *api.ValidationError
 			detail := ""
 			if errors.As(err, &verr) {
 				detail = verr.Member
 			}
 			writeError(w, wirePolicyForCode(apigen.ErrorCodeBadRequest), detail)
+			return
 		}
+		next.ServeHTTP(w, validated.Request())
 	})
 }
 
 // scimBodyIsOneValue enforces the single-JSON-value rule on a SCIM wire body
 // and answers the request itself when it is broken. It reports whether the
 // chain may continue.
-func isSCIMWireRequest(r *http.Request) bool {
-	operation, ok := api.OperationIDFor(r)
-	return ok && api.IsSCIMWireOperation(operation)
-}
-
 func (a *API) scimBodyIsOneValue(w http.ResponseWriter, r *http.Request) bool {
 	if r.Body == nil {
 		return true
