@@ -64,47 +64,32 @@ export function workspaceBearer(origin: string): WorkspaceBearer | undefined {
 }
 
 export function forgetWorkspace(origin: string): void {
-  // The strike count goes with the bearer. A workspace that is re-established
-  // after a run of unreachable probes is a NEW session, and letting it inherit
-  // the old count would kill it on its first blip instead of its second.
-  failures.delete(origin);
+  // The strike count goes with the bearer VALUE. A workspace that is
+  // re-established after a run of unreachable probes is a NEW credential, and
+  // letting it inherit the old count would kill it on its first blip instead of
+  // its second. Read the held value before deleting the bearer, or the count
+  // outlives the credential it belonged to.
+  const held = bearers.get(origin);
+  if (held !== undefined) {
+    failures.delete(held.value);
+  }
   if (bearers.delete(origin)) {
     publish();
   }
 }
 
 /**
- * forgetSession drops the bearer for one origin ONLY IF it is still the session
- * the caller is talking about.
+ * dropWorkspaceValue drops the bearer for one origin ONLY IF it is still the
+ * exact VALUE the caller is talking about — the transport's 401/403 kill path
+ * and the liveness probe's terminal drop both route through it (#71).
  *
- * Every probe outcome routes through this rather than through forgetWorkspace,
- * because a probe is asynchronous and the human is not. Close a workspace and
- * establish a new one to the same origin while S1's probe is still in flight,
- * and S1's eventual failure used to delete S2 — a freshly redeemed session
- * discarded by a verdict about a session that no longer exists. Keying the
- * decision on the session id makes a stale completion a no-op.
- */
-function forgetSession(origin: string, session: string): void {
-  const held = bearers.get(origin);
-  if (held === undefined || held.session !== session) {
-    return;
-  }
-  forgetWorkspace(origin);
-}
-
-/**
- * dropWorkspaceValue is the transport's kill path (#71). A data call that comes
- * back 401/403 has met a remote that no longer honours the exact bearer it was
- * sent — the session was revoked in the remote's own list, or its origin was
- * de-allowlisted — so the workspace is over the instant that lands, not one
- * liveness poll later.
- *
- * It is keyed by the exact bearer VALUE, not the session id, because a step-up
- * ELEVATES in place: same session id, a freshly ROTATED value. A 401 for the
- * pre-rotation value proves that old value is dead — which it is, it was
- * rotated — and must NOT take down the live post-rotation bearer that shares
- * its session id. Only a 401 whose value is still the one we hold is a real
- * revocation of the live credential.
+ * Keyed by the value, not the session id, for two reasons that are really one:
+ * a probe is asynchronous and the human is not, and a step-up ELEVATES in place
+ * — same session id, a freshly ROTATED value. A stale verdict about a value
+ * that has since been rotated (by a reconnect OR a step-up) must be a no-op, or
+ * a 401 for the dead pre-rotation value would take down the live post-rotation
+ * bearer that shares its session id. Only a verdict whose value is still the one
+ * we hold is a verdict about the live credential.
  */
 export function dropWorkspaceValue(origin: string, value: string): void {
   const held = bearers.get(origin);
@@ -114,18 +99,18 @@ export function dropWorkspaceValue(origin: string, value: string): void {
   forgetWorkspace(origin);
 }
 
-/** strike counts one unreachable probe, keyed by SESSION for the same reason. */
+/** strike counts one unreachable probe, keyed by the bearer VALUE. */
 function strike(bearer: WorkspaceBearer): boolean {
   const held = bearers.get(bearer.origin);
-  if (held === undefined || held.session !== bearer.session) {
+  if (held === undefined || held.value !== bearer.value) {
     return false;
   }
-  const next = (failures.get(bearer.session) ?? 0) + 1;
-  failures.set(bearer.session, next);
+  const next = (failures.get(bearer.value) ?? 0) + 1;
+  failures.set(bearer.value, next);
   if (next < UNREACHABLE_STRIKES) {
     return true;
   }
-  forgetSession(bearer.origin, bearer.session);
+  dropWorkspaceValue(bearer.origin, bearer.value);
   return false;
 }
 
@@ -190,7 +175,7 @@ export async function probeWorkspace(bearer: WorkspaceBearer): Promise<boolean> 
     return strike(bearer);
   }
   if (response.status === 401 || response.status === 403) {
-    forgetSession(bearer.origin, bearer.session);
+    dropWorkspaceValue(bearer.origin, bearer.value);
     return false;
   }
   // ONLY A WELL-FORMED SUCCESS CLEARS THE STRIKE COUNT. Anything else is a
@@ -207,7 +192,7 @@ export async function probeWorkspace(bearer: WorkspaceBearer): Promise<boolean> 
   } catch {
     return strike(bearer);
   }
-  failures.delete(bearer.session);
+  failures.delete(bearer.value);
   return true;
 }
 
@@ -220,7 +205,7 @@ const UNREACHABLE_STRIKES = 2;
  */
 const PROBE_TIMEOUT_MS = 4_000;
 
-/** Strike counts, keyed by SESSION id so a replaced session starts at zero. */
+/** Strike counts, keyed by bearer VALUE so a rotated credential starts at zero. */
 const failures = new Map<string, number>();
 
 /** WorkspaceError is a refusal this shell can put in front of a human. */
@@ -495,18 +480,19 @@ export async function openPrepared(prepared: PreparedWorkspace): Promise<Workspa
 /**
  * rememberWorkspace installs a redeemed bearer as the live one for its origin.
  *
- * It is the ONLY writer of the store, so "which session is current" has one
+ * It is the ONLY writer of the store, so "which credential is current" has one
  * answer and the probe path can compare against it. Replacing an origin's
- * bearer clears the outgoing session's strike count with it: a new session
- * starts with its full allowance, and the old session's count can never be
- * spent against it.
+ * bearer clears the outgoing VALUE's strike count with it: a new credential
+ * starts with its full allowance, and the old value's count can never be spent
+ * against it — including across a step-up, which rotates the value under a
+ * stable session id.
  */
 export function rememberWorkspace(bearer: WorkspaceBearer): void {
   const previous = bearers.get(bearer.origin);
   if (previous !== undefined) {
-    failures.delete(previous.session);
+    failures.delete(previous.value);
   }
-  failures.delete(bearer.session);
+  failures.delete(bearer.value);
   bearers.set(bearer.origin, bearer);
   publish();
 }

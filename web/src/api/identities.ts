@@ -22,6 +22,7 @@ import { useMutation, useQueries, useQuery, useQueryClient, type UseQueryResult 
 import type { z } from 'zod';
 
 import { ApiError, ok, parsed } from './client.ts';
+import { useTransport } from './transport.tsx';
 
 /**
  * The machine-access surface, as the SPA sees it (#67, locked prototype #31
@@ -64,10 +65,17 @@ const projectGrantsKey = (p: ProjectRef) => ['project-grants', p.org, p.project]
 export function useServiceAccounts(
   p: ProjectRef,
 ): UseQueryResult<z.infer<typeof zServiceAccountList>> {
+  // Threaded so the history drawer's pin flow lists the REMOTE's workload
+  // principals inside a workspace (#71) — a pin binds a revision to a service
+  // account, and it is the remote's accounts the pin lives among.
+  const transport = useTransport();
   return useQuery({
     queryKey: accountsKey(p),
     queryFn: () =>
-      parsed(listServiceAccounts({ path: { org: p.org, project: p.project } }), zServiceAccountList),
+      parsed(
+        listServiceAccounts({ path: { org: p.org, project: p.project }, ...transport }),
+        zServiceAccountList,
+      ),
     retry: false,
   });
 }

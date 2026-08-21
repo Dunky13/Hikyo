@@ -21,6 +21,7 @@ import {
 } from '../api/history.ts';
 import { useServiceAccounts } from '../api/identities.ts';
 import { ApiError, parsed } from '../api/client.ts';
+import { useTransport } from '../api/transport.tsx';
 import {
   matrixMutationError,
   rememberRestorePreview,
@@ -147,6 +148,7 @@ export function HistoryDrawer({
   const keyFilter = params.get('key');
   const env = { ...refData, environment: environmentId };
 
+  const transport = useTransport();
   const history = useRevisionHistory(env);
   const pins = useRevisionPins(env);
   const retention = useProjectRetention(refData);
@@ -161,6 +163,7 @@ export function HistoryDrawer({
         exportValues({
           path: { ...refData, environment: input.environmentId },
           body: { revision: revisionNumber(input.revision), reveal: false },
+          ...transport,
         }),
         zPinComparisonValues,
       ),

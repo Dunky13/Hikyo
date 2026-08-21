@@ -1,3 +1,4 @@
+import { listValues } from '@hikyo/client';
 import { afterEach, expect, test, vi } from 'vitest';
 
 import { createWorkspaceClient } from './workspaceClient.ts';
@@ -35,6 +36,32 @@ test('the bearer rides an Authorization header and nothing ambient travels', asy
   // credentials mode and cookies from ever crossing the origin.
   expect(seen?.credentials).toBe('omit');
   expect(seen?.url).toBe('https://remote.example/api/v1/me/sessions');
+});
+
+test('a real generated call routes to the remote with the bearer and no cookies', async () => {
+  seed('secret-1', 'ses_1');
+  let seen: Request | undefined;
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+    seen = input as Request;
+    return new Response('{"values":[]}', {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  });
+
+  // The whole seam as the wrappers use it: a generated SDK fn, its path
+  // templated, its `security: bearer` resolved, pointed at the remote by the
+  // per-call client. Not `client.get` — that skips the parts a real call hits.
+  await listValues({
+    path: { org: 'org_a', project: 'proj_b', environment: 'env_c' },
+    client: createWorkspaceClient(ORIGIN),
+  });
+
+  expect(seen?.url).toBe(
+    'https://remote.example/api/v1/orgs/org_a/projects/proj_b/environments/env_c/values',
+  );
+  expect(seen?.headers.get('Authorization')).toBe('Bearer secret-1');
+  expect(seen?.credentials).toBe('omit');
 });
 
 test('the bearer is read LIVE per request, not frozen at client creation', async () => {

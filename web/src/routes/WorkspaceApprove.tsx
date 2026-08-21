@@ -204,6 +204,12 @@ function StepUpReauth({
     setFailure(null);
     try {
       await run();
+      // Reauth is done; hand off to the approval and release our own busy flag
+      // so `working` now reflects only the approve mutation. If that mutation
+      // fails (an expired or already-consumed transaction), the buttons must
+      // come back — leaving busy latched here would strand the human with Cancel
+      // disabled and no way out but closing the window.
+      setBusy(false);
       onReauthed();
     } catch (err) {
       setFailure(ceremonyRefusalText(err));

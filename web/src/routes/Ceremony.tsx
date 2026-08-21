@@ -307,6 +307,13 @@ function WorkspaceStepUp({
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
 
+  // The decision's key set as a STABLE dependency. `keyIds` is a fresh array on
+  // every parent render — Ceremony rebuilds it from `request.keys.map(...)`, and
+  // the matrix behind it re-renders every couple of seconds as signals poll — so
+  // depending on the array identity would open a fresh handoff transaction on
+  // the remote on every one of those renders and rate-limit the human out of
+  // their own ceremony. The content, joined, changes only when the target does.
+  const keySetKey = keyIds.join(',');
   useEffect(() => {
     const bearer = workspaceBearer(origin);
     if (bearer === undefined) {
@@ -318,7 +325,7 @@ function WorkspaceStepUp({
       session: bearer.session,
       operation,
       environment: environmentId,
-      keySet: keyIds,
+      keySet: keySetKey === '' ? [] : keySetKey.split(','),
     })
       .then((ready) => {
         if (live) setPrepared(ready);
@@ -334,9 +341,9 @@ function WorkspaceStepUp({
     return () => {
       live = false;
     };
-    // Bound to the exact decision: a re-prepare is only warranted if the target
-    // itself changes, which stages a new modal rather than re-running this one.
-  }, [origin, operation, environmentId, keyIds]);
+    // Bound to the exact decision by content, not array identity: a re-prepare
+    // is warranted only if the target itself changes, which stages a new modal.
+  }, [origin, operation, environmentId, keySetKey]);
 
   // Must stay synchronous to the click: the popup inside openPrepared only
   // survives the blocker on a live user gesture.

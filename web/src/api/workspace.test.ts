@@ -101,6 +101,34 @@ describe('probeWorkspace session identity', () => {
     expect(await inFlight).toBe(false);
     expect(workspaceBearer(bearer.origin)?.session).toBe('ses_2');
   });
+
+  // A step-up ELEVATES in place: same session id, a freshly rotated value. A
+  // probe fired with the pre-elevation value must not, on its stale 401, take
+  // down the live elevated bearer that shares its session id — the drop is keyed
+  // by value, not session, exactly as the transport's kill path is.
+  it('ignores a stale 401 for a value the same session has since rotated', async () => {
+    let settle: (r: Response) => void = () => {};
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        () =>
+          new Promise<Response>((resolve) => {
+            settle = resolve;
+          }),
+      ),
+    );
+    rememberWorkspace(bearer);
+    const inFlight = probeWorkspace(bearer);
+
+    // The step-up rotates the value under the SAME session id.
+    const elevated: WorkspaceBearer = { ...bearer, value: 'hik_ws_elevated' };
+    rememberWorkspace(elevated);
+
+    settle(new Response(null, { status: 401 }));
+    expect(await inFlight).toBe(false);
+    expect(workspaceBearer(bearer.origin)?.value).toBe('hik_ws_elevated');
+    expect(workspaceBearer(bearer.origin)?.session).toBe('ses_1');
+  });
 });
 
 // A response the shell cannot recognise is not evidence of life. Before this a
