@@ -124,7 +124,7 @@ func TestJSONSchemaEvaluationFailsLoudWhenNotAdmitted(t *testing.T) {
 	release := saturateEvaluationSlots(t)
 	defer release()
 
-	c, err := Compile(Declaration{Rule: &Rule{Type: TypeJSON, JSONSchema: []byte(`{"type":"object"}`)}})
+	c, err := compileWithoutCompatibilityCheckForTest(Config, Declaration{Rule: &Rule{Type: TypeJSON, JSONSchema: []byte(`{"type":"object"}`)}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +132,7 @@ func TestJSONSchemaEvaluationFailsLoudWhenNotAdmitted(t *testing.T) {
 	evaluationDeadline = time.Millisecond
 	defer func() { evaluationDeadline = restore }()
 
-	v := c.Validate(`{}`, Config)
+	v := c.Validate(`{}`)
 	if v.Valid {
 		t.Fatal("an evaluation that was never admitted was reported valid")
 	}
@@ -150,14 +150,14 @@ func TestJSONSchemaEvaluationFailsLoudOnTheDeadline(t *testing.T) {
 	evaluationDeadline = 0 // every evaluation overruns
 	defer func() { evaluationDeadline = restore }()
 
-	c, err := Compile(Declaration{Rule: &Rule{
+	c, err := compileWithoutCompatibilityCheckForTest(Config, Declaration{Rule: &Rule{
 		Type:       TypeJSON,
 		JSONSchema: []byte(`{"type":"object"}`),
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	v := c.Validate(`{}`, Config)
+	v := c.Validate(`{}`)
 	if v.Valid {
 		t.Fatal("an evaluation past its deadline was reported valid")
 	}
@@ -219,7 +219,7 @@ func TestRefExpansionIsRefusedAgainstTheWorkBudget(t *testing.T) {
 	if declared := strings.Count(doc, `"type"`) + strings.Count(doc, `"allOf"`); declared > MaxJSONSchemaSubschemas {
 		t.Fatalf("the fixture is not structurally small (%d declared constructs)", declared)
 	}
-	_, err := Compile(Declaration{Rule: &Rule{Type: TypeJSON, JSONSchema: []byte(doc)}})
+	_, err := compileWithoutCompatibilityCheckForTest(Config, Declaration{Rule: &Rule{Type: TypeJSON, JSONSchema: []byte(doc)}})
 	if err == nil {
 		t.Fatal("a $ref chain expanding to thousands of evaluation paths was accepted")
 	}
@@ -244,15 +244,15 @@ func TestLinearRefReuseStillCompiles(t *testing.T) {
 		b.WriteString(`"p` + strconv.Itoa(i) + `":{"$ref":"#/$defs/t"}`)
 	}
 	b.WriteString(`}}`)
-	c, err := Compile(Declaration{Rule: &Rule{Type: TypeJSON, JSONSchema: []byte(b.String())}})
+	c, err := compileWithoutCompatibilityCheckForTest(Config, Declaration{Rule: &Rule{Type: TypeJSON, JSONSchema: []byte(b.String())}})
 	if err != nil {
 		t.Fatalf("linear $ref reuse was refused: %v", err)
 	}
 	// And it still validates: the bound rejected nothing it should have kept.
-	if v := c.Validate(`{"p0":"x"}`, Config); !v.Valid {
+	if v := c.Validate(`{"p0":"x"}`); !v.Valid {
 		t.Fatalf("the compiled schema refuses a valid instance: %+v", v.Errors)
 	}
-	if v := c.Validate(`{"p0":""}`, Config); v.Valid {
+	if v := c.Validate(`{"p0":""}`); v.Valid {
 		t.Fatal("the referenced constraint was not applied")
 	}
 }

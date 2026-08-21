@@ -15,30 +15,54 @@ import (
 // name, declarations in schema-canonical form, presence lists sorted), so it is
 // the sole producer of the canonical form Encode assumes.
 func Parse(raw []byte) (Bundle, error) {
+	parsed, err := ParseCompiled(raw)
+	if err != nil {
+		return Bundle{}, err
+	}
+	return parsed.Bundle, nil
+}
+
+// CompiledBundle keeps parsed wire data separate from the classified
+// declaration artifacts built from it. Apply paths consume both so a
+// declaration is not compiled again after parsing.
+type CompiledBundle struct {
+	Bundle       Bundle
+	declarations map[string]*schema.Compiled
+}
+
+// CompiledDeclaration returns the artifact for a normalized key name.
+func (b CompiledBundle) CompiledDeclaration(keyName string) (*schema.Compiled, bool) {
+	compiled, ok := b.declarations[keyName]
+	return compiled, ok
+}
+
+// ParseCompiled parses and normalizes a wire bundle while retaining each
+// declaration's classified artifact for an immediate apply.
+func ParseCompiled(raw []byte) (CompiledBundle, error) {
 	if len(raw) > MaxBundleBytes {
-		return Bundle{}, limitDetail("bundle is %d bytes, over the %d byte limit", len(raw), MaxBundleBytes)
+		return CompiledBundle{}, limitDetail("bundle is %d bytes, over the %d byte limit", len(raw), MaxBundleBytes)
 	}
 
 	var b Bundle
 	if err := DecodeStrict(raw, &b); err != nil {
-		return Bundle{}, mapDecodeError(err)
+		return CompiledBundle{}, mapDecodeError(err)
 	}
 
 	if b.FormatVersion != FormatVersion {
-		return Bundle{}, invalidDetail(
+		return CompiledBundle{}, invalidDetail(
 			"bundle format_version %d is not this build's %d: version mismatch", b.FormatVersion, FormatVersion)
 	}
 
 	entries := len(b.Keys) + len(b.Environments) + len(b.KeyGroups)
 	if entries > MaxBundleEntries {
-		return Bundle{}, limitDetail("bundle holds %d entries, over the %d entry limit", entries, MaxBundleEntries)
+		return CompiledBundle{}, limitDetail("bundle holds %d entries, over the %d entry limit", entries, MaxBundleEntries)
 	}
 
 	if b.Additive() && hasIDs(b) {
-		return Bundle{}, invalidDetail("malformed template: ids without base revision")
+		return CompiledBundle{}, invalidDetail("malformed template: ids without base revision")
 	}
 
-	return normalize(b)
+	return normalizeCompiled(b)
 }
 
 // mapDecodeError translates the neutral strict-decode errors into caller-safe
@@ -86,9 +110,15 @@ func hasIDs(b Bundle) bool {
 
 // Normalize sorts and canonicalizes a bundle. Import and tests that build a
 // bundle by hand call it before Encode; Parse calls it on decode.
-func Normalize(b Bundle) (Bundle, error) { return normalize(b) }
+func Normalize(b Bundle) (Bundle, error) {
+	compiled, err := normalizeCompiled(b)
+	if err != nil {
+		return Bundle{}, err
+	}
+	return compiled.Bundle, nil
+}
 
-func normalize(b Bundle) (Bundle, error) {
+func normalizeCompiled(b Bundle) (CompiledBundle, error) {
 	out := Bundle{
 		FormatVersion: FormatVersion,
 		BaseRevision:  b.BaseRevision,
@@ -96,6 +126,7 @@ func normalize(b Bundle) (Bundle, error) {
 		KeyGroups:     append([]KeyGroup(nil), b.KeyGroups...),
 		Keys:          append([]Key(nil), b.Keys...),
 	}
+	declarations := make(map[string]*schema.Compiled, len(out.Keys))
 	if out.Environments == nil {
 		out.Environments = []Environment{}
 	}
@@ -112,33 +143,27 @@ func normalize(b Bundle) (Bundle, error) {
 	for i := range out.Keys {
 		k := out.Keys[i]
 		if k.Classification != string(schema.Secret) && k.Classification != string(schema.Config) {
-			return Bundle{}, invalidDetail(
+			return CompiledBundle{}, invalidDetail(
 				"key %q declares classification %q, which is neither `secret` nor `config`", k.Name, k.Classification)
 		}
-		if err := schema.CheckDeclarationClassification(schema.Classification(k.Classification), k.Declaration); err != nil {
-			return Bundle{}, invalidDetail("key %q has an invalid declaration: %v", k.Name, err)
-		}
-		canonicalDecl, err := schema.Canonical(k.Declaration)
+		compiled, err := schema.CompileClassified(schema.Classification(k.Classification), k.Declaration)
 		if err != nil {
-			return Bundle{}, invalidDetail("key %q has an invalid declaration: %v", k.Name, err)
+			return CompiledBundle{}, invalidDetail("key %q has an invalid declaration: %v", k.Name, err)
 		}
-		decl, err := schema.ParseDeclaration(canonicalDecl)
-		if err != nil {
-			return Bundle{}, invalidDetail("key %q has an invalid declaration: %v", k.Name, err)
-		}
-		k.Declaration = decl
+		k.Declaration = compiled.Declaration()
 		req, err := normalizePresence("required_in", k.Name, k.RequiredIn)
 		if err != nil {
-			return Bundle{}, err
+			return CompiledBundle{}, err
 		}
 		forb, err := normalizePresence("forbidden_in", k.Name, k.ForbiddenIn)
 		if err != nil {
-			return Bundle{}, err
+			return CompiledBundle{}, err
 		}
 		k.RequiredIn, k.ForbiddenIn = req, forb
 		out.Keys[i] = k
+		declarations[k.Name] = compiled
 	}
-	return out, nil
+	return CompiledBundle{Bundle: out, declarations: declarations}, nil
 }
 
 // normalizePresence validates a bundle presence rule's mode/shape and returns

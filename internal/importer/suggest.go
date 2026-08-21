@@ -25,7 +25,7 @@ var (
 
 func mustCompile(t schema.Type) *schema.Compiled {
 	rule := schema.Rule{Type: t}
-	c, err := schema.Compile(schema.Declaration{Rule: &rule})
+	c, err := schema.CompileClassified(schema.Secret, schema.Declaration{Rule: &rule})
 	if err != nil {
 		// The rules are compile-time constants; a failure is a build-time bug.
 		panic("importer: compiling the " + string(t) + " suggestion rule: " + err.Error())
@@ -41,9 +41,9 @@ func SuggestType(values []string) schema.Type {
 		return schema.TypeString
 	}
 	switch {
-	case allSatisfy(values, func(v string) bool { return suggestBoolean.Validate(v, schema.Secret).Valid }):
+	case allSatisfy(values, func(v string) bool { return suggestBoolean.Validate(v).Valid }):
 		return schema.TypeBoolean
-	case allSatisfy(values, func(v string) bool { return suggestInteger.Validate(v, schema.Secret).Valid }):
+	case allSatisfy(values, func(v string) bool { return suggestInteger.Validate(v).Valid }):
 		return schema.TypeInteger
 	case allSatisfy(values, isJSONObjectOrArray):
 		return schema.TypeJSON

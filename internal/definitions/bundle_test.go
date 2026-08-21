@@ -89,6 +89,31 @@ func TestEncodeParseRoundTrip(t *testing.T) {
 	}
 }
 
+func TestParseCompiledCarriesClassifiedDeclarations(t *testing.T) {
+	norm := mustNormalize(t, sampleBundle())
+	raw, err := Encode(norm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := ParseCompiled(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(parsed.Bundle, norm) {
+		t.Fatalf("ParseCompiled bundle differs\n got: %+v\nwant: %+v", parsed.Bundle, norm)
+	}
+	compiled, ok := parsed.CompiledDeclaration("DB_URL")
+	if !ok {
+		t.Fatal("ParseCompiled omitted DB_URL's compiled declaration")
+	}
+	if verdict := compiled.Validate("postgres://db.example.test/app"); !verdict.Valid {
+		t.Fatalf("compiled DB_URL declaration refused a string: %+v", verdict.Errors)
+	}
+	if _, ok := parsed.CompiledDeclaration("MISSING"); ok {
+		t.Fatal("ParseCompiled returned an artifact for an absent key")
+	}
+}
+
 func TestDigestStableOverCanonical(t *testing.T) {
 	norm, _ := Normalize(sampleBundle())
 	d1, err := Digest(norm)

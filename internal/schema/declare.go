@@ -13,29 +13,47 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
-// Compile is the declaration authority. It performs every declaration-time
-// check the ADR fixes and returns the artifact the value engine runs against —
-// so "was this declaration well-formed?" and "what do I validate with?" cannot
-// drift apart, because they are the same call.
+// CompileClassified is the persisted-declaration authority. It normalizes the
+// wire declaration once, enforces the key classification against that exact
+// form, and builds the validators from it. Boundary callers must use this
+// constructor so a declaration cannot reach storage or application with its
+// classification check omitted or reordered.
 //
 // Compilation is per schema revision, not per validation: patterns and JSON
 // Schemas are compiled once here and reused by every Validate (ADR § Bounds:
 // "compiled once per schema revision and cached, never recompiled per
 // validation, so a fetch storm cannot be amplified into CPU").
-func Compile(d Declaration) (*Compiled, error) {
-	switch {
-	case (d.Rule == nil) == (len(d.AnyOf) == 0):
-		return nil, declErr("a declaration carries exactly one of `rule` or `any_of`")
-	case d.Rule == nil && len(d.AnyOf) < 2:
-		return nil, declErr("an `any_of` union carries at least two alternatives")
-	case len(d.AnyOf) > MaxAnyOfAlternatives:
-		return nil, declErr("an `any_of` union carries at most %d alternatives", MaxAnyOfAlternatives)
-	}
-	norm, err := normalize(d)
+func CompileClassified(classification Classification, d Declaration) (*Compiled, error) {
+	norm, err := normalizeForCompilation(classification, d)
 	if err != nil {
 		return nil, err
 	}
-	c := &Compiled{decl: norm}
+	if err := checkDeclarationClassification(classification, norm); err != nil {
+		return nil, err
+	}
+	return compileNormalized(classification, norm)
+}
+func normalizeForCompilation(classification Classification, d Declaration) (Declaration, error) {
+	if !classification.Valid() {
+		return Declaration{}, declErr("classification %q is neither `secret` nor `config`", classification)
+	}
+	return normalizeForCompile(d)
+}
+
+func normalizeForCompile(d Declaration) (Declaration, error) {
+	switch {
+	case (d.Rule == nil) == (len(d.AnyOf) == 0):
+		return Declaration{}, declErr("a declaration carries exactly one of `rule` or `any_of`")
+	case d.Rule == nil && len(d.AnyOf) < 2:
+		return Declaration{}, declErr("an `any_of` union carries at least two alternatives")
+	case len(d.AnyOf) > MaxAnyOfAlternatives:
+		return Declaration{}, declErr("an `any_of` union carries at most %d alternatives", MaxAnyOfAlternatives)
+	}
+	return normalize(d)
+}
+
+func compileNormalized(classification Classification, norm Declaration) (*Compiled, error) {
+	c := &Compiled{classification: classification, decl: norm}
 	for i, r := range norm.alternatives() {
 		cr, err := compileRule(r)
 		if err != nil {
@@ -53,13 +71,18 @@ func Compile(d Declaration) (*Compiled, error) {
 // concurrent use: compiled regexps and compiled JSON Schemas are, and the
 // engine writes nothing back.
 type Compiled struct {
-	decl Declaration
-	alts []compiledRule
+	classification Classification
+	decl           Declaration
+	alts           []compiledRule
 }
 
 // Declaration returns the normalized declaration this artifact was built from
 // — the canonical form, so a caller storing it stores what validation used.
-func (c *Compiled) Declaration() Declaration { return c.decl }
+func (c *Compiled) Declaration() Declaration { return cloneDeclaration(c.decl) }
+
+// Canonical renders the byte-stable storage form of the same normalized
+// declaration that the compiled validators use.
+func (c *Compiled) Canonical() ([]byte, error) { return json.Marshal(c.decl) }
 
 type compiledRule struct {
 	rule    Rule

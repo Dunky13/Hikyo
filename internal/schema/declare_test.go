@@ -76,7 +76,7 @@ func TestDeclarationRefusals(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := schema.Compile(tc.decl)
+			_, err := schema.CompileClassified(schema.Config, tc.decl)
 			if err == nil {
 				t.Fatalf("Compile accepted %+v", tc.decl)
 			}
@@ -87,41 +87,145 @@ func TestDeclarationRefusals(t *testing.T) {
 	}
 }
 
-func TestSecretDeclarationRefusesValueLiteralsRecursively(t *testing.T) {
+func TestCompileClassified(t *testing.T) {
 	cases := []struct {
-		name string
-		decl schema.Declaration
-		want string
+		name           string
+		classification schema.Classification
+		decl           schema.Declaration
+		wantCanonical  string
+		wantErr        string
 	}{
-		{"enum rule", rule(schema.Rule{Type: schema.TypeEnum, Members: []string{"live-value"}}), "members"},
-		{"any_of enum alternative", schema.Declaration{AnyOf: []schema.Rule{
-			{Type: schema.TypeString},
-			{Type: schema.TypeEnum, Members: []string{"live-value"}},
-		}}, "members"},
-		{"nested json schema const", rule(schema.Rule{Type: schema.TypeJSON, JSONSchema: json.RawMessage(
-			`{"properties":{"nested":{"allOf":[{"const":"live-value"}]}}}`)}), "const"},
-		{"nested json schema enum", rule(schema.Rule{Type: schema.TypeJSON, JSONSchema: json.RawMessage(
-			`{"$defs":{"nested":{"enum":["live-value"]}}}`)}), "enum"},
-		{"nested json schema examples", rule(schema.Rule{Type: schema.TypeJSON, JSONSchema: json.RawMessage(
-			`{"items":{"examples":["live-value"]}}`)}), "examples"},
+		{
+			name:           "config declaration is normalized once for storage and validation",
+			classification: schema.Config,
+			decl: rule(schema.Rule{
+				Type: schema.TypeEnum, Members: []string{" live ", "test"},
+			}),
+			wantCanonical: `{"rule":{"type":"enum","members":["live","test"]}}`,
+		},
+		{
+			name:           "secret pattern is allowed",
+			classification: schema.Secret,
+			decl:           rule(schema.Rule{Type: schema.TypeString, Pattern: `[A-Z]+`}),
+			wantCanonical:  `{"rule":{"type":"string","pattern":"[A-Z]+"}}`,
+		},
+		{
+			name:           "secret enum rule is refused",
+			classification: schema.Secret,
+			decl:           rule(schema.Rule{Type: schema.TypeEnum, Members: []string{"live-value"}}),
+			wantErr:        "members",
+		},
+		{
+			name:           "secret any_of enum alternative is refused",
+			classification: schema.Secret,
+			decl: schema.Declaration{AnyOf: []schema.Rule{
+				{Type: schema.TypeString},
+				{Type: schema.TypeEnum, Members: []string{"live-value"}},
+			}},
+			wantErr: "members",
+		},
+		{
+			name:           "secret nested json schema const is refused",
+			classification: schema.Secret,
+			decl: rule(schema.Rule{Type: schema.TypeJSON, JSONSchema: json.RawMessage(
+				`{"properties":{"nested":{"allOf":[{"const":"live-value"}]}}}`)}),
+			wantErr: "const",
+		},
+		{
+			name:           "secret nested json schema enum is refused",
+			classification: schema.Secret,
+			decl: rule(schema.Rule{Type: schema.TypeJSON, JSONSchema: json.RawMessage(
+				`{"$defs":{"nested":{"enum":["live-value"]}}}`)}),
+			wantErr: "enum",
+		},
+		{
+			name:           "secret nested json schema examples is refused",
+			classification: schema.Secret,
+			decl: rule(schema.Rule{Type: schema.TypeJSON, JSONSchema: json.RawMessage(
+				`{"items":{"examples":["live-value"]}}`)}),
+			wantErr: "examples",
+		},
+		{
+			name:           "unknown classification is refused",
+			classification: schema.Classification("public"),
+			decl:           rule(schema.Rule{Type: schema.TypeString}),
+			wantErr:        "classification",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := schema.CheckDeclarationClassification(schema.Secret, tc.decl)
-			if err == nil || !strings.Contains(err.Error(), tc.want) ||
-				!strings.Contains(err.Error(), "use `pattern`, or declassify the key") {
-				t.Fatalf("secret declaration refusal = %v", err)
+			compiled, err := schema.CompileClassified(tc.classification, tc.decl)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("CompileClassified error = %v, want error naming %q", err, tc.wantErr)
+				}
+				if tc.classification == schema.Secret &&
+					!strings.Contains(err.Error(), "use `pattern`, or declassify the key") {
+					t.Fatalf("secret declaration refusal = %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("CompileClassified refused declaration: %v", err)
+			}
+			canonical, err := compiled.Canonical()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(canonical) != tc.wantCanonical {
+				t.Fatalf("canonical declaration = %s, want %s", canonical, tc.wantCanonical)
 			}
 		})
 	}
+}
 
-	allowed := rule(schema.Rule{Type: schema.TypeJSON, JSONSchema: json.RawMessage(
-		`{"properties":{"nested":{"type":"string","pattern":"^[A-Z]+$"}}}`)})
-	if err := schema.CheckDeclarationClassification(schema.Secret, allowed); err != nil {
-		t.Fatalf("pattern-only secret declaration refused: %v", err)
+func TestCompiledValidationUsesConstructorClassification(t *testing.T) {
+	compiled, err := schema.CompileClassified(schema.Secret, rule(schema.Rule{
+		Type: schema.TypeJSON,
+		JSONSchema: json.RawMessage(
+			`{"type":"object","additionalProperties":false,"properties":{"declared":{"type":"string"}}}`),
+	}))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if err := schema.CheckDeclarationClassification(schema.Config, cases[0].decl); err != nil {
-		t.Fatalf("config enum declaration refused: %v", err)
+	const marker = "AKIA_CLASSIFICATION_MISMATCH"
+	verdict := compiled.Validate(`{"` + marker + `":"x"}`)
+	if verdict.Valid {
+		t.Fatal("secret value unexpectedly passed validation")
+	}
+	for _, failure := range verdict.Errors {
+		if failure.InstancePath != "" || strings.Contains(failure.Message, marker) {
+			t.Fatalf("secret failure disclosed instance data: %+v", failure)
+		}
+	}
+}
+
+func TestCompiledDeclarationIsImmutable(t *testing.T) {
+	input := rule(schema.Rule{Type: schema.TypeEnum, Members: []string{"live", "test"}})
+	compiled, err := schema.CompileClassified(schema.Config, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	input.Rule.Members[0] = "input-mutated"
+	returned := compiled.Declaration()
+	returned.Rule.Members[1] = "output-mutated"
+
+	canonical, err := compiled.Canonical()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = `{"rule":{"type":"enum","members":["live","test"]}}`
+	if string(canonical) != want {
+		t.Fatalf("compiled declaration mutated: got %s, want %s", canonical, want)
+	}
+	if verdict := compiled.Validate("live"); !verdict.Valid {
+		t.Fatalf("original member stopped validating: %+v", verdict.Errors)
+	}
+	for _, mutant := range []string{"input-mutated", "output-mutated"} {
+		if verdict := compiled.Validate(mutant); verdict.Valid {
+			t.Fatalf("mutated member %q reached compiled validation", mutant)
+		}
 	}
 }
 
@@ -183,7 +287,7 @@ func TestJSONSchemaProfileRefusals(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := schema.Compile(rule(schema.Rule{
+			_, err := schema.CompileClassified(schema.Config, rule(schema.Rule{
 				Type: schema.TypeJSON, JSONSchema: json.RawMessage(tc.schema),
 			}))
 			if err == nil {
@@ -199,7 +303,7 @@ func TestJSONSchemaProfileRefusals(t *testing.T) {
 func TestJSONSchemaBoundRefusals(t *testing.T) {
 	deep := strings.Repeat(`{"properties":{"a":`, schema.MaxJSONSchemaDepth+2) + `{}` +
 		strings.Repeat(`}}`, schema.MaxJSONSchemaDepth+2)
-	if _, err := schema.Compile(rule(schema.Rule{
+	if _, err := schema.CompileClassified(schema.Config, rule(schema.Rule{
 		Type: schema.TypeJSON, JSONSchema: json.RawMessage(deep),
 	})); err == nil || !strings.Contains(err.Error(), "depth") {
 		t.Fatalf("deep schema refusal = %v, want a depth bound", err)
@@ -214,7 +318,7 @@ func TestJSONSchemaBoundRefusals(t *testing.T) {
 		defs.WriteString(`"d` + itoa(i) + `":{"type":"string"}`)
 	}
 	defs.WriteString(`}}`)
-	_, err := schema.Compile(rule(schema.Rule{
+	_, err := schema.CompileClassified(schema.Config, rule(schema.Rule{
 		Type: schema.TypeJSON, JSONSchema: json.RawMessage(defs.String()),
 	}))
 	if err == nil || !strings.Contains(err.Error(), "subschema") {
@@ -227,7 +331,7 @@ func TestJSONSchemaBoundRefusals(t *testing.T) {
 	}
 
 	big := `{"description":"` + strings.Repeat("x", schema.MaxJSONSchemaBytes) + `"}`
-	if _, err := schema.Compile(rule(schema.Rule{
+	if _, err := schema.CompileClassified(schema.Config, rule(schema.Rule{
 		Type: schema.TypeJSON, JSONSchema: json.RawMessage(big),
 	})); err == nil || !strings.Contains(err.Error(), "bytes") {
 		t.Fatalf("large schema refusal = %v, want a byte bound", err)
@@ -242,7 +346,7 @@ func TestJSONSchemaProfileAccepts(t *testing.T) {
 		`{"$defs":{"port":{"type":"integer","minimum":1,"maximum":65535}},"type":"object","properties":{"p":{"$ref":"#/$defs/port"}}}`,
 		`{"anyOf":[{"type":"string"},{"type":"integer"}]}`,
 	} {
-		if _, err := schema.Compile(rule(schema.Rule{
+		if _, err := schema.CompileClassified(schema.Config, rule(schema.Rule{
 			Type: schema.TypeJSON, JSONSchema: json.RawMessage(s),
 		})); err != nil {
 			t.Fatalf("Compile(%s) refused an in-profile schema: %v", s, err)
@@ -321,7 +425,7 @@ func TestCanonicalDoesNotMutateItsInput(t *testing.T) {
 	if _, err := schema.Canonical(d); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := schema.Compile(d); err != nil {
+	if _, err := schema.CompileClassified(schema.Config, d); err != nil {
 		t.Fatal(err)
 	}
 	if d.AnyOf[0].Members[0] != " a " {

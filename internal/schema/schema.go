@@ -6,11 +6,11 @@
 //
 // Two authorities live here and nowhere else:
 //
-//   - Compile() is the DECLARATION authority. Saving a declaration blocks on
-//     well-formedness: a value may be wrong, a rule may not be meaningless
-//     (ADR § Validation timing). Every refusal names what it refused, because
-//     a rule that appears to enforce something and does not is worse than no
-//     rule at all.
+//   - CompileClassified() is the DECLARATION authority. Saving a declaration
+//     blocks on well-formedness and classification compatibility: a value may
+//     be wrong, a rule may not be meaningless (ADR § Validation timing). Every
+//     refusal names what it refused, because a rule that appears to enforce
+//     something and does not is worse than no rule at all.
 //   - Compiled.Validate() is the VALUE authority: one declaration against one
 //     string, with the ADR's fixed lexical semantics and its error-disclosure
 //     rules. Everything Hikyo delivers is a string on the wire, so a type is a
@@ -275,6 +275,40 @@ type Declaration struct {
 	AnyOf []Rule `json:"any_of,omitempty"`
 }
 
+func cloneRule(r Rule) Rule {
+	r.MinLength = clonePointer(r.MinLength)
+	r.MaxLength = clonePointer(r.MaxLength)
+	r.Min = clonePointer(r.Min)
+	r.Max = clonePointer(r.Max)
+	r.Members = slices.Clone(r.Members)
+	r.Schemes = slices.Clone(r.Schemes)
+	r.JSONSchema = slices.Clone(r.JSONSchema)
+	return r
+}
+
+func clonePointer[T any](p *T) *T {
+	if p == nil {
+		return nil
+	}
+	v := *p
+	return &v
+}
+
+func cloneDeclaration(d Declaration) Declaration {
+	out := Declaration{}
+	if d.Rule != nil {
+		r := cloneRule(*d.Rule)
+		out.Rule = &r
+	}
+	if d.AnyOf != nil {
+		out.AnyOf = make([]Rule, len(d.AnyOf))
+		for i, r := range d.AnyOf {
+			out.AnyOf[i] = cloneRule(r)
+		}
+	}
+	return out
+}
+
 // alternatives returns the rules to try, in declared order. A single rule is
 // the one-alternative case, so the engine has one loop rather than two paths.
 func (d Declaration) alternatives() []Rule {
@@ -330,8 +364,7 @@ func normalize(d Declaration) (Declaration, error) {
 		// as a side effect of asking for its canonical form — and Canonical is
 		// called on declarations the caller still holds (the reveal gate's diff
 		// runs on both sides before anything is written).
-		r.Members = slices.Clone(r.Members)
-		r.Schemes = slices.Clone(r.Schemes)
+		r = cloneRule(r)
 		for i, m := range r.Members {
 			r.Members[i] = strings.TrimSpace(m)
 		}
