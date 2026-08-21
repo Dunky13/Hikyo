@@ -19,9 +19,23 @@ import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tan
 import { z } from 'zod';
 
 import { ApiError, ok, parsed } from './client.ts';
-import type { MatrixRef } from './matrix.ts';
+import {
+  pinsKey,
+  projectRetentionKey,
+  revisionDetailKey,
+  revisionsKey,
+  valuesKey,
+  type EnvRef,
+  type MatrixRef,
+} from './keys.ts';
 import { useTransport } from './transport.tsx';
-import { valuesKey, type EnvRef } from './values.ts';
+
+export {
+  pinsKey,
+  projectRetentionKey,
+  revisionDetailKey,
+  revisionsKey,
+} from './keys.ts';
 
 /**
  * The revision-history API boundary (#59).
@@ -130,15 +144,6 @@ export function historyHref(input: {
     '/matrix/history';
   return query.length === 0 ? path : `${path}?${query.join('&')}`;
 }
-
-export const revisionsKey = (env: EnvRef) =>
-  ['revisions', env.org, env.project, env.environment] as const;
-export const revisionDetailKey = (env: EnvRef, revision: string) =>
-  ['revision-detail', env.org, env.project, env.environment, revision] as const;
-export const pinsKey = (env: EnvRef) =>
-  ['revision-pins', env.org, env.project, env.environment] as const;
-export const projectRetentionKey = (ref: MatrixRef) =>
-  ['project-retention', ref.org, ref.project] as const;
 
 const enabledEnv = (env: EnvRef): boolean =>
   env.org !== '' && env.project !== '' && env.environment !== '';
