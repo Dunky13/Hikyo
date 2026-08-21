@@ -342,7 +342,7 @@ func (s *Values) Import(ctx context.Context, actor Actor, scope domain.Scope, re
 	// §179 fail-closed default: a bulk value fan-out with no named category.
 	// Authorized-then-acquired at entry (rate + concurrency), so an unauthorized
 	// caller cannot occupy the org's slots by guessing its id.
-	release, err := chargeDefaultAtEntry(ctx, s.DB, s.Budget, actor, authz.OpValueImport, scope, func() time.Time { return time.Now().UTC() })
+	release, err := chargeDefaultAtEntry(ctx, s.DB, s.Budget, actor, authz.OpValueImport, authz.OpValueImport, scope, func() time.Time { return time.Now().UTC() })
 	if err != nil {
 		return ImportResult{}, err
 	}

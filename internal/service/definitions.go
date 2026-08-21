@@ -161,7 +161,7 @@ func (s *Definitions) Export(ctx context.Context, actor Actor, scope domain.Scop
 	// §179 fail-closed default: a whole-project bundle materialization with no
 	// named category. Authorized-then-acquired at entry (rate + concurrency), so
 	// an unauthorized caller cannot occupy the org's slots by guessing its id.
-	release, err := chargeDefaultAtEntry(ctx, s.DB, s.Budget, actor, authz.OpDefinitionsExport, scope, s.now)
+	release, err := chargeDefaultAtEntry(ctx, s.DB, s.Budget, actor, authz.OpDefinitionsExport, authz.OpDefinitionsExport, scope, s.now)
 	if err != nil {
 		return nil, err
 	}
@@ -198,7 +198,7 @@ func (s *Definitions) Check(ctx context.Context, actor Actor, scope domain.Scope
 	// every key/presence/group/environment and parses every declaration, plus
 	// scans the submitted bundle — the same fan-out Export is, so it takes the
 	// same default budget (authorized-then-acquired at entry).
-	release, err := chargeDefaultAtEntry(ctx, s.DB, s.Budget, actor, authz.OpDefinitionsCheck, scope, s.now)
+	release, err := chargeDefaultAtEntry(ctx, s.DB, s.Budget, actor, authz.OpDefinitionsCheck, authz.OpDefinitionsCheck, scope, s.now)
 	if err != nil {
 		return CheckResult{}, err
 	}

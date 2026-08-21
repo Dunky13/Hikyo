@@ -153,7 +153,7 @@ func (s *Reencrypt) ReencryptProject(ctx context.Context, actor Actor, orgID, pr
 	// §179 fail-closed default: a crypto walk proportional to every stored row,
 	// with no named category. Acquired once at entry and held for the whole
 	// multi-transaction walk.
-	release, err := chargeDefaultAtEntry(ctx, s.DB, s.Budget, actor, authz.OpReencryptProject, scope, s.now)
+	release, err := chargeDefaultAtEntry(ctx, s.DB, s.Budget, actor, authz.OpReencryptProject, authz.OpReencryptProject, scope, s.now)
 	if err != nil {
 		return ReencryptResult{}, err
 	}
@@ -273,7 +273,7 @@ func (s *Reencrypt) ReencryptInstance(ctx context.Context, actor Actor) (Reencry
 	// §179 fail-closed default: an instance-wide crypto walk with no named
 	// category (empty scope → the org bound keys on the instance bucket). Held
 	// for the whole multi-transaction walk.
-	release, err := chargeDefaultAtEntry(ctx, s.DB, s.Budget, actor, authz.OpReencryptInstance, domain.Scope{}, s.now)
+	release, err := chargeDefaultAtEntry(ctx, s.DB, s.Budget, actor, authz.OpReencryptInstance, authz.OpReencryptInstance, domain.Scope{}, s.now)
 	if err != nil {
 		return ReencryptResult{}, err
 	}

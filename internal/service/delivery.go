@@ -556,7 +556,7 @@ func (s *Delivery) ReconcileOfflineRecordsAs(ctx context.Context, actor Actor, s
 	// §179 fail-closed default: a bulk offline-record flush (up to 1000 records)
 	// with no named category. Authorized-then-acquired at entry (rate +
 	// concurrency), so an unauthorized caller cannot occupy the org's slots.
-	release, err := chargeDefaultAtEntry(ctx, s.DB, s.Budget, actor, authz.OpDeliveryReconcileOffline, scope, s.now)
+	release, err := chargeDefaultAtEntry(ctx, s.DB, s.Budget, actor, authz.OpDeliveryReconcileOffline, authz.OpDeliveryReconcileOffline, scope, s.now)
 	if err != nil {
 		return ReconcileResult{}, err
 	}

@@ -186,7 +186,7 @@ func (s *Rotation) RotateMasterKey(ctx context.Context, actor Actor) (MasterKeyR
 	// §179 fail-closed default: master rotation rewraps every project DEK. Charged
 	// (authorized-then-acquired) before the process-wide hierarchy lock, so a
 	// rate-limited caller is refused without contending for the global lock.
-	release, err := chargeDefaultAtEntry(ctx, s.DB, s.Budget, actor, authz.OpRotateMasterKey, domain.Scope{}, s.now)
+	release, err := chargeDefaultAtEntry(ctx, s.DB, s.Budget, actor, authz.OpRotateMasterKey, authz.OpRotateMasterKey, domain.Scope{}, s.now)
 	if err != nil {
 		return MasterKeyRotation{}, err
 	}

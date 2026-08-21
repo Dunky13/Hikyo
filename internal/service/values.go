@@ -1090,7 +1090,7 @@ func (s *Values) Copy(ctx context.Context, actor Actor, scope domain.Scope, req 
 	// §179 fail-closed default: a value fan-out across environments/keys with no
 	// named category. Authorized (source read) then acquired at entry (rate +
 	// concurrency), so an unauthorized caller cannot occupy the org's slots.
-	release, err := chargeDefaultAtEntry(ctx, s.DB, s.Budget, actor, authz.OpValueCopySource, sourceScope, func() time.Time { return time.Now().UTC() })
+	release, err := chargeDefaultAtEntry(ctx, s.DB, s.Budget, actor, authz.OpValueList, authz.OpValueCopySource, sourceScope, func() time.Time { return time.Now().UTC() })
 	if err != nil {
 		return CopyResult{}, err
 	}

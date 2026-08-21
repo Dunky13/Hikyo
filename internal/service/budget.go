@@ -24,12 +24,18 @@ import (
 // authorization refuses an ineligible caller before any slot is taken (they
 // cannot burn the org's budget by guessing its id). The returned release frees
 // the concurrency slot; hold it for the whole operation.
-func chargeDefaultAtEntry(ctx context.Context, db *store.DB, budget *Budget, actor Actor, op authz.Operation, scope domain.Scope, now func() time.Time) (func(), error) {
+// authOp is the operation AUTHORIZED at entry — the minimal authority the
+// method's own entry already requires, so this cannot refuse a caller the method
+// would otherwise admit. classifyOp is the default-expensive operation whose
+// budget is charged; the two differ only where a method's entry authorization is
+// a lighter read than the operation it is budgeted as (Copy authorizes the
+// source read OpValueList but is budgeted as OpValueCopySource).
+func chargeDefaultAtEntry(ctx context.Context, db *store.DB, budget *Budget, actor Actor, authOp, classifyOp authz.Operation, scope domain.Scope, now func() time.Time) (func(), error) {
 	// Couple the call site to the totality map: a method may only take the
 	// fail-closed default for an operation classified default-expensive. A named
 	// or exempt operation reaching here is a wiring bug, caught at the call.
-	if c, ok := operationBudgetClass[op]; !ok || c.class != budgetClassDefaultExpensive {
-		panic("service: chargeDefaultAtEntry called for non-default-expensive operation " + string(op))
+	if c, ok := operationBudgetClass[classifyOp]; !ok || c.class != budgetClassDefaultExpensive {
+		panic("service: chargeDefaultAtEntry called for non-default-expensive operation " + string(classifyOp))
 	}
 	if budget == nil {
 		return noopBudgetRelease, nil
@@ -40,7 +46,7 @@ func chargeDefaultAtEntry(ctx context.Context, db *store.DB, budget *Budget, act
 		if err != nil {
 			return err
 		}
-		if _, err := az.Authorize(ctx, caller, op, scope); err != nil {
+		if _, err := az.Authorize(ctx, caller, authOp, scope); err != nil {
 			return err
 		}
 		principal = caller.Principal
