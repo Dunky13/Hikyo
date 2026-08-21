@@ -118,9 +118,9 @@ The adversarial pass found five things; all fixed in this PR:
   (`os.CreateTemp`), no-replace publication (`os.Link`) with suffix retry.
 - **Empty-target TOCTOU closed**: sqlite publishes the restored file with
   `os.Link` (fails if a database appeared since the check) under a
-  pid-unique staging name; postgres re-verifies emptiness-modulo-migration-
-  seeds under `LOCK TABLE ... ACCESS EXCLUSIVE` inside the restore
-  transaction, before the truncate.
+  per-attempt, exclusively created staging name in the destination directory;
+  postgres re-verifies emptiness-modulo-migration-seeds under `LOCK TABLE ...
+  ACCESS EXCLUSIVE` inside the restore transaction, before the truncate.
 - **Drill honesty**: survival counts captured before the export (on postgres
   `db` and `restored` are the same database, so post-restore reads compared
   the restore with itself); the restore's own `restore.completed` event is
