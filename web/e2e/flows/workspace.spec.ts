@@ -1,7 +1,15 @@
 import { expect, test, type Page } from '@playwright/test';
 
 import { expectPinnedAssertionSet, expectStatusIsTextAndAria } from '../fixtures/assertions.ts';
-import { ADMIN, BASE_URL, BASE_URL_B, HOST_B, REMOTE_NAME, STORAGE_STATE } from '../fixtures/instance.ts';
+import {
+  ADMIN,
+  BASE_URL,
+  BASE_URL_B,
+  HOST_B,
+  readServing,
+  REMOTE_NAME,
+  STORAGE_STATE,
+} from '../fixtures/instance.ts';
 import { surfacesForFlow } from '../registry.ts';
 
 /**
@@ -231,6 +239,87 @@ test.describe('multi-instance', () => {
     await expect(entry.getByText('Workspace session ended')).toBeVisible({ timeout: 30_000 });
 
     await b.close();
+  });
+
+  /**
+   * OPERATING the remote — the reopen's core: a live workspace must route
+   * matrix/values reads and edits to the REMOTE, and NEVER to the viewing
+   * instance's server. This is the criterion the badge-only version failed.
+   */
+  test("A opens and operates B's project, and no operation touches A's server", async ({
+    page,
+    context,
+  }) => {
+    const b = readServing();
+
+    // Consent, through B's own UI.
+    const bPage = await context.newPage();
+    await onB(bPage, '/remotes');
+    await bPage.getByRole('textbox', { name: 'Origin' }).fill(VIEWING_ORIGIN);
+    await bPage.getByRole('button', { name: 'Allow origin' }).click();
+    await expect(bPage.getByText(VIEWING_ORIGIN, { exact: true })).toBeVisible();
+    await bPage.close();
+
+    // Open the workspace with the popup ceremony.
+    await page.goto('/remotes');
+    const entry = card(page);
+    await entry.getByRole('button', { name: 'Open workspace' }).click();
+    const proceed = entry.getByRole('button', { name: /^Continue to / });
+    await expect(proceed).toBeVisible({ timeout: 30_000 });
+    const popupOpened = context.waitForEvent('page');
+    await proceed.click();
+    const popup = await popupOpened;
+    await popup.waitForLoadState();
+    await popup.getByRole('button', { name: 'Authorize' }).click();
+    await expect(entry.getByText('Workspace open')).toBeVisible({ timeout: 30_000 });
+
+    // THE TRIPWIRE. Fail if any product-data call reaches THIS instance's server
+    // while the workspace is open: a missed transport thread would send that one
+    // call here, same-origin, with cookies, and render A's data as B's. The
+    // shell's own reads (its rail's `me/orgs`, retention health) are elsewhere;
+    // `/api/v1/orgs/**` is the project-data surface, and inside a workspace every
+    // one of those must be spoken to B, never here.
+    const leaked: string[] = [];
+    await page.route(`${BASE_URL}/api/v1/orgs/**`, async (route) => {
+      leaked.push(route.request().method() + ' ' + new URL(route.request().url()).pathname);
+      await route.abort('failed');
+    });
+
+    // Navigate into B's project through the picker — a CLIENT-SIDE navigation,
+    // because the bearer lives in memory and a full load would drop it. The
+    // picker read B's own orgs and projects over the bearer to build this link.
+    const picker = entry.locator('.remote__picker');
+    await expect(picker.getByRole('heading', { name: 'Open a project' })).toBeVisible({
+      timeout: 30_000,
+    });
+    await picker.getByText('serving-co').waitFor();
+    await picker.getByRole('link', { name: 'vault' }).click();
+
+    // B's config value is delivered in plaintext and rendered from the remote.
+    // Its presence proves the matrix read reached B; the banner proves the shell
+    // knows whose data it is showing.
+    await expect(page.getByText(b.value)).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator('.workspace-banner')).toContainText(BASE_URL_B);
+
+    // And nothing leaked to A. This is the no-proxy claim, checked at runtime
+    // rather than argued: `api/noproxy_test.go` proves the
+    // server grew no proxy endpoint; this proves the browser used none.
+    expect(leaked, `product-data calls reached the viewing server: ${leaked.join(', ')}`).toEqual(
+      [],
+    );
+
+    // Clean up the session this test opened. Both Playwright projects run
+    // against the SAME pair of instances and the specs run in order, so a
+    // workspace session left behind here is one a later test's kill-switch
+    // assertion would count — its "revoked 1 workspace session" is a real
+    // assertion and must not be loosened to absorb this one's litter.
+    const cleanup = await context.newPage();
+    await onB(cleanup, '/remotes');
+    await cleanup
+      .getByRole('button', { name: `Remove ${VIEWING_ORIGIN} and kill its workspace sessions` })
+      .click();
+    await expect(cleanup.getByText('revoked 1 workspace session')).toBeVisible();
+    await cleanup.close();
   });
 
   /**

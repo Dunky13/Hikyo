@@ -174,6 +174,15 @@ export function originOf(url: string): string {
   return new URL(url).origin;
 }
 
+/** safeOriginOf never throws on a stored URL the browser cannot parse. */
+export function safeOriginOf(url: string): string {
+  try {
+    return originOf(url);
+  } catch {
+    return url;
+  }
+}
+
 /**
  * remoteStateText is the human sentence for each of the seven closed states.
  *

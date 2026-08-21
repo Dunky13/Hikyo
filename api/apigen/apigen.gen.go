@@ -1601,16 +1601,16 @@ func (e SetDefinitionsSettingsRequestDefinitionsSource) Valid() bool {
 
 // Defines values for StartWorkspaceHandoffRequestPurpose.
 const (
-	Establishment StartWorkspaceHandoffRequestPurpose = "establishment"
-	StepUp        StartWorkspaceHandoffRequestPurpose = "step-up"
+	StartWorkspaceHandoffRequestPurposeEstablishment StartWorkspaceHandoffRequestPurpose = "establishment"
+	StartWorkspaceHandoffRequestPurposeStepUp        StartWorkspaceHandoffRequestPurpose = "step-up"
 )
 
 // Valid indicates whether the value is a known member of the StartWorkspaceHandoffRequestPurpose enum.
 func (e StartWorkspaceHandoffRequestPurpose) Valid() bool {
 	switch e {
-	case Establishment:
+	case StartWorkspaceHandoffRequestPurposeEstablishment:
 		return true
-	case StepUp:
+	case StartWorkspaceHandoffRequestPurposeStepUp:
 		return true
 	default:
 		return false
@@ -1713,6 +1713,45 @@ func (e WebauthnReauthStartRequestAdapterOperation) Valid() bool {
 	case WebauthnReauthStartRequestAdapterOperationAdapterCredentialSet:
 		return true
 	case WebauthnReauthStartRequestAdapterOperationAdapterSync:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for WorkspaceHandoffTransactionOperation.
+const (
+	WorkspaceHandoffTransactionOperationCopy    WorkspaceHandoffTransactionOperation = "copy"
+	WorkspaceHandoffTransactionOperationPublish WorkspaceHandoffTransactionOperation = "publish"
+	WorkspaceHandoffTransactionOperationReveal  WorkspaceHandoffTransactionOperation = "reveal"
+)
+
+// Valid indicates whether the value is a known member of the WorkspaceHandoffTransactionOperation enum.
+func (e WorkspaceHandoffTransactionOperation) Valid() bool {
+	switch e {
+	case WorkspaceHandoffTransactionOperationCopy:
+		return true
+	case WorkspaceHandoffTransactionOperationPublish:
+		return true
+	case WorkspaceHandoffTransactionOperationReveal:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for WorkspaceHandoffTransactionPurpose.
+const (
+	WorkspaceHandoffTransactionPurposeEstablishment WorkspaceHandoffTransactionPurpose = "establishment"
+	WorkspaceHandoffTransactionPurposeStepUp        WorkspaceHandoffTransactionPurpose = "step-up"
+)
+
+// Valid indicates whether the value is a known member of the WorkspaceHandoffTransactionPurpose enum.
+func (e WorkspaceHandoffTransactionPurpose) Valid() bool {
+	switch e {
+	case WorkspaceHandoffTransactionPurposeEstablishment:
+		return true
+	case WorkspaceHandoffTransactionPurposeStepUp:
 		return true
 	default:
 		return false
@@ -6010,6 +6049,29 @@ type WorkspaceHandoffStarted struct {
 	State string `json:"state"`
 }
 
+// WorkspaceHandoffTransaction defines model for WorkspaceHandoffTransaction.
+type WorkspaceHandoffTransaction struct {
+	// Environment The environment the elevation covers. Absent for an establishment.
+	Environment *ID `json:"environment,omitempty"`
+
+	// ExpiresAt RFC 3339 UTC, microsecond precision.
+	ExpiresAt Timestamp `json:"expires_at"`
+
+	// KeyIds The enumerated unit the elevation binds. Empty for an establishment.
+	KeyIds []ID `json:"key_ids"`
+
+	// Operation The disclosure the reauth authorizes. Absent for an establishment.
+	Operation *WorkspaceHandoffTransactionOperation `json:"operation,omitempty"`
+	Purpose   WorkspaceHandoffTransactionPurpose    `json:"purpose"`
+	State     string                                `json:"state"`
+}
+
+// WorkspaceHandoffTransactionOperation The disclosure the reauth authorizes. Absent for an establishment.
+type WorkspaceHandoffTransactionOperation string
+
+// WorkspaceHandoffTransactionPurpose defines model for WorkspaceHandoffTransaction.Purpose.
+type WorkspaceHandoffTransactionPurpose string
+
 // WorkspaceOrigin defines model for WorkspaceOrigin.
 type WorkspaceOrigin struct {
 	// CreatedAt RFC 3339 UTC, microsecond precision.
@@ -6944,6 +7006,9 @@ type ServerInterface interface {
 	// StartWorkspaceHandoff Open a workspace handoff transaction.
 	// (POST /api/v1/auth/workspace/start)
 	StartWorkspaceHandoff(w http.ResponseWriter, r *http.Request)
+	// ShowWorkspaceHandoff Load the step-up policy a live workspace handoff binds.
+	// (GET /api/v1/auth/workspace/transactions/{state})
+	ShowWorkspaceHandoff(w http.ResponseWriter, r *http.Request, state string)
 	// ListInstanceConnections The connection credentials this instance has minted.
 	// (GET /api/v1/instance/connections)
 	ListInstanceConnections(w http.ResponseWriter, r *http.Request)
@@ -7769,6 +7834,12 @@ func (_ Unimplemented) RedeemWorkspaceHandoff(w http.ResponseWriter, r *http.Req
 // StartWorkspaceHandoff Open a workspace handoff transaction.
 // (POST /api/v1/auth/workspace/start)
 func (_ Unimplemented) StartWorkspaceHandoff(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ShowWorkspaceHandoff Load the step-up policy a live workspace handoff binds.
+// (GET /api/v1/auth/workspace/transactions/{state})
+func (_ Unimplemented) ShowWorkspaceHandoff(w http.ResponseWriter, r *http.Request, state string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -9657,6 +9728,32 @@ func (siw *ServerInterfaceWrapper) StartWorkspaceHandoff(w http.ResponseWriter, 
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.StartWorkspaceHandoff(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ShowWorkspaceHandoff operation middleware
+func (siw *ServerInterfaceWrapper) ShowWorkspaceHandoff(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "state" -------------
+	var state string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "state", chi.URLParam(r, "state"), &state, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "state", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ShowWorkspaceHandoff(w, r, state)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -17481,6 +17578,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/api/v1/auth/workspace/redeem", wrapper.RedeemWorkspaceHandoff)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/auth/workspace/transactions/{state}", wrapper.ShowWorkspaceHandoff)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/api/v1/me/sessions", wrapper.ListMySessions)
 	})
 	r.Group(func(r chi.Router) {
@@ -21017,6 +21117,70 @@ func (response StartWorkspaceHandoff429JSONResponse) VisitStartWorkspaceHandoffR
 type StartWorkspaceHandoff500JSONResponse struct{ InternalJSONResponse }
 
 func (response StartWorkspaceHandoff500JSONResponse) VisitStartWorkspaceHandoffResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ShowWorkspaceHandoffRequestObject struct {
+	State string `json:"state"`
+}
+
+type ShowWorkspaceHandoffResponseObject interface {
+	VisitShowWorkspaceHandoffResponse(w http.ResponseWriter) error
+}
+
+type ShowWorkspaceHandoff200JSONResponse WorkspaceHandoffTransaction
+
+func (response ShowWorkspaceHandoff200JSONResponse) VisitShowWorkspaceHandoffResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ShowWorkspaceHandoff401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ShowWorkspaceHandoff401JSONResponse) VisitShowWorkspaceHandoffResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ShowWorkspaceHandoff404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ShowWorkspaceHandoff404JSONResponse) VisitShowWorkspaceHandoffResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ShowWorkspaceHandoff500JSONResponse struct{ InternalJSONResponse }
+
+func (response ShowWorkspaceHandoff500JSONResponse) VisitShowWorkspaceHandoffResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -40125,6 +40289,9 @@ type StrictServerInterface interface {
 	// StartWorkspaceHandoff Open a workspace handoff transaction.
 	// (POST /api/v1/auth/workspace/start)
 	StartWorkspaceHandoff(ctx context.Context, request StartWorkspaceHandoffRequestObject) (StartWorkspaceHandoffResponseObject, error)
+	// ShowWorkspaceHandoff Load the step-up policy a live workspace handoff binds.
+	// (GET /api/v1/auth/workspace/transactions/{state})
+	ShowWorkspaceHandoff(ctx context.Context, request ShowWorkspaceHandoffRequestObject) (ShowWorkspaceHandoffResponseObject, error)
 	// ListInstanceConnections The connection credentials this instance has minted.
 	// (GET /api/v1/instance/connections)
 	ListInstanceConnections(ctx context.Context, request ListInstanceConnectionsRequestObject) (ListInstanceConnectionsResponseObject, error)
@@ -41895,6 +42062,32 @@ func (sh *strictHandler) StartWorkspaceHandoff(w http.ResponseWriter, r *http.Re
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(StartWorkspaceHandoffResponseObject); ok {
 		if err := validResponse.VisitStartWorkspaceHandoffResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ShowWorkspaceHandoff operation middleware
+func (sh *strictHandler) ShowWorkspaceHandoff(w http.ResponseWriter, r *http.Request, state string) {
+	var request ShowWorkspaceHandoffRequestObject
+
+	request.State = state
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ShowWorkspaceHandoff(ctx, request.(ShowWorkspaceHandoffRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ShowWorkspaceHandoff")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ShowWorkspaceHandoffResponseObject); ok {
+		if err := validResponse.VisitShowWorkspaceHandoffResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

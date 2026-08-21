@@ -101,6 +101,34 @@ describe('probeWorkspace session identity', () => {
     expect(await inFlight).toBe(false);
     expect(workspaceBearer(bearer.origin)?.session).toBe('ses_2');
   });
+
+  // A step-up ELEVATES in place: same session id, a freshly rotated value. A
+  // probe fired with the pre-elevation value must not, on its stale 401, take
+  // down the live elevated bearer that shares its session id — the drop is keyed
+  // by value, not session, exactly as the transport's kill path is.
+  it('ignores a stale 401 for a value the same session has since rotated', async () => {
+    let settle: (r: Response) => void = () => {};
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        () =>
+          new Promise<Response>((resolve) => {
+            settle = resolve;
+          }),
+      ),
+    );
+    rememberWorkspace(bearer);
+    const inFlight = probeWorkspace(bearer);
+
+    // The step-up rotates the value under the SAME session id.
+    const elevated: WorkspaceBearer = { ...bearer, value: 'hik_ws_elevated' };
+    rememberWorkspace(elevated);
+
+    settle(new Response(null, { status: 401 }));
+    expect(await inFlight).toBe(false);
+    expect(workspaceBearer(bearer.origin)?.value).toBe('hik_ws_elevated');
+    expect(workspaceBearer(bearer.origin)?.session).toBe('ses_1');
+  });
 });
 
 // A response the shell cannot recognise is not evidence of life. Before this a
@@ -122,6 +150,21 @@ describe('probeWorkspace response validation', () => {
     expect(await probeWorkspace(bearer)).toBe(true); // strike one
     expect(await probeWorkspace(bearer)).toBe(false); // strike two ends it
     expect(workspaceBearer(bearer.origin)).toBeUndefined();
+  });
+
+  it('treats a 403 as alive, never dropping a valid session on a spurious forbidden', async () => {
+    // /me/sessions is self-scoped and cannot legitimately 403 a live session; a
+    // 403 here is anomalous (a proxy/WAF), not death (that is 401) and not
+    // unreachability. Two of them in a row must NOT kill the workspace — that
+    // would be a false reconnect the human never earned.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve(new Response(null, { status: 403 }))),
+    );
+    rememberWorkspace(bearer);
+    expect(await probeWorkspace(bearer)).toBe(true);
+    expect(await probeWorkspace(bearer)).toBe(true);
+    expect(workspaceBearer(bearer.origin)?.session).toBe('ses_1');
   });
 
   it('accepts a well-formed session listing', async () => {

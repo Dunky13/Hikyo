@@ -673,16 +673,22 @@ const (
 	EventRemoteWorkspaceSessionRevoked EventType = "remote.workspace_session_revoked"
 	EventRemoteHandoffFailed           EventType = "remote.handoff_failed"
 
-	// The two read events below are NOT in the multi-instance ADR's § Audit
+	// The three read events below are NOT in the multi-instance ADR's § Audit
 	// enumeration, and they are here anyway because the AUDIT ADR forces them:
 	// its default-deny permit rule admits `audited: none` only for tenant-class
-	// bare-`read` operations, and both of these are instance-class reads of
-	// custody state. Registering them is the same disposition #54 took when it
-	// added auth.provider_read for exactly this collision, and #61 repeated for
-	// identity.lifetime_policy_read. Flagged for review as a #71 addition
-	// rather than smuggled in as if the ADR had named them.
+	// bare-`read` operations, and each of these is an instance-class read of
+	// custody or ceremony state. Registering them is the same disposition #54
+	// took when it added auth.provider_read for exactly this collision, and #61
+	// repeated for identity.lifetime_policy_read. Flagged for review as a #71
+	// addition rather than smuggled in as if the ADR had named them.
 	EventRemoteCredentialsListed   EventType = "remote.credentials_listed"
 	EventRemoteOriginAllowlistRead EventType = "remote.origin_allowlist_read"
+	// remote.workspace_handoff_read is the approve page reading a live step-up
+	// transaction's bound operation, environment and key set by state. It is an
+	// authenticated human read of ceremony state, so it cannot take the silent
+	// permit rule — and a caller can read then close the popup, producing neither
+	// an approval nor an issuance, so no other event subsumes it.
+	EventRemoteWorkspaceHandoffRead EventType = "remote.workspace_handoff_read"
 
 	// adapter.* — deployment-module configuration, provider inspection and
 	// durable per-request external-effect linkage (#65).
@@ -2224,6 +2230,19 @@ var registry = map[EventType]TypeSpec{
 		Trails:        map[Trail]bool{TrailInstance: true},
 		Schema: Schema{
 			"row_count": {Kind: KindInt, Required: true},
+		},
+	},
+	EventRemoteWorkspaceHandoffRead: {
+		SchemaVersion: 1,
+		Retention:     RetentionAccess,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			// The correlating key and the origin the read came from. Never the
+			// key set, the environment or any value — the trail records THAT the
+			// human read the transaction's shape, not the shape itself.
+			"handoff_id": {Kind: KindString, Required: true},
+			"origin":     {Kind: KindString, Required: true},
 		},
 	},
 	EventRemoteWorkspaceSessionIssued: {

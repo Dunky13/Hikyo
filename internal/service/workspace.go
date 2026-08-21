@@ -840,6 +840,107 @@ func (s *Workspace) ApproveHandoff(ctx context.Context, actor Actor, state strin
 	return code, redirectURI, nil
 }
 
+// HandoffView is a live handoff transaction's step-up policy as the remote's
+// approve page reads it: the operation, environment and enumerated key set the
+// transaction was opened against. Identifiers only — never a value, a bearer or
+// a verifier.
+type HandoffView struct {
+	Purpose   HandoffPurpose
+	Operation string
+	EnvID     string
+	KeySet    []string
+	ExpiresAt time.Time
+}
+
+// ShowHandoff returns the step-up policy a live transaction binds, so the
+// approve page can name the operation, environment and exact key set to this
+// instance's own reauthentication ceremony rather than trusting them from its
+// URL — the key set can be large, and a URL is the wrong place for the
+// authoritative binding to live.
+//
+// It READS, it does not consume, and it answers only the authenticated human on
+// this instance (the approve page always has that session for a step-up). What
+// it returns are identifiers; a stolen state would leak env and key ids, never
+// values, and only for the transaction's few live minutes.
+func (s *Workspace) ShowHandoff(ctx context.Context, actor Actor, state string) (HandoffView, error) {
+	if err := crypto.ParseArtifact(state, crypto.ArtifactHandoffState); err != nil {
+		return HandoffView{}, ErrHandoffInvalid
+	}
+	now := s.now()
+	var out HandoffView
+	// A write transaction, not a read: the successful read is AUDITED
+	// (remote.workspace_handoff_read), which the audit ADR forces for an
+	// authenticated instance-class read of ceremony state — a caller can read
+	// then close the popup, so no approval or issuance event subsumes it.
+	err := tx.Write(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
+		// A human session on THIS instance, or nothing (401).
+		caller, err := az.Authenticate(ctx, actor.bearer, now)
+		if err != nil {
+			return err
+		}
+		h, err := az.WorkspaceHandoffByState(ctx, crypto.ArtifactVerifier(state))
+		if err != nil {
+			return ErrHandoffInvalid
+		}
+		// ONLY a step-up is readable here. An establishment binds no session, so
+		// there is nothing to anchor ownership on — and the approve page never
+		// reads one (it shows an establishment its plain Authorize button). A
+		// bare establishment state presented here is treated as not found.
+		if h.Purpose != authz.HandoffStepUp {
+			return ErrHandoffInvalid
+		}
+		if !h.Live(now) {
+			return ErrHandoffInvalid
+		}
+		// OWNERSHIP, and it is the whole point of the endpoint's security.
+		// `StartHandoff` is pre-authentication, so anyone may open a step-up
+		// transaction naming ANY session id; resolving that bound session within
+		// the CALLER's own sessions is what stops one human — or one tenant —
+		// reading another's bound environment and enumerated key set from a
+		// leaked state. The refusal is the SAME `ErrHandoffInvalid` (a 404) as an
+		// unknown state, so the endpoint never distinguishes "not yours" from
+		// "not there". Mirrors the ownership check `elevate` performs at
+		// redemption, moved earlier so a read cannot outrun it.
+		rows, err := az.SessionsForPrincipal(ctx, caller.Principal)
+		if err != nil {
+			return err
+		}
+		owned := false
+		for _, row := range rows {
+			if row.ID == h.SessionID {
+				owned = true
+				break
+			}
+		}
+		if !owned {
+			return ErrHandoffInvalid
+		}
+		out = HandoffView{
+			Purpose:   h.Purpose,
+			Operation: h.Operation,
+			EnvID:     h.EnvID,
+			KeySet:    []string{},
+			ExpiresAt: h.ExpiresAt,
+		}
+		if h.KeySet != "" {
+			out.KeySet = splitKeySet(h.KeySet)
+		}
+		// The trail records THAT this human read the transaction's shape, keyed
+		// by the handoff id — never the key set, the environment or any value.
+		e, err := domainEvent(ctx, audit.EventRemoteWorkspaceHandoffRead, caller.Principal,
+			audit.Object{Type: "workspace_handoff", ID: h.ID},
+			audit.Payload{"handoff_id": h.ID, "origin": h.Origin})
+		if err != nil {
+			return err
+		}
+		return az.RecordAuthEvent(ctx, e)
+	})
+	if err != nil {
+		return HandoffView{}, err
+	}
+	return out, nil
+}
+
 // freshCeremonyClass is the step-up approval's factor-verification gate. It
 // returns the class of the reauthentication the approving human completed
 // INSIDE this popup, or a refusal.

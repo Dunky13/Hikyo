@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tan
 import type { z } from 'zod';
 
 import { ApiError, ok, parsed } from './client.ts';
+import { useTransport } from './transport.tsx';
 
 /**
  * loginFailureText turns a login failure into something true.
@@ -72,9 +73,13 @@ export function useSession(): UseQueryResult<WhoAmI | null> {
  * need no capability at all.
  */
 export function useOrgs(enabled: boolean): UseQueryResult<MyOrgList> {
+  // Transport-aware so the workspace project browser (#71) reads the REMOTE's
+  // "my orgs" — the human's own grants over there — while the local nav rail,
+  // rendered outside any workspace provider, still reads this instance's.
+  const transport = useTransport();
   return useQuery({
     queryKey: orgsKey,
-    queryFn: () => parsed(listMyOrgs(), zMyOrgList),
+    queryFn: () => parsed(listMyOrgs({ ...transport }), zMyOrgList),
     enabled,
     retry: false,
   });

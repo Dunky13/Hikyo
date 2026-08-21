@@ -20,6 +20,7 @@ import { z } from 'zod';
 
 import { ApiError, ok, parsed } from './client.ts';
 import type { MatrixRef } from './matrix.ts';
+import { useTransport } from './transport.tsx';
 import { valuesKey, type EnvRef } from './values.ts';
 
 /**
@@ -143,9 +144,10 @@ const enabledEnv = (env: EnvRef): boolean =>
   env.org !== '' && env.project !== '' && env.environment !== '';
 
 export function useRevisionHistory(env: EnvRef): UseQueryResult<HistoryRevisionList> {
+  const transport = useTransport();
   return useQuery({
     queryKey: revisionsKey(env),
-    queryFn: () => parsed(listRevisions({ path: { ...env } }), zHistoryRevisionList),
+    queryFn: () => parsed(listRevisions({ path: { ...env }, ...transport }), zHistoryRevisionList),
     enabled: enabledEnv(env),
     retry: false,
   });
@@ -167,19 +169,21 @@ export function useRevisionDetail(
   payloadPresent: boolean,
 ): UseQueryResult<HistoryRevisionDetail> {
   const label = revision === null ? '' : String(revision);
+  const transport = useTransport();
   return useQuery({
     queryKey: revisionDetailKey(env, label),
     queryFn: () =>
-      parsed(getRevision({ path: { ...env, revision: label } }), zHistoryRevisionDetail),
+      parsed(getRevision({ path: { ...env, revision: label }, ...transport }), zHistoryRevisionDetail),
     enabled: enabledEnv(env) && revision !== null && payloadPresent,
     retry: false,
   });
 }
 
 export function useRevisionPins(env: EnvRef): UseQueryResult<RevisionPinList> {
+  const transport = useTransport();
   return useQuery({
     queryKey: pinsKey(env),
-    queryFn: () => parsed(listRevisionPins({ path: { ...env } }), zRevisionPinList),
+    queryFn: () => parsed(listRevisionPins({ path: { ...env }, ...transport }), zRevisionPinList),
     enabled: enabledEnv(env),
     retry: false,
   });
@@ -194,9 +198,10 @@ export function useRevisionPins(env: EnvRef): UseQueryResult<RevisionPinList> {
  * second thing that can fail.
  */
 export function useProjectRetention(ref: MatrixRef): UseQueryResult<ProjectRetention> {
+  const transport = useTransport();
   return useQuery({
     queryKey: projectRetentionKey(ref),
-    queryFn: () => parsed(getProjectRetention({ path: { ...ref } }), zProjectRetentionPolicy),
+    queryFn: () => parsed(getProjectRetention({ path: { ...ref }, ...transport }), zProjectRetentionPolicy),
     enabled: ref.org !== '' && ref.project !== '',
     retry: false,
   });
@@ -212,12 +217,14 @@ export function useProjectRetention(ref: MatrixRef): UseQueryResult<ProjectReten
  */
 export function useRestoreRevision(env: EnvRef) {
   const queries = useQueryClient();
+  const transport = useTransport();
   return useMutation({
     mutationFn: (input: { readonly revision: bigint; readonly key?: string }) =>
       parsed(
         rollbackRevision({
           path: { ...env, revision: revisionNumber(input.revision) },
           body: input.key === undefined ? {} : { key: input.key },
+          ...transport,
         }),
         zHistoryRollbackResult,
       ),
@@ -232,6 +239,7 @@ export function useRestoreRevision(env: EnvRef) {
 
 export function useSetRevisionPin(env: EnvRef) {
   const queries = useQueryClient();
+  const transport = useTransport();
   return useMutation({
     mutationFn: (input: {
       readonly workloadPrincipalID: string;
@@ -248,6 +256,7 @@ export function useSetRevisionPin(env: EnvRef) {
             expires_at: input.expiresAt,
             override_schema: input.overrideSchema,
           },
+          ...transport,
         }),
         zRevisionPinResult,
       ),
@@ -257,9 +266,10 @@ export function useSetRevisionPin(env: EnvRef) {
 
 export function useReleaseRevisionPin(env: EnvRef) {
   const queries = useQueryClient();
+  const transport = useTransport();
   return useMutation({
     mutationFn: (workloadPrincipalID: string) =>
-      ok(releaseRevisionPin({ path: { ...env, workloadPrincipal: workloadPrincipalID } })),
+      ok(releaseRevisionPin({ path: { ...env, workloadPrincipal: workloadPrincipalID }, ...transport })),
     onSuccess: () =>
       Promise.all([
         queries.invalidateQueries({ queryKey: pinsKey(env) }),

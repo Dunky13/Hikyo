@@ -506,6 +506,58 @@ select {
   background: color-mix(in oklch, var(--bg), var(--danger) 8%);
 }
 
+/* The workspace banner (#71): a persistent accent bar naming the remote a
+   subtree is operating. Accent, not danger — this is a legitimate live state,
+   not a warning — and it sits at the top of the operated surface, above its
+   own content. */
+.workspace-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-container);
+  color: var(--tx);
+  background: color-mix(in oklch, var(--bg), var(--accent) 10%);
+}
+
+.workspace-banner__dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.workspace-banner__text {
+  flex: 1;
+}
+
+/* The remote card's live project picker (#71). */
+.remote__picker {
+  margin-top: 12px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.remote__picker h3 {
+  margin: 0 0 8px;
+}
+
+.remote__picker-org {
+  margin-top: 8px;
+}
+
+.remote__picker-org ul {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0;
+  margin: 4px 0 0;
+}
+
 .content {
   flex: 1;
   /* No top padding on the scroll container: a sticky child (the jump index)

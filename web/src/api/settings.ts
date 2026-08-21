@@ -37,10 +37,12 @@ import {
   useQueryClient,
   type UseQueryResult,
 } from '@tanstack/react-query';
+import type { Client } from '@hikyo/runtime-core';
 import type { z } from 'zod';
 
 import { ApiError, ok, parsed } from './client.ts';
 import type { EnvironmentNode, ProjectNode } from './access.ts';
+import { useTransport } from './transport.tsx';
 
 /**
  * The organisation, project and instance settings surfaces (#60), riding the
@@ -93,13 +95,14 @@ export function useEnvironments(
   org: string,
   project: string,
 ): UseQueryResult<z.infer<typeof zEnvironmentList>> {
-  return useQuery(environmentListQueryOptions(org, project));
+  const transport = useTransport();
+  return useQuery(environmentListQueryOptions(org, project, transport.client));
 }
 
-function environmentListQueryOptions(org: string, project: string) {
+function environmentListQueryOptions(org: string, project: string, client?: Client) {
   return {
     queryKey: environmentsKey(org, project),
-    queryFn: () => parsed(listEnvironments({ path: { org, project } }), zEnvironmentList),
+    queryFn: () => parsed(listEnvironments({ path: { org, project }, client }), zEnvironmentList),
     enabled: org !== '' && project !== '',
     retry: false,
   } as const;
@@ -107,9 +110,10 @@ function environmentListQueryOptions(org: string, project: string) {
 
 /** One canonical project-list hook and query key for every chrome surface. */
 export function useProjects(org: string): UseQueryResult<z.infer<typeof zProjectList>> {
+  const transport = useTransport();
   return useQuery({
     queryKey: projectsKey(org),
-    queryFn: () => parsed(listProjects({ path: { org } }), zProjectList),
+    queryFn: () => parsed(listProjects({ path: { org }, ...transport }), zProjectList),
     enabled: org !== '',
     retry: false,
   });
@@ -231,12 +235,15 @@ export function environmentSettingsQueryOptions(
   org: string,
   project: string,
   environment: string,
+  // Threaded so the matrix's per-environment settings fan-out reaches the
+  // REMOTE inside a workspace (#71). Undefined is this instance's own server.
+  client?: Client,
 ) {
   return {
     queryKey: environmentSettingsKey(org, project, environment),
     queryFn: () =>
       parsed(
-        getEnvironmentSettings({ path: { org, project, environment } }),
+        getEnvironmentSettings({ path: { org, project, environment }, client }),
         zEnvironmentSettings,
       ),
     enabled: org !== '' && project !== '' && environment !== '',

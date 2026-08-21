@@ -64,46 +64,53 @@ export function workspaceBearer(origin: string): WorkspaceBearer | undefined {
 }
 
 export function forgetWorkspace(origin: string): void {
-  // The strike count goes with the bearer. A workspace that is re-established
-  // after a run of unreachable probes is a NEW session, and letting it inherit
-  // the old count would kill it on its first blip instead of its second.
-  failures.delete(origin);
+  // The strike count goes with the bearer VALUE. A workspace that is
+  // re-established after a run of unreachable probes is a NEW credential, and
+  // letting it inherit the old count would kill it on its first blip instead of
+  // its second. Read the held value before deleting the bearer, or the count
+  // outlives the credential it belonged to.
+  const held = bearers.get(origin);
+  if (held !== undefined) {
+    failures.delete(held.value);
+  }
   if (bearers.delete(origin)) {
     publish();
   }
 }
 
 /**
- * forgetSession drops the bearer for one origin ONLY IF it is still the session
- * the caller is talking about.
+ * dropWorkspaceValue drops the bearer for one origin ONLY IF it is still the
+ * exact VALUE the caller is talking about — the transport's 401/403 kill path
+ * and the liveness probe's terminal drop both route through it (#71).
  *
- * Every probe outcome routes through this rather than through forgetWorkspace,
- * because a probe is asynchronous and the human is not. Close a workspace and
- * establish a new one to the same origin while S1's probe is still in flight,
- * and S1's eventual failure used to delete S2 — a freshly redeemed session
- * discarded by a verdict about a session that no longer exists. Keying the
- * decision on the session id makes a stale completion a no-op.
+ * Keyed by the value, not the session id, for two reasons that are really one:
+ * a probe is asynchronous and the human is not, and a step-up ELEVATES in place
+ * — same session id, a freshly ROTATED value. A stale verdict about a value
+ * that has since been rotated (by a reconnect OR a step-up) must be a no-op, or
+ * a 401 for the dead pre-rotation value would take down the live post-rotation
+ * bearer that shares its session id. Only a verdict whose value is still the one
+ * we hold is a verdict about the live credential.
  */
-function forgetSession(origin: string, session: string): void {
+export function dropWorkspaceValue(origin: string, value: string): void {
   const held = bearers.get(origin);
-  if (held === undefined || held.session !== session) {
+  if (held === undefined || held.value !== value) {
     return;
   }
   forgetWorkspace(origin);
 }
 
-/** strike counts one unreachable probe, keyed by SESSION for the same reason. */
+/** strike counts one unreachable probe, keyed by the bearer VALUE. */
 function strike(bearer: WorkspaceBearer): boolean {
   const held = bearers.get(bearer.origin);
-  if (held === undefined || held.session !== bearer.session) {
+  if (held === undefined || held.value !== bearer.value) {
     return false;
   }
-  const next = (failures.get(bearer.session) ?? 0) + 1;
-  failures.set(bearer.session, next);
+  const next = (failures.get(bearer.value) ?? 0) + 1;
+  failures.set(bearer.value, next);
   if (next < UNREACHABLE_STRIKES) {
     return true;
   }
-  forgetSession(bearer.origin, bearer.session);
+  dropWorkspaceValue(bearer.origin, bearer.value);
   return false;
 }
 
@@ -167,9 +174,21 @@ export async function probeWorkspace(bearer: WorkspaceBearer): Promise<boolean> 
     // card must not do.
     return strike(bearer);
   }
-  if (response.status === 401 || response.status === 403) {
-    forgetSession(bearer.origin, bearer.session);
+  // Only a 401 is the session dying (revoked, expired, origin-binding mismatch —
+  // all ErrUnauthenticated).
+  if (response.status === 401) {
+    dropWorkspaceValue(bearer.origin, bearer.value);
     return false;
+  }
+  // A 403 is NOT death and NOT unreachability — it is a "forbidden" from a
+  // remote that is up and did not 401 the session. This endpoint is self-scoped
+  // and cannot legitimately 403 a live session, so a 403 here is anomalous (a
+  // proxy, a WAF); treating it as a strike would let two spurious ones kill a
+  // valid workspace. Matches the transport's own 403 handling — keep the
+  // session — so a forbidden never becomes a false reconnect. It does not clear
+  // the strike count either: it is not the clean answer that proves liveness.
+  if (response.status === 403) {
+    return true;
   }
   // ONLY A WELL-FORMED SUCCESS CLEARS THE STRIKE COUNT. Anything else is a
   // strike: a 404 or a 500 is not this endpoint answering, and a 200 carrying
@@ -185,7 +204,7 @@ export async function probeWorkspace(bearer: WorkspaceBearer): Promise<boolean> 
   } catch {
     return strike(bearer);
   }
-  failures.delete(bearer.session);
+  failures.delete(bearer.value);
   return true;
 }
 
@@ -198,7 +217,7 @@ const UNREACHABLE_STRIKES = 2;
  */
 const PROBE_TIMEOUT_MS = 4_000;
 
-/** Strike counts, keyed by SESSION id so a replaced session starts at zero. */
+/** Strike counts, keyed by bearer VALUE so a rotated credential starts at zero. */
 const failures = new Map<string, number>();
 
 /** WorkspaceError is a refusal this shell can put in front of a human. */
@@ -252,6 +271,13 @@ async function remoteJSON<T>(
  * establishing or resuming a workspace.
  */
 export async function assertCompatible(origin: string): Promise<void> {
+  // The live protection is right here in `remoteJSON`: a remote that is
+  // unreachable, refuses this origin, or serves a meta that does not PARSE as
+  // this protocol throws, and the caller refuses the workspace. The numeric
+  // check below is the second half — the per-operation minimum-revision gate —
+  // and it is dormant while this shell's floor equals the meta contract's own
+  // (`zMeta` already rejects a revision below 1). It becomes live the day a
+  // future operation raises `WORKSPACE_MIN_API_REVISION` above that floor.
   const meta = await remoteJSON(origin, '/api/v1/meta', zMeta);
   if (meta.api_revision < WORKSPACE_MIN_API_REVISION) {
     throw new WorkspaceError(
@@ -367,27 +393,73 @@ export type PreparedWorkspace = {
 };
 
 /**
+ * StepUpParams turns a `prepareWorkspace` into an elevation rather than an
+ * establishment (#71, multi-instance ADR § The handoff and the workspace
+ * session). Every field is bound into the remote's own transaction row, so an
+ * elevated consent cannot be replayed against a different operation, environment
+ * or key set.
+ */
+export type StepUpParams = {
+  /** The workspace session being elevated. A step-up NEVER mints a second one. */
+  readonly session: string;
+  /** What the reauthentication authorizes, as the reveal endpoint consumes it. */
+  readonly operation: 'reveal' | 'copy' | 'publish';
+  /** The environment the elevation covers. */
+  readonly environment: string;
+  /** The enumerated key unit the elevation covers. */
+  readonly keySet: readonly string[];
+};
+
+/**
  * prepareWorkspace performs the live compatibility check and opens the handoff
  * transaction on the remote. It touches no window.
+ *
+ * With `stepUp` it opens an ELEVATION of an existing session rather than a first
+ * establishment. The bound fields ride the approve URL as well as the start
+ * body: the approve page needs the environment and key set to run the remote's
+ * OWN reauthentication ceremony over them before it may approve — while the
+ * server still validates the fresh reauth window against the transaction's own
+ * bound environment, so a tampered URL parameter only fails closed.
  */
-export async function prepareWorkspace(origin: string): Promise<PreparedWorkspace> {
+export async function prepareWorkspace(
+  origin: string,
+  stepUp?: StepUpParams,
+): Promise<PreparedWorkspace> {
   await assertCompatible(origin);
 
   const verifier = newVerifier();
-  const started = await remoteJSON(origin, '/api/v1/auth/workspace/start', zWorkspaceHandoffStarted, {
-    body: {
-      origin: globalThis.location.origin,
-      redirect_uri: globalThis.location.origin + CALLBACK_PATH,
-      pkce_challenge: await challengeFor(verifier),
-      purpose: 'establishment',
-    },
-  });
-  return {
-    origin,
-    state: started.state,
-    verifier,
-    approveURL: `${origin}${APPROVE_PATH}?state=${encodeURIComponent(started.state)}`,
+  const base = {
+    origin: globalThis.location.origin,
+    redirect_uri: globalThis.location.origin + CALLBACK_PATH,
+    pkce_challenge: await challengeFor(verifier),
   };
+  const body =
+    stepUp === undefined
+      ? { ...base, purpose: 'establishment' as const }
+      : {
+          ...base,
+          purpose: 'step-up' as const,
+          session: stepUp.session,
+          operation: stepUp.operation,
+          environment: stepUp.environment,
+          key_set: [...stepUp.keySet],
+        };
+  const started = await remoteJSON(origin, '/api/v1/auth/workspace/start', zWorkspaceHandoffStarted, {
+    body,
+  });
+  // The approve URL carries only STATE and (for a step-up) the tiny purpose
+  // flag. The operation, environment and enumerated key set the approve page
+  // needs are NOT here: they are bound in the remote's own transaction row and
+  // the approve page reads them back by state (`showWorkspaceHandoff`). Putting
+  // the key set on the URL would cap a reveal-all at the browser's URL length;
+  // the server-bound transaction has no such ceiling and is the authoritative
+  // copy anyway, so a tampered parameter could never move the elevation's scope.
+  const approve = new URL(`${origin}${APPROVE_PATH}`);
+  approve.searchParams.set('state', started.state);
+  if (stepUp !== undefined) {
+    approve.searchParams.set('purpose', 'step-up');
+  }
+  return { origin, state: started.state, verifier, approveURL: approve.toString() };
 }
 
 /**
@@ -429,18 +501,19 @@ export async function openPrepared(prepared: PreparedWorkspace): Promise<Workspa
 /**
  * rememberWorkspace installs a redeemed bearer as the live one for its origin.
  *
- * It is the ONLY writer of the store, so "which session is current" has one
+ * It is the ONLY writer of the store, so "which credential is current" has one
  * answer and the probe path can compare against it. Replacing an origin's
- * bearer clears the outgoing session's strike count with it: a new session
- * starts with its full allowance, and the old session's count can never be
- * spent against it.
+ * bearer clears the outgoing VALUE's strike count with it: a new credential
+ * starts with its full allowance, and the old value's count can never be spent
+ * against it — including across a step-up, which rotates the value under a
+ * stable session id.
  */
 export function rememberWorkspace(bearer: WorkspaceBearer): void {
   const previous = bearers.get(bearer.origin);
   if (previous !== undefined) {
-    failures.delete(previous.session);
+    failures.delete(previous.value);
   }
-  failures.delete(bearer.session);
+  failures.delete(bearer.value);
   bearers.set(bearer.origin, bearer);
   publish();
 }

@@ -2564,6 +2564,19 @@ export const zWorkspaceSession = z.object({
     window_expires_at: zTimestamp.optional()
 });
 
+export const zWorkspaceHandoffTransaction = z.object({
+    state: z.string().min(1),
+    purpose: z.enum(['establishment', 'step-up']),
+    operation: z.enum([
+        'reveal',
+        'copy',
+        'publish'
+    ]).optional(),
+    environment: zId.optional(),
+    key_ids: z.array(zId),
+    expires_at: zTimestamp
+});
+
 /**
  * One of the caller's own sessions. Metadata only; no verifier is ever returned.
  */
@@ -4754,6 +4767,15 @@ export const zRedeemWorkspaceHandoffBody = zRedeemWorkspaceHandoffRequest;
  * The workspace session, disclosed once.
  */
 export const zRedeemWorkspaceHandoffResponse = zWorkspaceSession;
+
+export const zShowWorkspaceHandoffPath = z.object({
+    state: z.string().min(1).max(512)
+});
+
+/**
+ * The live transaction's bound step-up policy — identifiers only.
+ */
+export const zShowWorkspaceHandoffResponse = zWorkspaceHandoffTransaction;
 
 /**
  * The caller's sessions.

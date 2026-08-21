@@ -1,7 +1,9 @@
-import { useQuery } from '@tanstack/react-query';
-import { useState, type FormEvent } from 'react';
+import { QueryClientProvider, useQuery } from '@tanstack/react-query';
+import { useMemo, useState, type FormEvent } from 'react';
+import { generatePath, Link } from 'react-router';
 
 import { ApiError } from '../api/client.ts';
+import { useProjects } from '../api/matrix.ts';
 import {
   originOf,
   remoteStateText,
@@ -15,6 +17,8 @@ import {
   useWorkspaceOrigins,
   type Remote,
 } from '../api/remotes.ts';
+import { useOrgs } from '../api/session.ts';
+import { WorkspaceContextProvider, withRemote } from '../api/transport.tsx';
 import {
   forgetWorkspace,
   livenessPollMs,
@@ -26,6 +30,9 @@ import {
   type PreparedWorkspace,
   type WorkspaceBearer,
 } from '../api/workspace.ts';
+import { createWorkspaceClient } from '../api/workspaceClient.ts';
+import { makeQueryClient } from '../app/queryClient.ts';
+import { surfaceById } from '../app/navigation.ts';
 
 /**
  * The multi-instance surface (registry surface `remotes`).
@@ -238,6 +245,7 @@ function RemoteCard({ remote }: { remote: Remote }) {
           Remove
         </button>
       </div>
+      {live === undefined ? null : <WorkspacePicker origin={origin} remoteName={remote.name} />}
       {remove.isSuccess ? (
         <p role="status">
           Removed here. That does <strong>not</strong> revoke the credential — revoke it on the
@@ -445,6 +453,102 @@ function useWorkspaceLiveness(bearer: WorkspaceBearer | undefined, onEnded: () =
     staleTime: 0,
     retry: false,
   });
+}
+
+/**
+ * WorkspacePicker is the bridge from "workspace open" to "operating a project":
+ * it reads the REMOTE's own orgs and projects over the bearer and renders each
+ * as a deep link into the matrix, tagged `?remote=<name>`.
+ *
+ * It reads live rather than from the directory snapshot for a load-bearing
+ * reason: the matrix is addressed by org and project IDS, and the snapshot
+ * carries only names. The ids exist only on the remote, so the shell resolves
+ * them there, over the same bearer everything else in the workspace uses — which
+ * is why this renders inside the workspace transport with its own isolated
+ * cache, exactly like the surfaces it links to.
+ */
+function WorkspacePicker({ origin, remoteName }: { origin: string; remoteName: string }) {
+  const [queries] = useState(() => makeQueryClient());
+  const client = useMemo(() => createWorkspaceClient(origin), [origin]);
+  return (
+    <QueryClientProvider client={queries}>
+      <WorkspaceContextProvider value={{ origin, remote: remoteName, client }}>
+        <PickerBody remoteName={remoteName} />
+      </WorkspaceContextProvider>
+    </QueryClientProvider>
+  );
+}
+
+function PickerBody({ remoteName }: { remoteName: string }) {
+  const orgs = useOrgs(true);
+  if (orgs.isPending) {
+    return (
+      <p role="status" className="remote__picker">
+        Loading this instance&apos;s projects…
+      </p>
+    );
+  }
+  if (orgs.isError) {
+    return (
+      <p className="alert" role="alert">
+        <span className="alert__glyph" aria-hidden="true">
+          !
+        </span>
+        <span>The remote&apos;s projects could not be read. Your grants over there may not cover them.</span>
+      </p>
+    );
+  }
+  if (orgs.data.items.length === 0) {
+    return (
+      <p role="status" className="remote__picker">
+        You have access to no organisations on this remote.
+      </p>
+    );
+  }
+  return (
+    <div className="remote__picker">
+      <h3>Open a project</h3>
+      {orgs.data.items.map((org) => (
+        <OrgProjects key={org.id} orgId={org.id} orgName={org.name} remoteName={remoteName} />
+      ))}
+    </div>
+  );
+}
+
+function OrgProjects({
+  orgId,
+  orgName,
+  remoteName,
+}: {
+  orgId: string;
+  orgName: string;
+  remoteName: string;
+}) {
+  const projects = useProjects(orgId);
+  const items = projects.data?.items ?? [];
+  if (items.length === 0) {
+    return null;
+  }
+  return (
+    <div className="remote__picker-org">
+      <p className="mono">{orgName}</p>
+      <ul>
+        {items.map((project) => (
+          <li key={project.id}>
+            <Link
+              className="btn"
+              to={withRemote(
+                generatePath(surfaceById('matrix').path, { org: orgId, project: project.id }),
+                remoteName,
+              )}
+            >
+              {project.name}
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
 }
 
 /** safeOrigin never throws on a stored URL the browser cannot parse. */

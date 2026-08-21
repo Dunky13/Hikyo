@@ -2,11 +2,13 @@ package server
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
 	"github.com/Hikyo-Org/hikyo/api/apigen"
 	"github.com/Hikyo-Org/hikyo/internal/audit"
+	"github.com/Hikyo-Org/hikyo/internal/domain"
 	"github.com/Hikyo-Org/hikyo/internal/remotefetch"
 	"github.com/Hikyo-Org/hikyo/internal/service"
 )
@@ -38,6 +40,7 @@ type WorkspaceService interface {
 	RemoveOrigin(ctx context.Context, actor service.Actor, origin string) (int64, error)
 	OriginAllowed(ctx context.Context, origin string) (bool, error)
 	StartHandoff(ctx context.Context, req service.HandoffRequest) (service.HandoffStart, error)
+	ShowHandoff(ctx context.Context, actor service.Actor, state string) (service.HandoffView, error)
 	ApproveHandoff(ctx context.Context, actor service.Actor, state string) (string, string, error)
 	RedeemHandoff(ctx context.Context, code, pkceVerifier, origin string) (service.WorkspaceSession, error)
 	ListSessions(ctx context.Context, actor service.Actor) ([]service.SessionView, error)
@@ -176,6 +179,49 @@ func (a *API) StartWorkspaceHandoff(ctx context.Context, req apigen.StartWorkspa
 	return apigen.StartWorkspaceHandoff201JSONResponse{
 		Handoff: started.HandoffID, State: started.State, ExpiresAt: started.ExpiresAt,
 	}, nil
+}
+
+func (a *API) ShowWorkspaceHandoff(ctx context.Context, req apigen.ShowWorkspaceHandoffRequestObject) (apigen.ShowWorkspaceHandoffResponseObject, error) {
+	view, err := a.Workspace.ShowHandoff(ctx, service.Bearer(bearer(ctx)), req.State)
+	if err != nil {
+		if errors.Is(err, domain.ErrUnauthenticated) {
+			return apigen.ShowWorkspaceHandoff401JSONResponse{
+				UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(
+					errorBody(apigen.ErrorCodeUnauthenticated, ""),
+				),
+			}, nil
+		}
+		// A not-found or expired/consumed transaction is a 404, not a 403: to a
+		// caller holding a stale state the answer is "there is no such live
+		// transaction", uniformly, whichever of those it is.
+		if errors.Is(err, service.ErrHandoffInvalid) {
+			return apigen.ShowWorkspaceHandoff404JSONResponse{
+				NotFoundJSONResponse: apigen.NotFoundJSONResponse(
+					errorBody(apigen.ErrorCodeNotFound, ""),
+				),
+			}, nil
+		}
+		return nil, err
+	}
+	keyIDs := make([]apigen.ID, 0, len(view.KeySet))
+	for _, k := range view.KeySet {
+		keyIDs = append(keyIDs, apigen.ID(k))
+	}
+	resp := apigen.ShowWorkspaceHandoff200JSONResponse{
+		State:     req.State,
+		Purpose:   apigen.WorkspaceHandoffTransactionPurpose(view.Purpose),
+		KeyIds:    keyIDs,
+		ExpiresAt: view.ExpiresAt,
+	}
+	if view.Operation != "" {
+		op := apigen.WorkspaceHandoffTransactionOperation(view.Operation)
+		resp.Operation = &op
+	}
+	if view.EnvID != "" {
+		env := apigen.ID(view.EnvID)
+		resp.Environment = &env
+	}
+	return resp, nil
 }
 
 func (a *API) ApproveWorkspaceHandoff(ctx context.Context, req apigen.ApproveWorkspaceHandoffRequestObject) (apigen.ApproveWorkspaceHandoffResponseObject, error) {
