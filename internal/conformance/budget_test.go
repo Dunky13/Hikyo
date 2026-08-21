@@ -18,6 +18,7 @@ import (
 func init() {
 	corpus = append(corpus,
 		scenario{"schema_revision_rate_limit", scenarioSchemaRevisionRateLimit},
+		scenario{"schema_revision_noop_does_not_charge", scenarioSchemaRevisionNoopDoesNotCharge},
 	)
 }
 
@@ -61,5 +62,31 @@ func scenarioSchemaRevisionRateLimit(t *testing.T, db *store.DB) {
 	if _, err := keys.Create(t.Context(), service.LocalPrincipal(who2), scope2,
 		keySpec("FRESH", string(schema.Config), decl(schema.Rule{Type: schema.TypeString})), nil); err != nil {
 		t.Fatalf("a second project's first schema revision was refused; the bound is not per-project: %v", err)
+	}
+}
+
+// scenarioSchemaRevisionNoopDoesNotCharge proves the § 151 charge sits at the
+// real revision bump, not at the operation's entry: a mutation that no-ops
+// (nothing actually changed, no BumpSchemaRevision) consumes no budget. Without
+// this, a script could exhaust the 60/h rate with idempotent no-ops that mint no
+// revision at all. It runs well past the hourly bound to make the point.
+func scenarioSchemaRevisionNoopDoesNotCharge(t *testing.T, db *store.DB) {
+	keys := &service.Keys{DB: db, Keyring: sharedKeyring(t, db), Budget: service.NewBudget()}
+	who, scope := tenantFixture(t, db, "schemarev-noop")
+	actor := service.LocalPrincipal(who)
+
+	created, err := keys.Create(t.Context(), actor, scope,
+		keySpec("NOOP", string(schema.Config), decl(schema.Rule{Type: schema.TypeString})), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// An empty metadata update merges to the stored row unchanged, so it returns
+	// early without bumping the revision. Many more than the hourly bound must all
+	// pass, because none is a revision.
+	for i := 0; i < service.BudgetSchemaRevisionPerHour*2; i++ {
+		if _, err := keys.UpdateMetadata(t.Context(), actor, scope, created.ID, service.KeyMetadataUpdate{}, nil); err != nil {
+			t.Fatalf("no-op metadata update %d charged the schema-revision budget: %v", i+1, err)
+		}
 	}
 }

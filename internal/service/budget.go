@@ -191,20 +191,21 @@ var (
 		name:  "schema-revision",
 		rates: []budgetRateRule{{dimProject, BudgetSchemaRevisionPerHour, time.Hour}},
 	}
-	// budgetDefault is the fail-closed reference for an expensive category not
-	// named above. §179 closes coverage "by omission" at the CATEGORY level:
-	// every expensive path today has a named category, and a future one adopts
-	// this default. It is not applied as blanket route middleware — a per-request
-	// budget needs the post-auth identity that only exists inside the service
-	// transaction, and classifying every endpoint as expensive-or-not is its own
-	// concern — so a NEW expensive category must charge it explicitly, enforced
-	// by review, not inferred. Exercised by TestBudgetFailClosedDefault.
-	budgetDefault = budgetCategory{
-		name:  "default",
-		rates: []budgetRateRule{{dimPrincipal, BudgetDefaultRatePerMin, time.Minute}},
-		concs: []budgetConcRule{{dimOrg, BudgetDefaultOrgConcurrency}},
-	}
 )
+
+// The §179 fail-closed default (BudgetDefaultRatePerMin / BudgetDefaultOrgConcurrency,
+// 60/min per principal, 8 concurrent per org) is NOT materialised as a live
+// category, because there is no unnamed expensive category to apply it to today:
+// every expensive path above has a named, wired category. Applying it "by
+// omission" to arbitrary future endpoints is not something this layer can do on
+// its own — a per-request budget needs the post-authorization principal that
+// only exists inside the service transaction, and deciding which endpoints are
+// expensive-enough to budget (vs ordinary reads that must NOT be capped at
+// 60/min) is a per-operation classification, its own concern. The default's
+// values are kept as exported constants (spec-pinned in the conformance
+// registry) so that a future category adopts them without re-deriving; wiring an
+// operation→category dispatch that charges the default for unclassified
+// expensive operations is a tracked follow-up, not part of #186.
 
 // budgetKeys carries every scope value a category might key on. A caller
 // supplies the ones its category needs; unused fields stay zero.
@@ -258,28 +259,29 @@ func (b *Budget) acquire(cat budgetCategory, keys budgetKeys) (func(), error) {
 	defer b.mu.Unlock()
 
 	// 1. Slide every rate window and confirm it has room — WITHOUT recording.
+	// kept is built in FRESH storage, never bucket.hits[:0]: an in-place
+	// compaction would mutate the map-owned backing array before every check has
+	// passed, so a later concurrency/tracking refusal would leave the stored
+	// bucket corrupted. Nothing here writes to b.rate; step 4 publishes.
 	type slid struct {
 		key    string
 		kept   []time.Time
 		window time.Duration
-		isNew  bool // absent from the map, so recording it grows the tracking set.
 	}
 	pending := make([]slid, 0, len(cat.rates))
 	for _, r := range cat.rates {
 		key := budgetMapKey(cat.name, r.dim, keys.value(r.dim))
 		cutoff := at.Add(-r.window)
-		bucket, ok := b.rate[key]
-		kept := bucket.hits[:0]
-		for _, t := range bucket.hits {
+		kept := make([]time.Time, 0, len(b.rate[key].hits)+1)
+		for _, t := range b.rate[key].hits {
 			if t.After(cutoff) {
 				kept = append(kept, t)
 			}
 		}
 		if len(kept) >= r.limit {
-			b.rate[key] = rateBucket{hits: kept, window: r.window} // keep the compaction; charge nothing.
 			return noopBudgetRelease, fmt.Errorf("%w: service: %s rate budget exhausted", admission.ErrOverloaded, cat.name)
 		}
-		pending = append(pending, slid{key: key, kept: kept, window: r.window, isNew: !ok})
+		pending = append(pending, slid{key: key, kept: kept, window: r.window})
 	}
 
 	// 2. Confirm every concurrency bound has a free slot — WITHOUT taking one.
@@ -293,20 +295,25 @@ func (b *Budget) acquire(cat budgetCategory, keys budgetKeys) (func(), error) {
 	// 3. Tracking-bound check BEFORE any mutation, so a saturation refusal never
 	// leaves a partial charge (one rate rule recorded, a later one refused). If
 	// the brand-new rate buckets this acquire would add overflow the bound, evict
-	// stale buckets once; if that frees nothing, refuse. Refusing a new subject
-	// rather than growing unbounded is the safe direction under the threat model,
-	// exactly as the reveal gateLimiter decides it (admission evicts the oldest
-	// live entry instead — a deliberate divergence, since this map is shared
-	// across categories with a one-hour widest window).
-	newKeys := 0
-	for _, p := range pending {
-		if p.isNew {
-			newKeys++
+	// stale buckets once, then RECOUNT which pending keys are still absent — an
+	// eviction can drop a bucket a pending key names, making it newly absent — and
+	// refuse if they no longer fit. Refusing a new subject rather than growing
+	// unbounded is the safe direction under the threat model, exactly as the
+	// reveal gateLimiter decides it (admission evicts the oldest live entry
+	// instead — a deliberate divergence, since this map is shared across
+	// categories with a one-hour widest window).
+	countNew := func() int {
+		n := 0
+		for _, p := range pending {
+			if _, ok := b.rate[p.key]; !ok {
+				n++
+			}
 		}
+		return n
 	}
-	if newKeys > 0 && len(b.rate)+newKeys > budgetMaxTrackedSubjects {
+	if newKeys := countNew(); newKeys > 0 && len(b.rate)+newKeys > budgetMaxTrackedSubjects {
 		b.evictStaleRate(at)
-		if len(b.rate)+newKeys > budgetMaxTrackedSubjects {
+		if newKeys := countNew(); len(b.rate)+newKeys > budgetMaxTrackedSubjects {
 			return noopBudgetRelease, fmt.Errorf("%w: service: %s budget tracking saturated", admission.ErrOverloaded, cat.name)
 		}
 	}

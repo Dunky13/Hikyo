@@ -530,6 +530,7 @@ func (s *Adapters) UpdateTarget(ctx context.Context, actor Actor, scope domain.S
 	}
 	now := store.CanonTime(s.now())
 	var out store.AdapterTarget
+	var rateCharged bool
 	err := retryAdapterProviderFence(ctx, func() error {
 		return tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 			caller, err := actor.resolve(ctx, az, now)
@@ -582,6 +583,17 @@ func (s *Adapters) UpdateTarget(ctx context.Context, actor Actor, scope domain.S
 				return err
 			}
 			out = updated.Target
+			// § 179 adapter sync/trigger rate: a reconfigure that re-syncs enqueues
+			// a "trigger":"manual" job just like SyncTarget, so it charges the same
+			// 10/min per-principal budget — otherwise a script re-toggles a target's
+			// keys to trigger syncs past the bound. Charged only when a job was
+			// actually enqueued (a pure config edit that re-syncs nothing does not),
+			// once across the fence/tx retry loops; a refusal rolls the enqueue back.
+			if updated.Enqueue.JobID != "" {
+				if err := s.Budget.chargeOnce(&rateCharged, budgetAdapterRate, budgetKeys{Principal: caller.Principal}); err != nil {
+					return err
+				}
+			}
 			payload := audit.Payload{"mutation": "target-update", "authority": updated.AuthorityPrincipalID}
 			if full {
 				payload["previous_authority"] = updated.PreviousAuthorityPrincipalID

@@ -190,25 +190,6 @@ func TestBudgetMachineFetchAggregates(t *testing.T) {
 	}
 }
 
-func TestBudgetFailClosedDefault(t *testing.T) {
-	c := &clock{t: time.Unix(1_700_000_000, 0)}
-	b := newTestBudget(c)
-	keys := principalKeys("p1", "org1", "proj")
-
-	// An unnamed category inherits the fail-closed default: 60/min per principal.
-	// Acquire+release each so the 8/org concurrency bound never fires first.
-	for i := range BudgetDefaultRatePerMin {
-		rel, err := b.acquire(budgetDefault, keys)
-		if err != nil {
-			t.Fatalf("default charge %d refused early: %v", i+1, err)
-		}
-		rel()
-	}
-	if _, err := b.acquire(budgetDefault, keys); !errors.Is(err, admission.ErrOverloaded) {
-		t.Fatalf("61st default = %v, want ErrOverloaded", err)
-	}
-}
-
 // TestAuditExportChargesExpensiveBudget proves the WIRING (the registry fixture
 // for ops-spec § 20 / § 179 "audit exports 2/org · 6/instance"): Audits.Export
 // consults the shared budget before touching the store, and a caller that finds
