@@ -48,12 +48,14 @@ fi
 
 core_actual=$(printf '%s\n' 'internal/service/values.go' | "$classifier" --files)
 if ! printf '%s\n' "$core_actual" | jq -e '
+	.fuzz == true and
 	.generated == true and
 	.headline_guarantee == true and
+	.race == true and
 	.release_snapshot == true and
 	.test == true and
 	.web == true and
-	([.client, .compose_demo, .docs, .fuzz, .k8s_e2e, .lint, .race, .supply_chain_checks] | all(. == false))
+	([.client, .compose_demo, .docs, .k8s_e2e, .lint, .supply_chain_checks] | all(. == false))
 ' >/dev/null; then
 	printf 'changed-path classifier fixture failed: core plan was wrong\n' >&2
 	printf 'actual: %s\n' "$core_actual" >&2
@@ -151,20 +153,30 @@ if ! printf '%s\n' "$all_actual" | jq -e 'all(.[]; . == true)' >/dev/null; then
 	exit 1
 fi
 
-# The race detector and the fuzz pass are reachable ONLY through all_jobs: a main
-# push, a dependency or workflow change, or the fail-closed default. No per-path
-# rule may select them, or they land back on the per-PR critical path.
-for scoped_path in \
+# Race and fuzz are blocking for code and schema changes. Their sharded jobs keep
+# complete package/target coverage without putting their old serial runtimes back
+# on the pull-request critical path.
+for code_path in \
 	'internal/service/values.go' \
 	'internal/store/query.sql' \
-	'api/openapi.yaml' \
 	'internal/operator/reconciler.go' \
-	'internal/isolation/k8s_operator_e2e_test.go' \
+	'internal/isolation/k8s_operator_e2e_test.go'; do
+	code_actual=$(printf '%s\n' "$code_path" | "$classifier" --files)
+	if ! printf '%s\n' "$code_actual" | jq -e '.fuzz == true and .race == true' >/dev/null; then
+		printf 'changed-path classifier fixture failed: %s did not select race/fuzz\n' \
+			"$code_path" >&2
+		printf 'actual: %s\n' "$code_actual" >&2
+		exit 1
+	fi
+done
+
+for scoped_path in \
+	'api/openapi.yaml' \
 	'web/src/routes/Values.tsx' \
 	'docs/site/src/content/docs/docs/index.mdx'; do
 	scoped_actual=$(printf '%s\n' "$scoped_path" | "$classifier" --files)
 	if ! printf '%s\n' "$scoped_actual" | jq -e '.fuzz == false and .race == false' >/dev/null; then
-		printf 'changed-path classifier fixture failed: %s selected race/fuzz on a scoped plan\n' \
+		printf 'changed-path classifier fixture failed: %s unexpectedly selected race/fuzz\n' \
 			"$scoped_path" >&2
 		printf 'actual: %s\n' "$scoped_actual" >&2
 		exit 1
@@ -221,13 +233,15 @@ for operator_path in \
 	'internal/isolation/k8s_operator_e2e_test.go'; do
 	operator_actual=$(printf '%s\n' "$operator_path" | "$classifier" --files)
 	if ! printf '%s\n' "$operator_actual" | jq -e '
+		.fuzz == true and
 		.k8s_e2e == true and
 		.generated == true and
 		.headline_guarantee == true and
+		.race == true and
 		.release_snapshot == true and
 		.test == true and
 		.web == true and
-		([.client, .docs, .fuzz, .lint, .race, .supply_chain_checks] | all(. == false))
+		([.client, .docs, .lint, .supply_chain_checks] | all(. == false))
 	' >/dev/null; then
 		printf 'changed-path classifier fixture failed: %s did not select k8s_e2e\n' \
 			"$operator_path" >&2

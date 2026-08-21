@@ -10,6 +10,7 @@ on:
   workflow_call:
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -739,15 +740,81 @@ jobs:
           path: ~/.cache/go-build
           key: ${{ steps.k8s-e2e-go-cache.outputs.cache-primary-key }}
 
+  # The workflow graph is trusted base-branch code, but every validation job
+  # checks out the untrusted PR head. Build both shard plans once from a copy of
+  # the planner at BASE_SHA so a PR cannot omit its own package or fuzz target.
+  analysis_shards:
+    needs: changes
+    if: >-
+      ${{ fromJSON(needs.changes.outputs.plan).race ||
+      fromJSON(needs.changes.outputs.plan).fuzz }}
+    runs-on: ubuntu-latest
+    outputs:
+      fuzz_plan: ${{ steps.plan.outputs.fuzz_plan }}
+      race_plan: ${{ steps.plan.outputs.race_plan }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Plan complete race and fuzz shards
+        id: plan
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -o pipefail
+          trusted_planner="$RUNNER_TEMP/analysis-shards.go"
+          if [ "$EVENT_NAME" = push ]; then
+            cp ./scripts/ci/analysis-shards-go/main.go "$trusted_planner"
+          else
+            git show "$BASE_SHA:scripts/ci/analysis-shards-go/main.go" >"$trusted_planner"
+          fi
+
+          race_plan='[]'
+          fuzz_plan='[]'
+          for shard in 0 1 2; do
+            race_shard=$(go run "$trusted_planner" race --root . \
+              --shard "$shard" --shards 3 | jq -Rsc 'split("\n") | map(select(length > 0))')
+            fuzz_shard=$(go run "$trusted_planner" fuzz --root . \
+              --shard "$shard" --shards 3 | jq -Rsc 'split("\n") | map(select(length > 0))')
+            race_plan=$(jq -cn --argjson plan "$race_plan" --argjson shard "$race_shard" \
+              '$plan + [$shard]')
+            fuzz_plan=$(jq -cn --argjson plan "$fuzz_plan" --argjson shard "$fuzz_shard" \
+              '$plan + [$shard]')
+          done
+
+          if [ "$(printf '%s' "$race_plan" | jq 'flatten | length')" -eq 0 ] ||
+            [ "$(printf '%s' "$fuzz_plan" | jq 'flatten | length')" -eq 0 ]; then
+            echo 'analysis shards: race or fuzz plan was empty' >&2
+            exit 1
+          fi
+          {
+            echo "race_plan=$race_plan"
+            echo "fuzz_plan=$fuzz_plan"
+          } >>"$GITHUB_OUTPUT"
+
   # Race detector as its own context: a concurrent server with transaction
   # retry and a single-writer SQLite pool gets its data races found here, not
   # in production. The probe-based isolation E2E suite exceeds the per-package
   # timeout under the detector, so its race-instrumented run lives in the
   # scheduled race-isolation workflow instead of on the PR wall-clock.
-  race:
-    needs: changes
+  race_shard:
+    name: race shard (${{ matrix.shard }})
+    needs:
+      - analysis_shards
+      - changes
     if: ${{ fromJSON(needs.changes.outputs.plan).race }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2]
     services:
       postgres:
         image: postgres:18@sha256:3a82e1f56c8f0f5616a11103ac3d47e632c3938698946a7ad26da0df1334744a
@@ -785,13 +852,22 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
-          key: go-race-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-cache-abi.outputs.value }}-${{ hashFiles('go.mod', 'go.sum') }}
-          restore-keys: |
-            go-race-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-cache-abi.outputs.value }}-
+          key: go-race-v2-shard-${{ matrix.shard }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-cache-abi.outputs.value }}-${{ hashFiles('go.mod', 'go.sum') }}
+          restore-keys: go-race-v2-shard-${{ matrix.shard }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-cache-abi.outputs.value }}-
       - name: Race detector (all packages except the isolation suite)
         env:
           HIKYO_TEST_POSTGRES_DSN: postgres://hikyo:hikyo@127.0.0.1:5432/hikyo_test
-        run: go list ./... | grep -v '/internal/isolation$' | xargs go test -race -count=1
+          RACE_PLAN: ${{ needs.analysis_shards.outputs.race_plan }}
+          RACE_SHARD: ${{ matrix.shard }}
+        run: |
+          packages="$RUNNER_TEMP/race-packages"
+          printf '%s\n' "$RACE_PLAN" |
+            jq -r --argjson shard "$RACE_SHARD" '.[$shard][]' >"$packages"
+          if [ ! -s "$packages" ]; then
+            echo "race: shard $RACE_SHARD has no packages" >&2
+            exit 1
+          fi
+          xargs go test -race -vet=off -count=1 <"$packages"
       - name: Save race Go cache (main push only)
         if: >-
           success() && steps.race-go-cache.outputs.cache-hit != 'true' &&
@@ -801,12 +877,31 @@ jobs:
           path: ~/.cache/go-build
           key: ${{ steps.race-go-cache.outputs.cache-primary-key }}
 
+  race:
+    needs:
+      - changes
+      - race_shard
+    if: ${{ always() && fromJSON(needs.changes.outputs.plan).race }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every race shard
+        env:
+          RACE_SHARD_RESULT: ${{ needs.race_shard.result }}
+        run: test "$RACE_SHARD_RESULT" = success
+
   # Seed corpora already run in `test`; this bounded exploration pass discovers
   # targets dynamically so a new fuzz target cannot be forgotten.
-  fuzz:
-    needs: changes
+  fuzz_shard:
+    name: fuzz shard (${{ matrix.shard }})
+    needs:
+      - analysis_shards
+      - changes
     if: ${{ fromJSON(needs.changes.outputs.plan).fuzz }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -836,43 +931,35 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
-          key: go-fuzz-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-cache-abi.outputs.value }}-${{ hashFiles('go.mod', 'go.sum') }}-${{ steps.fuzz-cache-generation.outputs.value }}
+          key: go-fuzz-v2-shard-${{ matrix.shard }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-cache-abi.outputs.value }}-${{ hashFiles('go.mod', 'go.sum') }}-${{ steps.fuzz-cache-generation.outputs.value }}
           restore-keys: |
-            go-fuzz-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-cache-abi.outputs.value }}-${{ hashFiles('go.mod', 'go.sum') }}-
-            go-fuzz-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-cache-abi.outputs.value }}-
+            go-fuzz-v2-shard-${{ matrix.shard }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-cache-abi.outputs.value }}-${{ hashFiles('go.mod', 'go.sum') }}-
+            go-fuzz-v2-shard-${{ matrix.shard }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-cache-abi.outputs.value }}-
       - name: Fuzz every target for a bounded time
+        env:
+          FUZZ_PLAN: ${{ needs.analysis_shards.outputs.fuzz_plan }}
+          FUZZ_SHARD: ${{ matrix.shard }}
         run: |
           set -o pipefail
           failed=0
           ran=0
-          # One listing over the tree: `go test -list` prints each matching
-          # target on its own line, followed by an `ok <pkg>` line for the
-          # package it belongs to, so targets are attributed to the package
-          # that follows them. A listing failure fails the step.
-          listing=$(go test -list '^Fuzz' ./...)
-          pending=()
-          while IFS= read -r line; do
-            case "$line" in
-              Fuzz*) pending+=("$line") ;;
-              "ok "*)
-                pkg=$(printf '%s\n' "$line" | awk '{print $2}')
-                for target in "${pending[@]}"; do
-                  echo "::group::$pkg $target"
-                  if ! go test -run='^$' -fuzz="^${target}\$" -fuzztime=15s "$pkg"; then
-                    failed=1
-                  fi
-                  echo "::endgroup::"
-                  ran=$((ran + 1))
-                done
-                pending=()
-                ;;
-            esac
-          done <<<"$listing"
+          targets="$RUNNER_TEMP/fuzz-targets"
+          printf '%s\n' "$FUZZ_PLAN" |
+            jq -r --argjson shard "$FUZZ_SHARD" '.[$shard][]' >"$targets"
+          while IFS=$'\t' read -r pkg target; do
+            [ -n "$pkg" ] && [ -n "$target" ] || continue
+            echo "::group::$pkg $target"
+            if ! go test -run='^$' -fuzz="^${target}\$" -fuzztime=15s "$pkg"; then
+              failed=1
+            fi
+            echo "::endgroup::"
+            ran=$((ran + 1))
+          done <"$targets"
           if [ "$ran" -eq 0 ]; then
-            echo "fuzz: no Fuzz* target discovered — the pass cannot be vacuous" >&2
+            echo "fuzz: shard $FUZZ_SHARD has no target — the pass cannot be vacuous" >&2
             exit 1
           fi
-          echo "fuzz: $ran targets ran"
+          echo "fuzz: shard $FUZZ_SHARD ran $ran targets"
           exit "$failed"
       # Go writes a newly discovered failing input into the package's
       # testdata/fuzz tree. Preserve only regular, bounded, hash-named corpus
@@ -916,11 +1003,11 @@ jobs:
             found=true
           done < <(find . -type f -path '*/testdata/fuzz/Fuzz*/*' -print0)
           echo "found=$found" >>"$GITHUB_OUTPUT"
-      - name: Upload minimized fuzz reproducers
+      - name: Upload shard fuzz reproducers
         if: failure() && steps.fuzz-reproducers.outputs.found == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: fuzz-reproducers-${{ github.run_id }}-${{ github.run_attempt }}
+          name: fuzz-reproducers-${{ github.run_id }}-${{ github.run_attempt }}-shard-${{ matrix.shard }}
           path: ${{ runner.temp }}/fuzz-reproducers/
           if-no-files-found: error
           retention-days: 30
@@ -933,10 +1020,56 @@ jobs:
           path: ~/.cache/go-build
           key: ${{ steps.fuzz-go-cache.outputs.cache-primary-key }}
 
+  # Preserve the reporter's single canonical artifact contract while allowing
+  # all shard failures to finish and contribute minimized reproducers.
+  fuzz:
+    needs:
+      - changes
+      - fuzz_shard
+    if: ${{ always() && fromJSON(needs.changes.outputs.plan).fuzz }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Download shard fuzz reproducers
+        if: ${{ needs.fuzz_shard.result != 'success' }}
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: fuzz-reproducers-${{ github.run_id }}-${{ github.run_attempt }}-shard-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/fuzz-shard-artifacts
+      - name: Find merged fuzz reproducers
+        id: merged-reproducers
+        if: ${{ needs.fuzz_shard.result != 'success' }}
+        env:
+          ARTIFACT_ROOT: ${{ runner.temp }}/fuzz-shard-artifacts
+        run: |
+          found=false
+          if [ -d "$ARTIFACT_ROOT" ] &&
+            find "$ARTIFACT_ROOT" -type f -print -quit | grep -q .; then
+            found=true
+          fi
+          echo "found=$found" >>"$GITHUB_OUTPUT"
+      - name: Upload minimized fuzz reproducers
+        if: ${{ steps.merged-reproducers.outputs.found == 'true' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: fuzz-reproducers-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/fuzz-shard-artifacts/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Require every fuzz shard
+        env:
+          FUZZ_SHARD_RESULT: ${{ needs.fuzz_shard.result }}
+        run: test "$FUZZ_SHARD_RESULT" = success
+
   # Fuzz findings are reported out-of-band by fuzz-report.yml (workflow_run), so
   # no job here requests issue/PR write. That keeps this reusable workflow's
-  # permission surface at contents:read, which is all its caller (trusted-ci)
-  # grants — a write request here would startup-fail every PR's trusted-ci run.
+  # permission surface read-only (contents/actions), which is all its caller
+  # (trusted-ci) grants — a write request here would startup-fail every PR's
+  # trusted-ci run.
 
   # The headline guarantee, as its own named context (#76, mvp-boundary K3):
   # a stolen database and a stolen backup, without the root key, yield no

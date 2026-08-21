@@ -1,8 +1,9 @@
 # Out-of-band fuzz reporting (#189). The validation graphs (ci.yml, ci-control.yml)
 # execute untrusted PR code and therefore hold no issue/PR write authority — a
-# write request inside the reusable ci.yml is capped by trusted-ci's contents:read
-# grant and startup-fails every PR run. This workflow runs in the trusted base
-# context on workflow_run completion, where write can be granted safely.
+# write request inside the reusable ci.yml is capped by trusted-ci's read-only
+# contents/actions grant and startup-fails every PR run. This workflow runs in
+# the trusted base context on workflow_run completion, where write can be granted
+# safely.
 #
 # Trust model: the fuzz-reproducers artifact is produced by untrusted PR jobs, so
 # its contents are re-validated (corpus-path shape and count) by both the classify
