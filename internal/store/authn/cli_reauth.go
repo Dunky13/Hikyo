@@ -11,9 +11,9 @@ import (
 
 type CLIReauthHandoff struct {
 	ID, SessionID, Purpose, Operation, EnvironmentSet, KeySet, PKCEChallenge, RedirectURI string
-	StateVerifier, CodeVerifier, ApprovedWindows                         []byte
-	PrincipalID                                                          domain.PrincipalID
-	CreatedAt, ExpiresAt, ConsumedAt                                     time.Time
+	StateVerifier, CodeVerifier, ApprovedWindows                                          []byte
+	PrincipalID                                                                           domain.PrincipalID
+	CreatedAt, ExpiresAt, ConsumedAt                                                      time.Time
 }
 
 func (h CLIReauthHandoff) Live(now time.Time) bool {
@@ -22,9 +22,9 @@ func (h CLIReauthHandoff) Live(now time.Time) bool {
 
 type NewCLIReauthHandoff struct {
 	ID, SessionID, Purpose, Operation, EnvironmentSet, KeySet, PKCEChallenge, RedirectURI string
-	StateVerifier                                                        []byte
-	PrincipalID                                                          domain.PrincipalID
-	CreatedAt, ExpiresAt                                                 time.Time
+	StateVerifier                                                                         []byte
+	PrincipalID                                                                           domain.PrincipalID
+	CreatedAt, ExpiresAt                                                                  time.Time
 }
 
 func (r *Resolver) CreateCLIReauthHandoff(ctx context.Context, h NewCLIReauthHandoff) error {

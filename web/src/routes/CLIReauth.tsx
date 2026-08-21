@@ -6,6 +6,7 @@ import {
   cliReauthCallbackURL,
   loadCLIReauthTransaction,
 } from '../api/cliReauth.ts';
+import { useTotpStatus } from '../api/account.ts';
 import { useSession } from '../api/session.ts';
 import {
   runAdapterPasskeyCeremony,
@@ -22,6 +23,7 @@ export function CLIReauth() {
     () => new URLSearchParams(globalThis.location.search).get('transaction') ?? '',
   );
   const [totp, setTOTP] = useState('');
+  const totpStatus = useTotpStatus();
   const transaction = useQuery({
     queryKey: ['cli-reauth', state] as const,
     queryFn: () => loadCLIReauthTransaction(state),
@@ -53,15 +55,19 @@ export function CLIReauth() {
         // ceremony the Values page runs, one decision per environment over
         // exactly the keys the terminal named. A 0-window environment takes
         // the passkey; a sliding environment accepts the authenticator code.
+        // A sliding environment takes the passkey too, or an authenticator
+        // code where one was typed - the code opens the environment-wide
+        // window TOTP always opens (human-auth ADR: TOTP is a per-step gate,
+        // not a per-operation one), never a per-key decision.
         for (const environment of handoff.environments) {
-          if (environment.requires_webauthn) {
+          if (!environment.requires_webauthn && totp.trim() !== '') {
+            await runTOTPCeremony(environment.environment_id, totp.trim());
+          } else {
             await runPasskeyCeremony({
               operation: handoff.purpose,
               environmentId: environment.environment_id,
               keyIds: handoff.key_ids,
             });
-          } else {
-            await runTOTPCeremony(environment.environment_id, totp);
           }
         }
       }
@@ -80,8 +86,16 @@ export function CLIReauth() {
     return <Login />;
   }
 
-  const requiresTOTP =
-    transaction.data?.environments.some((environment) => !environment.requires_webauthn) ?? false;
+  const disclosure = transaction.data !== undefined && transaction.data.purpose !== 'adapter';
+  const slidingEnvironments =
+    transaction.data?.environments.filter((environment) => !environment.requires_webauthn) ?? [];
+  // An adapter handoff needs a code for every sliding environment (its
+  // ceremony is TOTP-or-passkey per policy, as before). A disclosure handoff
+  // offers the code only where it can do anything - a sliding environment and
+  // an enrolled authenticator - and the passkey otherwise.
+  const hasTotp = totpStatus.isSuccess && totpStatus.data.confirmed;
+  const requiresTOTP = !disclosure && slidingEnvironments.length > 0;
+  const offersTOTP = disclosure && slidingEnvironments.length > 0 && hasTotp;
 
   return (
     <main className="login">
@@ -102,9 +116,11 @@ export function CLIReauth() {
               ) : (
                 <>
                   The terminal asks to <strong>{transaction.data.purpose}</strong>{' '}
-                  {transaction.data.key_ids.length} secret key
+                  {transaction.data.key_ids.length} key
                   {transaction.data.key_ids.length === 1 ? '' : 's'} in the environments below.
-                  This is one decision over exactly those keys; nothing else is authorized.
+                  {slidingEnvironments.length === 0
+                    ? ' A passkey authorises one decision over exactly those keys; nothing else.'
+                    : ' A passkey authorises one decision over exactly those keys. A code from your authenticator instead opens the environment-wide window the policy allows, for its duration.'}
                 </>
               )}
             </p>
@@ -123,9 +139,11 @@ export function CLIReauth() {
                 </li>
               ))}
             </ul>
-            {requiresTOTP ? (
+            {requiresTOTP || offersTOTP ? (
               <div className="field">
-                <label htmlFor="cli-reauth-totp">Authenticator code</label>
+                <label htmlFor="cli-reauth-totp">
+                  {requiresTOTP ? 'Authenticator code' : 'Authenticator code (optional; leave empty to use a passkey)'}
+                </label>
                 <input id="cli-reauth-totp" inputMode="numeric" autoComplete="one-time-code" value={totp} onChange={(event) => setTOTP(event.target.value)} required />
               </div>
             ) : null}

@@ -27,6 +27,9 @@ func ceremonyServer(t *testing.T, window apigen.RevealWindow) (http.Handler, *[]
 		case strings.HasSuffix(r.URL.Path, "/reveal-window"):
 			window.Live = live
 			_ = json.NewEncoder(w).Encode(window)
+		case strings.HasSuffix(r.URL.Path, "/auth/totp"):
+			// The inline path dispatches on enrolment: an authenticator stands.
+			_ = json.NewEncoder(w).Encode(apigen.TotpStatus{Confirmed: true})
 		case strings.HasSuffix(r.URL.Path, "/auth/reauth/totp"):
 			var body apigen.TotpReauthRequest
 			_ = json.NewDecoder(r.Body).Decode(&body)
@@ -130,7 +133,7 @@ func TestRevealCeremonyRefusesZeroWindowNamingTheBrowserPath(t *testing.T) {
 	if code := cli.Run(t.Context(), ios, revealArgs()); code != cli.ExitAuth {
 		t.Fatalf("exit %d, want ExitAuth; stderr=%s", code, stderr.String())
 	}
-	for _, want := range []string{"protected environment", "passkey", "project-settings set --env env_70 --reauth-window-seconds"} {
+	for _, want := range []string{"protected environment", "ceremony is the browser's", "project-settings set --env env_70 --reauth-window-seconds"} {
 		if !strings.Contains(stderr.String(), want) {
 			t.Errorf("refusal lacks %q: %s", want, stderr.String())
 		}
@@ -234,5 +237,47 @@ func TestRevealCeremonyHandsOffToTheBrowserAtZeroWindow(t *testing.T) {
 	}
 	if strings.Contains(stdout.String(), rotated) || strings.Contains(stderr.String(), rotated) {
 		t.Fatal("the rotated bearer reached command output")
+	}
+}
+
+// A sliding window on an account WITHOUT an authenticator: the inline prompt
+// would be a dead end, so the CLI hands off to the browser, whose page offers
+// the passkey (and no code).
+func TestRevealCeremonyHandsOffWhenNoAuthenticatorIsEnrolled(t *testing.T) {
+	var started bool
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/reveal-window"):
+			_ = json.NewEncoder(w).Encode(apigen.RevealWindow{CanReveal: true, EffectiveWindowSeconds: 300, TotpOffered: true, Live: started})
+		case strings.HasSuffix(r.URL.Path, "/auth/totp"):
+			_ = json.NewEncoder(w).Encode(apigen.TotpStatus{Confirmed: false})
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/environments/env_70/values"):
+			_ = json.NewEncoder(w).Encode(apigen.ValueList{Items: []apigen.ValueCell{{Name: "DATABASE_PASSWORD", Classification: "secret", KeyId: "key_pw", Set: true}}})
+		case strings.HasSuffix(r.URL.Path, "/auth/cli-reauth/start"):
+			started = true
+			// The handoff began; the test needs no browser round trip to prove
+			// the dispatch, so it ends the flow here with a refusal.
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte(`{"error":{"code":"conflict","message":"the current state of this resource refuses the request"}}`))
+		case strings.HasSuffix(r.URL.Path, "/values/DATABASE_PASSWORD/reveal"):
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"error":{"code":"forbidden","message":"not permitted"}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	ios, _, stderr := definitionsTestIO(t, handler)
+	ios.ReadPassword = func(string) (string, error) {
+		t.Fatal("no authenticator is enrolled: a code prompt is a dead end")
+		return "", nil
+	}
+	ios.OpenURL = func(string) error { t.Fatal("the handoff was refused at start; the browser must not open"); return nil }
+	_ = cli.Run(t.Context(), ios, revealArgs())
+	if !started {
+		t.Fatalf("no handoff was started for an account without an authenticator; stderr=%s", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "no authenticator is enrolled") {
+		t.Errorf("the reason was not named: %s", stderr.String())
 	}
 }

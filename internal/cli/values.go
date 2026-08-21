@@ -220,7 +220,7 @@ func runValues(ctx context.Context, ios IO, args []string) error {
 	// or the named subset).
 	unit := func(names []string) func(context.Context, string) ([]string, error) {
 		return func(ctx context.Context, env string) ([]string, error) {
-			return secretKeyIDs(ctx, client, project, env, names)
+			return keyIDsOf(ctx, client, project, env, apigen.KeyClassificationSecret, names)
 		}
 	}
 	ceremony := func(envs []string, d disclosure, attempt func() error) error {
@@ -404,7 +404,14 @@ func runValues(ctx context.Context, ios IO, args []string) error {
 		}
 		var out apigen.ExportedValues
 		exportEnv := resolved.Get(DimEnv)
-		if err := ceremony([]string{exportEnv}, disclosure{purpose: "reveal", keys: unit(nil)}, func() error {
+		// An export's unit is the secret keys of the REVISION it covers, not
+		// of the current list: a key added, deleted or reclassified since then
+		// would otherwise make the consent set differ from the exported set
+		// (api-cli-surface ADR line 144, "the full key set the export covers").
+		exportUnit := func(ctx context.Context, env string) ([]string, error) {
+			return exportSecretKeyIDs(ctx, client, project, base, env, revision)
+		}
+		if err := ceremony([]string{exportEnv}, disclosure{purpose: "reveal", keys: exportUnit}, func() error {
 			return client.Do(ctx, http.MethodPost, base+"/values/export", body, &out)
 		}); err != nil {
 			return err
@@ -708,11 +715,11 @@ func renderCell(ios IO, f Format, cell apigen.ValueCell, outputFile string, dang
 	return nil
 }
 
-// secretKeyIDs resolves the enumerated unit of a disclosure in one
-// environment: the ids of its secret keys (all of them, or the named subset).
-// It reads the non-revealing list, which discloses nothing; the ids are what
-// the browser ceremony binds and what the disclosure then consumes.
-func secretKeyIDs(ctx context.Context, client *Client, projectBase, env string, names []string) ([]string, error) {
+// keyIDsOf resolves the enumerated unit of a disclosure in one environment:
+// the ids of its keys of one classification (all of them, or the named
+// subset). It reads the non-revealing list, which discloses nothing; the ids
+// are what the browser ceremony binds and what the disclosure then consumes.
+func keyIDsOf(ctx context.Context, client *Client, projectBase, env string, class apigen.KeyClassification, names []string) ([]string, error) {
 	var list apigen.ValueList
 	if err := client.Do(ctx, http.MethodGet, projectBase+"/environments/"+url.PathEscape(env)+"/values", nil, &list); err != nil {
 		return nil, err
@@ -723,13 +730,53 @@ func secretKeyIDs(ctx context.Context, client *Client, projectBase, env string, 
 	}
 	var out []string
 	for _, cell := range list.Items {
-		if cell.Classification != apigen.KeyClassificationSecret {
+		if cell.Classification != class {
 			continue
 		}
 		if len(wanted) > 0 && !wanted[cell.Name] {
 			continue
 		}
 		out = append(out, string(cell.KeyId))
+	}
+	return out, nil
+}
+
+// exportSecretKeyIDs resolves an export's unit from the revision it covers:
+// the non-revealing export names the secret keys of that revision, and the
+// project catalogue maps names to ids. A key the catalogue no longer holds
+// cannot be bound and refuses by name rather than consenting to a narrower
+// set than the export would open.
+func exportSecretKeyIDs(ctx context.Context, client *Client, projectBase, envBase, env string, revision int64) ([]string, error) {
+	body := apigen.ExportValuesRequest{}
+	if revision > 0 {
+		body.Revision = &revision
+	}
+	var covered apigen.ExportedValues
+	if err := client.Do(ctx, http.MethodPost, envBase+"/values/export", body, &covered); err != nil {
+		return nil, err
+	}
+	var catalogue apigen.KeyList
+	if err := client.Do(ctx, http.MethodGet, projectBase+"/keys", nil, &catalogue); err != nil {
+		return nil, err
+	}
+	ids := map[string]string{}
+	for _, k := range catalogue.Items {
+		ids[string(k.Name)] = string(k.Id)
+	}
+	var out, missing []string
+	for _, item := range covered.Items {
+		if item.Classification != apigen.KeyClassificationSecret {
+			continue
+		}
+		id, ok := ids[string(item.Name)]
+		if !ok {
+			missing = append(missing, string(item.Name))
+			continue
+		}
+		out = append(out, id)
+	}
+	if len(missing) > 0 {
+		return nil, failf(ExitRefused, "the export covers secret key(s) the catalogue no longer declares (%s); a ceremony cannot be bound to them - export the current revision, or reveal in the browser", strings.Join(missing, ", "))
 	}
 	return out, nil
 }

@@ -104,15 +104,30 @@ func ensureRevealWindow(ctx context.Context, client *Client, st *State, ios IO, 
 	if !window.CanReveal {
 		return refusal
 	}
-	if window.EffectiveWindowSeconds == 0 || !window.TotpOffered {
-		// The 0-window case: only the browser's purpose-bound, enumerated-key-set
-		// passkey ceremony may open it. Hand off, naming the reason first.
+	// Dispatch by what the environment allows AND what the account can
+	// present (api-cli-surface ADR: "by how the current session authenticated
+	// and what is enrolled"): inline TOTP needs a window above 0 and an
+	// enrolled authenticator; everything else is the browser's ceremony - the
+	// passkey where the window is 0, a passkey or the browser's own code entry
+	// where it slides but no authenticator stands on this account.
+	inlineTOTP := window.EffectiveWindowSeconds > 0 && window.TotpOffered
+	if inlineTOTP {
+		var status apigen.TotpStatus
+		if err := client.Do(ctx, http.MethodGet, api.PathPrefix+"/auth/totp", nil, &status); err != nil {
+			return err
+		}
+		inlineTOTP = status.Confirmed
+	}
+	if !inlineTOTP {
 		why := "its reveal window is 0"
-		if window.Protected {
+		switch {
+		case window.Protected:
 			why = "it is a protected environment"
+		case window.EffectiveWindowSeconds > 0:
+			why = "no authenticator is enrolled on this account"
 		}
 		if d.keys == nil || d.purpose == "" || ios.OpenURL == nil {
-			return failf(ExitAuth, "a disclosure in %s needs a reauthentication window and %s: every disclosure there takes its own passkey ceremony in the browser, "+
+			return failf(ExitAuth, "a disclosure in %s needs a reauthentication window and %s: the ceremony is the browser's, "+
 				"which this invocation cannot open; reveal it in the browser, or raise the window with `hikyo project-settings set --env %s --reauth-window-seconds 300`", env, why, env)
 		}
 		keyIDs, err := d.keys(ctx, env)
@@ -123,7 +138,7 @@ func ensureRevealWindow(ctx context.Context, client *Client, st *State, ios IO, 
 		if d.purpose == "copy" {
 			operation = "value.copy-source"
 		}
-		fmt.Fprintf(ios.Stderr, "disclosure in %s: %s, so every disclosure takes its own passkey ceremony. Opening the browser to authorize %d key(s)...\n", env, why, len(keyIDs))
+		fmt.Fprintf(ios.Stderr, "disclosure in %s: %s, so the ceremony is the browser's. Opening it to authorize %d key(s)...\n", env, why, len(keyIDs))
 		return runCLIDisclosureReauth(ctx, client, st, *artifact, d.purpose, operation, env, keyIDs, ios.OpenURL)
 	}
 	code, err := ios.readPassword(fmt.Sprintf(

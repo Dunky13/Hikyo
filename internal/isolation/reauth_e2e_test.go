@@ -224,6 +224,11 @@ func runCLIAdapterReauthHandoff(t *testing.T, db *store.DB) {
 	if redeemed.SessionToken == "" || redeemed.SessionToken == cliConfirmed.SessionToken || len(redeemed.Windows) != 1 || redeemed.Windows[0].EnvironmentID != "env_prod" {
 		t.Fatalf("redeemed = %+v", redeemed)
 	}
+	// The CLI's adapter window stays BOUND exactly as the browser's was: the
+	// adapter purpose, its operation and the full environment set.
+	if got := queryString(t, db, "SELECT COALESCE(bound_purpose, '') || '|' || COALESCE(bound_operation, '') || '|' || COALESCE(bound_environment_set, '') FROM reauth_windows WHERE session_id = '"+cliConfirmed.SessionID+"'"); got != "adapter|adapter.sync|env_prod" {
+		t.Fatalf("redeemed adapter window binding = %q, want adapter|adapter.sync|env_prod", got)
+	}
 	if _, err := auth.Identity(t.Context(), cliConfirmed.SessionToken); !errors.Is(err, domain.ErrUnauthenticated) {
 		t.Fatalf("old CLI bearer after rotation = %v", err)
 	}
@@ -1091,5 +1096,128 @@ func runCLIDisclosureReauthHandoff(t *testing.T, db *store.DB) {
 	}
 	if revealed != len(secretKeys) {
 		t.Fatalf("revealed %d secrets under the handoff window, want %d", revealed, len(secretKeys))
+	}
+}
+
+func TestCLIDisclosureHandoffPasskeyBindingSQLite(t *testing.T) {
+	runCLIDisclosureHandoffPasskeyBinding(t, seededDB(t, openSQLite))
+}
+
+func TestCLIDisclosureHandoffPasskeyBindingPostgres(t *testing.T) {
+	runCLIDisclosureHandoffPasskeyBinding(t, seededDB(t, openPostgres))
+}
+
+// runCLIDisclosureHandoffPasskeyBinding is the 0-window handoff, the case the
+// ADR wrote the handoff for: the browser's single-decision passkey window must
+// carry the handoff's exact (purpose, environment, key set) binding, the
+// approval consumes the browser's decision and redemption hands the CLI a
+// single-decision window bound through the same ceremony - spendable by the
+// CLI exactly once, over exactly that unit - and an adapter-bound window can
+// never satisfy a disclosure handoff.
+func runCLIDisclosureHandoffPasskeyBinding(t *testing.T, db *store.DB) {
+	ctx := t.Context()
+	auth, browserToken, values, dev := ceremonyFixture(t, db, "handoff-zero")
+	auth.ReauthWindow = 0
+	auth.ReauthHardCap = time.Hour
+	scope := scopeEnv(orgA, prjA1, envA1)
+	keyA, keyB := "key_"+ceremonySecretA, "key_"+ceremonySecretB
+	// The CLI session: same account, a second CLI login, stepped up with the
+	// passkey the way a terminal user would be (the redeemed window is the
+	// only thing the handoff adds).
+	cliLogin, err := auth.LocalLogin(ctx, "handoff-zero", ceremonyPassword, service.ArtifactCLI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sopts, err := auth.StepUpPasskeyStart(ctx, cliLogin.SessionToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sresp, err := dev.Assert(sopts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stepped, err := auth.StepUpPasskeyFinish(ctx, cliLogin.SessionToken, sresp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cliToken := stepped.SessionToken
+	pkce := func(seed string) (string, string) {
+		v := sha256.Sum256([]byte(seed))
+		verifier := base64.RawURLEncoding.EncodeToString(v[:])
+		c := sha256.Sum256([]byte(verifier))
+		return verifier, base64.RawURLEncoding.EncodeToString(c[:])
+	}
+
+	// 1. The browser consented to key A alone; a handoff over {A, B} is refused
+	// at approval by the binding, and the browser's window is not spent by the
+	// refusal.
+	res := passkeyCeremony(t, auth, ctx, browserToken, service.PurposeReveal, string(envA1), []string{keyA}, dev)
+	browserToken = res.SessionToken
+	_, wideChallenge := pkce("wide")
+	wide, err := auth.StartCLIReauth(ctx, cliToken, string(service.PurposeReveal), string(authz.OpValueReveal), []string{string(envA1)}, []string{keyA, keyB}, wideChallenge, "http://127.0.0.1:40125/callback")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := auth.ApproveCLIReauth(ctx, service.Bearer(browserToken), wide.State); !errors.Is(err, service.ErrReauthUnitMismatch) {
+		t.Fatalf("approval of a wider unit than the browser signed = %v, want unit mismatch", err)
+	}
+	// 2. A handoff for exactly key A is approved, consuming the browser's
+	// single decision; the redeemed CLI window is single-decision, unbound in
+	// columns (bound through its ceremony), and spendable once over key A.
+	verifier, challenge := pkce("exact")
+	exact, err := auth.StartCLIReauth(ctx, cliToken, string(service.PurposeReveal), string(authz.OpValueReveal), []string{string(envA1)}, []string{keyA}, challenge, "http://127.0.0.1:40125/callback")
+	if err != nil {
+		t.Fatal(err)
+	}
+	approved, err := auth.ApproveCLIReauth(ctx, service.Bearer(browserToken), exact.State)
+	if err != nil {
+		t.Fatalf("approve exact unit: %v", err)
+	}
+	if _, err := values.Get(ctx, service.Bearer(browserToken), scope, ceremonySecretA, true); !errors.Is(err, service.ErrReauthWindowSpent) && !errors.Is(err, service.ErrNoReauthWindow) {
+		t.Fatalf("the browser's decision was not consumed by the approval: %v", err)
+	}
+	redeemed, err := auth.RedeemCLIReauth(ctx, approved.Code, verifier)
+	if err != nil {
+		t.Fatalf("redeem: %v", err)
+	}
+	if len(redeemed.Windows) != 1 || !redeemed.Windows[0].SingleDecision {
+		t.Fatalf("redeemed windows = %+v, want one single-decision window", redeemed.Windows)
+	}
+	if got := queryString(t, db, "SELECT COALESCE(bound_purpose, '') || '|' || COALESCE(bound_environment_set, '') FROM reauth_windows WHERE session_id = '"+stepped.SessionID+"'"); got != "|" {
+		t.Fatalf("the CLI's disclosure window carries column bindings %q; it must be bound through its ceremony alone", got)
+	}
+	if _, err := values.List(ctx, service.Bearer(redeemed.SessionToken), scope, true); !errors.Is(err, service.ErrReauthUnitMismatch) {
+		t.Fatalf("a wider disclosure under the redeemed window = %v, want unit mismatch", err)
+	}
+	if _, err := values.Get(ctx, service.Bearer(redeemed.SessionToken), scope, ceremonySecretA, true); err != nil {
+		t.Fatalf("the exact disclosure under the redeemed window: %v", err)
+	}
+	if _, err := values.Get(ctx, service.Bearer(redeemed.SessionToken), scope, ceremonySecretA, true); !errors.Is(err, service.ErrReauthWindowSpent) {
+		t.Fatalf("second disclosure on the redeemed single-decision window = %v, want spent", err)
+	}
+
+	// 3. An adapter-bound browser window never satisfies a disclosure handoff.
+	execRaw(t, db, `INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_hz_adapters', (SELECT principal_id FROM sessions WHERE id = '`+stepped.SessionID+`'), 'manage-adapters', 'org_a', 'prj_a1', NULL, `+ts+`)`)
+	execRaw(t, db, `INSERT INTO grant_origins (id, grant_id, kind, subject, created_at) VALUES ('gor_g_hz_adapters', 'g_hz_adapters', 'manual', 'seed', `+ts+`)`)
+	aopts, err := auth.ReauthAdapterPasskeyStart(ctx, browserToken, authz.OpAdapterSync, string(envA1), []string{string(envA1)})
+	if err != nil {
+		t.Fatalf("adapter passkey start: %v", err)
+	}
+	aresp, err := dev.Assert(aopts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ares, err := auth.ReauthPasskeyFinish(ctx, browserToken, aresp)
+	if err != nil {
+		t.Fatalf("adapter passkey finish: %v", err)
+	}
+	browserToken = ares.SessionToken
+	_, mixChallenge := pkce("mix")
+	mix, err := auth.StartCLIReauth(ctx, redeemed.SessionToken, string(service.PurposeReveal), string(authz.OpValueReveal), []string{string(envA1)}, []string{keyB}, mixChallenge, "http://127.0.0.1:40125/callback")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := auth.ApproveCLIReauth(ctx, service.Bearer(browserToken), mix.State); !errors.Is(err, service.ErrReauthUnitMismatch) {
+		t.Fatalf("an adapter-bound window satisfying a disclosure handoff = %v, want unit mismatch", err)
 	}
 }

@@ -290,8 +290,15 @@ func runHumanSession(ctx context.Context, ios IO, st *State, flags commonFlags, 
 	// under --config-only too: the exception's four conditions are locked
 	// without a projection carve-out (api-cli-surface ADR).
 	if err := ensureRevealWindow(ctx, client, st, ios, &session, project, env,
+		// The unit is what the run will inject: the environment's secret keys
+		// for the full projection, its config keys under --config-only - the
+		// exception's "enumerated environment/key-set" named as the act is.
 		disclosure{purpose: "reveal", keys: func(ctx context.Context, env string) ([]string, error) {
-			return secretKeyIDs(ctx, client, project, env, nil)
+			class := apigen.KeyClassificationSecret
+			if configOnly {
+				class = apigen.KeyClassificationConfig
+			}
+			return keyIDsOf(ctx, client, project, env, class, nil)
 		}},
 		failf(ExitAuth, "a live disclosure window is required: run the reveal ceremony first")); err != nil {
 		return err
