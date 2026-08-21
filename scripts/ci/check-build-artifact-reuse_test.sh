@@ -37,6 +37,8 @@ printf '%s\n' "$web_block" | grep -F 'needs: [changes, app-build]' >/dev/null ||
 	fail 'web does not depend on app-build'
 printf '%s\n' "$web_block" | grep -F 'name: hikyo-app-${{ github.run_id }}-${{ github.run_attempt }}' >/dev/null ||
 	fail 'web does not consume the exact app-build artifact'
+printf '%s\n' "$web_block" | grep -F 'actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1' >/dev/null ||
+	fail 'web does not use the repository-pinned download-artifact action'
 printf '%s\n' "$web_block" | grep -F 'run: chmod +x ci-artifacts/hikyo-ui' >/dev/null ||
 	fail 'web does not restore execute permission after artifact download'
 
