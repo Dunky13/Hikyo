@@ -7,8 +7,10 @@ import { WorkspaceContextProvider } from '../api/transport.tsx';
 import {
   assertCompatible,
   forgetWorkspace,
+  livenessPollMs,
   openPrepared,
   prepareWorkspace,
+  probeWorkspace,
   useWorkspaces,
   WorkspaceError,
   type PreparedWorkspace,
@@ -96,6 +98,29 @@ function WorkspaceBoundary({ remote, children }: { remote: string; children: Rea
       live = false;
     };
   }, [origin, bearer]);
+
+  // The liveness poll, here as well as on the remotes card. Operating a matrix
+  // three routes deep is exactly where a kill switch must still bite: a
+  // de-allowlist strips the CORS headers rather than answering 401, so a data
+  // call fails at the browser without a status the transport can read, and
+  // without this poll an idle workspace would keep claiming to be open. The
+  // probe drops the bearer on a run of failures, which flips this boundary to
+  // its reconnect state — fail closed, without reloading the shell.
+  useEffect(() => {
+    if (bearer === undefined) {
+      return;
+    }
+    let cancelled = false;
+    const id = setInterval(() => {
+      if (!cancelled) {
+        void probeWorkspace(bearer);
+      }
+    }, livenessPollMs);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [bearer]);
 
   if (remotes.isPending) {
     return (
