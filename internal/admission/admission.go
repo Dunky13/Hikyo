@@ -114,8 +114,22 @@ type Limiter struct {
 	// amplification an unknown `kid` buys is aimed at the ISSUER, so one
 	// fabricated-`kid` stream from a thousand addresses is one outbound flood.
 	issuerRefreshes map[string][]time.Time
-	failures        map[[32]byte]int
-	blocked         map[[32]byte]time.Time
+	// accounts holds one backoff record per presented identifier. A single map
+	// keeps the failure count and the blocked-until instant together, so an
+	// inconsistent state — a count with no partner instant, or the reverse — is
+	// not representable.
+	accounts map[subjectKey]accountBackoff
+}
+
+// subjectKey is the hashed presented identifier a backoff record is keyed on.
+type subjectKey = [32]byte
+
+// accountBackoff is one account's consecutive-failure count and its optional
+// blocked-until instant. A zero until means the curve has not crossed the
+// threshold yet, so no delay applies.
+type accountBackoff struct {
+	failures int
+	until    time.Time
 }
 
 // New derives the concurrency and refuses a configuration in which a single
@@ -157,8 +171,7 @@ func New(cfg Config) (*Limiter, error) {
 		ipHits:          map[string][]time.Time{},
 		metaHits:        map[string][]time.Time{},
 		issuerRefreshes: map[string][]time.Time{},
-		failures:        map[[32]byte]int{},
-		blocked:         map[[32]byte]time.Time{},
+		accounts:        map[subjectKey]accountBackoff{},
 	}
 	for range concurrency {
 		l.slots <- struct{}{}
@@ -315,11 +328,11 @@ func (l *Limiter) AccountDelay(presented string) time.Duration {
 	key := bucketKey(presented)
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	until, ok := l.blocked[key]
+	b, ok := l.accounts[key]
 	if !ok {
 		return 0
 	}
-	if d := until.Sub(l.now()); d > 0 {
+	if d := b.until.Sub(l.now()); d > 0 {
 		return d
 	}
 	return 0
@@ -336,17 +349,18 @@ func (l *Limiter) RecordFailure(presented string) (crossedThreshold bool) {
 	key := bucketKey(presented)
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if _, tracked := l.failures[key]; !tracked && len(l.failures) >= MaxTrackedSubjects {
+	if _, tracked := l.accounts[key]; !tracked && len(l.accounts) >= MaxTrackedSubjects {
 		l.evictAccounts()
 	}
-	l.failures[key]++
-	n := l.failures[key]
-	if n <= FailuresBeforeBackoff {
-		return false
+	b := l.accounts[key]
+	b.failures++
+	n := b.failures
+	if n > FailuresBeforeBackoff {
+		delay := time.Duration(1<<min(n-FailuresBeforeBackoff-1, 16)) * time.Second
+		delay = min(delay, MaxAccountBackoff)
+		b.until = l.now().Add(delay)
 	}
-	delay := time.Duration(1<<min(n-FailuresBeforeBackoff-1, 16)) * time.Second
-	delay = min(delay, MaxAccountBackoff)
-	l.blocked[key] = l.now().Add(delay)
+	l.accounts[key] = b
 	return n == FailuresBeforeBackoff+1
 }
 
@@ -355,8 +369,7 @@ func (l *Limiter) RecordSuccess(presented string) {
 	key := bucketKey(presented)
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	delete(l.failures, key)
-	delete(l.blocked, key)
+	delete(l.accounts, key)
 }
 
 // evictAccounts drops account buckets whose backoff has elapsed. An account
@@ -371,33 +384,30 @@ func (l *Limiter) RecordSuccess(presented string) {
 // semaphore still bounds the actual work an admitted attempt can do.
 func (l *Limiter) evictAccounts() {
 	now := l.now()
-	for k := range l.failures {
-		if until, blocked := l.blocked[k]; !blocked || !until.After(now) {
-			delete(l.failures, k)
-			delete(l.blocked, k)
+	for k, b := range l.accounts {
+		if !b.until.After(now) {
+			delete(l.accounts, k)
 		}
 	}
-	if len(l.failures) < MaxTrackedSubjects {
+	if len(l.accounts) < MaxTrackedSubjects {
 		return
 	}
-	var soonestKey [32]byte
+	var soonestKey subjectKey
 	var soonest time.Time
 	found := false
-	for k := range l.failures {
-		until := l.blocked[k]
-		if !found || until.Before(soonest) {
-			soonestKey, soonest, found = k, until, true
+	for k, b := range l.accounts {
+		if !found || b.until.Before(soonest) {
+			soonestKey, soonest, found = k, b.until, true
 		}
 	}
 	if found {
-		delete(l.failures, soonestKey)
-		delete(l.blocked, soonestKey)
+		delete(l.accounts, soonestKey)
 	}
 }
 
 // bucketKey hashes the presented identifier. Storing it raw would put every
 // attempted username in memory in plaintext for the process lifetime, which
 // is a log of who is being attacked that nothing needs.
-func bucketKey(presented string) [32]byte {
+func bucketKey(presented string) subjectKey {
 	return sha256.Sum256([]byte(presented))
 }

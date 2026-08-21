@@ -241,12 +241,98 @@ func TestLimiterStateIsBounded(t *testing.T) {
 		now = now.Add(time.Second)
 	}
 	l.mu.Lock()
-	ips, accounts := len(l.ipHits), len(l.failures)
+	ips, accounts := len(l.ipHits), len(l.accounts)
 	l.mu.Unlock()
 	if ips > MaxTrackedSubjects {
 		t.Errorf("tracking %d source IPs, bound is %d", ips, MaxTrackedSubjects)
 	}
 	if accounts > MaxTrackedSubjects {
 		t.Errorf("tracking %d accounts, bound is %d", accounts, MaxTrackedSubjects)
+	}
+}
+
+// TestBackoffRecordCouplesCountAndInstant checks that one record holds both the
+// failure count and the blocked-until instant, so the two never drift apart.
+func TestBackoffRecordCouplesCountAndInstant(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	l, err := New(Config{BudgetMiB: DefaultBudgetMiB, ArgonMemoryKiB: 64 * 1024, Now: fixedClock(&now)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const who = "someone"
+	key := bucketKey(who)
+
+	// Below the threshold: the count rises but no instant is set yet.
+	for i := range FailuresBeforeBackoff {
+		l.RecordFailure(who)
+		l.mu.Lock()
+		b := l.accounts[key]
+		l.mu.Unlock()
+		if b.failures != i+1 {
+			t.Fatalf("failure count %d, want %d", b.failures, i+1)
+		}
+		if !b.until.IsZero() {
+			t.Fatalf("blocked-until set before the threshold: %v", b.until)
+		}
+	}
+
+	// Crossing the threshold sets the instant on the same record.
+	l.RecordFailure(who)
+	l.mu.Lock()
+	b := l.accounts[key]
+	l.mu.Unlock()
+	if b.failures != FailuresBeforeBackoff+1 {
+		t.Fatalf("failure count %d, want %d", b.failures, FailuresBeforeBackoff+1)
+	}
+	if b.until != now.Add(1*time.Second) {
+		t.Fatalf("blocked-until %v, want %v", b.until, now.Add(1*time.Second))
+	}
+
+	// Success drops the whole record — no half-state can survive.
+	l.RecordSuccess(who)
+	l.mu.Lock()
+	_, present := l.accounts[key]
+	l.mu.Unlock()
+	if present {
+		t.Fatal("success left a record behind")
+	}
+}
+
+// TestEvictionForgivesWhenEveryAccountIsLive checks the fallback path: when the
+// bound is hit and no window has elapsed, eviction forgets one live account to
+// admit a new one rather than locking the map.
+func TestEvictionForgivesWhenEveryAccountIsLive(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	l, err := New(Config{BudgetMiB: DefaultBudgetMiB, ArgonMemoryKiB: 64 * 1024, Now: fixedClock(&now)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Fill the map with accounts that all hold a live backoff. The clock never
+	// advances, so the stale sweep frees nothing and the fallback must run.
+	for i := range MaxTrackedSubjects {
+		who := fmt.Sprintf("subject-%d", i)
+		for range FailuresBeforeBackoff + 1 {
+			l.RecordFailure(who)
+		}
+	}
+	l.mu.Lock()
+	filled := len(l.accounts)
+	l.mu.Unlock()
+	if filled != MaxTrackedSubjects {
+		t.Fatalf("filled %d accounts, want %d", filled, MaxTrackedSubjects)
+	}
+
+	const newcomer = "newcomer"
+	l.RecordFailure(newcomer)
+
+	l.mu.Lock()
+	after := len(l.accounts)
+	_, present := l.accounts[bucketKey(newcomer)]
+	l.mu.Unlock()
+	if after > MaxTrackedSubjects {
+		t.Errorf("tracking %d accounts, bound is %d", after, MaxTrackedSubjects)
+	}
+	if !present {
+		t.Error("the new account was not admitted after eviction")
 	}
 }
