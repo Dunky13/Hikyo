@@ -152,6 +152,21 @@ describe('probeWorkspace response validation', () => {
     expect(workspaceBearer(bearer.origin)).toBeUndefined();
   });
 
+  it('treats a 403 as alive, never dropping a valid session on a spurious forbidden', async () => {
+    // /me/sessions is self-scoped and cannot legitimately 403 a live session; a
+    // 403 here is anomalous (a proxy/WAF), not death (that is 401) and not
+    // unreachability. Two of them in a row must NOT kill the workspace — that
+    // would be a false reconnect the human never earned.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve(new Response(null, { status: 403 }))),
+    );
+    rememberWorkspace(bearer);
+    expect(await probeWorkspace(bearer)).toBe(true);
+    expect(await probeWorkspace(bearer)).toBe(true);
+    expect(workspaceBearer(bearer.origin)?.session).toBe('ses_1');
+  });
+
   it('accepts a well-formed session listing', async () => {
     vi.stubGlobal(
       'fetch',

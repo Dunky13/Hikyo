@@ -175,12 +175,20 @@ export async function probeWorkspace(bearer: WorkspaceBearer): Promise<boolean> 
     return strike(bearer);
   }
   // Only a 401 is the session dying (revoked, expired, origin-binding mismatch —
-  // all ErrUnauthenticated). A 403 on this self-scoped endpoint would be
-  // abnormal rather than a kill signal, so it falls through to a strike below
-  // like any other response that is not this endpoint answering cleanly.
+  // all ErrUnauthenticated).
   if (response.status === 401) {
     dropWorkspaceValue(bearer.origin, bearer.value);
     return false;
+  }
+  // A 403 is NOT death and NOT unreachability — it is a "forbidden" from a
+  // remote that is up and did not 401 the session. This endpoint is self-scoped
+  // and cannot legitimately 403 a live session, so a 403 here is anomalous (a
+  // proxy, a WAF); treating it as a strike would let two spurious ones kill a
+  // valid workspace. Matches the transport's own 403 handling — keep the
+  // session — so a forbidden never becomes a false reconnect. It does not clear
+  // the strike count either: it is not the clean answer that proves liveness.
+  if (response.status === 403) {
+    return true;
   }
   // ONLY A WELL-FORMED SUCCESS CLEARS THE STRIKE COUNT. Anything else is a
   // strike: a 404 or a 500 is not this endpoint answering, and a 200 carrying
