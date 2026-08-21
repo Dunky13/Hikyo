@@ -91,6 +91,10 @@ type Values struct {
 	// ride any findings on the response. Nil disables the scan (pre-#74 tests); a
 	// booted server always wires it.
 	Scan *scanning.Ruleset
+	// Budget applies the §179 fail-closed default (60/min·principal, 8/org) to
+	// the two bulk value fan-outs with no named category — Import and Copy. Nil
+	// disables it.
+	Budget *Budget
 }
 
 // ValueCell is one `(key, environment)` cell as reported to a reader.
@@ -1083,8 +1087,17 @@ func (s *Values) Copy(ctx context.Context, actor Actor, scope domain.Scope, req 
 	if err != nil {
 		return CopyResult{}, err
 	}
+	// §179 fail-closed default: a value fan-out across environments/keys with no
+	// named category. Concurrency (8/org) at entry, per-principal rate (60/min)
+	// in-tx.
+	release, err := s.Budget.acquire(budgetDefaultConc, budgetKeys{Org: scope.Org})
+	if err != nil {
+		return CopyResult{}, err
+	}
+	defer release()
 	var out CopyResult
 	var advanced []PublishedEnvironment
+	var rateCharged bool
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		out = CopyResult{}
 		advanced = nil
@@ -1098,6 +1111,10 @@ func (s *Values) Copy(ctx context.Context, actor Actor, scope domain.Scope, req 
 		// the units the two ceremonies enumerate.
 		hasConfig, secretKeyIDs, allKeyIDs, err := classifyCopyKeys(ctx, r, az, caller, sourceScope, req.KeyNames)
 		if err != nil {
+			return err
+		}
+		// Charged after the source read authorizes, once across the retry loop.
+		if err := s.Budget.chargeOnce(&rateCharged, budgetDefaultRate, budgetKeys{Principal: caller.Principal}); err != nil {
 			return err
 		}
 		// PREFLIGHT every destination — the copy formula and the protected-

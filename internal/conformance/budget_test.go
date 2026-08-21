@@ -3,9 +3,12 @@ package conformance
 import (
 	"errors"
 	"fmt"
+	"sort"
+	"strings"
 	"testing"
 
 	"github.com/Hikyo-Org/hikyo/internal/admission"
+	"github.com/Hikyo-Org/hikyo/internal/authz"
 	"github.com/Hikyo-Org/hikyo/internal/schema"
 	"github.com/Hikyo-Org/hikyo/internal/service"
 	"github.com/Hikyo-Org/hikyo/internal/store"
@@ -88,5 +91,25 @@ func scenarioSchemaRevisionNoopDoesNotCharge(t *testing.T, db *store.DB) {
 		if _, err := keys.UpdateMetadata(t.Context(), actor, scope, created.ID, service.KeyMetadataUpdate{}, nil); err != nil {
 			t.Fatalf("no-op metadata update %d charged the schema-revision budget: %v", i+1, err)
 		}
+	}
+}
+
+// TestBudgetClassificationIsTotal is the §179 "no path is unbudgeted by
+// omission" guarantee, enforced at build time: every registered authorization
+// operation must be classified in the budget totality map (named category,
+// fail-closed default, or exempt-with-reason). A new operation added without a
+// deliberate budget decision fails HERE — the same shape as the metrics-label
+// grep and the keyword-allowlist diff.
+func TestBudgetClassificationIsTotal(t *testing.T) {
+	var missing []string
+	for op := range (authz.RegistryFacts{}).Operations() {
+		if _, known := service.BudgetClassOf(op); !known {
+			missing = append(missing, string(op))
+		}
+	}
+	if len(missing) > 0 {
+		sort.Strings(missing)
+		t.Fatalf("%d operation(s) not classified in the §179 budget totality map (classify in internal/service/budget_classification.go):\n%s",
+			len(missing), strings.Join(missing, "\n"))
 	}
 }

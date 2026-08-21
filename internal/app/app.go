@@ -313,7 +313,7 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 		return nil, fmt.Errorf("boot: outbound directory client: %w", err)
 	}
 	retentionSvc := &service.Retention{DB: db}
-	reencryptSvc := &service.Reencrypt{DB: db, Keyring: kr}
+	reencryptSvc := &service.Reencrypt{DB: db, Keyring: kr, Budget: budget}
 	adapterRuntime := store.NewAdapterRuntime(db, func(ctx context.Context, job adapter.Job, _ adapter.Effect) error {
 		return tx.Read(ctx, db, func(ctx context.Context, _ store.ReadRepos, az *authz.TxAuthorizer) error {
 			_, err := az.Authorize(ctx, authz.Identity{Principal: domain.PrincipalID(job.AuthorityPrincipal), Class: domain.ClassHuman}, authz.OpAdapterPush, domain.Scope{
@@ -352,7 +352,7 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 		// One Advisory across the value and revision surfaces: staging and
 		// publishing both announce on the same channel, and two channels would
 		// mean a subscriber saw half the events.
-		Values:    &service.Values{DB: db, Keyring: kr, Auth: authSvc, Advisory: advisory, Scan: ruleset},
+		Values:    &service.Values{DB: db, Keyring: kr, Auth: authSvc, Advisory: advisory, Scan: ruleset, Budget: budget},
 		Revisions: &service.Revisions{DB: db, Keyring: kr, Auth: authSvc, Advisory: advisory, Budget: budget},
 		Rotation:  &service.Rotation{DB: db, Keyring: kr, RootKey: rootKeySource{cfg: cfg, log: log}},
 		Reencrypt: reencryptSvc,

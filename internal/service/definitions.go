@@ -158,14 +158,26 @@ type DefinitionsSettings struct {
 // the server-owned ids and the base revision, producing a template that applies
 // cleanly to a fresh instance.
 func (s *Definitions) Export(ctx context.Context, actor Actor, scope domain.Scope, portable bool) ([]byte, error) {
+	// §179 fail-closed default: a whole-project bundle materialization with no
+	// named category. Concurrency (8/org) at entry, per-principal rate (60/min)
+	// in-tx once the principal resolves — the publish split.
+	release, err := s.Budget.acquire(budgetDefaultConc, budgetKeys{Org: scope.Org})
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	var out []byte
-	err := tx.Read(ctx, s.DB, func(ctx context.Context, r store.ReadRepos, az *authz.TxAuthorizer) error {
+	var rateCharged bool
+	err = tx.Read(ctx, s.DB, func(ctx context.Context, r store.ReadRepos, az *authz.TxAuthorizer) error {
 		caller, err := actor.resolve(ctx, az, s.now())
 		if err != nil {
 			return err
 		}
 		p, err := az.Authorize(ctx, caller, authz.OpDefinitionsExport, scope)
 		if err != nil {
+			return err
+		}
+		if err := s.Budget.chargeOnce(&rateCharged, budgetDefaultRate, budgetKeys{Principal: caller.Principal}); err != nil {
 			return err
 		}
 		cur, err := buildCurrentState(ctx, r.Catalogue(), r.Environments(), p)

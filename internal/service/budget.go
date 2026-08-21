@@ -1,14 +1,50 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"sync"
 	"time"
 
 	"github.com/Hikyo-Org/hikyo/internal/admission"
+	"github.com/Hikyo-Org/hikyo/internal/authz"
 	"github.com/Hikyo-Org/hikyo/internal/domain"
+	"github.com/Hikyo-Org/hikyo/internal/store"
+	"github.com/Hikyo-Org/hikyo/internal/store/tx"
 )
+
+// chargeDefaultAtEntry acquires the §179 fail-closed default (rate + concurrency)
+// once at the entry of a heavy operation whose work spans MANY transactions and
+// therefore has no single in-tx charge point (reencrypt). It resolves and
+// authorizes the caller in one lightweight read transaction purely to key the
+// per-principal rate; the operation re-authorizes in each of its own
+// transactions, so this is not a cross-transaction authorization cache — the
+// resolved principal is used only as a budget key, and the resolve's own
+// authorization refuses an ineligible caller before any slot is taken (they
+// cannot burn the org's budget by guessing its id). The returned release frees
+// the concurrency slot; hold it for the whole operation.
+func chargeDefaultAtEntry(ctx context.Context, db *store.DB, budget *Budget, actor Actor, op authz.Operation, scope domain.Scope, now func() time.Time) (func(), error) {
+	if budget == nil {
+		return noopBudgetRelease, nil
+	}
+	var principal domain.PrincipalID
+	err := tx.Read(ctx, db, func(ctx context.Context, _ store.ReadRepos, az *authz.TxAuthorizer) error {
+		caller, err := actor.resolve(ctx, az, now())
+		if err != nil {
+			return err
+		}
+		if _, err := az.Authorize(ctx, caller, op, scope); err != nil {
+			return err
+		}
+		principal = caller.Principal
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return budget.acquire(budgetDefault, budgetKeys{Principal: principal, Org: scope.Org})
+}
 
 // Budget is the ops-spec § 179 expensive-path availability layer plus the § 151
 // (§ 8) schema-revision rate limit: a per-scope windowed rate counter and a
@@ -191,21 +227,36 @@ var (
 		name:  "schema-revision",
 		rates: []budgetRateRule{{dimProject, BudgetSchemaRevisionPerHour, time.Hour}},
 	}
+	// budgetDefault is the §179 fail-closed default: 60/min per principal, 8
+	// concurrent per org, applied to expensive operations that have no named
+	// category above. There is no once-per-operation post-authorization
+	// chokepoint (Authorize runs per-env/per-page), so it is charged at the
+	// owning service method — concurrency at entry (budgetDefaultConc, keyed on
+	// the org in scope) and the per-principal rate in-tx (budgetDefaultRate, once
+	// the principal is resolved), the same split publish uses. Which operations
+	// take it, which take a named category, and which are exempt is the totality
+	// map in budget_classification.go; the conformance totality test fails the
+	// build if any registered operation is left unclassified. THAT test is "no
+	// path is unbudgeted by omission": a new operation cannot be added without a
+	// deliberate budget decision.
+	budgetDefaultConc = budgetCategory{
+		name:  "default",
+		concs: []budgetConcRule{{dimOrg, BudgetDefaultOrgConcurrency}},
+	}
+	budgetDefaultRate = budgetCategory{
+		name:  "default",
+		rates: []budgetRateRule{{dimPrincipal, BudgetDefaultRatePerMin, time.Minute}},
+	}
+	// budgetDefault is the combined rate+concurrency default, for a heavy
+	// operation whose work spans multiple transactions and has no single in-tx
+	// charge point (reencrypt): it is acquired once at entry after a lightweight
+	// resolve. It shares the "default" buckets with the split halves above.
+	budgetDefault = budgetCategory{
+		name:  "default",
+		rates: []budgetRateRule{{dimPrincipal, BudgetDefaultRatePerMin, time.Minute}},
+		concs: []budgetConcRule{{dimOrg, BudgetDefaultOrgConcurrency}},
+	}
 )
-
-// The §179 fail-closed default (BudgetDefaultRatePerMin / BudgetDefaultOrgConcurrency,
-// 60/min per principal, 8 concurrent per org) is NOT materialised as a live
-// category, because there is no unnamed expensive category to apply it to today:
-// every expensive path above has a named, wired category. Applying it "by
-// omission" to arbitrary future endpoints is not something this layer can do on
-// its own — a per-request budget needs the post-authorization principal that
-// only exists inside the service transaction, and deciding which endpoints are
-// expensive-enough to budget (vs ordinary reads that must NOT be capped at
-// 60/min) is a per-operation classification, its own concern. The default's
-// values are kept as exported constants (spec-pinned in the conformance
-// registry) so that a future category adopts them without re-deriving; wiring an
-// operation→category dispatch that charges the default for unclassified
-// expensive operations is a tracked follow-up, not part of #186.
 
 // budgetKeys carries every scope value a category might key on. A caller
 // supplies the ones its category needs; unused fields stay zero.

@@ -122,6 +122,7 @@ var Registry = []Bound{
 	// §20 audit ops.
 	{"Audit free text", "ops-spec §20", "truncation to audit.FreeTextBound", "audit audit_test", StatusSanitize},
 	{"Audit exports 2/org · 6/instance", "ops-spec §20 (§179)", "admission.ErrOverloaded (uniform 429) via service.Budget", "service.TestAuditExportChargesExpensiveBudget + service.TestBudgetInstanceConcurrencyIsSeparateFromOrg", StatusEnforced},
+	{"Expensive-path fail-closed default 60/min·principal · 8/org", "ops-spec §10 (§179)", "budgetDefault charged at each default-expensive method; no path unbudgeted by omission (build-time totality)", "conformance TestBudgetClassificationIsTotal (every authz op classified) + service.TestBudgetRateWindowSlides (default mechanism)", StatusEnforced},
 
 	// SAML / SCIM wire bounds.
 	{"SAML document bytes / depth / tokens", "ops-catalogue §SAML", "samlsp.ErrDocument* ", "samlsp xml_test", StatusEnforced},

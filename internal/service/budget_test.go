@@ -270,6 +270,50 @@ func TestBudgetChargeOnceIsRetryIdempotent(t *testing.T) {
 	}
 }
 
+// TestBudgetDefaultEnforces proves the §179 fail-closed default category: the
+// per-principal rate (60/min) and per-org concurrency (8) that a
+// default-expensive operation charges. Its three variants (combined, conc-only,
+// rate-only) share the one "default" bucket set, so the split used at call sites
+// composes with the combined one reencrypt uses.
+func TestBudgetDefaultEnforces(t *testing.T) {
+	c := &clock{t: time.Unix(1_700_000_000, 0)}
+	b := newTestBudget(c)
+
+	// Concurrency: 8 per org, via the conc-only variant. A ninth is refused.
+	var rels []func()
+	for i := range BudgetDefaultOrgConcurrency {
+		rel, err := b.acquire(budgetDefaultConc, budgetKeys{Org: "org1"})
+		if err != nil {
+			t.Fatalf("default conc %d refused early: %v", i+1, err)
+		}
+		rels = append(rels, rel)
+	}
+	if _, err := b.acquire(budgetDefaultConc, budgetKeys{Org: "org1"}); !errors.Is(err, admission.ErrOverloaded) {
+		t.Fatalf("9th concurrent default op = %v, want ErrOverloaded", err)
+	}
+	for _, rel := range rels {
+		rel()
+	}
+
+	// Rate: 60/min per principal, via the rate-only variant. The 61st is refused,
+	// and the combined variant reencrypt uses draws from the SAME bucket.
+	var charged bool
+	for i := 1; i < BudgetDefaultRatePerMin; i++ {
+		var one bool
+		if err := b.chargeOnce(&one, budgetDefaultRate, budgetKeys{Principal: "p1"}); err != nil {
+			t.Fatalf("default rate charge %d refused early: %v", i, err)
+		}
+	}
+	// One combined acquire (reencrypt's path) fills the 60th slot for the same
+	// principal; the next is refused whichever variant asks.
+	if _, err := b.acquire(budgetDefault, budgetKeys{Principal: "p1", Org: "org2"}); err != nil {
+		t.Fatalf("combined default acquire (60th) refused: %v", err)
+	}
+	if err := b.chargeOnce(&charged, budgetDefaultRate, budgetKeys{Principal: "p1"}); !errors.Is(err, admission.ErrOverloaded) {
+		t.Fatalf("61st default rate = %v, want ErrOverloaded across shared bucket", err)
+	}
+}
+
 func TestBudgetNilIsNoop(t *testing.T) {
 	var b *Budget
 	rel, err := b.acquire(budgetExport, principalKeys("p", "o", "pr"))

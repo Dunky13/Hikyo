@@ -31,7 +31,11 @@ import (
 type Reencrypt struct {
 	DB      *store.DB
 	Keyring *crypto.Keyring
-	Now     func() time.Time
+	// Budget applies the §179 fail-closed default (60/min·principal, 8/org) to
+	// the reencrypt trigger — a row-proportional crypto walk with no named
+	// category. Nil disables it.
+	Budget *Budget
+	Now    func() time.Time
 	// ChunkSize / ChunkPause override the #187 defaults; zero uses them. Tests
 	// set a tiny chunk and no pause.
 	ChunkSize  int
@@ -146,6 +150,15 @@ func (s *Reencrypt) ReencryptProject(ctx context.Context, actor Actor, orgID, pr
 	active := sealer.ActiveVersion()
 	scope := domain.Scope{Org: domain.OrgID(orgID), Project: domain.ProjectID(projectID)}
 
+	// §179 fail-closed default: a crypto walk proportional to every stored row,
+	// with no named category. Acquired once at entry and held for the whole
+	// multi-transaction walk.
+	release, err := chargeDefaultAtEntry(ctx, s.DB, s.Budget, actor, authz.OpReencryptProject, scope, s.now)
+	if err != nil {
+		return ReencryptResult{}, err
+	}
+	defer release()
+
 	// Adapter credential ciphertext (live row + any pending route-move credential)
 	// binds the ADAPTER's id (row.owner) in its AAD, not the row id.
 	adapterAAD := func(row projectFieldRow) crypto.AAD {
@@ -257,6 +270,14 @@ func (s *Reencrypt) ReencryptInstance(ctx context.Context, actor Actor) (Reencry
 	if s.Keyring == nil {
 		return ReencryptResult{}, errors.New("service: reencrypt requires a keyring")
 	}
+	// §179 fail-closed default: an instance-wide crypto walk with no named
+	// category (empty scope → the org bound keys on the instance bucket). Held
+	// for the whole multi-transaction walk.
+	release, err := chargeDefaultAtEntry(ctx, s.DB, s.Budget, actor, authz.OpReencryptInstance, domain.Scope{}, s.now)
+	if err != nil {
+		return ReencryptResult{}, err
+	}
+	defer release()
 	sealer := s.Keyring.ForInstance()
 	active := sealer.Version()
 	moved := 0
