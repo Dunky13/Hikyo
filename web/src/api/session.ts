@@ -1,4 +1,9 @@
-import { listMyOrgs, localLogin, logout, whoami } from '@hikyo/client';
+import {
+  listMyOrgsOp,
+  localLoginOp,
+  logoutOp,
+  whoamiOp,
+} from '@hikyo/operations';
 import { zLoginResult, zMyOrgList, zWhoAmI } from '@hikyo/zod';
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import type { z } from 'zod';
@@ -49,7 +54,7 @@ export function useSession(): UseQueryResult<WhoAmI | null> {
     queryKey: sessionKey,
     queryFn: async () => {
       try {
-        return await parsed(whoami(), zWhoAmI);
+        return await parsed(whoamiOp, {});
       } catch (err) {
         if (err instanceof ApiError && err.status === 401) {
           return null;
@@ -79,7 +84,7 @@ export function useOrgs(enabled: boolean): UseQueryResult<MyOrgList> {
   const transport = useTransport();
   return useQuery({
     queryKey: orgsKey,
-    queryFn: () => parsed(listMyOrgs({ ...transport }), zMyOrgList),
+    queryFn: () => parsed(listMyOrgsOp, { ...transport }),
     enabled,
     retry: false,
   });
@@ -101,12 +106,9 @@ export function useLogin() {
       // shape the document does not describe must fail here, naming the
       // member, rather than being ignored because the caller happened not to
       // need it.
-      const result = await parsed(
-        localLogin({
+      const result = await parsed(localLoginOp, {
           body: { username: input.username, password: input.password, artifact: 'browser' },
-        }),
-        zLoginResult,
-      );
+        });
       // B2 restated on the client: a browser artifact must never carry its
       // token in a script-readable body. If one ever does, that is a server
       // regression and it stops here rather than being quietly stored.
@@ -122,7 +124,7 @@ export function useLogin() {
 export function useLogout() {
   const queries = useQueryClient();
   return useMutation({
-    mutationFn: () => ok(logout()),
+    mutationFn: () => ok(logoutOp, {}),
     // The server clears both cookies; the client discards every cached
     // answer, because every one of them was scoped to the session that just
     // ended. `resetQueries`, not `clear`: clearing empties the cache but

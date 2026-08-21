@@ -1,5 +1,8 @@
-import { getCredentialPolicy, getRetentionHealth, setCredentialPolicy } from '@hikyo/client';
-import { zCredentialPolicy, zCredentialPolicyResult, zRetentionHealth } from '@hikyo/zod';
+import {
+  getCredentialPolicyOp,
+  getRetentionHealthOp,
+  setCredentialPolicyOp,
+} from '@hikyo/operations';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useEffect, useId, useState } from 'react';
 import { generatePath, Link } from 'react-router';
@@ -31,23 +34,33 @@ import { useFeedback, useModalDialog } from './useModalDialog.ts';
 const credentialPolicyKey = ['instance-credential-policy'] as const;
 const instanceRetentionKey = ['instance-retention-health'] as const;
 function useCredentialPolicy() {
-  return useQuery({ queryKey: credentialPolicyKey, queryFn: () => parsed(getCredentialPolicy(), zCredentialPolicy), retry: false });
+  return useQuery({
+    queryKey: credentialPolicyKey,
+    queryFn: () => parsed(getCredentialPolicyOp, {}),
+    retry: false,
+  });
 }
 
 function useSetCredentialPolicy() {
   return useMutation({
     mutationFn: (input: { maxFiniteLifetimeSeconds: number; allowIndefinite: boolean; maxLiveCredentials: number; confirm: boolean }) =>
-      parsed(setCredentialPolicy({ body: {
-        max_finite_lifetime_seconds: input.maxFiniteLifetimeSeconds,
-        allow_indefinite: input.allowIndefinite,
-        max_live_credentials: input.maxLiveCredentials,
-        ...(input.confirm ? { confirm: true } : {}),
-      } }), zCredentialPolicyResult),
+      parsed(setCredentialPolicyOp, {
+        body: {
+          max_finite_lifetime_seconds: input.maxFiniteLifetimeSeconds,
+          allow_indefinite: input.allowIndefinite,
+          max_live_credentials: input.maxLiveCredentials,
+          ...(input.confirm ? { confirm: true } : {}),
+        },
+      }),
   });
 }
 
 function useInstanceRetentionHealth() {
-  return useQuery({ queryKey: instanceRetentionKey, queryFn: () => parsed(getRetentionHealth(), zRetentionHealth), retry: false });
+  return useQuery({
+    queryKey: instanceRetentionKey,
+    queryFn: () => parsed(getRetentionHealthOp, {}),
+    retry: false,
+  });
 }
 
 const secondFactor = (error: unknown) => error instanceof ApiError && error.status === 403;

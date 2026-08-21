@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
-import { exportValues } from '@hikyo/client';
+import { exportValuesOp } from '@hikyo/operations';
 import { zExportedValues } from '@hikyo/zod';
 import { useMutation } from '@tanstack/react-query';
 import { generatePath, Link, useNavigate, useSearchParams } from 'react-router';
@@ -159,14 +159,13 @@ export function HistoryDrawer({
   const releasePin = useReleaseRevisionPin(env);
   const publish = usePublishMatrix(refData);
   const comparePin = useMutation({
-    mutationFn: (input: { readonly environmentId: string; readonly revision: bigint }) =>
-      parsed(
-        exportValues({
+    mutationFn: async (input: { readonly environmentId: string; readonly revision: bigint }) =>
+      zPinComparisonValues.parse(
+        await parsed(exportValuesOp, {
           path: { ...refData, environment: input.environmentId },
           body: { revision: revisionNumber(input.revision), reveal: false },
           ...transport,
         }),
-        zPinComparisonValues,
       ),
   });
   const guard = useProtectedPublishCeremony(refData);

@@ -1,21 +1,20 @@
 import {
-  addRemote,
-  addWorkspaceOrigin,
-  listMySessions,
-  listRemotes,
-  listWorkspaceOrigins,
-  removeRemote,
-  removeWorkspaceOrigin,
-  renameRemote,
-  revokeMySession,
-} from '@hikyo/client';
+  addRemoteOp,
+  addWorkspaceOriginOp,
+  listMySessionsOp,
+  listRemotesOp,
+  listWorkspaceOriginsOp,
+  removeRemoteOp,
+  removeWorkspaceOriginOp,
+  renameRemoteOp,
+  revokeMySessionOp,
+} from '@hikyo/operations';
 import {
   zRemote,
   zRemoteList,
   zSessionList,
   zWorkspaceOrigin,
   zWorkspaceOriginList,
-  zWorkspaceOriginRemoved,
 } from '@hikyo/zod';
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import type { z } from 'zod';
@@ -71,7 +70,7 @@ const DIRECTORY_POLL_MS = 20_000;
 export function useRemotes(): UseQueryResult<RemoteList> {
   return useQuery({
     queryKey: remotesKey,
-    queryFn: () => parsed(listRemotes(), zRemoteList),
+    queryFn: () => parsed(listRemotesOp, {}),
     refetchInterval: DIRECTORY_POLL_MS,
     retry: false,
   });
@@ -81,8 +80,7 @@ export function useAddRemote() {
   const queries = useQueryClient();
   return useMutation({
     mutationFn: (input: { name: string; url: string; spkiPin: string; credential: string }) =>
-      parsed(
-        addRemote({
+      parsed(addRemoteOp, {
           body: {
             name: input.name,
             url: input.url,
@@ -90,8 +88,6 @@ export function useAddRemote() {
             credential: input.credential,
           },
         }),
-        zRemote,
-      ),
     onSuccess: () => queries.invalidateQueries({ queryKey: remotesKey }),
   });
 }
@@ -100,10 +96,7 @@ export function useRenameRemote() {
   const queries = useQueryClient();
   return useMutation({
     mutationFn: (input: { remote: string; name: string }) =>
-      parsed(
-        renameRemote({ path: { remote: input.remote }, body: { name: input.name } }),
-        zRemote,
-      ),
+      parsed(renameRemoteOp, { path: { remote: input.remote }, body: { name: input.name } }),
     onSuccess: () => queries.invalidateQueries({ queryKey: remotesKey }),
   });
 }
@@ -111,7 +104,7 @@ export function useRenameRemote() {
 export function useRemoveRemote() {
   const queries = useQueryClient();
   return useMutation({
-    mutationFn: (remote: string) => ok(removeRemote({ path: { remote } })),
+    mutationFn: (remote: string) => ok(removeRemoteOp, { path: { remote } }),
     onSuccess: () => queries.invalidateQueries({ queryKey: remotesKey }),
   });
 }
@@ -120,7 +113,7 @@ export function useRemoveRemote() {
 export function useWorkspaceOrigins(): UseQueryResult<z.infer<typeof zWorkspaceOriginList>> {
   return useQuery({
     queryKey: originsKey,
-    queryFn: () => parsed(listWorkspaceOrigins(), zWorkspaceOriginList),
+    queryFn: () => parsed(listWorkspaceOriginsOp, {}),
     retry: false,
   });
 }
@@ -129,7 +122,7 @@ export function useAddWorkspaceOrigin() {
   const queries = useQueryClient();
   return useMutation({
     mutationFn: (origin: string) =>
-      parsed(addWorkspaceOrigin({ body: { origin } }), zWorkspaceOrigin),
+      parsed(addWorkspaceOriginOp, { body: { origin } }),
     onSuccess: () => queries.invalidateQueries({ queryKey: originsKey }),
   });
 }
@@ -144,7 +137,7 @@ export function useRemoveWorkspaceOrigin() {
   const queries = useQueryClient();
   return useMutation({
     mutationFn: (origin: string) =>
-      parsed(removeWorkspaceOrigin({ body: { origin } }), zWorkspaceOriginRemoved),
+      parsed(removeWorkspaceOriginOp, { body: { origin } }),
     onSuccess: () => {
       void queries.invalidateQueries({ queryKey: originsKey });
       void queries.invalidateQueries({ queryKey: sessionsKey });
@@ -156,7 +149,7 @@ export function useRemoveWorkspaceOrigin() {
 export function useSessions(): UseQueryResult<SessionList> {
   return useQuery({
     queryKey: sessionsKey,
-    queryFn: () => parsed(listMySessions(), zSessionList),
+    queryFn: () => parsed(listMySessionsOp, {}),
     retry: false,
   });
 }
@@ -164,7 +157,7 @@ export function useSessions(): UseQueryResult<SessionList> {
 export function useRevokeSession() {
   const queries = useQueryClient();
   return useMutation({
-    mutationFn: (session: string) => ok(revokeMySession({ path: { session } })),
+    mutationFn: (session: string) => ok(revokeMySessionOp, { path: { session } }),
     onSuccess: () => queries.invalidateQueries({ queryKey: sessionsKey }),
   });
 }

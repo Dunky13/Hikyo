@@ -1,5 +1,4 @@
-import { approveWorkspaceHandoff, showWorkspaceHandoff } from '@hikyo/client';
-import { zWorkspaceHandoffApproved, zWorkspaceHandoffTransaction } from '@hikyo/zod';
+import { approveWorkspaceHandoffOp, showWorkspaceHandoffOp } from '@hikyo/operations';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useState, type FormEvent } from 'react';
 
@@ -60,17 +59,14 @@ export function WorkspaceApprove() {
   // Gated on a session, because the read requires one (a step-up always has it).
   const transaction = useQuery({
     queryKey: ['workspace-handoff', state],
-    queryFn: () => parsed(showWorkspaceHandoff({ path: { state } }), zWorkspaceHandoffTransaction),
+    queryFn: () => parsed(showWorkspaceHandoffOp, { path: { state } }),
     enabled: isStepUp && state !== '' && session.data != null,
     retry: false,
   });
 
   const approve = useMutation({
     mutationFn: async () => {
-      const result = await parsed(
-        approveWorkspaceHandoff({ body: { state } }),
-        zWorkspaceHandoffApproved,
-      );
+      const result = await parsed(approveWorkspaceHandoffOp, { body: { state } });
       // The code goes to the pre-registered callback and nowhere else. Building
       // the URL from the SERVER's `redirect_uri` is what makes that true.
       const target = new URL(result.redirect_uri);

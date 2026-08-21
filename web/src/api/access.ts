@@ -1,20 +1,20 @@
 import {
-  applyEnvTemplate,
-  applyInstanceTemplate,
-  applyOrgTemplate,
-  applyProjectTemplate,
-  createEnvGrant,
-  createInstanceGrant,
-  createOrgGrant,
-  createProjectGrant,
-  listInstanceGrants,
-  listOrgGrants,
-  revokeEnvGrant,
-  revokeInstanceGrant,
-  revokeOrgGrant,
-  revokeProjectGrant,
-} from '@hikyo/client';
-import { zGrantList, zGrantResult, zGrantResultList } from '@hikyo/zod';
+  applyEnvTemplateOp,
+  applyInstanceTemplateOp,
+  applyOrgTemplateOp,
+  applyProjectTemplateOp,
+  createEnvGrantOp,
+  createInstanceGrantOp,
+  createOrgGrantOp,
+  createProjectGrantOp,
+  listInstanceGrantsOp,
+  listOrgGrantsOp,
+  revokeEnvGrantOp,
+  revokeInstanceGrantOp,
+  revokeOrgGrantOp,
+  revokeProjectGrantOp,
+} from '@hikyo/operations';
+import { zGrantList } from '@hikyo/zod';
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import type { z } from 'zod';
 
@@ -566,7 +566,7 @@ const instanceGrantsKey = ['instance-grants'] as const;
 export function useOrgGrants(org: string): UseQueryResult<GrantList> {
   return useQuery({
     queryKey: orgGrantsKey(org),
-    queryFn: () => parsed(listOrgGrants({ path: { org } }), zGrantList),
+    queryFn: () => parsed(listOrgGrantsOp, { path: { org } }),
     enabled: org !== '',
     retry: false,
   });
@@ -575,7 +575,7 @@ export function useOrgGrants(org: string): UseQueryResult<GrantList> {
 export function useInstanceGrants(): UseQueryResult<GrantList> {
   return useQuery({
     queryKey: instanceGrantsKey,
-    queryFn: () => parsed(listInstanceGrants(), zGrantList),
+    queryFn: () => parsed(listInstanceGrantsOp, {}),
     retry: false,
   });
 }
@@ -586,22 +586,16 @@ function createOne(scope: ScopeRef, input: GrantInput) {
   const body = { principal: input.principal, capability: input.capability };
   switch (scope.kind) {
     case 'instance':
-      return parsed(createInstanceGrant({ body }), zGrantResult);
+      return parsed(createInstanceGrantOp, { body });
     case 'environment':
-      return parsed(
-        createEnvGrant({
+      return parsed(createEnvGrantOp, {
           path: { org: scope.org, project: scope.project, environment: scope.environment },
           body,
-        }),
-        zGrantResult,
-      );
+        });
     case 'project':
-      return parsed(
-        createProjectGrant({ path: { org: scope.org, project: scope.project }, body }),
-        zGrantResult,
-      );
+      return parsed(createProjectGrantOp, { path: { org: scope.org, project: scope.project }, body });
     case 'org':
-      return parsed(createOrgGrant({ path: { org: scope.org }, body }), zGrantResult);
+      return parsed(createOrgGrantOp, { path: { org: scope.org }, body });
   }
 }
 
@@ -669,32 +663,23 @@ export function useApplyTemplate() {
       const body = { principal: input.principal, template: templateOf(input.template) };
       switch (input.scope.kind) {
         case 'instance':
-          return parsed(applyInstanceTemplate({ body }), zGrantResultList);
+          return parsed(applyInstanceTemplateOp, { body });
         case 'environment':
-          return parsed(
-            applyEnvTemplate({
+          return parsed(applyEnvTemplateOp, {
               path: {
                 org: input.scope.org,
                 project: input.scope.project,
                 environment: input.scope.environment,
               },
               body,
-            }),
-            zGrantResultList,
-          );
+            });
         case 'project':
-          return parsed(
-            applyProjectTemplate({
+          return parsed(applyProjectTemplateOp, {
               path: { org: input.scope.org, project: input.scope.project },
               body,
-            }),
-            zGrantResultList,
-          );
+            });
         case 'org':
-          return parsed(
-            applyOrgTemplate({ path: { org: input.scope.org }, body }),
-            zGrantResultList,
-          );
+          return parsed(applyOrgTemplateOp, { path: { org: input.scope.org }, body });
       }
     },
     onSettled: () => queries.invalidateQueries(),
@@ -728,18 +713,16 @@ export function useRevokeGrant() {
       const scope = scopeOf(input.grant);
       switch (scope.kind) {
         case 'environment':
-          return ok(
-            revokeEnvGrant({
+          return ok(revokeEnvGrantOp, {
               path: { org: scope.org, project: scope.project, environment: scope.environment },
               query,
-            }),
-          );
+            });
         case 'project':
-          return ok(revokeProjectGrant({ path: { org: scope.org, project: scope.project }, query }));
+          return ok(revokeProjectGrantOp, { path: { org: scope.org, project: scope.project }, query });
         case 'org':
-          return ok(revokeOrgGrant({ path: { org: scope.org }, query }));
+          return ok(revokeOrgGrantOp, { path: { org: scope.org }, query });
         case 'instance':
-          return ok(revokeInstanceGrant({ query }));
+          return ok(revokeInstanceGrantOp, { query });
       }
     },
     onSettled: () => queries.invalidateQueries(),
