@@ -101,3 +101,34 @@ func TestRetryLoopRespectsCancelledContext(t *testing.T) {
 		t.Fatalf("calls = %d, want 1 (no retry after cancellation)", calls)
 	}
 }
+
+func TestRetryResultDiscardsValueWhenCommitRetries(t *testing.T) {
+	calls := 0
+	got, err := retryResult(t.Context(), store.EnginePostgres, func(context.Context) (string, error) {
+		calls++
+		if calls == 1 {
+			// The transaction body produced this value, then commit reported a
+			// serialization failure for the complete attempt.
+			return "rolled-back-after-body", &pgconn.PgError{Code: "40001"}
+		}
+		return "committed", nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "committed" {
+		t.Fatalf("result = %q, want committed attempt value", got)
+	}
+}
+
+func TestRetryResultReturnsZeroWhenNoAttemptCommits(t *testing.T) {
+	got, err := retryResult(t.Context(), store.EnginePostgres, func(context.Context) (string, error) {
+		return "rolled-back-after-body", errors.New("commit failed")
+	})
+	if err == nil {
+		t.Fatal("commit failure must surface")
+	}
+	if got != "" {
+		t.Fatalf("result = %q, want zero value", got)
+	}
+}
