@@ -255,12 +255,29 @@ func insertGrantEvent(ctx context.Context, r store.Repos, p authz.Proof, actor d
 }
 
 // grantOne is the whole create path minus transport and audit writing: every
-// refusal rule, the dedup, the origin attach and the session kill. The
-// template path calls it once per expanded capability, so a template can never
-// take a shortcut past a rule an individual grant must satisfy.
+// refusal rule, the dedup, the origin attach and the session kill.
 func (s *Grants) grantOne(
 	ctx context.Context, az *authz.TxAuthorizer, caller authz.Identity,
 	spec GrantSpec, level domain.Level, template domain.Template,
+) (GrantResult, []grantEventInput, error) {
+	return s.grantOneWithInvalidation(ctx, az, caller, spec, level, template, true)
+}
+
+// grantOneDeferredInvalidation applies every individual-grant rule while
+// leaving session invalidation to the enclosing atomic operation. Templates
+// use it once per expanded capability, then invalidate once if any row was
+// created.
+func (s *Grants) grantOneDeferredInvalidation(
+	ctx context.Context, az *authz.TxAuthorizer, caller authz.Identity,
+	spec GrantSpec, level domain.Level, template domain.Template,
+) (GrantResult, []grantEventInput, error) {
+	return s.grantOneWithInvalidation(ctx, az, caller, spec, level, template, false)
+}
+
+func (s *Grants) grantOneWithInvalidation(
+	ctx context.Context, az *authz.TxAuthorizer, caller authz.Identity,
+	spec GrantSpec, level domain.Level, template domain.Template,
+	invalidateSessions bool,
 ) (GrantResult, []grantEventInput, error) {
 	var zero GrantResult
 	grantor := caller.Principal
@@ -301,9 +318,14 @@ func (s *Grants) grantOne(
 	}
 
 	origin := authz.Origin{Kind: domain.OriginManual, Subject: string(grantor)}
-	out, err := writeGrantRow(ctx, az, spec, origin, now)
+	out, err := writeGrantRowState(ctx, az, spec, origin, now)
 	if err != nil {
 		return zero, nil, err
+	}
+	if invalidateSessions && out.Outcome == GrantCreated() {
+		if err := invalidateGrantChange(ctx, az, spec.Target); err != nil {
+			return zero, nil, err
+		}
 	}
 
 	// F5: the lifecycle event must match the state transition. A repeat that
@@ -709,6 +731,19 @@ func checkMachineProject(ctx context.Context, az *authz.TxAuthorizer, target dom
 // them one body is not tidiness: the divergence is what let a swallowed read
 // error live in one caller and not the other.
 func writeGrantRow(ctx context.Context, az *authz.TxAuthorizer, spec GrantSpec, origin authz.Origin, now time.Time) (GrantResult, error) {
+	out, err := writeGrantRowState(ctx, az, spec, origin, now)
+	if err != nil {
+		return GrantResult{}, err
+	}
+	if out.Outcome == GrantCreated() {
+		if err := invalidateGrantChange(ctx, az, spec.Target); err != nil {
+			return GrantResult{}, err
+		}
+	}
+	return out, nil
+}
+
+func writeGrantRowState(ctx context.Context, az *authz.TxAuthorizer, spec GrantSpec, origin authz.Origin, now time.Time) (GrantResult, error) {
 	var out GrantResult
 	rows, err := az.GrantRowsForPrincipal(ctx, spec.Target)
 	if err != nil {
@@ -769,26 +804,19 @@ func writeGrantRow(ctx context.Context, az *authz.TxAuthorizer, spec GrantSpec, 
 		}
 	}
 
-	// Every EFFECTIVE authority change kills the grantee's sessions in the
-	// same transaction (human-auth ADR: grant addition/widening/revocation
-	// each invalidate sessions).
-	//
-	// A new row is such a change: the capability becomes held. A second
-	// origin joining a row that ALREADY holds the capability is not — the
-	// grantee's authority is identical before and after, so killing their
-	// sessions would be a denial of service triggered by somebody else's
-	// bookkeeping. The trail still records it as `grant.modified`, which is
-	// what it is. (Symmetric with revoke, where the advance is gated on the
-	// row actually dying.)
-	if out.Outcome == GrantCreated() {
-		if err := az.AdvanceGeneration(ctx, spec.Target); err != nil {
-			return GrantResult{}, err
-		}
-		if err := az.RevokeAllSessionsFor(ctx, spec.Target); err != nil {
-			return GrantResult{}, err
-		}
-	}
 	return out, nil
+}
+
+// Every EFFECTIVE authority change kills the grantee's sessions in the same
+// transaction (human-auth ADR: grant addition/widening/revocation each
+// invalidate sessions). A template is one authority change, so it batches the
+// generation advance after all its new rows instead of repeating it per row.
+// Origin-only changes do not call this: held authority is unchanged.
+func invalidateGrantChange(ctx context.Context, az *authz.TxAuthorizer, target domain.PrincipalID) error {
+	if err := az.AdvanceGeneration(ctx, target); err != nil {
+		return err
+	}
+	return az.RevokeAllSessionsFor(ctx, target)
 }
 
 // Revoke releases the calling surface's origins from one grant, and deletes
@@ -1080,7 +1108,7 @@ func (s *Grants) applyTemplate(
 	created, joined, unchanged := 0, 0, 0
 	names := make([]string, 0, len(caps))
 	for _, capability := range caps {
-		res, evs, err := s.grantOne(ctx, az, caller, GrantSpec{
+		res, evs, err := s.grantOneDeferredInvalidation(ctx, az, caller, GrantSpec{
 			Target: target, Capability: capability, Scope: scope,
 		}, level, template)
 		if err != nil {
@@ -1098,6 +1126,11 @@ func (s *Grants) applyTemplate(
 			unchanged++
 		default:
 			return nil, fmt.Errorf("invalid grant outcome %q", res.Outcome)
+		}
+	}
+	if created > 0 {
+		if err := invalidateGrantChange(ctx, az, target); err != nil {
+			return nil, err
 		}
 	}
 

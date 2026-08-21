@@ -176,7 +176,12 @@ func (s *Orgs) Create(ctx context.Context, actor Actor, name string, active bool
 		Metadata:  metadata,
 		CreatedAt: store.CanonTime(now),
 	}
-	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+	// Session invalidation updates the creator's shared generation row. Admit
+	// org creates before postgres takes a SERIALIZABLE snapshot so concurrent
+	// creates do not spend their bounded retries waiting on stale snapshots.
+	// This is a low-rate control-plane operation; sqlite already admits one
+	// writer at a time through BEGIN IMMEDIATE.
+	err = tx.WriteSerialized(ctx, s.DB, "hikyo:org-create", func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		caller, err := actor.resolve(ctx, az, now)
 		if err != nil {
 			return err
