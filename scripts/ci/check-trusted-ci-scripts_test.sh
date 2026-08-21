@@ -30,11 +30,22 @@ require_line "$workflow" "git show \"\$BASE_SHA:scripts/ci/analysis-shards-go/ma
 require_line "$workflow" 'name: Upload shard fuzz reproducers'
 require_line "$workflow" 'name: Download shard fuzz reproducers'
 require_line "$workflow" 'name: Upload minimized fuzz reproducers'
+# Workflow shell variables below are literal fixture text.
+# shellcheck disable=SC2016
+require_line "$workflow" 'echo "$shellcheck_dir" >>"$GITHUB_PATH"'
 # GitHub expressions below are literal fixture text.
 # shellcheck disable=SC2016
 require_line "$workflow" 'FUZZ_SHARD_RESULT: ${{ needs.fuzz_shard.result }}'
 # shellcheck disable=SC2016
 require_line "$workflow" 'RACE_SHARD_RESULT: ${{ needs.race_shard.result }}'
+
+download_block=$(sed -n \
+	'/name: Download shard fuzz reproducers/,/name: Find merged fuzz reproducers/p' \
+	"$workflow")
+if printf '%s\n' "$download_block" | grep -F 'continue-on-error: true' >/dev/null; then
+	printf 'trusted CI scripts fixture failed: shard artifact download errors are suppressed\n' >&2
+	exit 1
+fi
 
 if grep -Eq '^[[:space:]]+pull_request:' "$workflow"; then
 	printf 'trusted CI scripts fixture failed: direct pull-request trigger is enabled\n' >&2

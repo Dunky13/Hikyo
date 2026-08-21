@@ -109,8 +109,10 @@ jobs:
             --output "$archive"
           printf '%s  %s\n' "$SHELLCHECK_SHA256" "$archive" | sha256sum --check --strict
           tar -xJf "$archive" -C "$RUNNER_TEMP"
-          "$RUNNER_TEMP/shellcheck-$SHELLCHECK_VERSION/shellcheck" \
+          shellcheck_dir="$RUNNER_TEMP/shellcheck-$SHELLCHECK_VERSION"
+          "$shellcheck_dir/shellcheck" \
             scripts/lib/*.sh scripts/ci/*.sh scripts/release/*.sh scripts/compose-demo.sh install/install.sh.in
+          echo "$shellcheck_dir" >>"$GITHUB_PATH"
       - name: Actionlint
         run: ./scripts/ci/run-go-tool.sh actionlint
       - name: Save lint Go cache
@@ -947,7 +949,9 @@ jobs:
           printf '%s\n' "$FUZZ_PLAN" |
             jq -r --argjson shard "$FUZZ_SHARD" '.[$shard][]' >"$targets"
           while IFS=$'\t' read -r pkg target; do
-            [ -n "$pkg" ] && [ -n "$target" ] || continue
+            if [ -z "$pkg" ] || [ -z "$target" ]; then
+              continue
+            fi
             echo "::group::$pkg $target"
             if ! go test -run='^$' -fuzz="^${target}\$" -fuzztime=15s "$pkg"; then
               failed=1
@@ -1034,7 +1038,6 @@ jobs:
     steps:
       - name: Download shard fuzz reproducers
         if: ${{ needs.fuzz_shard.result != 'success' }}
-        continue-on-error: true
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: fuzz-reproducers-${{ github.run_id }}-${{ github.run_attempt }}-shard-*
