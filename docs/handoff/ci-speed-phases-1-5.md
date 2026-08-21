@@ -28,10 +28,22 @@ skipping validation domains that a pull request cannot affect.
   ruleset 20539346 requires only `ci-required`.
 - Pull-request updates cancel older runs of the same PR. Main pushes use their
   run ID as the concurrency key, so none are discarded while pending.
-- Go build caches are isolated by job. Pull requests restore them; successful
-  `main` runs save rolling caches. All Go CI jobs restore one dependency-keyed
-  module cache, while only `test` saves it on trusted `main`. Tagged releases
-  build without a restored Go cache.
+- Go build caches are isolated by compiler mode and use stable v2 keys derived
+  from OS, architecture, GitHub runner image ABI, `go.mod`, `go.sum`, and any
+  job-specific tool config.
+  Source changes reuse the existing generation and let Go's content hashes
+  reject stale objects; they do not upload another whole archive. Pull requests
+  restore only, while trusted `main` saves on an exact miss. Fuzz rotates weekly
+  so coverage-expanding inputs can accumulate without per-run cache churn.
+- All Go CI jobs restore one dependency/tool-keyed module cache, while only
+  `test` saves it on trusted `main`. That writer preloads the complete module
+  graphs for actionlint and govulncheck; their authoritative versions live in
+  `scripts/ci/go-tool-modules.txt` and `run-go-tool.sh` uses those same pins.
+  The weekly isolation race run also restores the trusted race cache. Tagged
+  releases build without a restored Go cache.
+- A cache-policy fixture locks every workflow to GitHub-hosted
+  `ubuntu-latest`, rejects run IDs in Go cache keys, and verifies that every
+  cache writer is both trusted-main-only and guarded against exact-hit uploads.
 - Full six-target GoReleaser output and its manifest classifier run together
   in `release-snapshot`, parallel to the release shell fixtures.
 - Go formatting and generated-code freshness run in `generated`, parallel to
