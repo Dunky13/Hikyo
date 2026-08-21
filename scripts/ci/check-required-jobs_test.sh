@@ -58,6 +58,7 @@ all_success='{
 	"headline-guarantee":{"result":"success"},
 	"k8s-e2e":{"result":"success"},
 	"lint":{"result":"success"},
+	"no-egress":{"result":"success"},
 	"race":{"result":"success"},
 	"release-snapshot":{"result":"success"},
 	"supply-chain-checks":{"result":"success"},
@@ -74,6 +75,7 @@ docs_success=$(printf '%s' "$all_success" | jq '
 	.["headline-guarantee"].result = "skipped" |
 	.["k8s-e2e"].result = "skipped" |
 	.lint.result = "skipped" |
+	.["no-egress"].result = "skipped" |
 	.race.result = "skipped" |
 	.["release-snapshot"].result = "skipped" |
 	.["supply-chain-checks"].result = "skipped" |
@@ -93,7 +95,7 @@ done
 expect_accept 'main push with skipped DCO' push \
 	"$(printf '%s' "$all_success" | jq '.dco.result = "skipped"')" "$all_plan"
 
-for job in client compose-demo fuzz race; do
+for job in client compose-demo fuzz no-egress race; do
 	for result in failure cancelled skipped; do
 		expect_reject "selected $job with $result result" pull_request \
 			"$(printf '%s' "$all_success" | jq --arg job "$job" --arg result "$result" '.[ $job ].result = $result')" \
