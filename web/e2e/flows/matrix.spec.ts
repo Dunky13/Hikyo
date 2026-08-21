@@ -133,9 +133,15 @@ test.describe('environment matrix', () => {
     await expect(group).toHaveAttribute('aria-expanded', 'true');
   });
 
-  test('confirms protected config copy and routes secret work to Values', async ({ page }) => {
+  test('refreshes a mounted copy destination and routes secret work to Values', async ({ page }, testInfo) => {
     const persistPasskey = await installPasskeyAuthenticator(page);
     try {
+      // Both cells are already mounted. The destination starts warm with its
+      // pre-copy value, so only successful destination invalidation can replace
+      // it inside React Query's five-second freshness window.
+      await expect(
+        page.getByRole('button', { name: `${seed.config} in production: warn` }),
+      ).toBeVisible();
       await page
         .getByRole('button', { name: new RegExp(`${seed.config} in development:`) })
         .click();
@@ -160,6 +166,11 @@ test.describe('environment matrix', () => {
       await expect(page.locator('.notice')).toContainText(
         `${seed.config} copied to 1 environment`,
       );
+      await expect(
+        page.getByRole('button', {
+          name: `${seed.config} in production: selective-${testInfo.project.name}`,
+        }),
+      ).toBeVisible();
 
       const secret = seed.secrets[0] ?? '';
       await page

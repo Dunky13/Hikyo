@@ -26,12 +26,24 @@ import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/rea
 import { z } from 'zod';
 
 import { ApiError, parsed } from './client.ts';
-import { callerSafeRefusal, pinsKey, revisionsKey } from './history.ts';
+import { callerSafeRefusal } from './history.ts';
+import {
+  invalidateAfterCopy,
+  matrixGroupsKey,
+  matrixKeysKey,
+  pendingDraftsKey,
+  pinsKey,
+  revisionsKey,
+  signalsKey,
+  valuesKey,
+  windowKey,
+  type MatrixRef,
+} from './keys.ts';
 import { environmentSettingsQueryOptions, useEnvironments } from './settings.ts';
 import { useTransport } from './transport.tsx';
-import { valuesKey } from './values.ts';
 
 export { useProjects } from './settings.ts';
+export type { MatrixRef } from './keys.ts';
 
 /**
  * Whole-project matrix API boundary.
@@ -43,7 +55,6 @@ export { useProjects } from './settings.ts';
  * unavailable, and this surface does not need a second live-update protocol.
  */
 
-export type MatrixRef = { readonly org: string; readonly project: string };
 export type MatrixKeyList = z.infer<typeof zKeyList>;
 /**
  * A redacted secret-scanning finding (#74, secret-scanning ADR §4). It rides
@@ -239,21 +250,6 @@ export function matrixPublishValidation(
   }
   return { keyId: key.id, environmentId, message: error.detail };
 }
-
-const matrixKeysKey = (ref: MatrixRef): readonly [string, string, string] =>
-  ['matrix-keys', ref.org, ref.project];
-const matrixGroupsKey = (ref: MatrixRef): readonly [string, string, string] =>
-  ['matrix-groups', ref.org, ref.project];
-const signalsKey = (
-  ref: MatrixRef,
-  environment: string,
-): readonly [string, string, string, string] =>
-  ['matrix-signals', ref.org, ref.project, environment];
-const pendingDraftsKey = (
-  ref: MatrixRef,
-  environment: string,
-): readonly [string, string, string, string] =>
-  ['matrix-pending', ref.org, ref.project, environment];
 
 export function useMatrixProject(ref: MatrixRef) {
   const queries = useQueryClient();
@@ -496,12 +492,17 @@ export function useCopyMatrixConfig(ref: MatrixRef) {
         }),
         zCopyValuesResult,
       ),
-    onSuccess: () =>
-      Promise.all([
-        queries.invalidateQueries({ queryKey: ['values', ref.org, ref.project] }),
-        queries.invalidateQueries({ queryKey: ['matrix-signals', ref.org, ref.project] }),
-        queries.invalidateQueries({ queryKey: ['matrix-pending', ref.org, ref.project] }),
+    onSuccess: (result, input) =>
+      invalidateAfterCopy(queries, ref, [
+        ...new Set([
+          ...input.destinationEnvironments,
+          ...result.copied.map((copied) => copied.destination_environment_id),
+        ]),
       ]),
+    onSettled: (_result, _error, input) =>
+      queries.invalidateQueries({
+        queryKey: windowKey({ ...ref, environment: input.sourceEnvironment }),
+      }),
   });
 }
 

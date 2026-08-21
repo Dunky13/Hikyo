@@ -25,7 +25,15 @@ import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tan
 import type { z } from 'zod';
 
 import { ApiError, parsed } from './client.ts';
+import {
+  invalidateAfterCopy,
+  valuesKey,
+  windowKey,
+  type EnvRef,
+} from './keys.ts';
 import { useTransport } from './transport.tsx';
+
+export { valuesKey, windowKey, type EnvRef } from './keys.ts';
 
 /**
  * The value surface and the reveal ceremony, as the SPA sees them (#58).
@@ -47,13 +55,6 @@ import { useTransport } from './transport.tsx';
 export type ValueCell = z.infer<typeof zValueCell>;
 export type ValueList = z.infer<typeof zValueList>;
 export type RevealWindow = z.infer<typeof zRevealWindow>;
-
-export type EnvRef = { org: string; project: string; environment: string };
-
-export const valuesKey = (env: EnvRef) =>
-  ['values', env.org, env.project, env.environment] as const;
-export const windowKey = (env: EnvRef) =>
-  ['reveal-window', env.org, env.project, env.environment] as const;
 
 export type EnvironmentList = z.infer<typeof zEnvironmentList>;
 
@@ -501,6 +502,14 @@ export function useCopyValues(env: EnvRef) {
         }),
         zCopyValuesResult,
       ),
+    onSuccess: (result, input) =>
+      invalidateAfterCopy(queries, env, [
+        ...new Set([
+          ...input.destinations,
+          ...result.copied.map((copied) => copied.destination_environment_id),
+        ]),
+      ]),
+    // Source ceremony state can change even when the mutation refuses.
     onSettled: () => queries.invalidateQueries({ queryKey: windowKey(env) }),
   });
 }
