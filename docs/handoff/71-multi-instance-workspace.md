@@ -83,10 +83,13 @@ disclosure retries over the now-elevated transport.
   and the strike counter all key on the bearer **value**. A step-up rotates the
   value under a stable session id, so a stale verdict about the pre-rotation
   value must be a no-op or it kills the live elevated bearer.
-- **Step-up parameters ride the approve URL, no new server endpoint.** The
-  approve page needs the environment/key set to run the remote's reauth; the
-  server still validates the fresh window against the transaction's OWN bound
-  environment, so a tampered URL parameter only fails closed. (Ceiling below.)
+- **Step-up policy read from a server transaction, not the URL.** The approve
+  page reads the operation, environment and enumerated key set back from the
+  remote's own transaction by state (`GET /api/v1/auth/workspace/transactions/{state}`,
+  session-gated, identifiers only). The URL carries only `state` + the tiny
+  purpose flag — so a reveal-all over any size environment has no URL-length
+  ceiling, and the binding is authoritative (nothing the popup was handed
+  decides the elevation's scope). Mirrors the cli-reauth transaction read.
 
 ## Deferred / blockers, by name
 
@@ -106,13 +109,9 @@ disclosure retries over the now-elevated transport.
   threading, the unit tests (the generated-SDK-through-workspace-client test
   exercises the value PUT path), and the same tripwire (a leaked edit to A
   would fail it) — but no edit is driven through the matrix UI in the browser.
-- **URL length ceiling on step-up `key` params** (`ponytail:` in
-  `prepareWorkspace`): a reveal-all over a very large environment enumerates
-  every key id onto the approve URL. The server accepts 1000×200 chars in the
-  *body*; a URL will not carry that. The TOTP path does not need the params;
-  passkey challenge binding does. Upgrade path: post the key set to a short-lived
-  server-side transaction read the approve page fetches by state (mirrors
-  cli-reauth's transaction read).
+- ~~URL length ceiling on step-up `key` params~~ — **RESOLVED** by the
+  transaction-read endpoint above (the ceiling that a large reveal-all's key set
+  would have hit no longer exists; the URL carries only `state`).
 
 ## Running it
 
