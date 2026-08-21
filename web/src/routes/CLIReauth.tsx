@@ -118,9 +118,9 @@ export function CLIReauth() {
                   The terminal asks to <strong>{transaction.data.purpose}</strong>{' '}
                   {transaction.data.key_ids.length} key
                   {transaction.data.key_ids.length === 1 ? '' : 's'} in the environments below.
-                  {slidingEnvironments.length === 0
-                    ? ' A passkey authorises one decision over exactly those keys; nothing else.'
-                    : ' A passkey authorises one decision over exactly those keys. A code from your authenticator instead opens the environment-wide window the policy allows, for its duration.'}
+                  {offersTOTP
+                    ? ' A passkey authorises one decision over exactly those keys. A code from your authenticator instead opens the environment-wide window the policy allows, for its duration.'
+                    : ' A passkey authorises one decision over exactly those keys; nothing else.'}
                 </>
               )}
             </p>

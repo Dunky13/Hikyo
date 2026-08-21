@@ -1196,6 +1196,20 @@ func runCLIDisclosureHandoffPasskeyBinding(t *testing.T, db *store.DB) {
 		t.Fatalf("second disclosure on the redeemed single-decision window = %v, want spent", err)
 	}
 
+	// 2b. The binding is per ENVIRONMENT too: the browser consented over
+	// env_a1; a handoff over another environment finds no window there and is
+	// refused, never satisfied by a decision made elsewhere.
+	res = passkeyCeremony(t, auth, ctx, browserToken, service.PurposeReveal, string(envA1), []string{keyB}, dev)
+	browserToken = res.SessionToken
+	_, elsewhereChallenge := pkce("elsewhere")
+	elsewhere, err := auth.StartCLIReauth(ctx, redeemed.SessionToken, string(service.PurposeReveal), string(authz.OpValueReveal), []string{"env_prod"}, []string{keyB}, elsewhereChallenge, "http://127.0.0.1:40125/callback")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := auth.ApproveCLIReauth(ctx, service.Bearer(browserToken), elsewhere.State); !errors.Is(err, service.ErrReauthRequired) {
+		t.Fatalf("a handoff over another environment than the browser's decision = %v, want reauth required", err)
+	}
+
 	// 3. An adapter-bound browser window never satisfies a disclosure handoff.
 	execRaw(t, db, `INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_hz_adapters', (SELECT principal_id FROM sessions WHERE id = '`+stepped.SessionID+`'), 'manage-adapters', 'org_a', 'prj_a1', NULL, `+ts+`)`)
 	execRaw(t, db, `INSERT INTO grant_origins (id, grant_id, kind, subject, created_at) VALUES ('gor_g_hz_adapters', 'g_hz_adapters', 'manual', 'seed', `+ts+`)`)
