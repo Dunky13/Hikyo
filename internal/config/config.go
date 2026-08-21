@@ -104,6 +104,12 @@ type Config struct {
 	// by an environment variable, and the key name says so out loud for anyone
 	// who copies it into a compose file.
 	DevAdmissionPerIPPerMinute int
+	// DevServiceBudgetsDisabled disables the authenticated, in-memory expensive
+	// operation budgets for a development server. It exists for the browser flow
+	// suite, whose scenarios intentionally reuse one principal while exercising
+	// more than the production publish allowance. Load refuses the override
+	// outside --dev; false keeps the production budget enabled.
+	DevServiceBudgetsDisabled bool
 	// ReauthWindow is the instance-default disclosure reauthentication
 	// window (human-auth ADR section Assurance; permission-model ADR's
 	// per-environment knob inherits it). Zero - the production default - means
@@ -133,6 +139,7 @@ var knownEnv = map[string]bool{
 	// Development-only. Named so the deployment it does not belong in is
 	// obvious at a glance, and refused at boot outside --dev regardless.
 	"HIKYO_DEV_ADMISSION_PER_IP_PER_MINUTE": true,
+	"HIKYO_DEV_SERVICE_BUDGETS_DISABLED":    true,
 
 	// Client-side keys. They configure no server behaviour, but they are
 	// listed here because the unknown-key warning is a typo detector: a
@@ -259,6 +266,18 @@ func Load(subcommand string, args []string, getenv func(string) string, environ 
 				return nil, nil, fmt.Errorf("HIKYO_DEV_ADMISSION_PER_IP_PER_MINUTE: %q is not a positive integer", raw)
 			}
 			cfg.DevAdmissionPerIPPerMinute = perIP
+		}
+		if raw := strings.TrimSpace(getenv("HIKYO_DEV_SERVICE_BUDGETS_DISABLED")); raw != "" {
+			if !cfg.Dev {
+				return nil, nil, fmt.Errorf(
+					"HIKYO_DEV_SERVICE_BUDGETS_DISABLED is a development-mode override and this is not a development server: " +
+						"remove it, or pass --dev if this is an evaluation instance")
+			}
+			disabled, err := strconv.ParseBool(raw)
+			if err != nil {
+				return nil, nil, fmt.Errorf("HIKYO_DEV_SERVICE_BUDGETS_DISABLED: %q is not a boolean", raw)
+			}
+			cfg.DevServiceBudgetsDisabled = disabled
 		}
 	}
 	if subcommand == "server" {

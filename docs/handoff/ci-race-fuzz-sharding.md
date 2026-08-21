@@ -60,6 +60,12 @@ shards. Release snapshot keeps its small SPA build so its six cross-platform
 builds can run concurrently. Hosted timing remains pending until this exact
 head runs on GitHub.
 
+The flow harness disables authenticated service budgets through an explicit
+development-only setting. The matrix deliberately reuses one principal across
+enough publish scenarios to exceed the production ten-per-minute ceiling; the
+setting is refused unless the server runs with `--dev`, while budget behavior
+remains covered by service conformance and unit tests.
+
 ## Development downloads
 
 A successful trusted `main` run retains the six GoReleaser archives,

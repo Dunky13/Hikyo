@@ -264,7 +264,7 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 	// in-memory like admission, wired into every surface that owns a named
 	// expensive category — export, publish, adapter sync, machine fetch, and
 	// schema revision.
-	budget := service.NewBudget()
+	budget := serviceBudget(cfg)
 	authSvc := &service.Auth{DB: db, Keyring: kr, KDF: kdf, Admission: limiter, Log: log, ExternalOrigin: cfg.ExternalOrigin, ReauthWindow: cfg.ReauthWindow}
 	samlProviders := &service.SAMLProviders{DB: db, Keyring: kr, ExternalOrigin: cfg.ExternalOrigin}
 	// RP ID + expected origins are immutable instance config derived from the
@@ -440,6 +440,17 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 		}}},
 		adapterWorker: adapterWorker,
 	}, nil
+}
+
+// serviceBudget keeps production policy fail-closed even when a caller builds
+// Config directly instead of going through config.Load. The development-only
+// off switch exists for the browser flow harness; budget behavior itself is
+// covered by service-level conformance and unit tests.
+func serviceBudget(cfg *config.Config) *service.Budget {
+	if cfg.Dev && cfg.DevServiceBudgetsDisabled {
+		return nil
+	}
+	return service.NewBudget()
 }
 
 // AuthComponents resolves the two authentication settings and, in doing so,

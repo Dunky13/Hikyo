@@ -465,6 +465,11 @@ async function startInstanceAt(host: string, port: number, base: string): Promis
       // production. The alternative was deleting tests to fit under the
       // ceiling, which is measuring the throttle instead of the UI.
       HIKYO_DEV_ADMISSION_PER_IP_PER_MINUTE: '500',
+      // Flow scenarios also reuse one authenticated principal and collectively
+      // publish more than the production allowance of ten per minute. Budget
+      // behavior has its own conformance/unit coverage; this harness validates
+      // UI behavior. The server refuses this switch unless --dev is active.
+      HIKYO_DEV_SERVICE_BUDGETS_DISABLED: 'true',
     },
   });
   const instance: Instance = { proc, dir, binary, base, host, cookies: [] };
