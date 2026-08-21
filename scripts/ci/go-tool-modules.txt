@@ -1,0 +1,2 @@
+github.com/rhysd/actionlint@v1.7.12
+golang.org/x/vuln@v1.7.0

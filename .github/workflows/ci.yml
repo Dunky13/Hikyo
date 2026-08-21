@@ -83,16 +83,19 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/go/pkg/mod
-          key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          key: go-mod-v2-${{ runner.os }}-${{ hashFiles('go.mod', 'go.sum', 'scripts/ci/go-tool-modules.txt') }}
+          restore-keys: go-mod-v2-${{ runner.os }}-
+      - name: Select runner cache ABI
+        id: runner-cache-abi
+        run: ./scripts/ci/export-runner-cache-abi.sh
       - name: Restore lint Go cache
         id: lint-go-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
-          key: go-lint-v1.7.12-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: go-lint-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-cache-abi.outputs.value }}-${{ hashFiles('go.mod', 'go.sum', 'scripts/ci/go-tool-modules.txt') }}
           restore-keys: |
-            go-lint-v1.7.12-${{ runner.os }}-${{ hashFiles('go.sum') }}-
-            go-lint-v1.7.12-${{ runner.os }}-
+            go-lint-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-cache-abi.outputs.value }}-
       - name: Shellcheck (pinned archive)
         env:
           SHELLCHECK_VERSION: v0.11.0
@@ -108,9 +111,11 @@ jobs:
           "$RUNNER_TEMP/shellcheck-$SHELLCHECK_VERSION/shellcheck" \
             scripts/lib/*.sh scripts/ci/*.sh scripts/release/*.sh scripts/compose-demo.sh install/install.sh.in
       - name: Actionlint
-        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+        run: ./scripts/ci/run-go-tool.sh actionlint
       - name: Save lint Go cache
-        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: >-
+          success() && steps.lint-go-cache.outputs.cache-hit != 'true' &&
+          github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
@@ -179,6 +184,8 @@ jobs:
         run: ./scripts/ci/check-chart_test.sh
       - name: Trusted CI scripts fixture
         run: ./scripts/ci/check-trusted-ci-scripts_test.sh
+      - name: Cache policy fixture
+        run: ./scripts/ci/check-cache-policy_test.sh
       - name: Fuzz finding classifier fixture
         run: ./scripts/ci/classify-fuzz-findings_test.sh
       - name: Fuzz finding reporter fixture
@@ -211,16 +218,19 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/go/pkg/mod
-          key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          key: go-mod-v2-${{ runner.os }}-${{ hashFiles('go.mod', 'go.sum', 'scripts/ci/go-tool-modules.txt') }}
+          restore-keys: go-mod-v2-${{ runner.os }}-
+      - name: Select runner cache ABI
+        id: runner-cache-abi
+        run: ./scripts/ci/export-runner-cache-abi.sh
       - name: Restore release-snapshot Go cache
         id: release-snapshot-go-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
-          key: go-release-snapshot-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: go-release-snapshot-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-cache-abi.outputs.value }}-${{ hashFiles('go.mod', 'go.sum', '.goreleaser.yaml') }}
           restore-keys: |
-            go-release-snapshot-${{ runner.os }}-${{ hashFiles('go.sum') }}-
-            go-release-snapshot-${{ runner.os }}-
+            go-release-snapshot-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-cache-abi.outputs.value }}-
       - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
         with:
           node-version-file: .nvmrc
@@ -243,7 +253,9 @@ jobs:
       - name: Classify complete snapshot manifest
         run: ./scripts/release/snapshot-manifest_test.sh
       - name: Save release-snapshot Go cache
-        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: >-
+          success() && steps.release-snapshot-go-cache.outputs.cache-hit != 'true' &&
+          github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
@@ -266,16 +278,19 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/go/pkg/mod
-          key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          key: go-mod-v2-${{ runner.os }}-${{ hashFiles('go.mod', 'go.sum', 'scripts/ci/go-tool-modules.txt') }}
+          restore-keys: go-mod-v2-${{ runner.os }}-
+      - name: Select runner cache ABI
+        id: runner-cache-abi
+        run: ./scripts/ci/export-runner-cache-abi.sh
       - name: Restore generated-code Go cache
         id: generated-go-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
-          key: go-generated-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: go-generated-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-cache-abi.outputs.value }}-${{ hashFiles('go.mod', 'go.sum') }}
           restore-keys: |
-            go-generated-${{ runner.os }}-${{ hashFiles('go.sum') }}-
-            go-generated-${{ runner.os }}-
+            go-generated-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-cache-abi.outputs.value }}-
       - name: Format
         run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
       - name: Generated code is fresh
@@ -293,7 +308,9 @@ jobs:
           # git diff misses newly generated untracked files
           test -z "$(git status --porcelain --untracked-files=all -- chart/hikyo/crds internal/operator/api)"
       - name: Save generated-code Go cache
-        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: >-
+          success() && steps.generated-go-cache.outputs.cache-hit != 'true' &&
+          github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
@@ -438,16 +455,19 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/go/pkg/mod
-          key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          key: go-mod-v2-${{ runner.os }}-${{ hashFiles('go.mod', 'go.sum', 'scripts/ci/go-tool-modules.txt') }}
+          restore-keys: go-mod-v2-${{ runner.os }}-
+      - name: Select runner cache ABI
+        id: runner-cache-abi
+        run: ./scripts/ci/export-runner-cache-abi.sh
       - name: Restore web Go cache
         id: web-go-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
-          key: go-web-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: go-web-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-cache-abi.outputs.value }}-${{ hashFiles('go.mod', 'go.sum', 'scripts/ci/go-tool-modules.txt') }}
           restore-keys: |
-            go-web-${{ runner.os }}-${{ hashFiles('go.sum') }}-
-            go-web-${{ runner.os }}-
+            go-web-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-cache-abi.outputs.value }}-
       - name: Enable pnpm
         run: corepack enable
 
@@ -490,7 +510,7 @@ jobs:
         if: matrix.project == 'desktop'
         run: |
           go build -tags ui -o "$RUNNER_TEMP/hikyo-ui" ./cmd/hikyo
-          go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 -mode=binary "$RUNNER_TEMP/hikyo-ui"
+          ./scripts/ci/run-go-tool.sh govulncheck -mode=binary "$RUNNER_TEMP/hikyo-ui"
 
       - name: Go tests (transport, serving rules, browser session)
         # Restored GOCACHE may contain passing test results. Compile from cache,
@@ -531,7 +551,8 @@ jobs:
       # the same key, so the second upload is 378 MB spent to lose a race.
       - name: Save web Go cache
         if: >-
-          success() && github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+          success() && steps.web-go-cache.outputs.cache-hit != 'true' &&
+          github.event_name == 'push' && github.ref == 'refs/heads/main' &&
           matrix.project == 'desktop'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -582,19 +603,31 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/go/pkg/mod
-          key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          key: go-mod-v2-${{ runner.os }}-${{ hashFiles('go.mod', 'go.sum', 'scripts/ci/go-tool-modules.txt') }}
+          restore-keys: go-mod-v2-${{ runner.os }}-
+      - name: Select runner cache ABI
+        id: runner-cache-abi
+        run: ./scripts/ci/export-runner-cache-abi.sh
       - name: Restore test Go cache
         id: test-go-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
-          key: go-test-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: go-test-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-cache-abi.outputs.value }}-${{ hashFiles('go.mod', 'go.sum', 'scripts/ci/go-tool-modules.txt') }}
           restore-keys: |
-            go-test-${{ runner.os }}-${{ hashFiles('go.sum') }}-
-            go-test-${{ runner.os }}-
+            go-test-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-cache-abi.outputs.value }}-
 
       - name: Populate shared Go module cache
-        run: go mod download
+        run: |
+          go mod download
+          tool_module_dir="$RUNNER_TEMP/go-tool-modules"
+          mkdir -p "$tool_module_dir"
+          cd "$tool_module_dir"
+          go mod init ci-tools
+          while IFS= read -r module; do
+            go mod edit -require="$module"
+          done < "$GITHUB_WORKSPACE/scripts/ci/go-tool-modules.txt"
+          go mod download all
 
       - name: Build
         run: go build ./...
@@ -609,7 +642,7 @@ jobs:
       - name: govulncheck (vulnerabilities reachable from the shipped binary)
         run: |
           go build -o "$RUNNER_TEMP/hikyo" ./cmd/hikyo
-          go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 -mode=binary "$RUNNER_TEMP/hikyo"
+          ./scripts/ci/run-go-tool.sh govulncheck -mode=binary "$RUNNER_TEMP/hikyo"
 
       - name: Test (sqlite + postgres conformance)
         env:
@@ -624,7 +657,9 @@ jobs:
       - name: Secret-scanning benchmark runs (relative regression guard)
         run: go test ./internal/scanning/ -run '^$' -bench BenchmarkScan -benchtime 3x
       - name: Save test Go cache
-        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: >-
+          success() && steps.test-go-cache.outputs.cache-hit != 'true' &&
+          github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
@@ -663,16 +698,19 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/go/pkg/mod
-          key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          key: go-mod-v2-${{ runner.os }}-${{ hashFiles('go.mod', 'go.sum', 'scripts/ci/go-tool-modules.txt') }}
+          restore-keys: go-mod-v2-${{ runner.os }}-
+      - name: Select runner cache ABI
+        id: runner-cache-abi
+        run: ./scripts/ci/export-runner-cache-abi.sh
       - name: Restore k8s-e2e Go cache
         id: k8s-e2e-go-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
-          key: go-k8s-e2e-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: go-k8s-e2e-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-cache-abi.outputs.value }}-${{ hashFiles('go.mod', 'go.sum') }}
           restore-keys: |
-            go-k8s-e2e-${{ runner.os }}-${{ hashFiles('go.sum') }}-
-            go-k8s-e2e-${{ runner.os }}-
+            go-k8s-e2e-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-cache-abi.outputs.value }}-
       # A pinned, checksummed binary download (the shellcheck pattern above):
       # the repository's Actions allowlist is deliberately narrow, and kind is
       # a single static binary — no third-party action needed.
@@ -693,7 +731,9 @@ jobs:
       - name: Operator kind e2e
         run: ./scripts/ci/k8s-e2e.sh
       - name: Save k8s-e2e Go cache
-        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: >-
+          success() && steps.k8s-e2e-go-cache.outputs.cache-hit != 'true' &&
+          github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
@@ -735,22 +775,27 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/go/pkg/mod
-          key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          key: go-mod-v2-${{ runner.os }}-${{ hashFiles('go.mod', 'go.sum', 'scripts/ci/go-tool-modules.txt') }}
+          restore-keys: go-mod-v2-${{ runner.os }}-
+      - name: Select runner cache ABI
+        id: runner-cache-abi
+        run: ./scripts/ci/export-runner-cache-abi.sh
       - name: Restore race Go cache
         id: race-go-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
-          key: go-race-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: go-race-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-cache-abi.outputs.value }}-${{ hashFiles('go.mod', 'go.sum') }}
           restore-keys: |
-            go-race-${{ runner.os }}-${{ hashFiles('go.sum') }}-
-            go-race-${{ runner.os }}-
+            go-race-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-cache-abi.outputs.value }}-
       - name: Race detector (all packages except the isolation suite)
         env:
           HIKYO_TEST_POSTGRES_DSN: postgres://hikyo:hikyo@127.0.0.1:5432/hikyo_test
         run: go list ./... | grep -v '/internal/isolation$' | xargs go test -race -count=1
       - name: Save race Go cache (main push only)
-        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: >-
+          success() && steps.race-go-cache.outputs.cache-hit != 'true' &&
+          github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
@@ -775,16 +820,26 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/go/pkg/mod
-          key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          key: go-mod-v2-${{ runner.os }}-${{ hashFiles('go.mod', 'go.sum', 'scripts/ci/go-tool-modules.txt') }}
+          restore-keys: go-mod-v2-${{ runner.os }}-
+      - name: Select runner cache ABI
+        id: runner-cache-abi
+        run: ./scripts/ci/export-runner-cache-abi.sh
+      # Unlike compile artifacts, fuzz coverage discoveries are added to
+      # GOCACHE over time. Rotate weekly so main can publish those discoveries
+      # without returning to one immutable multi-gigabyte cache per run.
+      - name: Select weekly fuzz cache generation
+        id: fuzz-cache-generation
+        run: echo "value=$(date -u +%G-W%V)" >>"$GITHUB_OUTPUT"
       - name: Restore fuzz Go cache
         id: fuzz-go-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
-          key: go-fuzz-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: go-fuzz-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-cache-abi.outputs.value }}-${{ hashFiles('go.mod', 'go.sum') }}-${{ steps.fuzz-cache-generation.outputs.value }}
           restore-keys: |
-            go-fuzz-${{ runner.os }}-${{ hashFiles('go.sum') }}-
-            go-fuzz-${{ runner.os }}-
+            go-fuzz-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-cache-abi.outputs.value }}-${{ hashFiles('go.mod', 'go.sum') }}-
+            go-fuzz-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-cache-abi.outputs.value }}-
       - name: Fuzz every target for a bounded time
         run: |
           set -o pipefail
@@ -870,7 +925,9 @@ jobs:
           if-no-files-found: error
           retention-days: 30
       - name: Save fuzz Go cache (main push only)
-        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: >-
+          success() && steps.fuzz-go-cache.outputs.cache-hit != 'true' &&
+          github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
@@ -923,15 +980,18 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/go/pkg/mod
-          key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          key: go-mod-v2-${{ runner.os }}-${{ hashFiles('go.mod', 'go.sum', 'scripts/ci/go-tool-modules.txt') }}
+          restore-keys: go-mod-v2-${{ runner.os }}-
+      - name: Select runner cache ABI
+        id: runner-cache-abi
+        run: ./scripts/ci/export-runner-cache-abi.sh
       - name: Restore test Go cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
-          key: go-test-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: go-test-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-cache-abi.outputs.value }}-${{ hashFiles('go.mod', 'go.sum', 'scripts/ci/go-tool-modules.txt') }}
           restore-keys: |
-            go-test-${{ runner.os }}-${{ hashFiles('go.sum') }}-
-            go-test-${{ runner.os }}-
+            go-test-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-cache-abi.outputs.value }}-
       - name: Container round-trip, stanza exclusivity and truncation refusal
         run: go test -count=1 ./internal/crypto/backup/
       - name: Planted-plaintext scan of dump and backup, and credential replay refusal
