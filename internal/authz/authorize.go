@@ -58,7 +58,7 @@ func NewTxAuthorizer(r *authn.Resolver, tok *TxToken) *TxAuthorizer {
 // authority — bootstrap, break-glass, `hikyo admin` — and is exempt, presenting
 // no session and therefore no factor.
 func (a *TxAuthorizer) Authorize(ctx context.Context, caller Identity, op Operation, scope domain.Scope) (Proof, error) {
-	spec, ok := operations[op]
+	spec, ok := registry.authorizationSpec(op)
 	if !ok {
 		return nil, fmt.Errorf("authz: operation %q is not in the operation registry", op)
 	}
@@ -124,7 +124,7 @@ func (a *TxAuthorizer) assuranceInadequate(caller Identity, op Operation) bool {
 	return AssuranceEnforced && caller.SessionID != "" && FormulaDemandsMFA(op) && !AdequateAssurance(caller.Assurance)
 }
 
-func (a *TxAuthorizer) authorizeTenant(ctx context.Context, caller Identity, op Operation, spec opSpec, scope domain.Scope) (Proof, error) {
+func (a *TxAuthorizer) authorizeTenant(ctx context.Context, caller Identity, op Operation, spec authorizationSpec, scope domain.Scope) (Proof, error) {
 	principal := caller.Principal
 	level, err := scope.Level()
 	if err != nil {
@@ -240,7 +240,7 @@ func (a *TxAuthorizer) MachineRevealOptIn(ctx context.Context, caller Identity, 
 	return st.Enabled, st.Generation, nil
 }
 
-func (a *TxAuthorizer) authorizeInstance(ctx context.Context, caller Identity, op Operation, spec opSpec) (Proof, error) {
+func (a *TxAuthorizer) authorizeInstance(ctx context.Context, caller Identity, op Operation, spec authorizationSpec) (Proof, error) {
 	principal := caller.Principal
 	grants, err := a.r.Grants(ctx, principal)
 	if err != nil {
@@ -455,10 +455,10 @@ func (a *TxAuthorizer) principalHoldsFormula(ctx context.Context, principal doma
 }
 
 func (a *TxAuthorizer) principalFormulaEvaluation(ctx context.Context, principal domain.PrincipalID,
-	op Operation, scope domain.Scope) (opSpec, domain.Scope, bool, error) {
-	spec, ok := operations[op]
+	op Operation, scope domain.Scope) (authorizationSpec, domain.Scope, bool, error) {
+	spec, ok := registry.authorizationSpec(op)
 	if !ok {
-		return opSpec{}, domain.Scope{}, false, fmt.Errorf("authz: operation %q is not in the operation registry", op)
+		return authorizationSpec{}, domain.Scope{}, false, fmt.Errorf("authz: operation %q is not in the operation registry", op)
 	}
 	chain, err := a.r.ResolveChain(ctx, scope)
 	if err != nil {
@@ -468,11 +468,11 @@ func (a *TxAuthorizer) principalFormulaEvaluation(ctx context.Context, principal
 		if errors.Is(err, domain.ErrNotFound) {
 			return spec, domain.Scope{}, false, nil
 		}
-		return opSpec{}, domain.Scope{}, false, err
+		return authorizationSpec{}, domain.Scope{}, false, err
 	}
 	grants, err := a.r.Grants(ctx, principal)
 	if err != nil {
-		return opSpec{}, domain.Scope{}, false, err
+		return authorizationSpec{}, domain.Scope{}, false, err
 	}
 	return spec, chain, evaluate(spec.formula, chain, grants), nil
 }
