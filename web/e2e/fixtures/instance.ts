@@ -663,32 +663,23 @@ function grantServingAdmin(serving: Instance): void {
 }
 
 /**
- * grantServingOrgRead grants an ORG-scoped read so the org appears in the
- * serving admin's `listMyOrgs` — which is what the workspace project picker
- * reads. Instance-scoped grants operate the project but do not NAME an org, so
- * without this the picker would be empty even though every operation is allowed.
- * Break-glass, so it needs no session; it invalidates the one held, which the
- * caller re-establishes.
- */
-function grantServingOrgRead(serving: Instance, org: string): void {
-  run(
-    serving.binary,
-    ['admin', 'grant', '--principal', servingPrincipal(serving.dir), '--capability', 'read', '--org', org],
-    { cwd: serving.dir, env: adminEnv(serving) },
-  );
-}
-
-/**
  * seedServingProject creates the one operable project on the serving instance,
  * as its stepped-up administrator. Returns the ids the workspace flow navigates
  * by and the config value it asserts renders from the remote.
  */
-async function seedServingProject(serving: Instance): Promise<Omit<ServingSeed, 'dbPath'>> {
+async function seedServingProject(
+  serving: Instance,
+  otpauth: string,
+): Promise<Omit<ServingSeed, 'dbPath'>> {
   const zId = z.object({ id: z.string() });
   const created = async (path: string, body: unknown): Promise<string> =>
     zId.parse(await api(serving, 'POST', path, body)).id;
 
   const org = await created('/api/v1/orgs', { name: 'serving-co' });
+  // The atomic creator-admin grant invalidates the creating session. A fresh
+  // MFA session is required before building inside the organisation.
+  await signIn(serving);
+  await presentTotp(serving, otpauth, '/api/v1/auth/totp/step-up');
   const project = await created(`/api/v1/orgs/${org}/projects`, { name: 'vault' });
   const dev = await created(`/api/v1/orgs/${org}/projects/${project}/environments`, {
     name: 'development',
@@ -842,15 +833,11 @@ export async function startInstance(): Promise<void> {
   await signIn(serving);
   await presentTotp(serving, servingOtpauth, '/api/v1/auth/totp/step-up');
 
-  // The operable project on B, created by its now-stepped-up administrator, then
-  // made visible to the project picker with an org-scoped read. That grant kills
-  // B's session (it advances the principal's generation), so the 2-factor
-  // session is re-established afterwards — the workspace inherits the factors the
-  // approving B session holds, and edit/publish over there are MFA-mandatory.
-  const serving_ = await seedServingProject(serving);
-  grantServingOrgRead(serving, serving_.org);
-  await signIn(serving);
-  await presentTotp(serving, servingOtpauth, '/api/v1/auth/totp/step-up');
+  // The operable project on B. Organisation creation grants the creator admin
+  // access and invalidates that session; the helper reauthenticates before
+  // building the project. The resulting MFA session remains suitable for the
+  // workspace's later edit and publish operations.
+  const serving_ = await seedServingProject(serving, servingOtpauth);
   writeFileSync(SERVING, JSON.stringify({ ...serving_, dbPath: join(serving.dir, 'hikyo-dev.db') }));
 
   // A's raw setup session, stepped up with the factor `seedTenant` enrolled.

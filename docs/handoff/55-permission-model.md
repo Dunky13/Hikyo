@@ -514,16 +514,14 @@ data "through an explicit audited grant, **never by bundle**". At bootstrap
 there is no org, so both cannot be satisfied literally at once. The reading
 taken: **bootstrap seeds `operator` at instance scope** — separate visible
 grants, no disclosure, no tenant data by bundle — and the `admin`-template
-clause is satisfied where it is applicable, at **org scope**, when the first
-administrator creates the first org and applies `admin` to themselves through
-their instance `manage-members` (the ADR's own unheld-granting power, audited
-like any other grant). `reveal` and `reveal-history` arrive there, as the
-separate seeded rows the clause asks for.
+clause is satisfied where it is applicable, at **org scope**. As amended on
+2026-08-21, creating the first org atomically applies `admin` to the creator
+through their instance `manage-members` authority. `reveal` and
+`reveal-history` arrive as the separate seeded rows the clause asks for.
 
-Knock-ons, all landed: the demo applies the admin template at the org it
-creates and re-logs in (a self-grant advances the administrator's own
-generation and deletes their sessions — the ADR's rule applied to the person
-applying it, and now demonstrated); `credential-reset` is no longer bundled, so
+Knock-ons, all landed: org creation applies the admin template and the demo
+re-logs in (the grant advances the administrator's own generation and deletes
+their sessions — the ADR's rule applied to the creator); `credential-reset` is no longer bundled, so
 #54's reset fixtures grant it explicitly through the real grant surface, which
 is exactly the "explicit audited grant" the ADR describes.
 

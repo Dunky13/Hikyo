@@ -705,16 +705,16 @@ paths:
       tags: [orgs]
       summary: Create an organisation.
       description: |
-        The first audited mutating endpoint: authorization is evaluated at the
-        chokepoint inside the request's own transaction, and the
-        `org.created` audit event commits in that same transaction — a write
-        without its durable record does not complete.
+        Authorization is evaluated at the chokepoint inside the request's own
+        transaction. The organisation, `org.created` event, and creator's org
+        `admin` template grants commit atomically. The privilege increase ends
+        the creator's sessions; the new membership is usable after login.
 
         Not idempotent: each call creates a distinct organisation. The name must
         be unused among live organisations; a collision is a `conflict`.
       x-hikyo-class: instance
       x-hikyo-operation: org.create
-      x-hikyo-formula: [instance-config@instance]
+      x-hikyo-formula: [instance-config@instance, manage-members@instance]
       x-hikyo-artifacts: [human-session]
       x-hikyo-min-revision: 1
       requestBody:

@@ -1366,14 +1366,16 @@ var registry = mustNewRegistry(operationTable)
 // invariant 6. The table is never read directly: newRegistry validates it into
 // the immutable registry below, so no lookup can observe an unvalidated row.
 var operationTable = map[Operation]opSpec{
-	// The Org aggregate (#48). Creation and enumeration are instance-scoped
-	// under the operator set's instance-config atom: a create has no parent
-	// tenant to authorize against, and an enumeration of every org is
-	// cross-tenant by definition, so there is no tenant object whose
-	// nonexistence a refusal could mimic.
+	// The Org aggregate (#48). Creation and enumeration are instance-scoped: a
+	// create has no parent tenant to authorize against, and an enumeration of
+	// every org is cross-tenant by definition. Creation also needs
+	// manage-members because it atomically grants the creator org-admin access.
 	OpOrgCreate: {
-		class:    ClassInstance,
-		formula:  Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
+		class: ClassInstance,
+		formula: Formula{
+			{Cap: domain.CapInstanceConfig, At: domain.LevelNone},
+			{Cap: domain.CapManageMembers, At: domain.LevelNone},
+		},
 		storeOps: map[StoreOp]bool{StoreOrgsCreate: true, StoreAuditInstanceInsert: true},
 		// Org names are not secret-scanned (#74, ADR §2 Surface 2 is bundle
 		// content; an org is not) — no scanning.* event is emitted here.

@@ -141,14 +141,39 @@ func runWebAuthnRoundtrip(t *testing.T, db *store.DB) {
 		t.Errorf("minted session must trace to its consumed login ceremony (fresh id), got %d", got)
 	}
 
-	// The passkey session passes an MFA-mandatory operation (org create is
-	// instance-config); the password-only session is refused for inadequate
-	// assurance.
-	if _, err := orgs.Create(ctx, service.Bearer(login.SessionToken), "passkey-org", true, []byte(`{}`)); err != nil {
-		t.Fatalf("a webauthn session must pass an MFA-mandatory op: %v", err)
-	}
+	// The password-only session is refused before the successful create. A
+	// successful create grants the creator the org admin template, which is a
+	// privilege increase and therefore invalidates every existing session.
 	if _, err := orgs.Create(ctx, service.Bearer(passwordSession), "pw-org", true, []byte(`{}`)); !errors.Is(err, domain.ErrUnauthorized) {
 		t.Fatalf("a password-only session must be refused an MFA-mandatory op, got %v", err)
+	}
+	created, err := orgs.Create(ctx, service.Bearer(login.SessionToken), "passkey-org", true, []byte(`{}`))
+	if err != nil {
+		t.Fatalf("a webauthn session must pass an MFA-mandatory op: %v", err)
+	}
+	principal := queryString(t, db, "SELECT principal_id FROM accounts WHERE username = '"+waAdmin+"'")
+	caps, err := domain.ExpandTemplate(domain.TemplateAdmin, domain.LevelOrg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, capability := range caps {
+		if got := queryInt(t, db, "SELECT COUNT(*) FROM grants WHERE principal_id = '"+principal+"' AND capability = '"+string(capability)+"' AND org_id = '"+created.ID+"' AND project_id IS NULL AND env_id IS NULL"); got != 1 {
+			t.Errorf("creator %s grants in created org = %d, want 1", capability, got)
+		}
+	}
+	if _, err := orgs.ListMine(ctx, service.Bearer(login.SessionToken)); !errors.Is(err, domain.ErrUnauthenticated) {
+		t.Fatalf("pre-promotion session survived creator grant: %v", err)
+	}
+	fresh, err := discoverableLogin(t, auth, ctx, dev)
+	if err != nil {
+		t.Fatalf("login after creator grant: %v", err)
+	}
+	mine, err := orgs.ListMine(ctx, service.Bearer(fresh.SessionToken))
+	if err != nil {
+		t.Fatalf("list creator organisations after login: %v", err)
+	}
+	if len(mine) != 1 || mine[0].ID != created.ID {
+		t.Fatalf("creator organisations = %+v, want %s", mine, created.ID)
 	}
 }
 

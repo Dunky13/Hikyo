@@ -389,12 +389,16 @@ export function useInstanceOrgs(): UseQueryResult<OrgList> {
   });
 }
 
-export function useCreateOrg() {
+export function useCreateOrg(onCreated?: (org: Org) => void) {
   const queries = useQueryClient();
-  return useMutation({
-    mutationFn: (input: { name: string }) =>
-      parsed(createOrgOp, { body: { name: input.name } }),
-    onSettled: () => queries.invalidateQueries(),
+	return useMutation({
+		mutationFn: (input: { name: string }) =>
+			parsed(createOrgOp, { body: { name: input.name } }),
+		// A successful create invalidates the creator's session. Hook-level
+		// success runs before query invalidation unmounts the caller; a per-call
+		// mutate callback is not guaranteed to run after that unmount.
+		onSuccess: onCreated,
+		onSettled: () => queries.invalidateQueries(),
   });
 }
 

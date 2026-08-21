@@ -146,7 +146,12 @@ type Orgs struct {
 	DB *store.DB
 }
 
-// Create publishes a new org through the transactional boundary.
+// Create publishes a new org and applies the org-admin template to its creator
+// through one transactional boundary. Creation requires both instance-config
+// and instance manage-members: without the second conjunct, an instance-config
+// holder could create a tenant and self-escalate into its secrets. The grant
+// invalidates the creator's sessions like every privilege increase; the new
+// authority becomes usable on their next login.
 //
 // Org names and metadata are NOT secret-scanned (#74, ADR §2 Surface 2): the
 // scan surface is "any string in the DEFINITIONS MODEL", and an org is not
@@ -163,15 +168,16 @@ func (s *Orgs) Create(ctx context.Context, actor Actor, name string, active bool
 	if err != nil {
 		return Org{}, err
 	}
+	now := time.Now().UTC()
 	org := store.Org{
 		ID:        id,
 		Name:      name,
 		Active:    active,
 		Metadata:  metadata,
-		CreatedAt: store.CanonTime(time.Now()),
+		CreatedAt: store.CanonTime(now),
 	}
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
-		caller, err := actor.resolve(ctx, az, time.Now().UTC())
+		caller, err := actor.resolve(ctx, az, now)
 		if err != nil {
 			return err
 		}
@@ -188,7 +194,24 @@ func (s *Orgs) Create(ctx context.Context, actor Actor, name string, active bool
 		if err != nil {
 			return err
 		}
-		return r.Audit().InsertInstance(ctx, p, ev)
+		if err := r.Audit().InsertInstance(ctx, p, ev); err != nil {
+			return err
+		}
+
+		scope := domain.Scope{Org: domain.OrgID(org.ID)}
+		ops, level, err := opsFor(scope)
+		if err != nil {
+			return err
+		}
+		grantProof, err := az.Authorize(ctx, caller, ops.template, scope)
+		if err != nil {
+			return err
+		}
+		grants := &Grants{DB: s.DB, Now: func() time.Time { return now }}
+		_, err = grants.applyTemplate(
+			ctx, r, az, grantProof, caller, domain.TemplateAdmin, caller.Principal, scope, level,
+		)
+		return err
 	})
 	if err != nil {
 		return Org{}, err

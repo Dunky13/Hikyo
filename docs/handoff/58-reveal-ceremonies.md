@@ -358,12 +358,11 @@ flakiness and was not:
    against a loopback *address* is refused by the browser before the server
    sees it. `--dev` derives the external origin from the listen address, so the
    two move together.
-2. **Grants at INSTANCE scope, not org scope.** `listMyOrgs` projects the orgs
-   a caller's own grants *name*, so org-scoped grants would put the fixture org
-   in the bootstrap admin's rail and silently delete the shell flow's
-   zero-organisation state — a locked surface state with nothing to do with
-   this ticket. Instance scope reaches the same environments by ordinary
-   downward inheritance.
+2. **Additional fixture grants stay at INSTANCE scope.** `listMyOrgs` projects
+   the orgs a caller's own grants *name*; the creator's automatic admin grants
+   now make both fixture organisations appear honestly in the rail. Instance
+   scope still lets the extra fixture authority reach both organisations by
+   ordinary downward inheritance.
 3. **The passkey is enrolled exactly once, in global setup, and its signature
    counter is persisted between Playwright projects.** Enrolment is an
    account-security mutation: it advances the principal's session generation

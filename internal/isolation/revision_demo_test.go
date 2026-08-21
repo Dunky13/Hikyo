@@ -43,10 +43,9 @@ func runRevisionDemo(t *testing.T, ios func() cli.IO, org, baseURL string, beare
 	type row struct{ Id, Name string }
 
 	// It rides the org the hierarchy demo already built, where the
-	// administrator holds the admin template: minting a second org would need
-	// a second self-grant, which kills its own session, and the relogin that
-	// follows counts against the instance-wide pre-auth admission limiter this
-	// flow has already spent most of.
+	// administrator holds the admin template: minting a second org would
+	// atomically grant another admin template, kill the creating session, and
+	// add another login against the instance-wide pre-auth admission limiter.
 	var project row
 	decode(run("project", "create", "--org", org, "--name", "billing", "-o", "json"), &project)
 	var dev row

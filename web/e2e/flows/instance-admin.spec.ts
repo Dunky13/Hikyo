@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import {
   zGrantList,
+  zOrg,
   zOrgList,
   zSamlProviderMutationResult,
   zScimBinding,
@@ -20,8 +21,10 @@ import {
   BASE_URL,
   establishSession,
   INSTANCE_GRANT_TARGET,
+  installPasskeyAuthenticator,
   nextTotpCode,
   readSeed,
+  refreshSharedSession,
   STORAGE_STATE,
 } from '../fixtures/instance.ts';
 
@@ -379,27 +382,33 @@ test.describe('instance administration', () => {
     }
   });
 
-  test('creates an organisation and says what it did not do', async ({ page }, testInfo) => {
+  test('creates an organisation, grants its creator admin access, and requires a fresh login', async ({ page }, testInfo) => {
     const name = `Instance drill ${testInfo.project.name}`;
-    let created = '';
+    const persistPasskey = await installPasskeyAuthenticator(page);
     try {
       await page.getByLabel('New organisation name').fill(name);
+      const responsePromise = page.waitForResponse(
+        (response) =>
+          response.request().method() === 'POST' &&
+          new URL(response.url()).pathname === '/api/v1/orgs',
+      );
       await page.getByRole('button', { name: 'Create organisation' }).click();
-      const done = page.locator('.notice').filter({ hasText: `Created ${name}` });
-      await expectStatusIsTextAndAria(page, done);
-      // Creating an organisation seeds its creator NOTHING: the permission
-      // model refuses to hand the creator standing authority inside it.
-      await expect(done).toContainText('seeds its creator nothing');
-      await expect(page.locator('#instance-orgs')).toContainText(name);
+      const response = await responsePromise;
+      expect(response.status()).toBe(201);
+      const created = zOrg.parse(await response.json());
 
-      const orgs = await browserApi(page, 'GET', '/api/v1/orgs', zOrgList);
-      const createdOrg = orgs.items.find((org) => org.name === name);
-      if (createdOrg === undefined) throw new Error(`created organisation ${name} was not listed`);
-      created = createdOrg.id;
+      const toast = page.getByRole('status').filter({ hasText: `Created ${name}` });
+      await expect(toast).toBeInViewport();
+      await expect(toast).toContainText('granted you organisation admin access');
+      await expect(page.getByRole('heading', { name: 'Sign in to Hikyo', level: 1 })).toBeVisible();
+
+      await establishSession(page);
+      await page.goto(`/orgs/${created.id}/settings`);
+      await expect(page.getByRole('heading', { name: 'Organisation settings', level: 1 })).toBeVisible();
+      await expect(page.getByLabel('Name')).toHaveValue(name);
     } finally {
-      if (created !== '') {
-        await browserApi(page, 'DELETE', `/api/v1/orgs/${created}`, z.null());
-      }
+      await persistPasskey();
+      await refreshSharedSession();
     }
   });
 

@@ -363,10 +363,10 @@ export const listOrgs = <ThrowOnError extends boolean = false>(options?: Options
 /**
  * Create an organisation.
  *
- * The first audited mutating endpoint: authorization is evaluated at the
- * chokepoint inside the request's own transaction, and the
- * `org.created` audit event commits in that same transaction — a write
- * without its durable record does not complete.
+ * Authorization is evaluated at the chokepoint inside the request's own
+ * transaction. The organisation, `org.created` event, and creator's org
+ * `admin` template grants commit atomically. The privilege increase ends
+ * the creator's sessions; the new membership is usable after login.
  *
  * Not idempotent: each call creates a distinct organisation. The name must
  * be unused among live organisations; a collision is a `conflict`.

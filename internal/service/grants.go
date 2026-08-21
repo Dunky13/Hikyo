@@ -1042,10 +1042,6 @@ func (s *Grants) ApplyTemplate(ctx context.Context, actor Actor, template domain
 		if err != nil {
 			return err
 		}
-		caps, err := domain.ExpandTemplate(template, level)
-		if err != nil {
-			return fmt.Errorf("%w: %s", domain.ErrInvalid, err)
-		}
 		caller, err := actor.resolve(ctx, az, s.now())
 		if err != nil {
 			return err
@@ -1054,63 +1050,86 @@ func (s *Grants) ApplyTemplate(ctx context.Context, actor Actor, template domain
 		if err != nil {
 			return err
 		}
-
-		events := make([]grantEventInput, 0, len(caps)+1)
-		results := make([]GrantResult, 0, len(caps))
-		created, joined, unchanged := 0, 0, 0
-		names := make([]string, 0, len(caps))
-		for _, capability := range caps {
-			res, evs, err := s.grantOne(ctx, az, caller, GrantSpec{
-				Target: target, Capability: capability, Scope: scope,
-			}, level, template)
-			if err != nil {
-				return err
-			}
-			results = append(results, res)
-			events = append(events, evs...)
-			names = append(names, string(capability))
-			switch res.Outcome {
-			case GrantCreated():
-				created++
-			case GrantOriginAdded():
-				joined++
-			case GrantUnchanged():
-				unchanged++
-			default:
-				return fmt.Errorf("invalid grant outcome %q", res.Outcome)
-			}
-		}
-		out = results
-
-		// The template event records ONE administrator performing ONE act;
-		// the per-capability rows above record what it produced. Without the
-		// first the trail can say ten capabilities appeared but not why.
-		summary := grantEventInput{
-			typ:    audit.EventGrantTemplateApplied,
-			object: audit.Object{Type: "principal", ID: string(target)},
-			payload: audit.Payload{
-				"template":         string(template),
-				"target_principal": string(target),
-				"scope":            renderScope(scope),
-				"capability_count": len(caps),
-				"grants_created":   created,
-				"grants_deduped":   joined + unchanged,
-				"grants_joined":    joined,
-				"grants_unchanged": unchanged,
-				"self_grant":       target == caller.Principal,
-				"capabilities":     strings.Join(names, ","),
-			},
-		}
-		for i, capability := range caps {
-			_, cured, err := cureIfMemberManagement(ctx, az, retentionAttentionClearer(r, p), capability, scope, results[i])
-			if err != nil {
-				return err
-			}
-			events = append(events, cured...)
-		}
-		return insertGrantEvent(ctx, r, p, caller.Principal, level, append([]grantEventInput{summary}, events...)...)
+		out, err = s.applyTemplate(ctx, r, az, p, caller, template, target, scope, level)
+		return err
 	})
 	return out, err
+}
+
+// applyTemplate is the transaction-internal template writer shared by the
+// ordinary grant endpoint and organisation creation. The latter must publish
+// the org and its creator's first membership atomically: an org with no way in
+// is not a valid intermediate state another request should have to repair.
+func (s *Grants) applyTemplate(
+	ctx context.Context,
+	r store.Repos,
+	az *authz.TxAuthorizer,
+	p authz.Proof,
+	caller authz.Identity,
+	template domain.Template,
+	target domain.PrincipalID,
+	scope domain.Scope,
+	level domain.Level,
+) ([]GrantResult, error) {
+	caps, err := domain.ExpandTemplate(template, level)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s", domain.ErrInvalid, err)
+	}
+	events := make([]grantEventInput, 0, len(caps)+1)
+	results := make([]GrantResult, 0, len(caps))
+	created, joined, unchanged := 0, 0, 0
+	names := make([]string, 0, len(caps))
+	for _, capability := range caps {
+		res, evs, err := s.grantOne(ctx, az, caller, GrantSpec{
+			Target: target, Capability: capability, Scope: scope,
+		}, level, template)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, res)
+		events = append(events, evs...)
+		names = append(names, string(capability))
+		switch res.Outcome {
+		case GrantCreated():
+			created++
+		case GrantOriginAdded():
+			joined++
+		case GrantUnchanged():
+			unchanged++
+		default:
+			return nil, fmt.Errorf("invalid grant outcome %q", res.Outcome)
+		}
+	}
+
+	// The template event records ONE administrator performing ONE act; the
+	// per-capability rows above record what it produced.
+	summary := grantEventInput{
+		typ:    audit.EventGrantTemplateApplied,
+		object: audit.Object{Type: "principal", ID: string(target)},
+		payload: audit.Payload{
+			"template":         string(template),
+			"target_principal": string(target),
+			"scope":            renderScope(scope),
+			"capability_count": len(caps),
+			"grants_created":   created,
+			"grants_deduped":   joined + unchanged,
+			"grants_joined":    joined,
+			"grants_unchanged": unchanged,
+			"self_grant":       target == caller.Principal,
+			"capabilities":     strings.Join(names, ","),
+		},
+	}
+	for i, capability := range caps {
+		_, cured, err := cureIfMemberManagement(ctx, az, retentionAttentionClearer(r, p), capability, scope, results[i])
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, cured...)
+	}
+	if err := insertGrantEvent(ctx, r, p, caller.Principal, level, append([]grantEventInput{summary}, events...)...); err != nil {
+		return nil, err
+	}
+	return results, nil
 }
 
 // Membership is one capability line on the membership surface: a principal,
