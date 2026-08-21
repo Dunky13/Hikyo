@@ -84,6 +84,8 @@ jobs:
         with:
           path: ~/go/pkg/mod
           key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            go-mod-${{ runner.os }}-
       - name: Restore lint Go cache
         id: lint-go-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -212,6 +214,8 @@ jobs:
         with:
           path: ~/go/pkg/mod
           key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            go-mod-${{ runner.os }}-
       - name: Restore release-snapshot Go cache
         id: release-snapshot-go-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -267,6 +271,8 @@ jobs:
         with:
           path: ~/go/pkg/mod
           key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            go-mod-${{ runner.os }}-
       - name: Restore generated-code Go cache
         id: generated-go-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -439,6 +445,8 @@ jobs:
         with:
           path: ~/go/pkg/mod
           key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            go-mod-${{ runner.os }}-
       - name: Restore web Go cache
         id: web-go-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -583,6 +591,8 @@ jobs:
         with:
           path: ~/go/pkg/mod
           key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            go-mod-${{ runner.os }}-
       - name: Restore test Go cache
         id: test-go-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -664,6 +674,8 @@ jobs:
         with:
           path: ~/go/pkg/mod
           key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            go-mod-${{ runner.os }}-
       - name: Restore k8s-e2e Go cache
         id: k8s-e2e-go-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -736,6 +748,8 @@ jobs:
         with:
           path: ~/go/pkg/mod
           key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            go-mod-${{ runner.os }}-
       - name: Restore race Go cache
         id: race-go-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -776,6 +790,8 @@ jobs:
         with:
           path: ~/go/pkg/mod
           key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            go-mod-${{ runner.os }}-
       - name: Restore fuzz Go cache
         id: fuzz-go-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -924,6 +940,8 @@ jobs:
         with:
           path: ~/go/pkg/mod
           key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            go-mod-${{ runner.os }}-
       - name: Restore test Go cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
