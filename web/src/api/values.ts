@@ -20,10 +20,12 @@ import {
   zWebauthnOptions,
   zReauthResult,
 } from '@hikyo/zod';
+import type { Client } from '@hikyo/runtime-core';
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import type { z } from 'zod';
 
 import { ApiError, parsed } from './client.ts';
+import { useTransport } from './transport.tsx';
 
 /**
  * The value surface and the reveal ceremony, as the SPA sees them (#58).
@@ -57,16 +59,21 @@ export type EnvironmentList = z.infer<typeof zEnvironmentList>;
 
 /** useEnvironments lists the project's environments — the copy destinations. */
 export function useEnvironments(env: EnvRef): UseQueryResult<EnvironmentList> {
+  const transport = useTransport();
   return useQuery({
     queryKey: ['environments', env.org, env.project] as const,
     queryFn: () =>
-      parsed(listEnvironments({ path: { org: env.org, project: env.project } }), zEnvironmentList),
+      parsed(
+        listEnvironments({ path: { org: env.org, project: env.project }, ...transport }),
+        zEnvironmentList,
+      ),
     retry: false,
   });
 }
 
 /** useValues is the masked read: write-presence for secrets, plaintext for config. */
 export function useValues(env: EnvRef): UseQueryResult<ValueList> {
+  const transport = useTransport();
   return useQuery({
     queryKey: valuesKey(env),
     queryFn: () =>
@@ -77,6 +84,7 @@ export function useValues(env: EnvRef): UseQueryResult<ValueList> {
             project: env.project,
             environment: env.environment,
           },
+          ...transport,
         }),
         zValueList,
       ),
@@ -93,10 +101,17 @@ export function useValues(env: EnvRef): UseQueryResult<ValueList> {
  * there would let a live window in development stand in for authority over
  * production, which is exactly what the protected cap exists to refuse.
  */
-export async function fetchRevealWindow(env: EnvRef): Promise<RevealWindow> {
+export async function fetchRevealWindow(
+  env: EnvRef,
+  // Imperative, so it cannot read the transport from context like a hook: the
+  // caller (a hook that CAN) passes it. Undefined means this instance's own
+  // server; a workspace client means the remote's window, over the bearer.
+  client?: Client,
+): Promise<RevealWindow> {
   return parsed(
     getRevealWindow({
       path: { org: env.org, project: env.project, environment: env.environment },
+      client,
     }),
     zRevealWindow,
   );
@@ -111,6 +126,7 @@ export async function fetchRevealWindow(env: EnvRef): Promise<RevealWindow> {
  * ceremony would keep offering TOTP that the server will refuse.
  */
 export function useRevealWindow(env: EnvRef): UseQueryResult<RevealWindow> {
+  const transport = useTransport();
   return useQuery({
     queryKey: windowKey(env),
     queryFn: () =>
@@ -121,6 +137,7 @@ export function useRevealWindow(env: EnvRef): UseQueryResult<RevealWindow> {
             project: env.project,
             environment: env.environment,
           },
+          ...transport,
         }),
         zRevealWindow,
       ),
@@ -393,6 +410,7 @@ export function disclosureRefusalText(error: unknown): string {
 /** useRevealOne discloses a single cell. */
 export function useRevealOne(env: EnvRef) {
   const queries = useQueryClient();
+  const transport = useTransport();
   return useMutation({
     mutationFn: (key: string) =>
       parsed(
@@ -403,6 +421,7 @@ export function useRevealOne(env: EnvRef) {
             environment: env.environment,
             key,
           },
+          ...transport,
         }),
         zValueCell,
       ),
@@ -414,6 +433,7 @@ export function useRevealOne(env: EnvRef) {
 /** useRevealAll discloses the whole environment in one decision. */
 export function useRevealAll(env: EnvRef) {
   const queries = useQueryClient();
+  const transport = useTransport();
   return useMutation({
     mutationFn: () =>
       parsed(
@@ -423,6 +443,7 @@ export function useRevealAll(env: EnvRef) {
             project: env.project,
             environment: env.environment,
           },
+          ...transport,
         }),
         zValueList,
       ),
@@ -441,6 +462,7 @@ export function useRevealAll(env: EnvRef) {
  */
 export function useSetValue(env: EnvRef) {
   const queries = useQueryClient();
+  const transport = useTransport();
   return useMutation({
     mutationFn: (input: { key: string; value: string }) =>
       parsed(
@@ -452,6 +474,7 @@ export function useSetValue(env: EnvRef) {
             key: input.key,
           },
           body: { value: input.value },
+          ...transport,
         }),
         zPendingChange,
       ),
@@ -462,6 +485,7 @@ export function useSetValue(env: EnvRef) {
 /** useCopyValues duplicates stored material into other environments. */
 export function useCopyValues(env: EnvRef) {
   const queries = useQueryClient();
+  const transport = useTransport();
   return useMutation({
     mutationFn: (input: { keys: readonly string[]; destinations: readonly string[] }) =>
       parsed(
@@ -473,6 +497,7 @@ export function useCopyValues(env: EnvRef) {
             destination_environment_ids: [...input.destinations],
             confirm_protected: true,
           },
+          ...transport,
         }),
         zCopyValuesResult,
       ),

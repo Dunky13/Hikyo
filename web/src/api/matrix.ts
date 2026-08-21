@@ -28,6 +28,7 @@ import { z } from 'zod';
 import { ApiError, parsed } from './client.ts';
 import { callerSafeRefusal, pinsKey, revisionsKey } from './history.ts';
 import { environmentSettingsQueryOptions, useEnvironments } from './settings.ts';
+import { useTransport } from './transport.tsx';
 import { valuesKey } from './values.ts';
 
 export { useProjects } from './settings.ts';
@@ -256,16 +257,17 @@ const pendingDraftsKey = (
 
 export function useMatrixProject(ref: MatrixRef) {
   const queries = useQueryClient();
+  const transport = useTransport();
   const environments = useEnvironments(ref.org, ref.project);
   const keys = useQuery({
     queryKey: matrixKeysKey(ref),
-    queryFn: () => parsed(listKeys({ path: ref }), zKeyList),
+    queryFn: () => parsed(listKeys({ path: ref, ...transport }), zKeyList),
     enabled: ref.org !== '' && ref.project !== '',
     retry: false,
   });
   const groups = useQuery({
     queryKey: matrixGroupsKey(ref),
-    queryFn: () => parsed(listKeyGroups({ path: ref }), zKeyGroupList),
+    queryFn: () => parsed(listKeyGroups({ path: ref, ...transport }), zKeyGroupList),
     enabled: ref.org !== '' && ref.project !== '',
     retry: false,
   });
@@ -275,7 +277,7 @@ export function useMatrixProject(ref: MatrixRef) {
       queryKey: valuesKey({ ...ref, environment: environment.id }),
       queryFn: () =>
         parsed(
-          listValues({ path: { ...ref, environment: environment.id } }),
+          listValues({ path: { ...ref, environment: environment.id }, ...transport }),
           zValueList,
         ),
       retry: false,
@@ -283,7 +285,7 @@ export function useMatrixProject(ref: MatrixRef) {
   });
   const settings = useQueries({
     queries: environmentItems.map((environment) =>
-      environmentSettingsQueryOptions(ref.org, ref.project, environment.id),
+      environmentSettingsQueryOptions(ref.org, ref.project, environment.id, transport.client),
     ),
   });
   const signals = useQueries({
@@ -295,6 +297,7 @@ export function useMatrixProject(ref: MatrixRef) {
         const next = await parsed(
           getEnvironmentSignals({
             path: { ...ref, environment: environment.id },
+            ...transport,
           }),
           zMatrixEnvironmentSignals,
         );
@@ -314,7 +317,7 @@ export function useMatrixProject(ref: MatrixRef) {
       queryKey: pendingDraftsKey(ref, environment.id),
       queryFn: () =>
         parsed(
-          listPendingDrafts({ path: { ...ref, environment: environment.id } }),
+          listPendingDrafts({ path: { ...ref, environment: environment.id }, ...transport }),
           zMatrixPendingDraftList,
         ),
       retry: false,
@@ -326,6 +329,7 @@ export function useMatrixProject(ref: MatrixRef) {
 
 export function useStageMatrixValue(ref: MatrixRef) {
   const queries = useQueryClient();
+  const transport = useTransport();
   return useMutation({
     // `acknowledgements` carries a keep-as-config token to dismiss a Surface-1
     // warning (#74): re-staging the SAME value with its token records the
@@ -346,6 +350,7 @@ export function useStageMatrixValue(ref: MatrixRef) {
               ? {}
               : { acknowledgements: [...input.acknowledgements] }),
           },
+          ...transport,
         }),
         zPendingChange,
       ),
@@ -367,12 +372,14 @@ export function useStageMatrixValue(ref: MatrixRef) {
  */
 export function useReclassifyKey(ref: MatrixRef) {
   const queries = useQueryClient();
+  const transport = useTransport();
   return useMutation({
     mutationFn: (input: { readonly key: string; readonly classification: 'secret' | 'config' }) =>
       parsed(
         reclassifyKey({
           path: { ...ref, key: input.key },
           body: { classification: input.classification },
+          ...transport,
         }),
         zKey,
       ),
@@ -382,10 +389,11 @@ export function useReclassifyKey(ref: MatrixRef) {
 
 export function useClearMatrixValue(ref: MatrixRef) {
   const queries = useQueryClient();
+  const transport = useTransport();
   return useMutation({
     mutationFn: (input: { readonly environment: string; readonly key: string }) =>
       parsed(
-        clearValue({ path: { ...ref, environment: input.environment, key: input.key } }),
+        clearValue({ path: { ...ref, environment: input.environment, key: input.key }, ...transport }),
         zPendingChange,
       ),
     onSuccess: (_result, input) =>
@@ -399,6 +407,7 @@ export function useClearMatrixValue(ref: MatrixRef) {
 
 export function usePublishMatrix(ref: MatrixRef) {
   const queries = useQueryClient();
+  const transport = useTransport();
   return useMutation({
     mutationFn: async (input: {
       readonly addressedEnvironment: string;
@@ -422,6 +431,7 @@ export function usePublishMatrix(ref: MatrixRef) {
               version_ids: [...input.versionIds],
               ...(previewToken === undefined ? {} : { preview_token: previewToken }),
             },
+            ...transport,
           }),
           zPublishResult,
         );
@@ -465,6 +475,7 @@ export function usePublishMatrix(ref: MatrixRef) {
 /** Config-only copy: secret copy stays on Values with its disclosure ceremony. */
 export function useCopyMatrixConfig(ref: MatrixRef) {
   const queries = useQueryClient();
+  const transport = useTransport();
   return useMutation({
     mutationFn: (input: {
       readonly sourceEnvironment: string;
@@ -481,6 +492,7 @@ export function useCopyMatrixConfig(ref: MatrixRef) {
             destination_environment_ids: [...input.destinationEnvironments],
             confirm_protected: input.confirmProtected,
           },
+          ...transport,
         }),
         zCopyValuesResult,
       ),
