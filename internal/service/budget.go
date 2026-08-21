@@ -25,6 +25,12 @@ import (
 // cannot burn the org's budget by guessing its id). The returned release frees
 // the concurrency slot; hold it for the whole operation.
 func chargeDefaultAtEntry(ctx context.Context, db *store.DB, budget *Budget, actor Actor, op authz.Operation, scope domain.Scope, now func() time.Time) (func(), error) {
+	// Couple the call site to the totality map: a method may only take the
+	// fail-closed default for an operation classified default-expensive. A named
+	// or exempt operation reaching here is a wiring bug, caught at the call.
+	if c, ok := operationBudgetClass[op]; !ok || c.class != budgetClassDefaultExpensive {
+		panic("service: chargeDefaultAtEntry called for non-default-expensive operation " + string(op))
+	}
 	if budget == nil {
 		return noopBudgetRelease, nil
 	}

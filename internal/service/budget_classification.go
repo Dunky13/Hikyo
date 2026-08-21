@@ -84,7 +84,9 @@ func buildBudgetClassification() map[authz.Operation]budgetClassification {
 		authz.OpValueImport,
 		authz.OpValueCopySource, authz.OpValueCopyDestination, authz.OpValueCopyDestinationConfig)
 	add(budgetClassDefaultExpensive, "whole-project materialization / bulk offline flush",
-		authz.OpDefinitionsExport, authz.OpDeliveryReconcileOffline)
+		authz.OpDefinitionsExport, authz.OpDefinitionsCheck, authz.OpDeliveryReconcileOffline)
+	add(budgetClassDefaultExpensive, "master-key rotation rewraps every project DEK (project-proportional)",
+		authz.OpRotateMasterKey)
 
 	// ---- EXEMPT ----
 	add(budgetClassExempt, "SSE admission caps (§10, 4/32/128) own concurrency; per-event authz must not be budgeted",
@@ -95,8 +97,8 @@ func buildBudgetClassification() map[authz.Operation]budgetClassification {
 		authz.OpAuditQueryOrg, authz.OpAuditQueryProject, authz.OpAuditQueryEnv, authz.OpAuditInstanceQuery)
 	add(budgetClassExempt, "outbox worker push; §12 outbox concurrency (1/target, 4/org) bounds it",
 		authz.OpAdapterPush)
-	add(budgetClassExempt, "key-hierarchy rotation (bounded: 1 root/1 master/N-project DEKs); the row-proportional rework is the separately-budgeted reencrypt (OpReencrypt*); §10 governs the trigger",
-		authz.OpRotateDEK, authz.OpRotateMasterKey, authz.OpRotateRootKey,
+	add(budgetClassExempt, "O(1) key-hierarchy rotation (one DEK / the master / one token key); the row-proportional rework is the separately-budgeted reencrypt (OpReencrypt*). Master-key rotation, which rewraps every project DEK, is default-expensive above",
+		authz.OpRotateDEK, authz.OpRotateRootKey,
 		authz.OpRotateTokenKey, authz.OpRotateScanningKey)
 
 	// The large remainder: single-row or paged CRUD/reads and admin config
@@ -119,8 +121,8 @@ func buildBudgetClassification() map[authz.Operation]budgetClassification {
 		// key / key-group reads (the mutating ones are schema-revision above)
 		authz.OpKeyGet, authz.OpKeyList, authz.OpKeyDeclassify, authz.OpKeySecretRuleChange,
 		authz.OpKeyGroupGet, authz.OpKeyGroupList,
-		// definitions (non-apply, non-export): reads and single-plan writes
-		authz.OpDefinitionsCheck, authz.OpDefinitionsPlanCreate, authz.OpDefinitionsPlanGet,
+		// definitions (non-apply, non-export, non-check): single-plan writes and reads
+		authz.OpDefinitionsPlanCreate, authz.OpDefinitionsPlanGet,
 		authz.OpDefinitionsSettingsGet, authz.OpDefinitionsSettingsSet,
 		// values (non-export, non-copy, non-import, non-publish): single-cell reads/writes
 		authz.OpValueRead, authz.OpValueList, authz.OpValueSet, authz.OpValueClear,

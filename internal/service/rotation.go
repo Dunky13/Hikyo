@@ -29,7 +29,10 @@ type Rotation struct {
 	// root rotation both re-read it here rather than holding it in memory. Nil
 	// refuses those two rotations loudly.
 	RootKey RootKeySource
-	Now     func() time.Time
+	// Budget applies the §179 fail-closed default to master-key rotation, which
+	// rewraps every project DEK (project-proportional). Nil disables it.
+	Budget *Budget
+	Now    func() time.Time
 }
 
 // RootKeySource re-reads operator root key material from its configured source.
@@ -180,6 +183,14 @@ func (s *Rotation) RotateMasterKey(ctx context.Context, actor Actor) (MasterKeyR
 	if s.RootKey == nil {
 		return MasterKeyRotation{}, errors.New("service: master rotation requires a root key source")
 	}
+	// §179 fail-closed default: master rotation rewraps every project DEK. Charged
+	// (authorized-then-acquired) before the process-wide hierarchy lock, so a
+	// rate-limited caller is refused without contending for the global lock.
+	release, err := chargeDefaultAtEntry(ctx, s.DB, s.Budget, actor, authz.OpRotateMasterKey, domain.Scope{}, s.now)
+	if err != nil {
+		return MasterKeyRotation{}, err
+	}
+	defer release()
 	// Process-wide serialization lives on the shared keyring, not this service:
 	// two Rotation instances over one keyring must still not prepare the same
 	// master version concurrently.

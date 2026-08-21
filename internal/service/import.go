@@ -340,8 +340,9 @@ func (s *Values) Import(ctx context.Context, actor Actor, scope domain.Scope, re
 		return ImportResult{}, err
 	}
 	// §179 fail-closed default: a bulk value fan-out with no named category.
-	// Concurrency (8/org) at entry, per-principal rate (60/min) in-tx.
-	release, err := s.Budget.acquire(budgetDefaultConc, budgetKeys{Org: scope.Org})
+	// Authorized-then-acquired at entry (rate + concurrency), so an unauthorized
+	// caller cannot occupy the org's slots by guessing its id.
+	release, err := chargeDefaultAtEntry(ctx, s.DB, s.Budget, actor, authz.OpValueImport, scope, func() time.Time { return time.Now().UTC() })
 	if err != nil {
 		return ImportResult{}, err
 	}
@@ -354,7 +355,6 @@ func (s *Values) Import(ctx context.Context, actor Actor, scope domain.Scope, re
 	var result ImportResult
 	var published PublishedEnvironment
 	advanced := false
-	var rateCharged bool
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		result = ImportResult{}
 		published = PublishedEnvironment{}
@@ -366,9 +366,6 @@ func (s *Values) Import(ctx context.Context, actor Actor, scope domain.Scope, re
 		}
 		p, err := az.Authorize(ctx, caller, authz.OpValueImport, scope)
 		if err != nil {
-			return err
-		}
-		if err := s.Budget.chargeOnce(&rateCharged, budgetDefaultRate, budgetKeys{Principal: caller.Principal}); err != nil {
 			return err
 		}
 		if err := r.Projects().Lock(ctx, p); err != nil {

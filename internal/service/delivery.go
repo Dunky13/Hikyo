@@ -554,15 +554,14 @@ func (s *Delivery) ReconcileOfflineRecordsAs(ctx context.Context, actor Actor, s
 	}
 
 	// §179 fail-closed default: a bulk offline-record flush (up to 1000 records)
-	// with no named category. Concurrency (8/org) at entry, per-principal rate
-	// (60/min) in-tx.
-	release, err := s.Budget.acquire(budgetDefaultConc, budgetKeys{Org: scope.Org})
+	// with no named category. Authorized-then-acquired at entry (rate +
+	// concurrency), so an unauthorized caller cannot occupy the org's slots.
+	release, err := chargeDefaultAtEntry(ctx, s.DB, s.Budget, actor, authz.OpDeliveryReconcileOffline, scope, s.now)
 	if err != nil {
 		return ReconcileResult{}, err
 	}
 	defer release()
 	var out ReconcileResult
-	var rateCharged bool
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		out = ReconcileResult{}
 		caller, err := actor.resolve(ctx, az, s.now())
@@ -571,9 +570,6 @@ func (s *Delivery) ReconcileOfflineRecordsAs(ctx context.Context, actor Actor, s
 		}
 		p, err := az.Authorize(ctx, caller, authz.OpDeliveryReconcileOffline, scope)
 		if err != nil {
-			return err
-		}
-		if err := s.Budget.chargeOnce(&rateCharged, budgetDefaultRate, budgetKeys{Principal: caller.Principal}); err != nil {
 			return err
 		}
 		// A production presenter is a machine credential. Resolve every credential

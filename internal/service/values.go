@@ -1088,16 +1088,15 @@ func (s *Values) Copy(ctx context.Context, actor Actor, scope domain.Scope, req 
 		return CopyResult{}, err
 	}
 	// §179 fail-closed default: a value fan-out across environments/keys with no
-	// named category. Concurrency (8/org) at entry, per-principal rate (60/min)
-	// in-tx.
-	release, err := s.Budget.acquire(budgetDefaultConc, budgetKeys{Org: scope.Org})
+	// named category. Authorized (source read) then acquired at entry (rate +
+	// concurrency), so an unauthorized caller cannot occupy the org's slots.
+	release, err := chargeDefaultAtEntry(ctx, s.DB, s.Budget, actor, authz.OpValueCopySource, sourceScope, func() time.Time { return time.Now().UTC() })
 	if err != nil {
 		return CopyResult{}, err
 	}
 	defer release()
 	var out CopyResult
 	var advanced []PublishedEnvironment
-	var rateCharged bool
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		out = CopyResult{}
 		advanced = nil
@@ -1111,10 +1110,6 @@ func (s *Values) Copy(ctx context.Context, actor Actor, scope domain.Scope, req 
 		// the units the two ceremonies enumerate.
 		hasConfig, secretKeyIDs, allKeyIDs, err := classifyCopyKeys(ctx, r, az, caller, sourceScope, req.KeyNames)
 		if err != nil {
-			return err
-		}
-		// Charged after the source read authorizes, once across the retry loop.
-		if err := s.Budget.chargeOnce(&rateCharged, budgetDefaultRate, budgetKeys{Principal: caller.Principal}); err != nil {
 			return err
 		}
 		// PREFLIGHT every destination — the copy formula and the protected-

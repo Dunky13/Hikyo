@@ -354,7 +354,7 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 		// mean a subscriber saw half the events.
 		Values:    &service.Values{DB: db, Keyring: kr, Auth: authSvc, Advisory: advisory, Scan: ruleset, Budget: budget},
 		Revisions: &service.Revisions{DB: db, Keyring: kr, Auth: authSvc, Advisory: advisory, Budget: budget},
-		Rotation:  &service.Rotation{DB: db, Keyring: kr, RootKey: rootKeySource{cfg: cfg, log: log}},
+		Rotation:  &service.Rotation{DB: db, Keyring: kr, RootKey: rootKeySource{cfg: cfg, log: log}, Budget: budget},
 		Reencrypt: reencryptSvc,
 		Pins:      &service.Pins{DB: db, Keyring: kr, Auth: authSvc},
 		Reveal:    &service.Reveal{DB: db, Auth: authSvc},

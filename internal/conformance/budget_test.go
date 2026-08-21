@@ -22,7 +22,31 @@ func init() {
 	corpus = append(corpus,
 		scenario{"schema_revision_rate_limit", scenarioSchemaRevisionRateLimit},
 		scenario{"schema_revision_noop_does_not_charge", scenarioSchemaRevisionNoopDoesNotCharge},
+		scenario{"default_budget_charged_end_to_end", scenarioDefaultBudgetChargedEndToEnd},
 	)
+}
+
+// scenarioDefaultBudgetChargedEndToEnd proves the §179 fail-closed default is
+// actually CHARGED at a default-expensive method, not merely classified: it
+// drives Definitions.Export (a whole-project materialization, classified
+// default-expensive) until the 60/min per-principal default rate refuses the
+// next call with the uniform overload error. The totality test proves every
+// operation is classified; this proves the classification reaches runtime.
+func scenarioDefaultBudgetChargedEndToEnd(t *testing.T, db *store.DB) {
+	budget := service.NewBudget()
+	defs := &service.Definitions{DB: db, Keyring: sharedKeyring(t, db), Budget: budget}
+	who, scope := tenantFixture(t, db, "defaultbudget")
+	actor := service.LocalPrincipal(who)
+
+	for i := range service.BudgetDefaultRatePerMin {
+		if _, err := defs.Export(t.Context(), actor, scope, true); err != nil {
+			t.Fatalf("definitions export %d/%d refused inside the default allowance: %v",
+				i+1, service.BudgetDefaultRatePerMin, err)
+		}
+	}
+	if _, err := defs.Export(t.Context(), actor, scope, true); !errors.Is(err, admission.ErrOverloaded) {
+		t.Fatalf("the 61st default-expensive call = %v, want ErrOverloaded (uniform 429)", err)
+	}
 }
 
 // scenarioSchemaRevisionRateLimit drives real semantic schema mutations against
