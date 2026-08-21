@@ -114,8 +114,27 @@ type Limiter struct {
 	// amplification an unknown `kid` buys is aimed at the ISSUER, so one
 	// fabricated-`kid` stream from a thousand addresses is one outbound flood.
 	issuerRefreshes map[string][]time.Time
-	failures        map[[32]byte]int
-	blocked         map[[32]byte]time.Time
+	// accounts is the per-account backoff state. One map, not a count map
+	// beside a deadline map: two maps keyed by the same value can disagree
+	// about which accounts exist, and every read, write and eviction here
+	// depends on them agreeing. A single entry makes the invariant structural.
+	accounts map[subjectKey]accountBackoff
+}
+
+// subjectKey is the irreversible bucket key for a presented account identifier.
+// Keeping the hash as a domain type prevents account state from accepting raw
+// identifiers by accident.
+type subjectKey [sha256.Size]byte
+
+// accountBackoff is one account's place on the failure curve. The key is the
+// hash of the presented identifier, never the identifier itself.
+type accountBackoff struct {
+	// failures counts consecutive failures; a success deletes the entry.
+	failures int
+	// until is the instant the delay expires. The zero value means no delay
+	// has been set yet, which is the state of every account still under the
+	// threshold.
+	until time.Time
 }
 
 // New derives the concurrency and refuses a configuration in which a single
@@ -157,8 +176,7 @@ func New(cfg Config) (*Limiter, error) {
 		ipHits:          map[string][]time.Time{},
 		metaHits:        map[string][]time.Time{},
 		issuerRefreshes: map[string][]time.Time{},
-		failures:        map[[32]byte]int{},
-		blocked:         map[[32]byte]time.Time{},
+		accounts:        map[subjectKey]accountBackoff{},
 	}
 	for range concurrency {
 		l.slots <- struct{}{}
@@ -315,11 +333,16 @@ func (l *Limiter) AccountDelay(presented string) time.Duration {
 	key := bucketKey(presented)
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	until, ok := l.blocked[key]
-	if !ok {
+	return l.accountDelay(key)
+}
+
+// accountDelay reports the current delay for key. l.mu must be held.
+func (l *Limiter) accountDelay(key subjectKey) time.Duration {
+	state, ok := l.accounts[key]
+	if !ok || state.until.IsZero() {
 		return 0
 	}
-	if d := until.Sub(l.now()); d > 0 {
+	if d := state.until.Sub(l.now()); d > 0 {
 		return d
 	}
 	return 0
@@ -336,17 +359,25 @@ func (l *Limiter) RecordFailure(presented string) (crossedThreshold bool) {
 	key := bucketKey(presented)
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if _, tracked := l.failures[key]; !tracked && len(l.failures) >= MaxTrackedSubjects {
+	return l.recordFailure(key)
+}
+
+// recordFailure advances key's backoff state. l.mu must be held.
+func (l *Limiter) recordFailure(key subjectKey) (crossedThreshold bool) {
+	state, tracked := l.accounts[key]
+	if !tracked && len(l.accounts) >= MaxTrackedSubjects {
 		l.evictAccounts()
 	}
-	l.failures[key]++
-	n := l.failures[key]
+	state.failures++
+	n := state.failures
 	if n <= FailuresBeforeBackoff {
+		l.accounts[key] = state
 		return false
 	}
 	delay := time.Duration(1<<min(n-FailuresBeforeBackoff-1, 16)) * time.Second
 	delay = min(delay, MaxAccountBackoff)
-	l.blocked[key] = l.now().Add(delay)
+	state.until = l.now().Add(delay)
+	l.accounts[key] = state
 	return n == FailuresBeforeBackoff+1
 }
 
@@ -355,8 +386,12 @@ func (l *Limiter) RecordSuccess(presented string) {
 	key := bucketKey(presented)
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	delete(l.failures, key)
-	delete(l.blocked, key)
+	l.recordSuccess(key)
+}
+
+// recordSuccess resets key's backoff state. l.mu must be held.
+func (l *Limiter) recordSuccess(key subjectKey) {
+	delete(l.accounts, key)
 }
 
 // evictAccounts drops account buckets whose backoff has elapsed. An account
@@ -369,35 +404,38 @@ func (l *Limiter) RecordSuccess(presented string) {
 // eviction, fall back to forgetting the account whose delay expires soonest:
 // it is the one closest to being forgiven anyway, and the instance-wide
 // semaphore still bounds the actual work an admitted attempt can do.
+//
+// Both passes read the same map in the same order — an entry's count and its
+// deadline are one value, so there is no way for the sweep to drop one and
+// keep the other, and no length comparison between two maps to get backwards.
 func (l *Limiter) evictAccounts() {
 	now := l.now()
-	for k := range l.failures {
-		if until, blocked := l.blocked[k]; !blocked || !until.After(now) {
-			delete(l.failures, k)
-			delete(l.blocked, k)
+	for key, state := range l.accounts {
+		// A zero `until` is an account still under the threshold: no live
+		// delay, nothing to lose by forgetting it.
+		if !state.until.After(now) {
+			delete(l.accounts, key)
 		}
 	}
-	if len(l.failures) < MaxTrackedSubjects {
+	if len(l.accounts) < MaxTrackedSubjects {
 		return
 	}
-	var soonestKey [32]byte
+	var soonestKey subjectKey
 	var soonest time.Time
 	found := false
-	for k := range l.failures {
-		until := l.blocked[k]
-		if !found || until.Before(soonest) {
-			soonestKey, soonest, found = k, until, true
+	for key, state := range l.accounts {
+		if !found || state.until.Before(soonest) {
+			soonestKey, soonest, found = key, state.until, true
 		}
 	}
 	if found {
-		delete(l.failures, soonestKey)
-		delete(l.blocked, soonestKey)
+		delete(l.accounts, soonestKey)
 	}
 }
 
 // bucketKey hashes the presented identifier. Storing it raw would put every
 // attempted username in memory in plaintext for the process lifetime, which
 // is a log of who is being attacked that nothing needs.
-func bucketKey(presented string) [32]byte {
-	return sha256.Sum256([]byte(presented))
+func bucketKey(presented string) subjectKey {
+	return subjectKey(sha256.Sum256([]byte(presented)))
 }

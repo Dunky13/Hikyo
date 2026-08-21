@@ -152,57 +152,56 @@ func TestPerIPSlidingWindow(t *testing.T) {
 	rel()
 }
 
-func TestPerAccountBackoffCurve(t *testing.T) {
+func TestPerAccountBackoffTransitions(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
 	l, err := New(Config{BudgetMiB: DefaultBudgetMiB, ArgonMemoryKiB: 64 * 1024, Now: fixedClock(&now)})
 	if err != nil {
 		t.Fatal(err)
 	}
 	const who = "someone"
-	for i := range FailuresBeforeBackoff {
-		if crossed := l.RecordFailure(who); crossed {
-			t.Fatalf("threshold reported crossed at failure %d", i+1)
-		}
-		if d := l.AccountDelay(who); d != 0 {
-			t.Fatalf("delay %v before the threshold", d)
-		}
-	}
-	// Failure 6 crosses: delay = 2^(6-5) ... the ops spec's min(2^(n-5), 60).
-	if !l.RecordFailure(who) {
-		t.Fatal("crossing the threshold was not reported — no audit event would be emitted")
-	}
-	if got, want := l.AccountDelay(who), 1*time.Second; got != want {
-		t.Fatalf("first backoff %v, want %v", got, want)
-	}
-	for want := 2 * time.Second; want <= 32*time.Second; want *= 2 {
-		if l.RecordFailure(who) {
-			t.Fatal("threshold reported crossed more than once")
-		}
-		if got := l.AccountDelay(who); got != want {
-			t.Fatalf("backoff %v, want %v", got, want)
-		}
-	}
-	// The cap holds, and no hard lockout ever appears.
-	for range 20 {
-		l.RecordFailure(who)
-	}
-	if got := l.AccountDelay(who); got != MaxAccountBackoff {
-		t.Fatalf("backoff %v, want the %v cap", got, MaxAccountBackoff)
+	transitions := []struct {
+		name          string
+		advance       time.Duration
+		checkBefore   bool
+		wantBefore    time.Duration
+		failures      int
+		success       bool
+		wantCrossings int
+		wantDelay     time.Duration
+	}{
+		{name: "below threshold", failures: FailuresBeforeBackoff},
+		{name: "threshold crossing", failures: 1, wantCrossings: 1, wantDelay: time.Second},
+		{name: "exponential delay", failures: 1, wantDelay: 2 * time.Second},
+		{name: "maximum delay", failures: cappedFailures - (FailuresBeforeBackoff + 2), wantDelay: MaxAccountBackoff},
+		{name: "expiry preserves failure count", advance: MaxAccountBackoff + time.Second, checkBefore: true, failures: 1, wantDelay: MaxAccountBackoff},
+		{name: "success resets delay and count", success: true},
+		{name: "first failure after success", failures: 1},
 	}
 
-	// The delay is an absolute instant, so concurrent attempts on the account
-	// queue behind the same one rather than each serving its own.
-	now = now.Add(MaxAccountBackoff)
-	if got := l.AccountDelay(who); got != 0 {
-		t.Fatalf("delay %v after it should have elapsed", got)
-	}
-
-	l.RecordSuccess(who)
-	if got := l.AccountDelay(who); got != 0 {
-		t.Fatalf("success did not reset the curve: %v", got)
-	}
-	if crossed := l.RecordFailure(who); crossed {
-		t.Fatal("the failure count did not reset")
+	for _, transition := range transitions {
+		t.Run(transition.name, func(t *testing.T) {
+			now = now.Add(transition.advance)
+			if transition.checkBefore {
+				if got := l.AccountDelay(who); got != transition.wantBefore {
+					t.Fatalf("delay before transition %v, want %v", got, transition.wantBefore)
+				}
+			}
+			if transition.success {
+				l.RecordSuccess(who)
+			}
+			crossings := 0
+			for range transition.failures {
+				if l.RecordFailure(who) {
+					crossings++
+				}
+			}
+			if crossings != transition.wantCrossings {
+				t.Fatalf("threshold crossed %d times, want %d", crossings, transition.wantCrossings)
+			}
+			if got := l.AccountDelay(who); got != transition.wantDelay {
+				t.Fatalf("delay %v, want %v", got, transition.wantDelay)
+			}
+		})
 	}
 }
 
@@ -218,6 +217,143 @@ func TestUnknownAccountGetsABucketExactlyLikeARealOne(t *testing.T) {
 	}
 	if l.AccountDelay("definitely-not-an-account") == 0 {
 		t.Fatal("an unknown identifier got no backoff bucket, which is observable")
+	}
+}
+
+// cappedFailures drives an account far enough up the curve that its delay
+// clamps at MaxAccountBackoff: 2^(12-5-1) = 64s, over the 60s cap.
+const cappedFailures = 12
+
+func TestEvictionForgivesTheAccountClosestToForgiveness(t *testing.T) {
+	// At the bound with nothing stale, the sweep frees nothing and the
+	// fallback must forget the account whose delay expires soonest — the one
+	// closest to being forgiven anyway. Forgiving is the safe direction; the
+	// instance-wide semaphore still bounds the work an admitted attempt does.
+	now := time.Unix(1_800_000_000, 0)
+	l, err := New(Config{BudgetMiB: DefaultBudgetMiB, ArgonMemoryKiB: 64 * 1024, Now: fixedClock(&now)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range MaxTrackedSubjects - 1 {
+		who := fmt.Sprintf("long-%d", i)
+		for range cappedFailures {
+			l.RecordFailure(who)
+		}
+	}
+	const soonest = "soonest"
+	for range FailuresBeforeBackoff + 1 {
+		l.RecordFailure(soonest)
+	}
+	if got, want := l.AccountDelay(soonest), 1*time.Second; got != want {
+		t.Fatalf("setup: soonest delay %v, want %v", got, want)
+	}
+
+	// The clock has not moved, so every tracked account is live and this one
+	// new subject puts the map past its bound.
+	l.RecordFailure("newcomer")
+
+	if got := l.AccountDelay(soonest); got != 0 {
+		t.Fatalf("eviction kept the soonest-expiring account: delay %v", got)
+	}
+	// Forgiveness is total: count and delay leave together, so the account
+	// has to climb the whole curve again.
+	for i := range FailuresBeforeBackoff {
+		if l.RecordFailure(soonest) {
+			t.Fatalf("forgiven account crossed the threshold at failure %d", i+1)
+		}
+	}
+	if !l.RecordFailure(soonest) {
+		t.Fatal("forgiven account did not cross the threshold on its 6th fresh failure")
+	}
+	// Exactly one account went, and it was the right one.
+	if got, want := l.AccountDelay("long-0"), MaxAccountBackoff; got != want {
+		t.Fatalf("a longer-backoff account was evicted instead: delay %v, want %v", got, want)
+	}
+}
+
+func TestEvictionDropsStaleAccountsBeforeLiveOnes(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	l, err := New(Config{BudgetMiB: DefaultBudgetMiB, ArgonMemoryKiB: 64 * 1024, Now: fixedClock(&now)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const half = MaxTrackedSubjects / 2
+	for i := range half {
+		who := fmt.Sprintf("short-%d", i)
+		for range FailuresBeforeBackoff + 1 { // 1s of backoff
+			l.RecordFailure(who)
+		}
+	}
+	for i := range half {
+		who := fmt.Sprintf("long-%d", i)
+		for range cappedFailures { // 60s of backoff
+			l.RecordFailure(who)
+		}
+	}
+	now = now.Add(2 * time.Second) // the short half is now stale
+
+	// A new subject hits the bound. Reclaiming the stale half is enough, so
+	// no live backoff may be forgiven.
+	l.RecordFailure("newcomer")
+
+	want := MaxAccountBackoff - 2*time.Second
+	for i := range half {
+		who := fmt.Sprintf("long-%d", i)
+		if got := l.AccountDelay(who); got != want {
+			t.Fatalf("live account %s: delay %v, want %v — a live entry was evicted while stale ones remained", who, got, want)
+		}
+	}
+}
+
+func TestConcurrentAccountCallsHoldTheCurve(t *testing.T) {
+	// One mutex guards the whole account map, so interleaved calls must not
+	// tear it or lose failures. Run with -race.
+	//
+	// The clock is frozen and never advanced once the goroutines are running,
+	// so the expected delay is exact rather than a wall-clock tolerance.
+	now := time.Unix(1_800_000_000, 0)
+	l, err := New(Config{BudgetMiB: DefaultBudgetMiB, ArgonMemoryKiB: 64 * 1024, Now: fixedClock(&now)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const workers = 16
+	var wg sync.WaitGroup
+	// Each worker owns a key and drives it just past the threshold, so the
+	// end state is deterministic however the calls interleave.
+	for w := range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			who := fmt.Sprintf("worker-%d", w)
+			for range FailuresBeforeBackoff + 1 {
+				l.RecordFailure(who)
+				_ = l.AccountDelay(who)
+			}
+		}()
+	}
+	// Meanwhile one contended key is failed, read and reset concurrently. Its
+	// end state is racy by construction; what must hold is that nothing panics
+	// and no reader observes a half-written entry.
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 50 {
+				l.RecordFailure("contended")
+				_ = l.AccountDelay("contended")
+				l.RecordSuccess("contended")
+			}
+		}()
+	}
+	wg.Wait()
+
+	for w := range workers {
+		who := fmt.Sprintf("worker-%d", w)
+		// Exactly 6 failures landed on this key: one more or one fewer moves
+		// the delay off the first rung of the curve.
+		if got, want := l.AccountDelay(who), 1*time.Second; got != want {
+			t.Fatalf("%s: delay %v, want %v — failures were lost or double-counted", who, got, want)
+		}
 	}
 }
 
@@ -241,7 +377,7 @@ func TestLimiterStateIsBounded(t *testing.T) {
 		now = now.Add(time.Second)
 	}
 	l.mu.Lock()
-	ips, accounts := len(l.ipHits), len(l.failures)
+	ips, accounts := len(l.ipHits), len(l.accounts)
 	l.mu.Unlock()
 	if ips > MaxTrackedSubjects {
 		t.Errorf("tracking %d source IPs, bound is %d", ips, MaxTrackedSubjects)
