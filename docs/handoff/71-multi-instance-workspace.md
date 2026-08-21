@@ -21,7 +21,7 @@ workspace tier — both establishment and step-up — before this run:
   redemption **elevates the session in place** — same session id, a rotated
   bearer value (`WorkspaceSession.Elevated`).
 
-Nothing server-side was added. `internal/server/api/noproxy_test.go` remains the
+Nothing server-side was added. `api/noproxy_test.go` remains the
 invariant that no viewing-server proxy endpoint exists.
 
 ## What landed (web)
@@ -100,8 +100,12 @@ disclosure retries over the now-elevated transport.
   literal, so a workspace step-up on B must use the TOTP path (no passkey RP).
   The unit tests cover the step-up prepare/elevate client logic; the full
   browser reveal-over-popup-TOTP flow (with its 30s step waits inside a popup)
-  is the highest-flake e2e and is not added here. The added e2e proves
-  read/edit + the no-proxy tripwire.
+  is the highest-flake e2e and is not added here. The added e2e drives a READ
+  of B's config value through the shell and the no-proxy route-guard tripwire;
+  edit/publish/reveal *routing* to the remote is covered by the transport
+  threading, the unit tests (the generated-SDK-through-workspace-client test
+  exercises the value PUT path), and the same tripwire (a leaked edit to A
+  would fail it) — but no edit is driven through the matrix UI in the browser.
 - **URL length ceiling on step-up `key` params** (`ponytail:` in
   `prepareWorkspace`): a reveal-all over a very large environment enumerates
   every key id onto the approve URL. The server accepts 1000×200 chars in the

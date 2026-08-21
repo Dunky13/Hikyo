@@ -174,7 +174,11 @@ export async function probeWorkspace(bearer: WorkspaceBearer): Promise<boolean> 
     // card must not do.
     return strike(bearer);
   }
-  if (response.status === 401 || response.status === 403) {
+  // Only a 401 is the session dying (revoked, expired, origin-binding mismatch —
+  // all ErrUnauthenticated). A 403 on this self-scoped endpoint would be
+  // abnormal rather than a kill signal, so it falls through to a strike below
+  // like any other response that is not this endpoint answering cleanly.
+  if (response.status === 401) {
     dropWorkspaceValue(bearer.origin, bearer.value);
     return false;
   }
@@ -259,6 +263,13 @@ async function remoteJSON<T>(
  * establishing or resuming a workspace.
  */
 export async function assertCompatible(origin: string): Promise<void> {
+  // The live protection is right here in `remoteJSON`: a remote that is
+  // unreachable, refuses this origin, or serves a meta that does not PARSE as
+  // this protocol throws, and the caller refuses the workspace. The numeric
+  // check below is the second half — the per-operation minimum-revision gate —
+  // and it is dormant while this shell's floor equals the meta contract's own
+  // (`zMeta` already rejects a revision below 1). It becomes live the day a
+  // future operation raises `WORKSPACE_MIN_API_REVISION` above that floor.
   const meta = await remoteJSON(origin, '/api/v1/meta', zMeta);
   if (meta.api_revision < WORKSPACE_MIN_API_REVISION) {
     throw new WorkspaceError(
@@ -434,6 +445,13 @@ export async function prepareWorkspace(
     approve.searchParams.set('purpose', 'step-up');
     approve.searchParams.set('operation', stepUp.operation);
     approve.searchParams.set('environment', stepUp.environment);
+    // ponytail: the enumerated key set rides the approve URL so the popup can
+    // name it to the remote's reauth ceremony. A reveal-all over a very large
+    // environment can outgrow the browser/ingress URL limit and fail before the
+    // approval renders — a bounded ceiling, since key sets are usually small.
+    // Upgrade path when it bites: post the key set to a short-lived server-side
+    // transaction (it is already bound there from the start body) and have the
+    // approve page fetch it by `state`, mirroring cli-reauth's transaction read.
     for (const key of stepUp.keySet) {
       approve.searchParams.append('key', key);
     }

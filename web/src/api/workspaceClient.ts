@@ -72,7 +72,17 @@ export function createWorkspaceClient(origin: string): Client {
   });
 
   client.interceptors.response.use((response, request) => {
-    if (response.status === 401 || response.status === 403) {
+    // ONLY a 401 kills the session. A 401 is what every death of the workspace
+    // session answers — a revoked or expired bearer, and the origin-binding
+    // mismatch the chokepoint enforces (session.go returns ErrUnauthenticated,
+    // never a 403). A 403 is the opposite: an AUTHENTICATED human who lacks the
+    // capability for THIS operation — no `publish` on this project, say. That is
+    // an ordinary authorization denial the surface must render as such; dropping
+    // the whole workspace on it would replace a real "you can't publish here"
+    // with a spurious reconnect and disconnect every other surface too. (A
+    // de-allowlist is not a 403 either: it strips the CORS headers, so the
+    // browser blocks the response and the liveness probe catches it.)
+    if (response.status === 401) {
       const value = sentUnder.get(request);
       if (value !== undefined) {
         // The remote has stopped honouring this bearer. Drop it now — the

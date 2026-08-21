@@ -1,8 +1,8 @@
 import { QueryClientProvider } from '@tanstack/react-query';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router';
 
-import { originOf, useRemotes } from '../api/remotes.ts';
+import { safeOriginOf, useRemotes } from '../api/remotes.ts';
 import { WorkspaceContextProvider } from '../api/transport.tsx';
 import {
   assertCompatible,
@@ -62,42 +62,10 @@ export function WorkspaceScope({
 function WorkspaceBoundary({ remote, children }: { remote: string; children: ReactNode }) {
   const remotes = useRemotes();
   const entry = remotes.data?.items.find((r) => r.name === remote);
-  const origin = entry === undefined ? '' : safeOrigin(entry.url);
-
-  // The workspace's OWN query cache. A fresh client per boundary mount, so a
-  // remote's data is structurally isolated from this instance's — a same-named
-  // org/project on both can never collide — and it dies with the subtree when
-  // the workspace is exited or the tab navigates away. The initializer runs
-  // once (StrictMode's double-mount included) so navigation within the
-  // workspace keeps its cache.
-  const [queries] = useState(() => makeQueryClient());
-  // One origin-scoped SDK client, rebuilt only if the origin itself changes.
-  const client = useMemo(() => (origin === '' ? null : createWorkspaceClient(origin)), [origin]);
+  const origin = entry === undefined ? '' : safeOriginOf(entry.url);
 
   const workspaces = useWorkspaces();
   const bearer = workspaces.find((w) => w.origin === origin);
-
-  const [skew, setSkew] = useState<string | null>(null);
-  // The LIVE pre-auth meta read the ADR requires before establishing OR
-  // RESUMING — entering the route holding a bearer is a resume, and a snapshot
-  // version can race a downgrade or a restore. Refuses by name rather than
-  // half-rendering a secrets matrix it does not fully understand.
-  useEffect(() => {
-    if (origin === '' || bearer === undefined) {
-      return;
-    }
-    let live = true;
-    assertCompatible(origin)
-      .then(() => {
-        if (live) setSkew(null);
-      })
-      .catch((error: unknown) => {
-        if (live) setSkew(error instanceof WorkspaceError ? error.message : 'This remote is not compatible with this shell.');
-      });
-    return () => {
-      live = false;
-    };
-  }, [origin, bearer]);
 
   // The liveness poll, here as well as on the remotes card. Operating a matrix
   // three routes deep is exactly where a kill switch must still bite: a
@@ -150,7 +118,79 @@ function WorkspaceBoundary({ remote, children }: { remote: string; children: Rea
     return <Reconnect origin={origin} name={remote} />;
   }
 
-  if (skew !== null) {
+  // The connected subtree — its cache, its client, its compatibility gate — is
+  // KEYED on origin AND session id. That key is the whole isolation story:
+  //
+  //   - a different human reconnecting in the same tab after a revocation gets a
+  //     NEW session id, so the key changes and the cache is thrown away — they
+  //     never see a frame of the previous human's values;
+  //   - switching `?remote=A` to `?remote=B` changes the origin, same effect;
+  //   - a STEP-UP rotates the bearer VALUE under a stable session id, so the key
+  //     does NOT change and the cache is preserved — the elevation is the same
+  //     human continuing, not a new one.
+  return (
+    <ConnectedWorkspace key={`${origin}::${bearer.session}`} origin={origin} remote={remote}>
+      {children}
+    </ConnectedWorkspace>
+  );
+}
+
+/**
+ * ConnectedWorkspace holds one workspace session's cache and gates rendering on
+ * the live compatibility check.
+ *
+ * It is mounted under a key of origin + session id, so everything below is
+ * created fresh for a new session and torn down with the old one. The gate is
+ * the ADR's "live meta read BEFORE resuming": product children — which would
+ * fire data reads at a possibly downgraded or restored remote — do not mount
+ * until the check passes, rather than mounting first and refusing after the
+ * reads have already gone out.
+ */
+function ConnectedWorkspace({
+  origin,
+  remote,
+  children,
+}: {
+  origin: string;
+  remote: string;
+  children: ReactNode;
+}) {
+  const [queries] = useState(() => makeQueryClient());
+  const [client] = useState(() => createWorkspaceClient(origin));
+  const [gate, setGate] = useState<'pending' | 'ok' | 'refused'>('pending');
+  const [message, setMessage] = useState('');
+
+  useEffect(() => {
+    let live = true;
+    assertCompatible(origin)
+      .then(() => {
+        if (live) setGate('ok');
+      })
+      .catch((error: unknown) => {
+        if (!live) {
+          return;
+        }
+        setMessage(
+          error instanceof WorkspaceError
+            ? error.message
+            : 'This remote is not compatible with this shell.',
+        );
+        setGate('refused');
+      });
+    return () => {
+      live = false;
+    };
+  }, [origin]);
+
+  if (gate === 'pending') {
+    return (
+      <p className="card" role="status">
+        Checking <span className="mono">{origin}</span>…
+      </p>
+    );
+  }
+
+  if (gate === 'refused') {
     return (
       <section className="card" aria-labelledby="workspace-skew">
         <h1 id="workspace-skew">Cannot operate this remote</h1>
@@ -158,16 +198,10 @@ function WorkspaceBoundary({ remote, children }: { remote: string; children: Rea
           <span className="alert__glyph" aria-hidden="true">
             !
           </span>
-          <span>{skew}</span>
+          <span>{message}</span>
         </p>
       </section>
     );
-  }
-
-  if (client === null) {
-    // Unreachable given origin !== '' above, but the type says it can be null
-    // and a workspace with no client must never fall through to a data call.
-    return null;
   }
 
   return (
@@ -270,13 +304,4 @@ function Reconnect({ origin, name }: { origin: string; name: string }) {
       )}
     </section>
   );
-}
-
-/** safeOrigin never throws on a stored URL the browser cannot parse. */
-function safeOrigin(url: string): string {
-  try {
-    return originOf(url);
-  } catch {
-    return url;
-  }
 }

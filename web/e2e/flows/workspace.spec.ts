@@ -302,7 +302,7 @@ test.describe('multi-instance', () => {
     await expect(page.locator('.workspace-banner')).toContainText(BASE_URL_B);
 
     // And nothing leaked to A. This is the no-proxy claim, checked at runtime
-    // rather than argued: `internal/server/api/noproxy_test.go` proves the
+    // rather than argued: `api/noproxy_test.go` proves the
     // server grew no proxy endpoint; this proves the browser used none.
     expect(leaked, `product-data calls reached the viewing server: ${leaked.join(', ')}`).toEqual(
       [],

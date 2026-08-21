@@ -18,7 +18,7 @@ import {
   type Remote,
 } from '../api/remotes.ts';
 import { useOrgs } from '../api/session.ts';
-import { WorkspaceContextProvider } from '../api/transport.tsx';
+import { WorkspaceContextProvider, withRemote } from '../api/transport.tsx';
 import {
   forgetWorkspace,
   livenessPollMs,
@@ -537,7 +537,10 @@ function OrgProjects({
           <li key={project.id}>
             <Link
               className="btn"
-              to={`${generatePath(surfaceById('matrix').path, { org: orgId, project: project.id })}?remote=${encodeURIComponent(remoteName)}`}
+              to={withRemote(
+                generatePath(surfaceById('matrix').path, { org: orgId, project: project.id }),
+                remoteName,
+              )}
             >
               {project.name}
             </Link>
