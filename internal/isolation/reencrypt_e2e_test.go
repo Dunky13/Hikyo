@@ -3,6 +3,7 @@ package isolation
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -12,6 +13,325 @@ import (
 	"github.com/Hikyo-Org/hikyo/internal/store"
 	"github.com/Hikyo-Org/hikyo/internal/store/keyring"
 )
+
+// injectRetryOnce returns an AfterChunk hook that fails the first chunk of each
+// named table with a retryable error, then never again — a deterministic
+// commit-time serialization retry to prove the walker publishes its cursor and
+// moved-count only after the transaction commits (#187 reopen). Firing once per
+// distinct table exercises each walker family independently.
+func injectRetryOnce(tables ...string) func(context.Context, string) error {
+	pending := map[string]bool{}
+	for _, t := range tables {
+		pending[t] = true
+	}
+	return func(_ context.Context, table string) error {
+		if pending[table] {
+			pending[table] = false
+			return store.ErrRetrySerialization
+		}
+		return nil
+	}
+}
+
+// reencCompletedRowsMoved asserts exactly one crypto.reencrypt_completed event
+// exists and its payload's rows_moved equals want (the completion audit count is
+// exact, #187 acceptance). It decodes the payload and compares numerically — a
+// substring/LIKE match would let rows_moved=2 pass against a stored 20.
+func reencCompletedRowsMoved(t *testing.T, db *store.DB, ctx context.Context, trail string, want int) {
+	t.Helper()
+	table := "audit_tenant_events"
+	if trail == "instance" {
+		table = "audit_instance_events"
+	}
+	payloads := reencQueryStrings(t, db, ctx, "SELECT payload FROM "+table+" WHERE type='crypto.reencrypt_completed'")
+	if len(payloads) != 1 {
+		t.Fatalf("crypto.reencrypt_completed events = %d, want exactly 1", len(payloads))
+	}
+	var got struct {
+		RowsMoved int64 `json:"rows_moved"`
+	}
+	if err := json.Unmarshal([]byte(payloads[0]), &got); err != nil {
+		t.Fatalf("decode reencrypt_completed payload %q: %v", payloads[0], err)
+	}
+	if got.RowsMoved != int64(want) {
+		t.Fatalf("crypto.reencrypt_completed rows_moved = %d, want %d (exact audit count)", got.RowsMoved, want)
+	}
+}
+
+// reencQueryStrings runs a single-text-column query on either engine.
+func reencQueryStrings(t *testing.T, db *store.DB, ctx context.Context, query string) []string {
+	t.Helper()
+	var out []string
+	switch db.Engine() {
+	case store.EngineSQLite:
+		rows, err := db.SQLiteRead().QueryContext(ctx, query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var s string
+			if err := rows.Scan(&s); err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, s)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+	default:
+		rows, err := db.PG().Query(ctx, query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var s string
+			if err := rows.Scan(&s); err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, s)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return out
+}
+
+// A commit-time serialization retry must not skip a page or double-count moved
+// rows. The #187 reopen found the walkers advanced their pagination cursor and
+// incremented the moved count from inside the replayable tx.Write closure, so a
+// retried chunk re-listed past the rolled-back page (stranding rows on the
+// retiring key, which the dryness gate then refuses) and counted the lost page
+// twice. AfterChunk injects one retryable failure per walker family; the run
+// must still move every row exactly once, retire v1, and report an exact count.
+func TestReencryptProjectRetrySafe(t *testing.T) {
+	t.Run("sqlite", func(t *testing.T) { reencryptProjectRetrySafe(t, openSQLite) })
+	t.Run("postgres", func(t *testing.T) { reencryptProjectRetrySafe(t, openPostgres) })
+}
+
+func reencryptProjectRetrySafe(t *testing.T, open func(*testing.T) *store.DB) {
+	// Control: no injection, to learn the exact moved count for this seed (the
+	// seeded project may carry a real draft the walk also moves).
+	control := reencProjectCycle(t, open, nil)
+	if control.err != nil {
+		t.Fatalf("control reencrypt: %v", control.err)
+	}
+	// Injected: one retryable failure on the first `value` chunk. With the bug,
+	// attempt 2 re-lists past the rolled-back row — it stays on v1, the dryness
+	// gate refuses the retire with ErrConflict, and the count double-reports.
+	got := reencProjectCycle(t, open, injectRetryOnce("value"))
+	if got.err != nil {
+		t.Fatalf("reencrypt with an injected retry: %v", got.err)
+	}
+	if got.moved != control.moved {
+		t.Fatalf("moved with a retried chunk = %d, want %d (control) — retry skipped or double-counted", got.moved, control.moved)
+	}
+	if got.v1 != "retired" {
+		t.Fatalf("DEK v1 = %q after a retried walk, want retired (a skipped page leaves it retiring)", got.v1)
+	}
+	reencCompletedRowsMoved(t, got.db, tctx(t), "project", got.moved)
+}
+
+type reencOutcome struct {
+	db    *store.DB
+	moved int
+	v1    string
+	err   error
+}
+
+// reencProjectCycle seeds one value row, rotates the project DEK, and runs
+// reencrypt with the given AfterChunk hook. With ChunkSize=1, a chunk that fails
+// retryably rolls back its row move; a walker that advanced its cursor from
+// inside that closure re-lists past the row on retry and strands it on v1, which
+// the dryness gate then refuses (the #187 skip). One row suffices to prove it.
+func reencProjectCycle(t *testing.T, open func(*testing.T) *store.DB, inject func(context.Context, string) error) reencOutcome {
+	db := seededDB(t, open)
+	kr := probeKeyring(t, db)
+	ctx := tctx(t)
+	const org, prj, env, key = "org_a", "prj_a1", "env_a1", "key_a1"
+	sealer, err := kr.ForProject(ctx, org, prj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aad := crypto.ValueAAD{OrgID: org, ProjectID: prj, EnvID: env, KeyID: key, RowID: "row_rs", FieldTag: "value"}
+	ct := reencSealValue(t, sealer.SealValue, aad, "retry-secret")
+	reencExec(t, db, ctx,
+		`INSERT INTO value_entries (id, org_id, project_id, environment_id, key_id, ciphertext, updated_at, updated_by) VALUES ('row_rs','org_a','prj_a1','env_a1','key_a1',?, '2026-01-01T00:00:00Z','usr_root')`,
+		`INSERT INTO value_entries (id, org_id, project_id, environment_id, key_id, ciphertext, updated_at, updated_by) VALUES ('row_rs','org_a','prj_a1','env_a1','key_a1',$1, '2026-01-01T00:00:00Z','usr_root')`,
+		ct)
+	rotation := &service.Rotation{DB: db, Keyring: kr, RootKey: probeRootSource{db: db}}
+	if _, err := rotation.RotateDEK(ctx, service.LocalPrincipal(root), service.DEKScope{OrgID: org, ProjectID: prj}); err != nil {
+		t.Fatalf("rotate-dek: %v", err)
+	}
+	re := &service.Reencrypt{DB: db, Keyring: kr, ChunkSize: 1, ChunkPause: -1, AfterChunk: inject}
+	res, err := re.ReencryptProject(ctx, service.LocalPrincipal(root), org, prj)
+	out := reencOutcome{db: db, moved: res.RowsMoved, err: err}
+	if err != nil {
+		return out
+	}
+	states, serr := queryTier3States(db, ctx, org, prj)
+	if serr != nil {
+		t.Fatal(serr)
+	}
+	out.v1 = states[1]
+	return out
+}
+
+// The instance walk has two more walker families than the project walk: the
+// row_version tables (password_credentials) and the blob-CAS remotes table.
+// Inject one retryable failure into each and assert the same retry-safety.
+func TestReencryptInstanceRetrySafe(t *testing.T) {
+	t.Run("sqlite", func(t *testing.T) { reencryptInstanceRetrySafe(t, openSQLite) })
+	t.Run("postgres", func(t *testing.T) { reencryptInstanceRetrySafe(t, openPostgres) })
+}
+
+func reencryptInstanceRetrySafe(t *testing.T, open func(*testing.T) *store.DB) {
+	control := reencInstanceCycle(t, open, nil)
+	if control.err != nil {
+		t.Fatalf("control reencrypt --instance: %v", control.err)
+	}
+	got := reencInstanceCycle(t, open, injectRetryOnce("password_credentials", "remotes"))
+	if got.err != nil {
+		t.Fatalf("reencrypt --instance with an injected retry: %v", got.err)
+	}
+	if got.moved != control.moved {
+		t.Fatalf("moved with retried chunks = %d, want %d (control) — retry skipped or double-counted", got.moved, control.moved)
+	}
+	if got.v1 != "retired" {
+		t.Fatalf("instance DEK v1 = %q after a retried walk, want retired", got.v1)
+	}
+	reencCompletedRowsMoved(t, got.db, tctx(t), "instance", got.moved)
+}
+
+// injectRetryOnNthChunk fails the n-th chunk of the named table once (retryable),
+// then never again — a mid-walk retry, unlike injectRetryOnce which always hits
+// the first chunk. It proves committed earlier pages are not re-counted and the
+// retried middle chunk advances exactly once (#187 validation: multi-chunk).
+func injectRetryOnNthChunk(table string, n int) func(context.Context, string) error {
+	seen, fired := 0, false
+	return func(_ context.Context, tbl string) error {
+		if tbl != table {
+			return nil
+		}
+		seen++
+		if seen == n && !fired {
+			fired = true
+			return store.ErrRetrySerialization
+		}
+		return nil
+	}
+}
+
+// The reopen's failure scenario is literally a multi-chunk walk (IDs 1–100 then
+// a later page retrying): the shared walkChunked primitive must publish the
+// cursor and moved-count only after each chunk commits, so a retry of chunk 2
+// re-counts neither chunk 1 (committed) nor itself. Three remotes with
+// ChunkSize=1 yield three chunks; inject the retry on the second.
+func TestReencryptMultiChunkRetrySafe(t *testing.T) {
+	t.Run("sqlite", func(t *testing.T) { reencryptMultiChunkRetrySafe(t, openSQLite) })
+	t.Run("postgres", func(t *testing.T) { reencryptMultiChunkRetrySafe(t, openPostgres) })
+}
+
+func reencryptMultiChunkRetrySafe(t *testing.T, open func(*testing.T) *store.DB) {
+	control := reencMultiRemoteCycle(t, open, nil)
+	if control.err != nil {
+		t.Fatalf("control reencrypt --instance: %v", control.err)
+	}
+	got := reencMultiRemoteCycle(t, open, injectRetryOnNthChunk("remotes", 2))
+	if got.err != nil {
+		t.Fatalf("reencrypt --instance with a mid-walk retry: %v", got.err)
+	}
+	if got.moved != control.moved {
+		t.Fatalf("moved with a retried middle chunk = %d, want %d (control) — retry re-counted a committed page or itself", got.moved, control.moved)
+	}
+	if got.v1 != "retired" {
+		t.Fatalf("instance DEK v1 = %q after a multi-chunk retried walk, want retired", got.v1)
+	}
+	reencCompletedRowsMoved(t, got.db, tctx(t), "instance", got.moved)
+}
+
+func reencMultiRemoteCycle(t *testing.T, open func(*testing.T) *store.DB, inject func(context.Context, string) error) reencOutcome {
+	db := seededDB(t, open)
+	kr := probeKeyring(t, db)
+	ctx := tctx(t)
+	inst := kr.ForInstance()
+	for _, rm := range []struct{ id, secret string }{{"rmt_mc1", "cred-1"}, {"rmt_mc2", "cred-2"}, {"rmt_mc3", "cred-3"}} {
+		aad := crypto.InstanceFieldAAD{OwnerTable: "remotes", OwnerRowID: rm.id, FieldTag: "credential"}
+		ct, err := inst.SealField(aad, []byte(rm.secret))
+		if err != nil {
+			t.Fatal(err)
+		}
+		reencExec(t, db, ctx,
+			`INSERT INTO remotes (id, name, url, spki_pin, credential_sealed, created_at, created_by) VALUES (?,?,'https://r','sha256-x',?, '2026-01-01T00:00:00Z','usr_root')`,
+			`INSERT INTO remotes (id, name, url, spki_pin, credential_sealed, created_at, created_by) VALUES ($1,$2,'https://r','sha256-x',$3, '2026-01-01T00:00:00Z','usr_root')`,
+			rm.id, rm.id, ct)
+	}
+	rotation := &service.Rotation{DB: db, Keyring: kr, RootKey: probeRootSource{db: db}}
+	if _, err := rotation.RotateDEK(ctx, service.LocalPrincipal(root), service.DEKScope{Instance: true}); err != nil {
+		t.Fatalf("rotate-dek --instance: %v", err)
+	}
+	re := &service.Reencrypt{DB: db, Keyring: kr, ChunkSize: 1, ChunkPause: -1, AfterChunk: inject}
+	res, err := re.ReencryptInstance(ctx, service.LocalPrincipal(root))
+	out := reencOutcome{db: db, moved: res.RowsMoved, err: err}
+	if err != nil {
+		return out
+	}
+	states, serr := queryTier3StatesPurpose(db, ctx, "instance", "", "")
+	if serr != nil {
+		t.Fatal(serr)
+	}
+	out.v1 = states[1]
+	return out
+}
+
+func reencInstanceCycle(t *testing.T, open func(*testing.T) *store.DB, inject func(context.Context, string) error) reencOutcome {
+	db := seededDB(t, open)
+	kr := probeKeyring(t, db)
+	ctx := tctx(t)
+	inst := kr.ForInstance()
+	// One password_credentials row (row_version family) and one remote (blob-CAS
+	// family). ChunkSize=1: a retried chunk that advanced its cursor strands the
+	// row on v1 and the dryness gate refuses. One row per family proves it.
+	pwAAD := crypto.InstanceFieldAAD{OwnerTable: "password_credentials", OwnerRowID: "acc_rs", FieldTag: "verifier"}
+	pwCT, err := inst.SealField(pwAAD, []byte("verifier-secret"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reencExec(t, db, ctx,
+		`INSERT INTO accounts (id, principal_id, username, display_name, created_at) VALUES ('acc_rs','usr_root','rsuser','RS','2026-01-01T00:00:00Z')`,
+		`INSERT INTO accounts (id, principal_id, username, display_name, created_at) VALUES ('acc_rs','usr_root','rsuser','RS','2026-01-01T00:00:00Z')`)
+	reencExec(t, db, ctx,
+		`INSERT INTO password_credentials (account_id, verifier, kdf_memory_kib, kdf_time, kdf_parallelism, dek_version, credential_epoch, row_version, updated_at) VALUES ('acc_rs',?,64,3,1,1,0,0,'2026-01-01T00:00:00Z')`,
+		`INSERT INTO password_credentials (account_id, verifier, kdf_memory_kib, kdf_time, kdf_parallelism, dek_version, credential_epoch, row_version, updated_at) VALUES ('acc_rs',$1,64,3,1,1,0,0,'2026-01-01T00:00:00Z')`,
+		pwCT)
+	rmAAD := crypto.InstanceFieldAAD{OwnerTable: "remotes", OwnerRowID: "rmt_rs", FieldTag: "credential"}
+	rmCT, err := inst.SealField(rmAAD, []byte("remote-secret"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reencExec(t, db, ctx,
+		`INSERT INTO remotes (id, name, url, spki_pin, credential_sealed, created_at, created_by) VALUES ('rmt_rs','rs-remote','https://r','sha256-x',?, '2026-01-01T00:00:00Z','usr_root')`,
+		`INSERT INTO remotes (id, name, url, spki_pin, credential_sealed, created_at, created_by) VALUES ('rmt_rs','rs-remote','https://r','sha256-x',$1, '2026-01-01T00:00:00Z','usr_root')`,
+		rmCT)
+	rotation := &service.Rotation{DB: db, Keyring: kr, RootKey: probeRootSource{db: db}}
+	if _, err := rotation.RotateDEK(ctx, service.LocalPrincipal(root), service.DEKScope{Instance: true}); err != nil {
+		t.Fatalf("rotate-dek --instance: %v", err)
+	}
+	re := &service.Reencrypt{DB: db, Keyring: kr, ChunkSize: 1, ChunkPause: -1, AfterChunk: inject}
+	res, err := re.ReencryptInstance(ctx, service.LocalPrincipal(root))
+	out := reencOutcome{db: db, moved: res.RowsMoved, err: err}
+	if err != nil {
+		return out
+	}
+	states, serr := queryTier3StatesPurpose(db, ctx, "instance", "", "")
+	if serr != nil {
+		t.Fatal(serr)
+	}
+	out.v1 = states[1]
+	return out
+}
 
 // reencExec runs a raw statement on either engine (sqlite `?` / postgres `$n`
 // placeholders), for seeding ciphertext rows the reencrypt walk then moves.

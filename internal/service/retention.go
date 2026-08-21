@@ -336,19 +336,24 @@ func (s *Retention) Sweep(ctx context.Context) (int64, error) {
 		now := store.CanonTime(s.now())
 		var candidates int
 		var collected int64
+		var prunedThisChunk bool
 		err := tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
-			candidates, collected = 0, 0
+			candidates, collected, prunedThisChunk = 0, 0, false
 			p, err := authz.SystemAuthority(authz.SiteScheduler, az.Token())
 			if err != nil {
 				return err
 			}
 			// Expired definitions plans share the hourly GC lifecycle. Run once per
 			// sweep, including startup catch-up, before payload batching begins.
+			// tx.Write can replay this closure on a serialization retry, so the
+			// once-per-sweep flag is published only after the chunk commits (below):
+			// setting it inside the closure would strand the prune if the pruning
+			// chunk rolled back and retried.
 			if !plansPruned {
 				if _, err := r.Definitions().PruneExpiredPlans(ctx, p, now); err != nil {
 					return err
 				}
-				plansPruned = true
+				prunedThisChunk = true
 			}
 			rows, err := r.Retention().Eligible(ctx, p, now, RetentionBatchSize)
 			if err != nil {
@@ -406,6 +411,9 @@ func (s *Retention) Sweep(ctx context.Context) (int64, error) {
 		if err != nil {
 			return total, s.recordFailedPruneRun(ctx, startedAt, store.CanonTime(s.now()),
 				totalCandidates+int64(candidates), total, err)
+		}
+		if prunedThisChunk {
+			plansPruned = true
 		}
 		total += collected
 		totalCandidates += int64(candidates)

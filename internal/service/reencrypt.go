@@ -44,6 +44,12 @@ type Reencrypt struct {
 	// gate. Test-only (nil in production): it lets a test interleave a rotate-dek
 	// or seed a straggler into the window the gate must refuse.
 	BeforeRetire func(context.Context) error
+	// AfterChunk, when set, runs inside each chunk transaction after its rows are
+	// processed and before commit, receiving the table being walked. Test-only
+	// (nil in production): returning a retryable error (store.ErrRetrySerialization)
+	// exercises the tx.Write replay path, proving a chunk's cursor and moved-count
+	// outputs are attempt-local and never published on a rolled-back attempt.
+	AfterChunk func(ctx context.Context, table string) error
 }
 
 // ReencryptChunkSize and ReencryptChunkPause are the ops-spec §9 (§167) bounds
@@ -339,63 +345,44 @@ func (s *Reencrypt) ReencryptInstance(ctx context.Context, actor Actor) (Reencry
 	return ReencryptResult{Scope: "instance", RowsMoved: moved}, nil
 }
 
-func (s *Reencrypt) walkInstanceVersioned(
-	ctx context.Context, actor Actor, table string, moved *int,
-	list func(store.ReencryptRepo, context.Context, authz.Proof, string, int) ([]store.ReencryptInstanceRow, error),
-	aadOf func(string) crypto.InstanceFieldAAD,
-	reseal func(store.ReencryptRepo, context.Context, authz.Proof, string, []byte, uint32, uint32) (bool, error),
-	sealer *crypto.InstanceSealer, active uint32,
+// walkChunked pages one table to completion in chunk-sized write transactions
+// with the inter-chunk pause. step processes one chunk starting at cursor and
+// returns the next cursor, how many rows it saw, and how many it moved.
+//
+// tx.Write replays step on a serialization retry (postgres 40001/40P01, sqlite
+// BUSY/LOCKED), so step MUST be a pure function of its cursor argument — it may
+// publish nothing outside its return values. walkChunked advances the outer
+// cursor and *moved only after the transaction commits, so a rolled-back attempt
+// changes neither: it neither skips the rolled-back page nor double-counts it
+// (#187 reopen).
+func (s *Reencrypt) walkChunked(
+	ctx context.Context, table string, moved *int,
+	step func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer, cursor string) (next string, seen, delta int, err error),
 ) error {
 	cursor := ""
 	for {
-		var chunkLen int
+		var next string
+		var seen, delta int
 		err := tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
-			caller, err := actor.resolve(ctx, az, s.now())
-			if err != nil {
-				return err
+			var e error
+			// A retry re-runs step with the SAME (not-yet-published) cursor and
+			// overwrites next/seen/delta, so only the committed attempt's outputs
+			// survive to be published below.
+			next, seen, delta, e = step(ctx, r, az, cursor)
+			if e != nil {
+				return e
 			}
-			p, err := az.Authorize(ctx, caller, authz.OpReencryptInstance, domain.Scope{})
-			if err != nil {
-				return err
-			}
-			// Per-chunk fence: abort if a rotate-dek --instance demoted our target.
-			if err := fenceInstanceVersion(ctx, r, p, active); err != nil {
-				return err
-			}
-			rows, err := list(r.Reencrypt(), ctx, p, cursor, s.chunkSize())
-			if err != nil {
-				return err
-			}
-			chunkLen = len(rows)
-			for _, row := range rows {
-				cursor = row.ID
-				if row.DEKVersion == active {
-					continue
-				}
-				aad := aadOf(row.ID)
-				plain, err := sealer.OpenField(aad, row.Ciphertext)
-				if err != nil {
-					return fmt.Errorf("reencrypt: open %s %s: %w", table, row.ID, err)
-				}
-				resealed, err := sealer.SealField(aad, plain)
-				crypto.Zero(plain)
-				if err != nil {
-					return fmt.Errorf("reencrypt: reseal %s %s: %w", table, row.ID, err)
-				}
-				did, err := reseal(r.Reencrypt(), ctx, p, row.ID, resealed, active, row.RowVersion)
-				if err != nil {
-					return err
-				}
-				if did {
-					*moved++
-				}
+			if s.AfterChunk != nil {
+				return s.AfterChunk(ctx, table)
 			}
 			return nil
 		})
 		if err != nil {
 			return err
 		}
-		if chunkLen < s.chunkSize() {
+		cursor = next
+		*moved += delta
+		if seen < s.chunkSize() {
 			return nil
 		}
 		if err := s.pause(ctx); err != nil {
@@ -404,67 +391,106 @@ func (s *Reencrypt) walkInstanceVersioned(
 	}
 }
 
-func (s *Reencrypt) walkRemotes(ctx context.Context, actor Actor, moved *int, sealer *crypto.InstanceSealer, active uint32) error {
-	cursor := ""
-	for {
-		var chunkLen int
-		err := tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
-			caller, err := actor.resolve(ctx, az, s.now())
-			if err != nil {
-				return err
-			}
-			p, err := az.Authorize(ctx, caller, authz.OpReencryptInstance, domain.Scope{})
-			if err != nil {
-				return err
-			}
-			// Per-chunk fence: abort if a rotate-dek --instance demoted our target.
-			if err := fenceInstanceVersion(ctx, r, p, active); err != nil {
-				return err
-			}
-			rows, err := r.Reencrypt().ListRemotesForReencrypt(ctx, p, cursor, s.chunkSize())
-			if err != nil {
-				return err
-			}
-			chunkLen = len(rows)
-			for _, row := range rows {
-				cursor = row.ID
-				ver, err := crypto.RecordKeyVersion(row.Ciphertext)
-				if err != nil {
-					return fmt.Errorf("reencrypt: remote %s: %w", row.ID, err)
-				}
-				if ver == active {
-					continue
-				}
-				aad := crypto.InstanceFieldAAD{OwnerTable: "remotes", OwnerRowID: row.ID, FieldTag: "credential"}
-				plain, err := sealer.OpenField(aad, row.Ciphertext)
-				if err != nil {
-					return fmt.Errorf("reencrypt: open remote %s: %w", row.ID, err)
-				}
-				resealed, err := sealer.SealField(aad, plain)
-				crypto.Zero(plain)
-				if err != nil {
-					return fmt.Errorf("reencrypt: reseal remote %s: %w", row.ID, err)
-				}
-				did, err := r.Reencrypt().ReencryptRemote(ctx, p, row.ID, resealed, row.Ciphertext)
-				if err != nil {
-					return err
-				}
-				if did {
-					*moved++
-				}
-			}
-			return nil
-		})
+func (s *Reencrypt) walkInstanceVersioned(
+	ctx context.Context, actor Actor, table string, moved *int,
+	list func(store.ReencryptRepo, context.Context, authz.Proof, string, int) ([]store.ReencryptInstanceRow, error),
+	aadOf func(string) crypto.InstanceFieldAAD,
+	reseal func(store.ReencryptRepo, context.Context, authz.Proof, string, []byte, uint32, uint32) (bool, error),
+	sealer *crypto.InstanceSealer, active uint32,
+) error {
+	return s.walkChunked(ctx, table, moved, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer, cursor string) (string, int, int, error) {
+		caller, err := actor.resolve(ctx, az, s.now())
 		if err != nil {
-			return err
+			return "", 0, 0, err
 		}
-		if chunkLen < s.chunkSize() {
-			return nil
+		p, err := az.Authorize(ctx, caller, authz.OpReencryptInstance, domain.Scope{})
+		if err != nil {
+			return "", 0, 0, err
 		}
-		if err := s.pause(ctx); err != nil {
-			return err
+		// Per-chunk fence: abort if a rotate-dek --instance demoted our target.
+		if err := fenceInstanceVersion(ctx, r, p, active); err != nil {
+			return "", 0, 0, err
 		}
-	}
+		rows, err := list(r.Reencrypt(), ctx, p, cursor, s.chunkSize())
+		if err != nil {
+			return "", 0, 0, err
+		}
+		next, delta := cursor, 0
+		for _, row := range rows {
+			next = row.ID // advance over skipped rows too, else a full-skip chunk re-lists forever
+			if row.DEKVersion == active {
+				continue
+			}
+			aad := aadOf(row.ID)
+			plain, err := sealer.OpenField(aad, row.Ciphertext)
+			if err != nil {
+				return "", 0, 0, fmt.Errorf("reencrypt: open %s %s: %w", table, row.ID, err)
+			}
+			resealed, err := sealer.SealField(aad, plain)
+			crypto.Zero(plain)
+			if err != nil {
+				return "", 0, 0, fmt.Errorf("reencrypt: reseal %s %s: %w", table, row.ID, err)
+			}
+			did, err := reseal(r.Reencrypt(), ctx, p, row.ID, resealed, active, row.RowVersion)
+			if err != nil {
+				return "", 0, 0, err
+			}
+			if did {
+				delta++
+			}
+		}
+		return next, len(rows), delta, nil
+	})
+}
+
+func (s *Reencrypt) walkRemotes(ctx context.Context, actor Actor, moved *int, sealer *crypto.InstanceSealer, active uint32) error {
+	return s.walkChunked(ctx, "remotes", moved, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer, cursor string) (string, int, int, error) {
+		caller, err := actor.resolve(ctx, az, s.now())
+		if err != nil {
+			return "", 0, 0, err
+		}
+		p, err := az.Authorize(ctx, caller, authz.OpReencryptInstance, domain.Scope{})
+		if err != nil {
+			return "", 0, 0, err
+		}
+		// Per-chunk fence: abort if a rotate-dek --instance demoted our target.
+		if err := fenceInstanceVersion(ctx, r, p, active); err != nil {
+			return "", 0, 0, err
+		}
+		rows, err := r.Reencrypt().ListRemotesForReencrypt(ctx, p, cursor, s.chunkSize())
+		if err != nil {
+			return "", 0, 0, err
+		}
+		next, delta := cursor, 0
+		for _, row := range rows {
+			next = row.ID
+			ver, err := crypto.RecordKeyVersion(row.Ciphertext)
+			if err != nil {
+				return "", 0, 0, fmt.Errorf("reencrypt: remote %s: %w", row.ID, err)
+			}
+			if ver == active {
+				continue
+			}
+			aad := crypto.InstanceFieldAAD{OwnerTable: "remotes", OwnerRowID: row.ID, FieldTag: "credential"}
+			plain, err := sealer.OpenField(aad, row.Ciphertext)
+			if err != nil {
+				return "", 0, 0, fmt.Errorf("reencrypt: open remote %s: %w", row.ID, err)
+			}
+			resealed, err := sealer.SealField(aad, plain)
+			crypto.Zero(plain)
+			if err != nil {
+				return "", 0, 0, fmt.Errorf("reencrypt: reseal remote %s: %w", row.ID, err)
+			}
+			did, err := r.Reencrypt().ReencryptRemote(ctx, p, row.ID, resealed, row.Ciphertext)
+			if err != nil {
+				return "", 0, 0, err
+			}
+			if did {
+				delta++
+			}
+		}
+		return next, len(rows), delta, nil
+	})
 }
 
 func (s *Reencrypt) pause(ctx context.Context) error {
@@ -603,72 +629,59 @@ func (s *Reencrypt) walkTable(
 	cas func(context.Context, store.Repos, authz.Proof, string, []byte, []byte) (bool, error),
 	sealer *crypto.ProjectSealer, active uint32,
 ) error {
-	cursor := ""
-	for {
-		var chunkLen int
-		err := tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
-			caller, err := actor.resolve(ctx, az, s.now())
-			if err != nil {
-				return err
-			}
-			p, err := az.Authorize(ctx, caller, authz.OpReencryptProject, scope)
-			if err != nil {
-				return err
-			}
-			// Per-chunk fence: abort the walk if a concurrent rotate-dek demoted the
-			// version we are sealing onto. Without this the walk would keep sealing
-			// rows onto a now-retiring version, which the retire's dryness gate would
-			// then (correctly) refuse — but aborting here kills that at the source.
-			if err := fenceProject(ctx, r, p, sealer, scope); err != nil {
-				return err
-			}
-			rows, err := list(ctx, r, p, cursor)
-			if err != nil {
-				return err
-			}
-			chunkLen = len(rows)
-			for _, row := range rows {
-				cursor = row.id
-				if len(row.ciphertext) == 0 {
-					continue // an `unset` pending draft holds no ciphertext to move
-				}
-				ver, err := crypto.RecordKeyVersion(row.ciphertext)
-				if err != nil {
-					return fmt.Errorf("reencrypt: %s %s: %w", table, row.id, err)
-				}
-				if ver == active {
-					continue
-				}
-				aad := aadOf(row)
-				plain, err := sealer.Open(aad, row.ciphertext)
-				if err != nil {
-					return fmt.Errorf("reencrypt: open %s %s: %w", table, row.id, err)
-				}
-				resealed, err := sealer.Seal(aad, plain)
-				crypto.Zero(plain)
-				if err != nil {
-					return fmt.Errorf("reencrypt: reseal %s %s: %w", table, row.id, err)
-				}
-				did, err := cas(ctx, r, p, row.id, resealed, row.ciphertext)
-				if err != nil {
-					return err
-				}
-				if did {
-					*moved++
-				}
-			}
-			return nil
-		})
+	return s.walkChunked(ctx, table, moved, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer, cursor string) (string, int, int, error) {
+		caller, err := actor.resolve(ctx, az, s.now())
 		if err != nil {
-			return err
+			return "", 0, 0, err
 		}
-		if chunkLen < s.chunkSize() {
-			return nil
+		p, err := az.Authorize(ctx, caller, authz.OpReencryptProject, scope)
+		if err != nil {
+			return "", 0, 0, err
 		}
-		if err := s.pause(ctx); err != nil {
-			return err
+		// Per-chunk fence: abort the walk if a concurrent rotate-dek demoted the
+		// version we are sealing onto. Without this the walk would keep sealing
+		// rows onto a now-retiring version, which the retire's dryness gate would
+		// then (correctly) refuse — but aborting here kills that at the source.
+		if err := fenceProject(ctx, r, p, sealer, scope); err != nil {
+			return "", 0, 0, err
 		}
-	}
+		rows, err := list(ctx, r, p, cursor)
+		if err != nil {
+			return "", 0, 0, err
+		}
+		next, delta := cursor, 0
+		for _, row := range rows {
+			next = row.id // advance over skipped rows too, else a full-skip chunk re-lists forever
+			if len(row.ciphertext) == 0 {
+				continue // an `unset` pending draft holds no ciphertext to move
+			}
+			ver, err := crypto.RecordKeyVersion(row.ciphertext)
+			if err != nil {
+				return "", 0, 0, fmt.Errorf("reencrypt: %s %s: %w", table, row.id, err)
+			}
+			if ver == active {
+				continue
+			}
+			aad := aadOf(row)
+			plain, err := sealer.Open(aad, row.ciphertext)
+			if err != nil {
+				return "", 0, 0, fmt.Errorf("reencrypt: open %s %s: %w", table, row.id, err)
+			}
+			resealed, err := sealer.Seal(aad, plain)
+			crypto.Zero(plain)
+			if err != nil {
+				return "", 0, 0, fmt.Errorf("reencrypt: reseal %s %s: %w", table, row.id, err)
+			}
+			did, err := cas(ctx, r, p, row.id, resealed, row.ciphertext)
+			if err != nil {
+				return "", 0, 0, err
+			}
+			if did {
+				delta++
+			}
+		}
+		return next, len(rows), delta, nil
+	})
 }
 
 // retireAndRecord retires the scope's now-unreferenced retiring DEK versions and
