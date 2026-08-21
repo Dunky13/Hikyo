@@ -16,6 +16,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type Engine string
@@ -103,6 +104,14 @@ type Config struct {
 	// by an environment variable, and the key name says so out loud for anyone
 	// who copies it into a compose file.
 	DevAdmissionPerIPPerMinute int
+	// ReauthWindow is the instance-default disclosure reauthentication
+	// window (human-auth ADR section Assurance; permission-model ADR's
+	// per-environment knob inherits it). Zero - the production default - means
+	// every disclosure takes its own ceremony, which only WebAuthn can honour;
+	// a non-zero window lets TOTP open a sliding window. --dev sets 15 minutes
+	// when the key is absent so an evaluation instance can reveal with an
+	// authenticator alone.
+	ReauthWindow time.Duration
 }
 
 // knownEnv is the closed set of HIKYO_* keys this build understands.
@@ -119,6 +128,7 @@ var knownEnv = map[string]bool{
 	"HIKYO_BACKUP_RECIPIENTS":          true,
 	"HIKYO_BACKUP_DIR":                 true,
 	"HIKYO_ADAPTER_EGRESS_POLICY_FILE": true,
+	"HIKYO_REAUTH_WINDOW_SECONDS":      true,
 
 	// Development-only. Named so the deployment it does not belong in is
 	// obvious at a glance, and refused at boot outside --dev regardless.
@@ -208,6 +218,18 @@ func Load(subcommand string, args []string, getenv func(string) string, environ 
 			return nil, nil, fmt.Errorf("HIKYO_ARGON2_PARALLELISM: %d exceeds the 255 Argon2id allows", parallelism)
 		}
 		cfg.Argon2Parallelism = uint8(parallelism)
+		reauthDefault := uint64(0)
+		if cfg.Dev && getenv("HIKYO_REAUTH_WINDOW_SECONDS") == "" {
+			reauthDefault = 900
+		}
+		reauthSeconds, err := uintEnv(getenv, "HIKYO_REAUTH_WINDOW_SECONDS", reauthDefault)
+		if err != nil {
+			return nil, nil, err
+		}
+		if reauthSeconds > 86400 {
+			return nil, nil, fmt.Errorf("HIKYO_REAUTH_WINDOW_SECONDS: %d exceeds the 24h ceiling", reauthSeconds)
+		}
+		cfg.ReauthWindow = time.Duration(reauthSeconds) * time.Second
 		budget, err := uintEnv(getenv, "HIKYO_ADMISSION_BUDGET_MIB", 272)
 		if err != nil {
 			return nil, nil, err

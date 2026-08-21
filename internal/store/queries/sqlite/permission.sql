@@ -93,6 +93,13 @@ ORDER BY principal_id;
 -- name: EnvironmentReauthSettings :one
 SELECT protected, reauth_window_seconds FROM environments WHERE id = ?;
 
+-- The machine-reveal opt-in is read beside session resolution: the grant
+-- writer's class check and the chokepoint's machine conjunct both need it
+-- before (or while) an operation proof is minted.
+-- hikyo:authn-resolution
+-- name: ProjectMachineReveal :one
+SELECT machine_reveal, machine_reveal_generation FROM projects WHERE id = ?;
+
 -- The machine allowlists key on the principal's class; kind discriminates
 -- human from machine. An unclassified machine principal fails closed in Go.
 -- hikyo:authn-resolution

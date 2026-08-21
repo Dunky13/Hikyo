@@ -918,6 +918,23 @@
     ]
   },
   {
+    "operation": "project.machine-reveal.get",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "read@project"
+    ]
+  },
+  {
+    "operation": "project.machine-reveal.set",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "project-settings@project",
+      "reveal@project"
+    ]
+  },
+  {
     "operation": "project.rename",
     "class": "tenant",
     "level": "project",

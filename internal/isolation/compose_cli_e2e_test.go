@@ -167,6 +167,9 @@ func (r *composeRig) mintWorkload(t *testing.T) (domain.PrincipalID, string) {
 
 func (r *composeRig) grantReveal(t *testing.T, p domain.PrincipalID) {
 	t.Helper()
+	// The per-project machine-reveal opt-in is what admits the grant below and
+	// what the fetch path reads before delivering plaintext.
+	execRaw(t, r.db, fmt.Sprintf(`UPDATE projects SET machine_reveal = TRUE WHERE id = '%s'`, cPrj))
 	execRaw(t, r.db, fmt.Sprintf(
 		`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_c_wl_reveal', '%s', 'reveal', '%s', '%s', '%s', %s)`,
 		p, cOrg, cPrj, cEnv, ts))

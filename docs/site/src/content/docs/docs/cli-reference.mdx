@@ -108,10 +108,18 @@ The shared dimensions are `--instance`, `--org`, `--project`, `--env`, and
 ## Workload delivery
 
 `run` and `compose` accept machine credentials only, through `--token-file` or
-`HIKYO_TOKEN`; a stored human session is refused.
+`HIKYO_TOKEN`. `compose` has no human path. `run` has one narrow exception:
+`--use-human-session` runs under the stored human session, but only when all of a
+controlling terminal with stderr on it, an enumerated confirmation of the
+environment and key set, and a live disclosure window hold. Without a live
+window the CLI opens one: an authenticator code at the terminal where the
+environment's window allows it, otherwise a browser handoff to the passkey
+ceremony over the keys it will inject. The four conditions hold under
+`--config-only` too.
 
 ```text
 hikyo run [--config-only] [--allow-override KEY,KEY] [--project-directory DIR] [--token-file PATH] -- <command> [args...]
+hikyo run --use-human-session [--config-only] -- <command> [args...]
 hikyo compose render [--project-directory DIR] [--config-only] [--token-file PATH]
 hikyo compose sync [--project-directory DIR] [--token-file PATH]
 hikyo compose doctor [--project-directory DIR] [-o table|json] [--token-file PATH]
@@ -121,6 +129,11 @@ hikyo compose doctor [--project-directory DIR] [-o table|json] [--token-file PAT
 the command. Fetched values win; a differing inherited value is refused unless
 its key is named in `--allow-override`. Command-not-found exits 127 and a found
 but non-executable command exits 126.
+
+`values export` writes a whole environment. `--format` selects the payload:
+`table` (default), `json`, or `dotenv`. The dotenv encoding matches the Compose
+renderer's. Secrets appear only under `--reveal`; without it they are omitted and
+counted on stderr, and with it the output obeys the print triad.
 
 `compose render` atomically writes raw-dotenv generations and the managed `.env`
 stamp block. `compose sync` renders conditionally and runs
@@ -154,8 +167,28 @@ The interactive, multi-environment wizard is not implemented yet. Running
 you to the available modes. Completion is tracked by
 [#112](https://github.com/Hikyo-Org/Hikyo/issues/112).
 
+For a plaintext `.env`, use `definitions scaffold --from .env` to author a
+declaration offline, then `values import --from-dotenv .env` for the values. See
+[value workflows](/docs/values-workflows/).
+
+## Definitions
+
+`definitions` manages the reviewable, Git-friendly catalogue.
+
+```text
+hikyo definitions scaffold --from <.env>
+hikyo definitions export [--portable] [--output-file PATH]
+hikyo definitions check --file PATH [-o table|json]
+hikyo definitions plan --file PATH [-o table|json]
+hikyo definitions apply --plan ID [--file PATH] [--allow-delete]
+```
+
+`scaffold` is a pure offline transform: it reads only the named `.env`, contacts
+no server, and emits an additive bundle every key of which is `config` with a
+`TODO: classify` marker. `check` exits `0` equal, `1` different, `2` on error.
+
 ## Commands not yet implemented
 
-`render`, `sync`, `adopt`, and `definitions` remain reserved top-level stubs.
-Compose delivery uses `compose render` and `compose sync`; `adopt` and
-`definitions` are not implemented in the current 0.x build.
+`render`, `sync`, and `adopt` remain reserved top-level stubs. Compose delivery
+uses `compose render` and `compose sync`; `adopt` is not implemented in the
+current 0.x build.

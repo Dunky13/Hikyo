@@ -387,15 +387,29 @@ export const zTotpCodeRequest = z.object({
     code: z.string().min(6).max(10)
 });
 
+/**
+ * `adapter` carries an adapter-routing decision over an environment set.
+ * `reveal` and `copy` carry a DISCLOSURE: the browser runs the same
+ * purpose-bound, enumerated-key-set ceremony the UI runs, so `key_ids`
+ * is required and names exactly the keys the one decision covers.
+ *
+ */
 export const zCliReauthStartRequest = z.object({
-    purpose: z.enum(['adapter']),
+    purpose: z.enum([
+        'adapter',
+        'reveal',
+        'copy'
+    ]),
     operation: z.enum([
         'adapter.configure',
         'adapter.credential-set',
         'adapter.adopt',
-        'adapter.sync'
+        'adapter.sync',
+        'value.reveal',
+        'value.copy-source'
     ]),
     environment_ids: z.array(zId).min(1),
+    key_ids: z.array(zId).max(500).optional(),
     pkce_challenge: z.string().length(43).regex(/^[A-Za-z0-9_-]{43}$/),
     redirect_uri: z.url().max(256)
 });
@@ -423,13 +437,21 @@ export const zCliReauthEnvironmentPolicy = z.object({
 
 export const zCliReauthTransaction = z.object({
     state: z.string().min(1),
+    purpose: z.enum([
+        'adapter',
+        'reveal',
+        'copy'
+    ]),
     operation: z.enum([
         'adapter.configure',
         'adapter.credential-set',
         'adapter.adopt',
-        'adapter.sync'
+        'adapter.sync',
+        'value.reveal',
+        'value.copy-source'
     ]),
     environments: z.array(zCliReauthEnvironmentPolicy).min(1),
+    key_ids: z.array(zId),
     redirect_uri: z.url(),
     expires_at: zTimestamp
 });
@@ -1250,6 +1272,10 @@ export const zGrantResultList = z.object({
 export const zEnvironmentSettings = z.object({
     protected: z.boolean(),
     reauth_window_seconds: z.int().gte(0).nullish()
+});
+
+export const zMachineRevealSettings = z.object({
+    enabled: z.boolean()
 });
 
 export const zRetentionPolicy = z.object({
@@ -3453,6 +3479,28 @@ export const zSetDefinitionsSettingsPath = z.object({
  * Updated definitions governance settings.
  */
 export const zSetDefinitionsSettingsResponse = zDefinitionsSettings;
+
+export const zGetMachineRevealPath = z.object({
+    org: zId,
+    project: zId
+});
+
+/**
+ * The opt-in state.
+ */
+export const zGetMachineRevealResponse = zMachineRevealSettings;
+
+export const zSetMachineRevealBody = zMachineRevealSettings;
+
+export const zSetMachineRevealPath = z.object({
+    org: zId,
+    project: zId
+});
+
+/**
+ * The opt-in state after the write.
+ */
+export const zSetMachineRevealResponse = zMachineRevealSettings;
 
 export const zListKeysPath = z.object({
     org: zId,

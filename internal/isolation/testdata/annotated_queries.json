@@ -729,7 +729,7 @@
     "engine": "postgres",
     "name": "InsertCLIReauthHandoff",
     "annotation": "authn-resolution",
-    "hash": "6b47e651594b1223e0996fe20d201bcf877c40cac868c0cf63419bf365facdb3"
+    "hash": "b72ad449e94f36d55c75a3a6f6d5a9da888fd5343fa7945e1121fb0b6e3721b6"
   },
   {
     "engine": "postgres",
@@ -1192,6 +1192,12 @@
     "name": "MaxKnownCredentialEpoch",
     "annotation": "authn-resolution",
     "hash": "d6a81ebbace5365c7148826efad827daf672e7b66768db14dc5d25b565c4afee"
+  },
+  {
+    "engine": "postgres",
+    "name": "ProjectMachineReveal",
+    "annotation": "authn-resolution",
+    "hash": "3e577763afe5aa3f27593372dcad2beacb3317148f5baf186c939c358b57f9a5"
   },
   {
     "engine": "postgres",
@@ -2163,7 +2169,7 @@
     "engine": "sqlite",
     "name": "InsertCLIReauthHandoff",
     "annotation": "authn-resolution",
-    "hash": "6a97964ade60e0598a6982d557bdd0e42481b8be63775fd92c4de19c928debe7"
+    "hash": "1c4645f45c68984dabe8482356d60594c9a484cf9208d3ff39de8746f13040a7"
   },
   {
     "engine": "sqlite",
@@ -2626,6 +2632,12 @@
     "name": "MaxKnownCredentialEpoch",
     "annotation": "authn-resolution",
     "hash": "927bb4a7a50553e3118b066cb53bcf1299685743daeaaf6c5768d55c6ee68d8f"
+  },
+  {
+    "engine": "sqlite",
+    "name": "ProjectMachineReveal",
+    "annotation": "authn-resolution",
+    "hash": "3b0c014ddf8ad75bd5a8cfb5182da9ee122a126a7c5c577ee20a72ed1e491d49"
   },
   {
     "engine": "sqlite",

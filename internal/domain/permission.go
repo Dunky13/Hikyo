@@ -266,6 +266,25 @@ var machineAllowlists = map[PrincipalClass]map[Capability]bool{
 	ClassInstanceConn: {CapInstanceDirector: true},
 }
 
+// machineRevealByOptIn is the set of machine classes that may hold `reveal`
+// under the per-project operator opt-in and under nothing else
+// (permission-model ADR section "Machine principal allowlists": workload and
+// automation credentials, "`reveal` only by the source-of-truth ADR's
+// explicit, documented, per-project operator opt-in"). It is deliberately
+// NOT folded into machineAllowlists: the allowlist answers "may this class
+// ever hold it", and for `reveal` that answer is conditional on a live
+// project setting the grant writer and the chokepoint both read.
+var machineRevealByOptIn = map[PrincipalClass]bool{
+	ClassWorkload:   true,
+	ClassAutomation: true,
+}
+
+// MachineMayHoldRevealByOptIn reports whether class c is one the per-project
+// machine-reveal opt-in can admit `reveal` onto.
+func MachineMayHoldRevealByOptIn(c PrincipalClass) bool {
+	return machineRevealByOptIn[c]
+}
+
 // MachineClasses returns the closed machine class set, sorted.
 func MachineClasses() []PrincipalClass {
 	out := make([]PrincipalClass, 0, len(machineAllowlists))

@@ -14,6 +14,7 @@ import (
 
 	"github.com/Hikyo-Org/hikyo/api/apigen"
 	"github.com/Hikyo-Org/hikyo/internal/disclose"
+	"github.com/Hikyo-Org/hikyo/internal/dotenv"
 )
 
 // The value verbs (#50): `hikyo values get|set|diff|copy`.
@@ -60,13 +61,21 @@ func runValues(ctx context.Context, ios IO, args []string) error {
 		return runValuesImport(ctx, ios, rest)
 	}
 
-	var format, valueFile, left, right, source, destinations, keyNames, environments string
+	var format, exportFormat, valueFile, left, right, source, destinations, keyNames, environments string
 	var versions, previewToken, confirmedProtectedEnvironments, acknowledge string
 	var revision int64
 	var clear, reveal, stdin, dangerous, confirmProtected bool
 	var outputFile string
 	st, flags, err := parseCommon("values "+sub, ios, rest, func(fs *flag.FlagSet) {
-		fs.StringVar(&format, "o", "table", "output format: table or json")
+		// `export` is an export PATH, so its payload encoding is `--format`
+		// (api-cli-surface ADR: `--format` names the payload on export paths, `-o`
+		// names the envelope on browse paths). Every other verb here is a browse
+		// path and takes `-o`.
+		if sub == "export" {
+			fs.StringVar(&exportFormat, "format", "table", "payload format: table, json, or dotenv")
+		} else {
+			fs.StringVar(&format, "o", "table", "output format: table or json")
+		}
 		if sub == "list" || sub == "get" || sub == "diff" || sub == "export" {
 			fs.BoolVar(&reveal, "reveal", false,
 				"disclose `secret` plaintext; audited per key, and refused without the reveal capability")
@@ -119,7 +128,17 @@ func runValues(ctx context.Context, ios IO, args []string) error {
 	if err != nil {
 		return err
 	}
-	f, err := ParseFormat(format)
+	// `export` carries the extra `dotenv` payload format; everything else is the
+	// two-value envelope. dotenv is resolved in the export case below.
+	dotenvExport := sub == "export" && exportFormat == "dotenv"
+	var f Format
+	if sub == "export" {
+		if !dotenvExport {
+			f, err = ParseFormat(exportFormat)
+		}
+	} else {
+		f, err = ParseFormat(format)
+	}
 	if err != nil {
 		return err
 	}
@@ -184,13 +203,28 @@ func runValues(ctx context.Context, ios IO, args []string) error {
 		}
 	}
 
-	client, _, resolved, err := authenticatedTarget(st, ios, flags)
+	client, artifact, resolved, err := authenticatedTarget(st, ios, flags)
 	if err != nil {
 		return err
 	}
 	project, err := projectBase(resolved)
 	if err != nil {
 		return err
+	}
+	// ceremony wraps a disclosure in the reauthentication ceremony over the
+	// environments it discloses in (reveal_window.go): the call is made, and on
+	// the server's refusal a window is opened by inline TOTP and the call made
+	// once more. Non-revealing reads never go through it.
+	// The enumerated unit a browser handoff binds, resolved only when one is
+	// needed: the secret keys the act opens in the environment (all of them,
+	// or the named subset).
+	unit := func(names []string) func(context.Context, string) ([]string, error) {
+		return func(ctx context.Context, env string) ([]string, error) {
+			return keyIDsOf(ctx, client, project, env, apigen.KeyClassificationSecret, names)
+		}
+	}
+	ceremony := func(envs []string, d disclosure, attempt func() error) error {
+		return withRevealCeremony(ctx, client, st, ios, artifact, project, envs, d, attempt)
 	}
 
 	switch sub {
@@ -201,7 +235,9 @@ func runValues(ctx context.Context, ios IO, args []string) error {
 		}
 		var list apigen.ValueList
 		if reveal {
-			err = client.Do(ctx, http.MethodPost, base+"/reveal", nil, &list)
+			err = ceremony([]string{resolved.Get(DimEnv)}, disclosure{purpose: "reveal", keys: unit(nil)}, func() error {
+				return client.Do(ctx, http.MethodPost, base+"/reveal", nil, &list)
+			})
 		} else {
 			err = client.Do(ctx, http.MethodGet, base, nil, &list)
 		}
@@ -221,7 +257,9 @@ func runValues(ctx context.Context, ios IO, args []string) error {
 		target := base + "/" + url.PathEscape(flags.positional())
 		var cell apigen.ValueCell
 		if reveal {
-			err = client.Do(ctx, http.MethodPost, target+"/reveal", nil, &cell)
+			err = ceremony([]string{resolved.Get(DimEnv)}, disclosure{purpose: "reveal", keys: unit([]string{flags.positional()})}, func() error {
+				return client.Do(ctx, http.MethodPost, target+"/reveal", nil, &cell)
+			})
 		} else {
 			err = client.Do(ctx, http.MethodGet, target, nil, &cell)
 		}
@@ -270,8 +308,10 @@ func runValues(ctx context.Context, ios IO, args []string) error {
 	case "diff":
 		var out apigen.ValueDiff
 		if reveal {
-			err = client.Do(ctx, http.MethodPost, project+"/values/diff/reveal",
-				apigen.RevealDiffRequest{Left: left, Right: right}, &out)
+			err = ceremony([]string{left, right}, disclosure{purpose: "reveal", keys: unit(nil)}, func() error {
+				return client.Do(ctx, http.MethodPost, project+"/values/diff/reveal",
+					apigen.RevealDiffRequest{Left: left, Right: right}, &out)
+			})
 		} else {
 			err = client.Do(ctx, http.MethodGet,
 				project+"/values/diff?left="+url.QueryEscape(left)+"&right="+url.QueryEscape(right), nil, &out)
@@ -294,7 +334,13 @@ func runValues(ctx context.Context, ios IO, args []string) error {
 			body.ConfirmProtected = &confirmProtected
 		}
 		var result apigen.CopyValuesResult
-		if err := client.Do(ctx, http.MethodPost, project+"/values/copy", body, &result); err != nil {
+		// A copy that carries secret material opens it under the source
+		// environment's reveal guard (values service: the reveal conjunct
+		// consumes the session's window over the SOURCE); a config-only copy
+		// is refused by nothing here and therefore never prompts.
+		if err := ceremony([]string{source}, disclosure{purpose: "copy", keys: unit(splitList(keyNames))}, func() error {
+			return client.Do(ctx, http.MethodPost, project+"/values/copy", body, &result)
+		}); err != nil {
 			return err
 		}
 		warnFindings(ios, result.Findings)
@@ -357,8 +403,21 @@ func runValues(ctx context.Context, ios IO, args []string) error {
 			body.Revision = &revision
 		}
 		var out apigen.ExportedValues
-		if err := client.Do(ctx, http.MethodPost, base+"/values/export", body, &out); err != nil {
+		exportEnv := resolved.Get(DimEnv)
+		// An export's unit is the secret keys of the REVISION it covers, not
+		// of the current list: a key added, deleted or reclassified since then
+		// would otherwise make the consent set differ from the exported set
+		// (api-cli-surface ADR line 144, "the full key set the export covers").
+		exportUnit := func(ctx context.Context, env string) ([]string, error) {
+			return exportSecretKeyIDs(ctx, client, project, base, env, revision)
+		}
+		if err := ceremony([]string{exportEnv}, disclosure{purpose: "reveal", keys: exportUnit}, func() error {
+			return client.Do(ctx, http.MethodPost, base+"/values/export", body, &out)
+		}); err != nil {
 			return err
+		}
+		if dotenvExport {
+			return exportDotenv(ios, out, reveal, deliver)
 		}
 		if reveal {
 			return emitRendered(f, exportTable(out), "exported values", deliver)
@@ -367,6 +426,55 @@ func runValues(ctx context.Context, ios IO, args []string) error {
 	}
 	// Unreachable: subverb() above admits only the cases enumerated here.
 	return failf(ExitInternal, "hikyo values: unhandled subverb %q", sub)
+}
+
+// exportDotenv renders an export as `NAME=value` lines through
+// internal/compose's raw encoder, so the escaping is byte-identical to what the
+// Compose renderer would deliver. Secrets appear only under `--reveal` (the
+// server returns their plaintext then, and the output goes through the print
+// triad because it may carry secret material); without `--reveal` every secret
+// is omitted and their count is reported on stderr. Values are written through
+// internal/dotenv's quoting encoder, so what `values import --from-dotenv`
+// reads back is byte-exact (surrounding whitespace, quotes, `#`, newlines).
+func exportDotenv(ios IO, out apigen.ExportedValues, reveal bool, deliver disclose.Options) error {
+	var rows []dotenv.Entry
+	omitted := 0
+	for _, item := range out.Items {
+		if item.Value == nil {
+			// An unrevealed secret is omitted and counted; an unset key simply has
+			// no line.
+			if item.Classification == apigen.KeyClassificationSecret {
+				omitted++
+			}
+			continue
+		}
+		rows = append(rows, dotenv.Entry{Key: item.Name, Value: *item.Value})
+	}
+	content, refusals, err := dotenv.Encode(rows)
+	if err != nil {
+		return failf(ExitInternal, "encoding the dotenv export: %v", err)
+	}
+	if len(refusals) > 0 {
+		names := make([]string, 0, len(refusals))
+		for _, r := range refusals {
+			names = append(names, fmt.Sprintf("%s (%s)", r.Key, r.Reason))
+		}
+		return failf(ExitRefused,
+			"hikyo values export --format dotenv: %s cannot be represented as a dotenv line; export as json instead",
+			strings.Join(names, ", "))
+	}
+	body := strings.TrimRight(string(content), "\n")
+	if reveal {
+		if _, err := disclose.Emit("exported values (dotenv)", body, deliver); err != nil {
+			return failf(ExitRefused, "disclosing the values: %v", err)
+		}
+	} else if _, err := ios.Stdout.Write(content); err != nil {
+		return err
+	}
+	if omitted > 0 {
+		fmt.Fprintf(ios.Stderr, "omitted %d secret(s); re-run with --reveal to include them\n", omitted)
+	}
+	return nil
 }
 
 func publishProtectedIDs(raw string) *[]apigen.ID {
@@ -605,4 +713,70 @@ func renderCell(ios IO, f Format, cell apigen.ValueCell, outputFile string, dang
 		return failf(ExitRefused, "disclosing the value: %v", err)
 	}
 	return nil
+}
+
+// keyIDsOf resolves the enumerated unit of a disclosure in one environment:
+// the ids of its keys of one classification (all of them, or the named
+// subset). It reads the non-revealing list, which discloses nothing; the ids
+// are what the browser ceremony binds and what the disclosure then consumes.
+func keyIDsOf(ctx context.Context, client *Client, projectBase, env string, class apigen.KeyClassification, names []string) ([]string, error) {
+	var list apigen.ValueList
+	if err := client.Do(ctx, http.MethodGet, projectBase+"/environments/"+url.PathEscape(env)+"/values", nil, &list); err != nil {
+		return nil, err
+	}
+	wanted := map[string]bool{}
+	for _, n := range names {
+		wanted[n] = true
+	}
+	var out []string
+	for _, cell := range list.Items {
+		if cell.Classification != class {
+			continue
+		}
+		if len(wanted) > 0 && !wanted[cell.Name] {
+			continue
+		}
+		out = append(out, string(cell.KeyId))
+	}
+	return out, nil
+}
+
+// exportSecretKeyIDs resolves an export's unit from the revision it covers:
+// the non-revealing export names the secret keys of that revision, and the
+// project catalogue maps names to ids. A key the catalogue no longer holds
+// cannot be bound and refuses by name rather than consenting to a narrower
+// set than the export would open.
+func exportSecretKeyIDs(ctx context.Context, client *Client, projectBase, envBase, env string, revision int64) ([]string, error) {
+	body := apigen.ExportValuesRequest{}
+	if revision > 0 {
+		body.Revision = &revision
+	}
+	var covered apigen.ExportedValues
+	if err := client.Do(ctx, http.MethodPost, envBase+"/values/export", body, &covered); err != nil {
+		return nil, err
+	}
+	var catalogue apigen.KeyList
+	if err := client.Do(ctx, http.MethodGet, projectBase+"/keys", nil, &catalogue); err != nil {
+		return nil, err
+	}
+	ids := map[string]string{}
+	for _, k := range catalogue.Items {
+		ids[string(k.Name)] = string(k.Id)
+	}
+	var out, missing []string
+	for _, item := range covered.Items {
+		if item.Classification != apigen.KeyClassificationSecret {
+			continue
+		}
+		id, ok := ids[string(item.Name)]
+		if !ok {
+			missing = append(missing, string(item.Name))
+			continue
+		}
+		out = append(out, id)
+	}
+	if len(missing) > 0 {
+		return nil, failf(ExitRefused, "the export covers secret key(s) the catalogue no longer declares (%s); a ceremony cannot be bound to them - export the current revision, or reveal in the browser", strings.Join(missing, ", "))
+	}
+	return out, nil
 }

@@ -17,15 +17,24 @@ import (
 	"github.com/Hikyo-Org/hikyo/api/apigen"
 	"github.com/Hikyo-Org/hikyo/internal/definitions"
 	"github.com/Hikyo-Org/hikyo/internal/disclose"
+	"github.com/Hikyo-Org/hikyo/internal/dotenv"
+	"github.com/Hikyo-Org/hikyo/internal/schema"
 )
 
 // runDefinitions is the reviewable definitions Git flow. Check deliberately
 // owns a 0/1/2 contract distinct from the CLI-wide exit taxonomy: 1 means
 // drift, and every actual check error maps to 2.
 func runDefinitions(ctx context.Context, ios IO, args []string) error {
-	sub, rest, err := subverb("definitions", args, "export", "check", "plan", "apply")
+	sub, rest, err := subverb("definitions", args, "export", "check", "plan", "apply", "scaffold")
 	if err != nil {
 		return err
+	}
+	// `scaffold` is a PURE LOCAL TRANSFORM (source-of-truth ADR § Onboarding
+	// under a closed schema): it reads only the file it is given, contacts no
+	// server, and holds no authority — so it never constructs a client or touches
+	// a session, and is handled here before any target resolution.
+	if sub == "scaffold" {
+		return runDefinitionsScaffold(ios, rest)
 	}
 	if sub == "check" {
 		if err := runDefinitionsVerb(ctx, ios, sub, rest); err != nil {
@@ -187,6 +196,70 @@ func runDefinitionsVerb(ctx context.Context, ios IO, sub string, args []string) 
 		return Render(ios.Stdout, f, definitionsApplyTable(result))
 	}
 	return failf(ExitInternal, "hikyo definitions: unhandled subverb %q", sub)
+}
+
+// scaffoldTODO is the reviewer marker every scaffolded key carries. It rides
+// the key's `description` because a bundle is JSON — there is no comment channel
+// — and it is echoed to stderr per run so the marker cannot pass silently
+// (source-of-truth ADR: scaffold "refuses to be silent about it").
+const scaffoldTODO = "TODO: classify"
+
+// runDefinitionsScaffold turns a plaintext `.env` into an ADDITIVE definitions
+// bundle on stdout, offline. Every key is emitted as `config` with a
+// string-typed declaration and a `# TODO: classify` marker: scaffold never
+// contacted a server, so it cannot know classification and must not guess
+// (source-of-truth ADR § Onboarding under a closed schema). The output is
+// additive (no base_revision), so the user reviews it, commits it, and applies
+// it, after which `values import` runs strict against an already-declared
+// schema.
+func runDefinitionsScaffold(ios IO, args []string) error {
+	fs := flag.NewFlagSet("definitions scaffold", flag.ContinueOnError)
+	fs.SetOutput(ios.Stderr)
+	from := fs.String("from", "", "the .env file to scaffold a definitions bundle from")
+	if err := fs.Parse(args); err != nil {
+		return &Error{Code: ExitUsage, Err: err}
+	}
+	if fs.NArg() > 0 {
+		return failf(ExitUsage, "hikyo definitions scaffold takes no positional arguments, got: %s", strings.Join(fs.Args(), " "))
+	}
+	if *from == "" {
+		return failf(ExitUsage, "usage: hikyo definitions scaffold --from <.env>")
+	}
+	raw, err := os.ReadFile(*from)
+	if err != nil {
+		return failf(ExitUsage, "reading %s: %v", *from, err)
+	}
+	entries, err := dotenv.Parse(raw)
+	if err != nil {
+		return failf(ExitRefused, "%v", err)
+	}
+
+	bundle := definitions.Bundle{Keys: make([]definitions.Key, 0, len(entries))}
+	for _, e := range entries {
+		bundle.Keys = append(bundle.Keys, definitions.Key{
+			Name:           e.Key,
+			Classification: string(schema.Config),
+			Description:    scaffoldTODO,
+			Declaration:    schema.Declaration{Rule: &schema.Rule{Type: schema.TypeString}},
+			RequiredIn:     definitions.Presence{Mode: string(schema.PresenceNone)},
+			ForbiddenIn:    definitions.Presence{Mode: string(schema.PresenceNone)},
+		})
+	}
+	normalized, err := definitions.Normalize(bundle)
+	if err != nil {
+		return failf(ExitInternal, "%v", err)
+	}
+	out, err := definitions.Encode(normalized)
+	if err != nil {
+		return failf(ExitInternal, "%v", err)
+	}
+	if _, err := ios.Stdout.Write(out); err != nil {
+		return err
+	}
+	fmt.Fprintf(ios.Stderr,
+		"scaffold: %d keys emitted as config — review and classify before apply (# %s)\n",
+		len(entries), scaffoldTODO)
+	return nil
 }
 
 func readDefinitionsBundle(path string) ([]byte, string, error) {

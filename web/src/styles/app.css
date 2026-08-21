@@ -1788,6 +1788,30 @@ select {
   max-width: 80ch;
 }
 
+/* The machine-reveal opt-in strip carries its own control: the act is a
+   per-project ceremony both ways, so the toggle sits beside the sentence that
+   states the current policy rather than in a settings page nobody reads first. */
+.machine__policy {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.machine__policy-toggle {
+  margin-inline-start: auto;
+  flex-shrink: 0;
+}
+
+/* The opt-in acknowledgement: a deliberate tick, never pre-checked. */
+.ceremony__ack {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin: 12px 0;
+  max-width: 60ch;
+}
+
 .machine__none {
   color: var(--tx-dim);
   margin: 4px 0 12px;
@@ -3004,4 +3028,72 @@ select {
     min-width: var(--touch);
     min-height: var(--touch);
   }
+}
+
+/* The shell's second-factor step-up: a strip above the content, present only
+   while the session is password-only AND the account has a factor to present. */
+.stepup {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  align-items: flex-end;
+  margin: 0 0 16px;
+  padding: 12px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-container, 8px);
+  background: var(--bg-raise);
+}
+
+.stepup__text {
+  flex: 1 1 32ch;
+}
+
+.stepup__title {
+  font-size: 1rem;
+  margin: 0 0 4px;
+}
+
+.stepup__lede {
+  margin: 0;
+  color: var(--tx-dim);
+  max-width: 70ch;
+}
+
+.stepup__controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.stepup__form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.stepup__form input {
+  width: 9ch;
+  min-height: var(--touch);
+  font-family: var(--font-mono);
+}
+
+.stepup .alert {
+  flex-basis: 100%;
+}
+
+.login__or {
+  margin: 4px 0;
+  text-align: center;
+  color: var(--tx-dim);
+}
+
+/* A long command in an empty state must wrap on a phone rather than make the
+   content region scroll sideways (axe: scrollable-region-focusable). */
+.hint-wrap,
+.hint-wrap code,
+.sidebar__empty code {
+  overflow-wrap: anywhere;
+  white-space: normal;
 }

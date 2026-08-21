@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"golang.org/x/term"
 	"io"
 	"log/slog"
 	"os"
@@ -70,6 +71,9 @@ func run() int {
 			Env:     cli.Env{Getenv: os.Getenv},
 			Workdir: workdir(),
 			OpenURL: cli.OpenBrowser,
+			StderrIsTerminal: func() bool {
+				return term.IsTerminal(int(os.Stderr.Fd()))
+			},
 		}, os.Args[1:])
 	case slices.Contains(app.ClientVerbs, cmd):
 		fmt.Fprintf(os.Stderr, "hikyo %s: not implemented yet\n", cmd)

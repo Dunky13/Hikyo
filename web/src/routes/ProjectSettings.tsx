@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useState, type FormEvent } from 'react';
 import { generatePath, Link, useParams } from 'react-router';
 
 import {
@@ -9,12 +9,14 @@ import {
   type DefinitionsSettings,
 } from '../api/definitions.ts';
 import {
+  createEnvironmentRefusalText,
   projectRetentionInherited,
   retentionBoundsPayload,
   retentionDayState,
   retentionSentence,
   settingsFailureText,
   settingsOperationFailure,
+  useCreateEnvironment,
   useDeleteProject,
   useEnvironmentSettings,
   useEnvironments,
@@ -194,6 +196,7 @@ export function ProjectSettings() {
             onError={(error) => report('set-environment-settings', error)}
           />
         ) : null}
+        <NewEnvironmentForm org={org} project={project} />
       </Panel>
 
       <Panel id="project-retention" title="Retention">
@@ -344,6 +347,69 @@ const WINDOWS: ReadonlyArray<{ value: string; label: string }> = [
   { value: '900', label: '15 minutes' },
   { value: '3600', label: '60 minutes' },
 ];
+
+/**
+ * NewEnvironmentForm creates an environment in this project.
+ *
+ * It sits beside the per-environment policy list because that is the list it
+ * grows. Creating one needs `definitions-edit`; a refusal is named as such,
+ * never carried by colour: `role="alert"` text with the glyph, `role="status"`
+ * on the created row.
+ */
+export function NewEnvironmentForm({
+  org,
+  project,
+}: {
+  readonly org: string;
+  readonly project: string;
+}) {
+  const create = useCreateEnvironment(org, project);
+  const nameId = useId();
+  const [name, setName] = useState('');
+
+  const onSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const trimmed = name.trim();
+    if (trimmed === '') {
+      return;
+    }
+    create.mutate({ name: trimmed }, { onSuccess: () => setName('') });
+  };
+
+  return (
+    <form className="settings-block" onSubmit={onSubmit} noValidate aria-labelledby="new-environment-title">
+      <h3 id="new-environment-title">New environment</h3>
+      {create.isError ? (
+        <p className="alert" role="alert">
+          <span className="alert__glyph" aria-hidden="true">!</span>
+          <span>{createEnvironmentRefusalText(create.error)}</span>
+        </p>
+      ) : null}
+      {create.isSuccess ? (
+        <p role="status">Environment {create.data.name} created.</p>
+      ) : null}
+      <div className="field">
+        <label htmlFor={nameId}>Environment name</label>
+        <input
+          id={nameId}
+          name="name"
+          required
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+        />
+      </div>
+      <div className="panel__actions">
+        <button
+          className="btn btn--primary"
+          type="submit"
+          disabled={create.isPending || name.trim() === ''}
+        >
+          {create.isPending ? 'Creating…' : 'Create environment'}
+        </button>
+      </div>
+    </form>
+  );
+}
 
 function EnvironmentPolicy({
   org,

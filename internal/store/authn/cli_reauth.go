@@ -10,10 +10,10 @@ import (
 )
 
 type CLIReauthHandoff struct {
-	ID, SessionID, Operation, EnvironmentSet, PKCEChallenge, RedirectURI string
-	StateVerifier, CodeVerifier, ApprovedWindows                         []byte
-	PrincipalID                                                          domain.PrincipalID
-	CreatedAt, ExpiresAt, ConsumedAt                                     time.Time
+	ID, SessionID, Purpose, Operation, EnvironmentSet, KeySet, PKCEChallenge, RedirectURI string
+	StateVerifier, CodeVerifier, ApprovedWindows                                          []byte
+	PrincipalID                                                                           domain.PrincipalID
+	CreatedAt, ExpiresAt, ConsumedAt                                                      time.Time
 }
 
 func (h CLIReauthHandoff) Live(now time.Time) bool {
@@ -21,17 +21,17 @@ func (h CLIReauthHandoff) Live(now time.Time) bool {
 }
 
 type NewCLIReauthHandoff struct {
-	ID, SessionID, Operation, EnvironmentSet, PKCEChallenge, RedirectURI string
-	StateVerifier                                                        []byte
-	PrincipalID                                                          domain.PrincipalID
-	CreatedAt, ExpiresAt                                                 time.Time
+	ID, SessionID, Purpose, Operation, EnvironmentSet, KeySet, PKCEChallenge, RedirectURI string
+	StateVerifier                                                                         []byte
+	PrincipalID                                                                           domain.PrincipalID
+	CreatedAt, ExpiresAt                                                                  time.Time
 }
 
 func (r *Resolver) CreateCLIReauthHandoff(ctx context.Context, h NewCLIReauthHandoff) error {
 	if r.sq != nil {
-		return r.sq.InsertCLIReauthHandoff(ctx, sqlitegen.InsertCLIReauthHandoffParams{ID: h.ID, StateVerifier: h.StateVerifier, SessionID: h.SessionID, PrincipalID: string(h.PrincipalID), Operation: h.Operation, EnvironmentSet: h.EnvironmentSet, PkceChallenge: h.PKCEChallenge, RedirectUri: h.RedirectURI, CreatedAt: encodeTime(h.CreatedAt), ExpiresAt: encodeTime(h.ExpiresAt)})
+		return r.sq.InsertCLIReauthHandoff(ctx, sqlitegen.InsertCLIReauthHandoffParams{ID: h.ID, StateVerifier: h.StateVerifier, SessionID: h.SessionID, PrincipalID: string(h.PrincipalID), Purpose: h.Purpose, Operation: h.Operation, EnvironmentSet: h.EnvironmentSet, KeySet: h.KeySet, PkceChallenge: h.PKCEChallenge, RedirectUri: h.RedirectURI, CreatedAt: encodeTime(h.CreatedAt), ExpiresAt: encodeTime(h.ExpiresAt)})
 	}
-	return r.pg.InsertCLIReauthHandoff(ctx, pggen.InsertCLIReauthHandoffParams{ID: h.ID, StateVerifier: h.StateVerifier, SessionID: h.SessionID, PrincipalID: string(h.PrincipalID), Operation: h.Operation, EnvironmentSet: h.EnvironmentSet, PkceChallenge: h.PKCEChallenge, RedirectUri: h.RedirectURI, CreatedAt: pgTime(h.CreatedAt), ExpiresAt: pgTime(h.ExpiresAt)})
+	return r.pg.InsertCLIReauthHandoff(ctx, pggen.InsertCLIReauthHandoffParams{ID: h.ID, StateVerifier: h.StateVerifier, SessionID: h.SessionID, PrincipalID: string(h.PrincipalID), Purpose: h.Purpose, Operation: h.Operation, EnvironmentSet: h.EnvironmentSet, KeySet: h.KeySet, PkceChallenge: h.PKCEChallenge, RedirectUri: h.RedirectURI, CreatedAt: pgTime(h.CreatedAt), ExpiresAt: pgTime(h.ExpiresAt)})
 }
 
 func (r *Resolver) CLIReauthHandoffByState(ctx context.Context, verifier []byte) (CLIReauthHandoff, error) {
@@ -52,7 +52,7 @@ func (r *Resolver) CLIReauthHandoffByState(ctx context.Context, verifier []byte)
 		if err != nil {
 			return CLIReauthHandoff{}, err
 		}
-		return CLIReauthHandoff{ID: row.ID, StateVerifier: row.StateVerifier, CodeVerifier: row.CodeVerifier, SessionID: row.SessionID, PrincipalID: domain.PrincipalID(row.PrincipalID), Operation: row.Operation, EnvironmentSet: row.EnvironmentSet, PKCEChallenge: row.PkceChallenge, RedirectURI: row.RedirectUri, ApprovedWindows: []byte(row.ApprovedWindows), CreatedAt: created, ExpiresAt: expires, ConsumedAt: consumed}, nil
+		return CLIReauthHandoff{ID: row.ID, StateVerifier: row.StateVerifier, CodeVerifier: row.CodeVerifier, SessionID: row.SessionID, PrincipalID: domain.PrincipalID(row.PrincipalID), Purpose: row.Purpose, Operation: row.Operation, EnvironmentSet: row.EnvironmentSet, KeySet: row.KeySet, PKCEChallenge: row.PkceChallenge, RedirectURI: row.RedirectUri, ApprovedWindows: []byte(row.ApprovedWindows), CreatedAt: created, ExpiresAt: expires, ConsumedAt: consumed}, nil
 	}
 	row, err := r.pg.CLIReauthHandoffByState(ctx, verifier)
 	if err != nil {
@@ -79,7 +79,7 @@ func (r *Resolver) CLIReauthHandoffByCode(ctx context.Context, verifier []byte) 
 		if err != nil {
 			return CLIReauthHandoff{}, err
 		}
-		return CLIReauthHandoff{ID: row.ID, StateVerifier: row.StateVerifier, CodeVerifier: row.CodeVerifier, SessionID: row.SessionID, PrincipalID: domain.PrincipalID(row.PrincipalID), Operation: row.Operation, EnvironmentSet: row.EnvironmentSet, PKCEChallenge: row.PkceChallenge, RedirectURI: row.RedirectUri, ApprovedWindows: []byte(row.ApprovedWindows), CreatedAt: created, ExpiresAt: expires, ConsumedAt: consumed}, nil
+		return CLIReauthHandoff{ID: row.ID, StateVerifier: row.StateVerifier, CodeVerifier: row.CodeVerifier, SessionID: row.SessionID, PrincipalID: domain.PrincipalID(row.PrincipalID), Purpose: row.Purpose, Operation: row.Operation, EnvironmentSet: row.EnvironmentSet, KeySet: row.KeySet, PKCEChallenge: row.PkceChallenge, RedirectURI: row.RedirectUri, ApprovedWindows: []byte(row.ApprovedWindows), CreatedAt: created, ExpiresAt: expires, ConsumedAt: consumed}, nil
 	}
 	row, err := r.pg.CLIReauthHandoffByCode(ctx, verifier)
 	if err != nil {
@@ -89,7 +89,7 @@ func (r *Resolver) CLIReauthHandoffByCode(ctx context.Context, verifier []byte) 
 }
 
 func cliReauthFromPG(row pggen.CliReauthHandoff) CLIReauthHandoff {
-	return CLIReauthHandoff{ID: row.ID, StateVerifier: row.StateVerifier, CodeVerifier: row.CodeVerifier, SessionID: row.SessionID, PrincipalID: domain.PrincipalID(row.PrincipalID), Operation: row.Operation, EnvironmentSet: row.EnvironmentSet, PKCEChallenge: row.PkceChallenge, RedirectURI: row.RedirectUri, ApprovedWindows: row.ApprovedWindows, CreatedAt: row.CreatedAt.Time, ExpiresAt: row.ExpiresAt.Time, ConsumedAt: row.ConsumedAt.Time}
+	return CLIReauthHandoff{ID: row.ID, StateVerifier: row.StateVerifier, CodeVerifier: row.CodeVerifier, SessionID: row.SessionID, PrincipalID: domain.PrincipalID(row.PrincipalID), Purpose: row.Purpose, Operation: row.Operation, EnvironmentSet: row.EnvironmentSet, KeySet: row.KeySet, PKCEChallenge: row.PkceChallenge, RedirectURI: row.RedirectUri, ApprovedWindows: row.ApprovedWindows, CreatedAt: row.CreatedAt.Time, ExpiresAt: row.ExpiresAt.Time, ConsumedAt: row.ConsumedAt.Time}
 }
 
 func (r *Resolver) ApproveCLIReauthHandoff(ctx context.Context, id string, codeVerifier, windows []byte) (bool, error) {

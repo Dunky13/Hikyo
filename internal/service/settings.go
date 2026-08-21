@@ -250,3 +250,75 @@ func storedSeconds(hasWindow bool, window time.Duration) int {
 	}
 	return int(window / time.Second)
 }
+
+// MachineRevealSettings is the per-project machine-reveal opt-in on the wire.
+type MachineRevealSettings struct {
+	Enabled bool
+}
+
+// GetMachineReveal reads the project's machine-reveal opt-in under
+// `read@project`.
+func (s *ProjectSettings) GetMachineReveal(ctx context.Context, actor Actor, scope domain.Scope) (MachineRevealSettings, error) {
+	var out MachineRevealSettings
+	err := tx.Read(ctx, s.DB, func(ctx context.Context, r store.ReadRepos, az *authz.TxAuthorizer) error {
+		caller, err := actor.resolve(ctx, az, s.now())
+		if err != nil {
+			return err
+		}
+		p, err := az.Authorize(ctx, caller, authz.OpProjectMachineRevealGet, scope)
+		if err != nil {
+			return err
+		}
+		proj, err := r.Projects().Get(ctx, p)
+		if err != nil {
+			return err
+		}
+		out.Enabled = proj.MachineReveal
+		return nil
+	})
+	return out, err
+}
+
+// SetMachineReveal flips the project's machine-reveal opt-in (source-of-truth
+// ADR: "Granting `reveal` to a machine identity is an explicit, documented,
+// per-project operator opt-in, never a default"). The formula carries
+// `project-settings` and `reveal` at project depth and is MFA-mandatory
+// through the latter. Both directions are audited; the flip itself touches no
+// grant row - withdrawal makes every machine `reveal` inert on the next fetch
+// because the chokepoint and the delivery path read the column live.
+func (s *ProjectSettings) SetMachineReveal(ctx context.Context, actor Actor, scope domain.Scope, enabled bool) (MachineRevealSettings, error) {
+	var out MachineRevealSettings
+	err := tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+		caller, err := actor.resolve(ctx, az, s.now())
+		if err != nil {
+			return err
+		}
+		p, err := az.Authorize(ctx, caller, authz.OpProjectMachineRevealSet, scope)
+		if err != nil {
+			return err
+		}
+		proj, err := r.Projects().Get(ctx, p)
+		if err != nil {
+			return err
+		}
+		if proj.MachineReveal != enabled {
+			if err := r.Projects().SetMachineReveal(ctx, p, enabled); err != nil {
+				return err
+			}
+			ev, err := domainEvent(ctx, audit.EventSettingsMachineRevealChanged, caller.Principal,
+				audit.Object{Type: "project", ID: string(scope.Project)}, audit.Payload{
+					"previous_enabled": proj.MachineReveal,
+					"enabled":          enabled,
+				})
+			if err != nil {
+				return err
+			}
+			if err := r.Audit().InsertTenant(ctx, p, ev); err != nil {
+				return err
+			}
+		}
+		out.Enabled = enabled
+		return nil
+	})
+	return out, err
+}

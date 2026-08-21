@@ -65,6 +65,11 @@ type Project struct {
 	// DefinitionsSource is `db` or `git` (#70). In `git` the definition-write
 	// chokepoint refuses every ordinary edit and only definitions apply writes.
 	DefinitionsSource string
+	// MachineReveal is the per-project machine-reveal opt-in (source-of-truth
+	// ADR). False (the default) means no machine principal may be granted
+	// `reveal` here and no machine fetch delivers secret plaintext, whatever
+	// grant rows exist.
+	MachineReveal bool
 }
 
 // RetentionPolicy is the stored keep-if-either payload policy. Unlimited is
@@ -193,6 +198,9 @@ type ProjectRepo interface {
 	// SetDefinitionsSource writes the git/db definitions mode (#70). It is a
 	// project-settings write, off the definitions-edit path.
 	SetDefinitionsSource(ctx context.Context, p authz.Proof, source string) error
+	// SetMachineReveal writes the per-project machine-reveal opt-in. It is a
+	// project-settings write, off every machine-reachable path.
+	SetMachineReveal(ctx context.Context, p authz.Proof, enabled bool) error
 	Delete(ctx context.Context, p authz.Proof) error
 	// Lock takes the project row for the rest of the transaction, so every
 	// mutation of that project's environment SET serializes: the cap check and

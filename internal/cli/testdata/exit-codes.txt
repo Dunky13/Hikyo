@@ -78,3 +78,7 @@ hikyo definitions check -> 2 usage
 hikyo definitions plan -> 2 usage
 hikyo definitions apply -> 2 usage
 hikyo definitions export stray -> 2 usage
+hikyo definitions scaffold -> 2 usage
+hikyo definitions scaffold --from x.env stray -> 2 usage
+hikyo values import --from-dotenv a.env --file v.json --instance unknown-ref -> 2 usage
+hikyo run --use-human-session --instance unknown-ref -- true -> 4 refused

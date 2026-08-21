@@ -53,11 +53,11 @@ func (emptyAccountReads) ListIdentities(context.Context, string) ([]service.Exte
 	return nil, nil
 }
 
-func (cliReauthAuth) StartCLIReauth(context.Context, string, string, string, []string, string, string) (service.CLIReauthStart, error) {
+func (cliReauthAuth) StartCLIReauth(context.Context, string, string, string, []string, []string, string, string) (service.CLIReauthStart, error) {
 	return service.CLIReauthStart{State: "front-channel-state", ExpiresAt: time.Date(2026, 8, 17, 4, 5, 0, 0, time.UTC)}, nil
 }
 func (cliReauthAuth) CLIReauthTransaction(context.Context, service.Actor, string) (service.CLIReauthTransaction, error) {
-	return service.CLIReauthTransaction{State: "front-channel-state", Operation: "adapter.sync", RedirectURI: "http://127.0.0.1:40123/callback", ExpiresAt: time.Date(2026, 8, 17, 4, 5, 0, 0, time.UTC), Environments: []service.CLIReauthEnvironmentPolicy{{EnvironmentID: "env_00000000-0000-0000-0000-000000000001", RequiresWebAuthn: true}}}, nil
+	return service.CLIReauthTransaction{State: "front-channel-state", Purpose: "adapter", Operation: "adapter.sync", KeyIDs: []string{}, RedirectURI: "http://127.0.0.1:40123/callback", ExpiresAt: time.Date(2026, 8, 17, 4, 5, 0, 0, time.UTC), Environments: []service.CLIReauthEnvironmentPolicy{{EnvironmentID: "env_00000000-0000-0000-0000-000000000001", RequiresWebAuthn: true}}}, nil
 }
 func (cliReauthAuth) ApproveCLIReauth(context.Context, service.Actor, string) (service.CLIReauthApproval, error) {
 	return service.CLIReauthApproval{Code: "single-use-code", State: "front-channel-state", RedirectURI: "http://127.0.0.1:40123/callback"}, nil
@@ -218,7 +218,7 @@ func (s stubAuth) ReauthTOTP(context.Context, string, string, string) (service.R
 func (s stubAuth) ReauthAdapterTOTP(context.Context, string, string, []string, string) ([]service.ReauthResult, error) {
 	return nil, domain.ErrUnauthenticated
 }
-func (s stubAuth) StartCLIReauth(context.Context, string, string, string, []string, string, string) (service.CLIReauthStart, error) {
+func (s stubAuth) StartCLIReauth(context.Context, string, string, string, []string, []string, string, string) (service.CLIReauthStart, error) {
 	return service.CLIReauthStart{}, domain.ErrUnauthenticated
 }
 func (s stubAuth) CLIReauthTransaction(context.Context, service.Actor, string) (service.CLIReauthTransaction, error) {
@@ -1239,6 +1239,14 @@ func (s stubSettings) GetEnvironment(context.Context, service.Actor, domain.Scop
 
 func (s stubSettings) SetEnvironment(context.Context, service.Actor, domain.Scope, service.EnvironmentSettings) (service.EnvironmentSettings, error) {
 	return service.EnvironmentSettings{}, s.outcome()
+}
+
+func (s stubSettings) GetMachineReveal(context.Context, service.Actor, domain.Scope) (service.MachineRevealSettings, error) {
+	return service.MachineRevealSettings{}, nil
+}
+
+func (s stubSettings) SetMachineReveal(_ context.Context, _ service.Actor, _ domain.Scope, enabled bool) (service.MachineRevealSettings, error) {
+	return service.MachineRevealSettings{Enabled: enabled}, nil
 }
 
 type stubRevisions struct{ stubHierarchy }

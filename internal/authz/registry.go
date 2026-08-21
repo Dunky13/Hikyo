@@ -91,6 +91,9 @@ const (
 	OpDefinitionsApply       Operation = "definitions.apply"
 	OpDefinitionsSettingsGet Operation = "definitions.settings.get"
 	OpDefinitionsSettingsSet Operation = "definitions.settings.set"
+	// The per-project machine-reveal opt-in (source-of-truth ADR).
+	OpProjectMachineRevealGet Operation = "project.machine-reveal.get"
+	OpProjectMachineRevealSet Operation = "project.machine-reveal.set"
 
 	// The flat value model (#50, flat-model ADR + permission-model ADR's
 	// locked formula table). Every operation addresses ENVIRONMENT depth: a
@@ -573,7 +576,10 @@ const (
 	// StoreProjectsSetDefinitionsSource flips the git/db definitions mode (#70).
 	// It rides project-settings authority, off the definitions-edit path.
 	StoreProjectsSetDefinitionsSource StoreOp = "projects.SetDefinitionsSource"
-	StoreProjectsDelete               StoreOp = "projects.Delete"
+	// StoreProjectsSetMachineReveal flips the per-project machine-reveal
+	// opt-in (source-of-truth ADR), a project-settings write.
+	StoreProjectsSetMachineReveal StoreOp = "projects.SetMachineReveal"
+	StoreProjectsDelete           StoreOp = "projects.Delete"
 
 	// The definitions plan ledger (#70). CreatePlan/MarkPlanApplied/PruneExpired
 	// mutate; GetPlan/CountOpenPlans/LatestAppliedPlan read.
@@ -1722,6 +1728,34 @@ var operations = map[Operation]opSpec{
 			StoreAuditTenantInsert:            true,
 		},
 		events: []audit.EventType{audit.EventSettingsDefinitionsSourceChanged},
+	},
+
+	// The per-project machine-reveal opt-in (source-of-truth ADR: "an explicit,
+	// documented, per-project operator opt-in"). The read is `read@project`,
+	// audited-none like the definitions-settings read; the write is a
+	// project-settings act carrying a `reveal` conjunct, because enabling it
+	// admits a standing decryption capability onto machine principals and the
+	// permission model lets nobody confer plaintext reach they do not hold.
+	// `reveal` is MFA-mandatory, so the write takes an adequate session too.
+	OpProjectMachineRevealGet: {
+		class:       ClassTenant,
+		level:       domain.LevelProject,
+		formula:     Formula{{Cap: domain.CapRead, At: domain.LevelProject}},
+		storeOps:    map[StoreOp]bool{StoreProjectsGet: true},
+		auditedNone: true,
+	},
+	OpProjectMachineRevealSet: {
+		class: ClassTenant,
+		level: domain.LevelProject,
+		formula: Formula{
+			{Cap: domain.CapProjectSettings, At: domain.LevelProject},
+			{Cap: domain.CapReveal, At: domain.LevelProject},
+		},
+		storeOps: map[StoreOp]bool{
+			StoreProjectsGet: true, StoreProjectsSetMachineReveal: true,
+			StoreAuditTenantInsert: true,
+		},
+		events: []audit.EventType{audit.EventSettingsMachineRevealChanged},
 	},
 
 	// The flat value model (#50). Every mutation takes the project row first,

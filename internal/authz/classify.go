@@ -326,6 +326,8 @@ var wireRegistry = map[string]Class{
 	"http:POST /api/v1/orgs/{org}/projects/{project}/definitions/plans/{plan}/apply": ClassTenant,
 	"http:GET /api/v1/orgs/{org}/projects/{project}/definitions/settings":            ClassTenant,
 	"http:PUT /api/v1/orgs/{org}/projects/{project}/definitions/settings":            ClassTenant,
+	"http:GET /api/v1/orgs/{org}/projects/{project}/machine-reveal":                  ClassTenant,
+	"http:PUT /api/v1/orgs/{org}/projects/{project}/machine-reveal":                  ClassTenant,
 	// The flat value model (#50). Tenant-class throughout: a value the caller
 	// may not reach answers exactly like one that is not there.
 	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values":               ClassTenant,
@@ -918,6 +920,8 @@ var wireRoutes = map[string][]Operation{
 	"http:POST /api/v1/orgs/{org}/projects/{project}/definitions/plans/{plan}/apply": {OpDefinitionsApply},
 	"http:GET /api/v1/orgs/{org}/projects/{project}/definitions/settings":            {OpDefinitionsSettingsGet},
 	"http:PUT /api/v1/orgs/{org}/projects/{project}/definitions/settings":            {OpDefinitionsSettingsSet},
+	"http:GET /api/v1/orgs/{org}/projects/{project}/machine-reveal":                  {OpProjectMachineRevealGet},
+	"http:PUT /api/v1/orgs/{org}/projects/{project}/machine-reveal":                  {OpProjectMachineRevealSet},
 	// The flat value model (#50). Three routes reach TWO operations each,
 	// following the credential-reset precedent: a route that reaches a second
 	// operation at runtime must say so, or the registry describes an

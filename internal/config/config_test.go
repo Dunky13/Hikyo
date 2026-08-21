@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func env(pairs ...string) func(string) string {
@@ -327,5 +328,32 @@ func TestAdmissionBudgetRefusesValuesThatCannotFitEverySupportedInt(t *testing.T
 	}
 	if !strings.Contains(err.Error(), "HIKYO_ADMISSION_BUDGET_MIB") {
 		t.Fatalf("error should name HIKYO_ADMISSION_BUDGET_MIB, got: %v", err)
+	}
+}
+
+func TestReauthWindowDefaultsZeroInProductionAndFifteenMinutesInDev(t *testing.T) {
+	prod, _, err := Load("server", nil, env("HIKYO_DB", "sqlite:/data/hikyo.db", "HIKYO_EXTERNAL_ORIGIN", "https://hikyo.example.com"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prod.ReauthWindow != 0 {
+		t.Fatalf("production default must be a 0 window (every disclosure takes its own ceremony), got %s", prod.ReauthWindow)
+	}
+	dev, _, err := Load("server", []string{"--dev"}, env(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dev.ReauthWindow != 15*time.Minute {
+		t.Fatalf("--dev default must be 15m, got %s", dev.ReauthWindow)
+	}
+	explicit, _, err := Load("server", []string{"--dev"}, env("HIKYO_REAUTH_WINDOW_SECONDS", "0"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if explicit.ReauthWindow != 0 {
+		t.Fatalf("an explicit 0 under --dev must win over the dev default, got %s", explicit.ReauthWindow)
+	}
+	if _, _, err := Load("server", nil, env("HIKYO_DB", "sqlite:/data/hikyo.db", "HIKYO_REAUTH_WINDOW_SECONDS", "90000"), nil); err == nil {
+		t.Fatal("a window above 24h must refuse")
 	}
 }

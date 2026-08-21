@@ -1,0 +1,53 @@
+- generic [ref=f5e3]:
+  - link "Skip to content" [ref=f5e4] [cursor=pointer]:
+    - /url: "#content"
+  - navigation "Organisations" [ref=f5e5]:
+    - button "Menu" [ref=f5e6] [cursor=pointer]
+    - list [ref=f5e7]:
+      - listitem [ref=f5e8]:
+        - button "Organisation demo" [ref=f5e9] [cursor=pointer]: DE
+    - 'button "Account: usr_01a02142-fb03-700f-bef2-01ef7a3e117a" [ref=f5e10] [cursor=pointer]': US
+  - generic [ref=f5e11]:
+    - banner [ref=f5e12]:
+      - list "Breadcrumb" [ref=f5e13]:
+        - listitem [ref=f5e14]: demo
+        - listitem [ref=f5e15]: /
+        - listitem [ref=f5e16]: Values
+      - button "Switch to dark theme" [ref=f5e17] [cursor=pointer]
+    - region [ref=f5e26]:
+      - generic [ref=f5e27]:
+        - heading "This session is password-only" [level=2] [ref=f5e28]
+        - paragraph [ref=f5e29]: Instance administration, grants and secret disclosure need a second factor presented in this session. Present it here; nothing else about the session changes.
+      - generic [ref=f5e31]:
+        - generic [ref=f5e32]: Authenticator code
+        - textbox "Authenticator code" [ref=f5e33]
+        - button "Present code" [disabled] [ref=f5e34]
+    - main [ref=f5e35]:
+      - region [ref=f5e36]:
+        - generic [ref=f5e37]:
+          - heading "Values" [level=1] [ref=f5e38]
+          - status [ref=f5e39]: Locked · each disclosure asks first
+        - generic [ref=f5e40]:
+          - button "Reveal every secret" [disabled] [ref=f5e41]
+          - generic [ref=f5e42]:
+            - generic [ref=f5e43]: Publish into
+            - combobox "Publish into" [ref=f5e44]:
+              - option "Choose an environment…" [selected]
+          - button "Publish into environment" [disabled] [ref=f5e45]
+        - table [ref=f5e46]:
+          - caption [ref=f5e47]: Values in this environment. Secret values are masked until disclosed.
+          - rowgroup [ref=f5e48]:
+            - row [ref=f5e49]:
+              - columnheader "Key" [ref=f5e50]
+              - columnheader "Value" [ref=f5e51]
+              - columnheader "Actions" [ref=f5e52]
+          - rowgroup [ref=f5e53]:
+            - row [ref=f5e54]:
+              - rowheader [ref=f5e55]:
+                - button "DATABASE_URL" [ref=f5e56] [cursor=pointer]
+              - cell "DATABASE_URL is masked" [ref=f5e57]: ••••••••
+              - cell [ref=f5e58]:
+                - button "Copy DATABASE_URL" [ref=f5e59] [cursor=pointer]: Copy
+        - region "Disclosure records" [ref=f5e60]:
+          - heading "Recorded this session" [level=2] [ref=f5e61]
+          - status [ref=f5e62]: No disclosures yet.

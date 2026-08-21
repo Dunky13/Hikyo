@@ -202,6 +202,14 @@ func TestExitCodeMatrix(t *testing.T) {
 		{"definitions plan without a file", []string{"definitions", "plan"}, cli.ExitUsage},
 		{"definitions apply without a plan", []string{"definitions", "apply"}, cli.ExitUsage},
 		{"stray positional on definitions export", []string{"definitions", "export", "stray"}, cli.ExitUsage},
+		// scaffold is a pure local transform: no --from is a usage error, decided
+		// before any session lookup, and a stray positional is rejected too.
+		{"definitions scaffold without a source", []string{"definitions", "scaffold"}, cli.ExitUsage},
+		{"stray positional on definitions scaffold", []string{"definitions", "scaffold", "--from", "x.env", "stray"}, cli.ExitUsage},
+		// The dotenv leg of values import is mutually exclusive with the artifact file.
+		{"values import file and from-dotenv", []string{"values", "import", "--from-dotenv", "a.env", "--file", "v.json", "--instance", "unknown-ref"}, cli.ExitUsage},
+		// run --use-human-session with no terminal is refused (testIO injects none).
+		{"run --use-human-session without a terminal", []string{"run", "--use-human-session", "--instance", "unknown-ref", "--", "true"}, cli.ExitRefused},
 	}
 	var report strings.Builder
 	for _, tc := range cases {

@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"flag"
+	"fmt"
 	"net/http"
 	"net/url"
 	"sort"
@@ -132,7 +133,7 @@ func runAccessGrant(ctx context.Context, ios IO, args []string) error {
 		return failf(ExitUsage, "usage: hikyo access grant template --principal <id> --template <name>")
 	}
 
-	client, _, resolved, err := authenticatedTarget(st, ios, flags)
+	client, artifact, resolved, err := authenticatedTarget(st, ios, flags)
 	if err != nil {
 		return err
 	}
@@ -152,7 +153,27 @@ func runAccessGrant(ctx context.Context, ios IO, args []string) error {
 	case "add":
 		var res apigen.GrantResult
 		body := apigen.CreateGrantRequest{Principal: principal, Capability: capability}
-		if err := client.Do(ctx, http.MethodPost, scope.path, body, &res); err != nil {
+		// A grant that makes machine plaintext reachable (reveal on a machine
+		// principal) consumes the grantor's reauthentication window over the
+		// environments it reaches. For an environment-scoped grant that is
+		// exactly the addressed environment, so the inline TOTP ceremony can
+		// open it here; a wider scope is answered by the server's refusal,
+		// which names the environments to reauthenticate over.
+		attempt := func() error { return client.Do(ctx, http.MethodPost, scope.path, body, &res) }
+		var err error
+		if env := resolved.Get(DimEnv); env != "" && !instanceScope && capability == "reveal" {
+			base, perr := projectBase(resolved)
+			if perr != nil {
+				return perr
+			}
+			// No browser handoff for a widening: a 0-window environment's grant
+			// is made in the browser's Machine access page, which runs the
+			// mint-purpose passkey ceremony itself.
+			err = withRevealCeremony(ctx, client, st, ios, artifact, base, []string{env}, disclosure{}, attempt)
+		} else {
+			err = attempt()
+		}
+		if err != nil {
 			return err
 		}
 		return Render(ios.Stdout, f, Table{
@@ -292,9 +313,12 @@ func grantRouteFor(g apigen.Grant, listPath string) string {
 // CAPS its window, so a surface that wrote them apart would have an observable
 // state with the flag set and the window not yet capped.
 func runProjectSettings(ctx context.Context, ios IO, args []string) error {
-	sub, rest, err := subverb("project-settings", args, "get", "set")
+	sub, rest, err := subverb("project-settings", args, "get", "set", "machine-reveal")
 	if err != nil {
 		return err
+	}
+	if sub == "machine-reveal" {
+		return runMachineReveal(ctx, ios, rest)
 	}
 	var format, window, protected string
 	st, flags, err := parseCommon("project-settings "+sub, ios, rest, func(fs *flag.FlagSet) {
@@ -384,6 +408,80 @@ func runProjectSettings(ctx context.Context, ios IO, args []string) error {
 		return err
 	}
 	return Render(ios.Stdout, f, settingsTable(out))
+}
+
+// runMachineReveal is the per-project machine-reveal opt-in (source-of-truth
+// ADR: "an explicit, documented, per-project operator opt-in, never a
+// default"). `get` reads it; `set --enabled true|false` flips it, which is a
+// project-settings write carrying `reveal` at project depth and therefore
+// MFA-mandatory: step up first. Enabling admits `reveal` grants onto workload
+// and automation principals of the project - a standing decryption capability
+// - and the verb says so before it writes. Withdrawing stops every machine
+// secret delivery on the next fetch without touching any grant row.
+func runMachineReveal(ctx context.Context, ios IO, args []string) error {
+	sub, rest, err := subverb("project-settings machine-reveal", args, "get", "set")
+	if err != nil {
+		return err
+	}
+	var format, enabled string
+	st, flags, err := parseCommon("project-settings machine-reveal "+sub, ios, rest, func(fs *flag.FlagSet) {
+		fs.StringVar(&format, "o", "table", "output format: table or json")
+		if sub == "set" {
+			fs.StringVar(&enabled, "enabled", "", "true to admit reveal onto this project's machine principals, false to withdraw it")
+		}
+	})
+	if err != nil {
+		return err
+	}
+	f, err := ParseFormat(format)
+	if err != nil {
+		return err
+	}
+	if err := flags.checkNoPositionals("project-settings machine-reveal " + sub); err != nil {
+		return err
+	}
+	var want bool
+	if sub == "set" {
+		switch enabled {
+		case "true":
+			want = true
+		case "false":
+			want = false
+		default:
+			return failf(ExitUsage, "usage: hikyo project-settings machine-reveal set --enabled true|false")
+		}
+	}
+	client, _, resolved, err := authenticatedTarget(st, ios, flags)
+	if err != nil {
+		return err
+	}
+	base, err := projectBase(resolved)
+	if err != nil {
+		return err
+	}
+	path := base + "/machine-reveal"
+	var out apigen.MachineRevealSettings
+	if sub == "get" {
+		if err := client.Do(ctx, http.MethodGet, path, nil, &out); err != nil {
+			return err
+		}
+		return Render(ios.Stdout, f, machineRevealTable(out))
+	}
+	if want {
+		fmt.Fprintln(ios.Stderr, "enabling the machine-reveal opt-in: a machine principal holding reveal is a standing decryption capability, "+
+			"and a CI runner holding it is that capability in the most-attacked box in the system. Each reveal grant still runs its own widening ceremony.")
+	}
+	if err := client.Do(ctx, http.MethodPut, path, apigen.MachineRevealSettings{Enabled: want}, &out); err != nil {
+		return err
+	}
+	if !want {
+		fmt.Fprintln(ios.Stderr, "machine-reveal opt-in withdrawn: every machine reveal grant in this project is inert from the next fetch; grant rows are untouched.")
+	}
+	return Render(ios.Stdout, f, machineRevealTable(out))
+}
+
+func machineRevealTable(s apigen.MachineRevealSettings) Table {
+	return Table{Columns: []string{"MACHINE REVEAL"}, Rows: [][]string{{strconv.FormatBool(s.Enabled)}}, JSON: s}
 }
 
 var (

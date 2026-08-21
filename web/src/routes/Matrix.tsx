@@ -1,8 +1,9 @@
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router';
+import { generatePath, Link, useParams } from 'react-router';
 
 import { historyHref } from '../api/history.ts';
+import { surfaceById } from '../app/navigation.ts';
 import {
   matrixPublishValidation,
   matrixMutationError,
@@ -569,10 +570,37 @@ export function Matrix({ historyOpen = false }: { historyOpen?: boolean } = {}) 
             </fieldset>
           </details>
 
-          {keys.length === 0 ? (
+          {environments.length === 0 ? (
+            <div className="matrix__empty" role="status">
+              <h2>No environments yet</h2>
+              <p>
+                A matrix needs at least one environment before any key can hold a value. Add one
+                under{' '}
+                <Link
+                  to={generatePath(surfaceById('project-settings').path, {
+                    org: ref.org,
+                    project: ref.project,
+                  })}
+                >
+                  Project settings › New environment
+                </Link>
+                .
+              </p>
+            </div>
+          ) : keys.length === 0 ? (
             <div className="matrix__empty" role="status">
               <h2>No keys yet</h2>
-              <p>Declare a key, then give each environment its own explicit value.</p>
+              <p>
+                Declare a key, then give each environment its own explicit value. Key declaration
+                has no web surface in this build — it is done at the CLI:
+              </p>
+              <pre className="matrix__cli">
+                <code>{'hikyo key create --context <ctx> --name NAME --classification config|secret --declaration \'{"rule":{"type":"string"}}\''}</code>
+              </pre>
+              <p>or scaffold every key from an existing file, then apply:</p>
+              <pre className="matrix__cli">
+                <code>{'hikyo definitions scaffold --from .env\nhikyo definitions apply'}</code>
+              </pre>
             </div>
           ) : filter === 'problems' && filteredKeyIDs.size === 0 ? (
             <div className="matrix__empty" role="status">

@@ -176,23 +176,41 @@ describe('dismissDecision', () => {
 
 describe('setupJourney', () => {
   it('has no journey for an automation principal', () => {
-    expect(setupJourney('automation', [])).toBeNull();
+    expect(setupJourney('automation', [], false)).toBeNull();
   });
 
   it('waits on the read grant before anything else', () => {
-    const steps = setupJourney('workload', scopeOf([], 'mp_a', ENVS)) ?? [];
-    expect(steps.map((s) => s.state)).toEqual(['done', 'next', 'next', 'unavailable', 'unavailable']);
+    const steps = setupJourney('workload', scopeOf([], 'mp_a', ENVS), false) ?? [];
+    expect(steps.map((s) => s.state)).toEqual(['done', 'next', 'next', 'next', 'unavailable']);
   });
 
-  it('marks delivery done once read is granted, and never invents a refusal', () => {
+  it('marks delivery done once read is granted, and gates reveal on the opt-in', () => {
     const scope = scopeOf([grant('mp_a', 'read', { environment_id: 'env_dev' })], 'mp_a', ENVS);
-    const steps = setupJourney('workload', scope) ?? [];
+    const steps = setupJourney('workload', scope, false) ?? [];
     expect(steps[1]?.title).toBe('read granted — development');
     expect(steps[2]?.state).toBe('done');
-    // The two steps this build cannot perform say so rather than offering a
-    // control the server refuses every time.
-    expect(steps[3]?.state).toBe('unavailable');
+    // With the opt-in off the grant API refuses reveal, so the step says so
+    // rather than offering a control the server refuses every time.
+    expect(steps[3]?.state).toBe('next');
     expect(steps[4]?.state).toBe('unavailable');
+  });
+
+  it('offers the reveal grant once the project has opted in, and closes it once held', () => {
+    const reading = scopeOf([grant('mp_a', 'read', { environment_id: 'env_dev' })], 'mp_a', ENVS);
+    const steps = setupJourney('workload', reading, true) ?? [];
+    expect(steps[3]?.state).toBe('done');
+    expect(steps[4]?.state).toBe('next');
+    const revealing = scopeOf(
+      [
+        grant('mp_a', 'read', { environment_id: 'env_dev' }),
+        grant('mp_a', 'reveal', { environment_id: 'env_dev' }),
+      ],
+      'mp_a',
+      ENVS,
+    );
+    const held = setupJourney('workload', revealing, true) ?? [];
+    expect(held[4]?.state).toBe('done');
+    expect(held[4]?.title).toBe('reveal granted — development');
   });
 });
 

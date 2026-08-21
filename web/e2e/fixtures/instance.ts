@@ -342,11 +342,10 @@ async function enrolTotp(instance: Instance): Promise<string> {
  * TRAP, recorded because it cost real time. A code is single-use PER STEP —
  * `last_step < ?`, strictly — and the validation window is only +/-1 step wide,
  * so two ceremonies inside the same 30 seconds have NO code that is both fresh
- * and acceptable. Worse, the refusal is `unauthenticated`, which is
- * indistinguishable from a wrong code and reads exactly like a clock skew that
- * is not there: this server's `Date` header agrees with this process to the
- * second, and the two implementations generate identical codes for identical
- * instants (checked against `pquerna/otp` directly).
+ * and acceptable. The server names that case (409, "already used for its time
+ * step") rather than answering the uniform `unauthenticated`; a wrong code is
+ * still a 401, and the two implementations generate identical codes for
+ * identical instants (checked against `pquerna/otp` directly).
  *
  * So every presentation waits for the step counter to advance and then sends
  * the code for NOW. That is deterministic — one request, no failed attempts to
@@ -372,6 +371,12 @@ async function presentTotp(instance: Instance, otpauth: string, path: string): P
         return;
       }
       last = `${resp.status}: ${await resp.text()}`;
+      // 409 is the server naming a REPLAY: the code's step was already
+      // consumed by an earlier ceremony in this same 30-second window. That is
+      // the one refusal worth waiting out; everything else is a real fault.
+      if (resp.status === 409 && last.includes('already used for its time step')) {
+        break;
+      }
       if (resp.status !== 401) {
         throw new Error(`${path} at ${instance.base} answered ${last}`);
       }

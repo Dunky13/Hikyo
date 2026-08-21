@@ -278,8 +278,10 @@ type CliReauthHandoff struct {
 	CodeVerifier    []byte
 	SessionID       string
 	PrincipalID     string
+	Purpose         string
 	Operation       string
 	EnvironmentSet  string
+	KeySet          string
 	PkceChallenge   string
 	RedirectUri     string
 	ApprovedWindows string
@@ -585,13 +587,15 @@ type Principal struct {
 }
 
 type Project struct {
-	ID                     string
-	OrgID                  string
-	Name                   string
-	CreatedAt              string
-	RetentionRevisionCount sql.NullInt64
-	RetentionAgeSeconds    sql.NullInt64
-	DefinitionsSource      string
+	ID                      string
+	OrgID                   string
+	Name                    string
+	CreatedAt               string
+	RetentionRevisionCount  sql.NullInt64
+	RetentionAgeSeconds     sql.NullInt64
+	DefinitionsSource       string
+	MachineReveal           int64
+	MachineRevealGeneration int64
 }
 
 type ProjectSchemaRevision struct {

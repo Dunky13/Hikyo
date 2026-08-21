@@ -457,11 +457,13 @@ export type JourneyStep = {
 export function setupJourney(
   kind: 'workload' | 'automation',
   scope: readonly MachineEnvScope[],
+  machineReveal: boolean,
 ): JourneyStep[] | null {
   if (kind === 'automation') {
     return null;
   }
   const read = scope.filter((s) => s.read);
+  const revealed = scope.filter((s) => s.read && s.reveal);
   const named = read.map((s) => s.name).join(', ');
   return [
     {
@@ -486,14 +488,23 @@ export function setupJourney(
       state: read.length === 0 ? 'next' : 'done',
     },
     {
-      title: 'Project machine-reveal opt-in',
-      note: 'not part of this build: the per-project opt-in that admits a standing decryption capability has no server surface yet (#17/#18)',
-      state: 'unavailable',
+      title: machineReveal
+        ? 'Project machine-reveal opt-in is on'
+        : 'Enable the project machine-reveal opt-in',
+      note: machineReveal
+        ? 'workload and automation principals in this project may hold reveal; withdrawing the opt-in makes every such grant inert on the next fetch'
+        : 'a deliberate per-project act (project-settings ∧ reveal, second factor): it admits a standing decryption capability onto machine principals',
+      state: machineReveal ? 'done' : 'next',
     },
     {
-      title: 'Grant reveal',
-      note: 'not part of this build: a workload principal may hold read and nothing else until the opt-in lands, so no credential here reaches plaintext',
-      state: 'unavailable',
+      title:
+        revealed.length === 0
+          ? 'Grant reveal'
+          : `reveal granted — ${revealed.map((s) => s.name).join(', ')}`,
+      note: machineReveal
+        ? 'secret plaintext is delivered on the next fetch; the widening ceremony names the environments it reaches'
+        : 'refused by the grant API until the opt-in above is on',
+      state: revealed.length > 0 ? 'done' : machineReveal ? 'next' : 'unavailable',
     },
   ];
 }

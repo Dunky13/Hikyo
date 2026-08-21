@@ -56,7 +56,8 @@ func (q *Queries) DeleteProject(ctx context.Context, arg DeleteProjectParams) (i
 
 const getProject = `-- name: GetProject :one
 SELECT id, org_id, name, created_at,
-       retention_revision_count, retention_age_seconds, definitions_source
+       retention_revision_count, retention_age_seconds, definitions_source,
+       machine_reveal, machine_reveal_generation
 FROM projects
 WHERE org_id = $1 AND id = $2
 `
@@ -77,6 +78,8 @@ func (q *Queries) GetProject(ctx context.Context, arg GetProjectParams) (Project
 		&i.RetentionRevisionCount,
 		&i.RetentionAgeSeconds,
 		&i.DefinitionsSource,
+		&i.MachineReveal,
+		&i.MachineRevealGeneration,
 	)
 	return i, err
 }
@@ -120,7 +123,8 @@ func (q *Queries) ListAllProjects(ctx context.Context) ([]ListAllProjectsRow, er
 
 const listProjects = `-- name: ListProjects :many
 SELECT id, org_id, name, created_at,
-       retention_revision_count, retention_age_seconds, definitions_source
+       retention_revision_count, retention_age_seconds, definitions_source,
+       machine_reveal, machine_reveal_generation
 FROM projects
 WHERE org_id = $1 ORDER BY name
 `
@@ -142,6 +146,8 @@ func (q *Queries) ListProjects(ctx context.Context, chainOrgID string) ([]Projec
 			&i.RetentionRevisionCount,
 			&i.RetentionAgeSeconds,
 			&i.DefinitionsSource,
+			&i.MachineReveal,
+			&i.MachineRevealGeneration,
 		); err != nil {
 			return nil, err
 		}
@@ -209,6 +215,27 @@ type SetProjectDefinitionsSourceParams struct {
 // definitions-edit path so a blocked editor cannot disable its own guard.
 func (q *Queries) SetProjectDefinitionsSource(ctx context.Context, arg SetProjectDefinitionsSourceParams) (int64, error) {
 	result, err := q.db.Exec(ctx, setProjectDefinitionsSource, arg.DefinitionsSource, arg.ChainOrgID, arg.ChainProjectID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const setProjectMachineReveal = `-- name: SetProjectMachineReveal :execrows
+UPDATE projects SET machine_reveal = $1, machine_reveal_generation = machine_reveal_generation + 1
+WHERE org_id = $2 AND id = $3
+`
+
+type SetProjectMachineRevealParams struct {
+	MachineReveal  bool
+	ChainOrgID     string
+	ChainProjectID string
+}
+
+// SetProjectMachineReveal flips the per-project machine-reveal opt-in (see the
+// sqlite statement).
+func (q *Queries) SetProjectMachineReveal(ctx context.Context, arg SetProjectMachineRevealParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setProjectMachineReveal, arg.MachineReveal, arg.ChainOrgID, arg.ChainProjectID)
 	if err != nil {
 		return 0, err
 	}

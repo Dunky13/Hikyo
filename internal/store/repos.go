@@ -522,12 +522,28 @@ func (r sqliteProjects) Delete(ctx context.Context, p authz.Proof) error {
 	}))
 }
 
+func (r sqliteProjects) SetMachineReveal(ctx context.Context, p authz.Proof, enabled bool) error {
+	chain, err := authz.Verify(p, authz.StoreProjectsSetMachineReveal, r.tok)
+	if err != nil {
+		return err
+	}
+	var flag int64
+	if enabled {
+		flag = 1
+	}
+	return affected(r.q.SetProjectMachineReveal(ctx, sqlitegen.SetProjectMachineRevealParams{
+		MachineReveal: flag,
+		OrgID:         string(chain.Org),
+		ID:            string(chain.Project),
+	}))
+}
+
 func projectFromSQLite(row sqlitegen.Project) (Project, error) {
 	created, err := parseTime("project", row.ID, row.CreatedAt)
 	if err != nil {
 		return Project{}, err
 	}
-	project := Project{ID: row.ID, OrgID: row.OrgID, Name: row.Name, CreatedAt: created, DefinitionsSource: row.DefinitionsSource}
+	project := Project{ID: row.ID, OrgID: row.OrgID, Name: row.Name, CreatedAt: created, DefinitionsSource: row.DefinitionsSource, MachineReveal: row.MachineReveal == 1}
 	if row.RetentionAgeSeconds.Valid != row.RetentionRevisionCount.Valid {
 		return Project{}, fmt.Errorf("store: project %s: partial retention override", row.ID)
 	}
@@ -1157,11 +1173,23 @@ func (r pgProjects) Delete(ctx context.Context, p authz.Proof) error {
 	}))
 }
 
+func (r pgProjects) SetMachineReveal(ctx context.Context, p authz.Proof, enabled bool) error {
+	chain, err := authz.Verify(p, authz.StoreProjectsSetMachineReveal, r.tok)
+	if err != nil {
+		return err
+	}
+	return affected(r.q.SetProjectMachineReveal(ctx, pggen.SetProjectMachineRevealParams{
+		MachineReveal:  enabled,
+		ChainOrgID:     string(chain.Org),
+		ChainProjectID: string(chain.Project),
+	}))
+}
+
 func projectFromPG(row pggen.Project) (Project, error) {
 	if !row.CreatedAt.Valid {
 		return Project{}, fmt.Errorf("store: project %s: null created_at", row.ID)
 	}
-	project := Project{ID: row.ID, OrgID: row.OrgID, Name: row.Name, CreatedAt: row.CreatedAt.Time.UTC(), DefinitionsSource: row.DefinitionsSource}
+	project := Project{ID: row.ID, OrgID: row.OrgID, Name: row.Name, CreatedAt: row.CreatedAt.Time.UTC(), DefinitionsSource: row.DefinitionsSource, MachineReveal: row.MachineReveal}
 	if row.RetentionAgeSeconds.Valid != row.RetentionRevisionCount.Valid {
 		return Project{}, fmt.Errorf("store: project %s: partial retention override", row.ID)
 	}

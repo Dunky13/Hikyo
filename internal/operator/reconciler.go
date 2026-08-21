@@ -337,7 +337,7 @@ func (r *HikyoSecretReconciler) deliver(
 	// sync — no partial write (§ 0.4 refusal). Retain the existing Secret.
 	if len(presenceOnly) > 0 {
 		sort.Strings(presenceOnly)
-		msg := fmt.Sprintf("undelivered (presence-only) mapped keys: %s. Grant the machine principal `reveal` on the project (the per-project machine-reveal opt-in) to deliver their values",
+		msg := fmt.Sprintf("undelivered (presence-only) mapped keys: %s. Enable the project's machine-reveal opt-in (hikyo project-settings machine-reveal set --enabled true) and grant the machine principal `reveal` on the environment to deliver their values, or set projection: config-only",
 			strings.Join(presenceOnly, ", "))
 		r.event(cr, corev1.EventTypeWarning, hikyov1.ReasonUndeliveredSecrets, "%s", msg)
 		r.setCond(cr, hikyov1.ConditionDelivery, metav1.ConditionFalse, hikyov1.ReasonUndeliveredSecrets, msg)

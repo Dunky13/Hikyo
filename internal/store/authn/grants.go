@@ -377,6 +377,33 @@ func (r *Resolver) EnvironmentReauthSettings(ctx context.Context, envID string) 
 	}, nil
 }
 
+// ProjectMachineReveal reads the per-project machine-reveal opt-in. It is a
+// resolution read like EnvironmentReauthSettings: the grant writer's class
+// check and the chokepoint's machine conjunct both consult it before an
+// operation proof exists. An unknown project answers ErrNotFound, which every
+// caller treats as "opt-in off" - fail-closed, never widened by absence.
+func (r *Resolver) ProjectMachineReveal(ctx context.Context, projectID string) (MachineRevealState, error) {
+	if r.sq != nil {
+		row, err := r.sq.ProjectMachineReveal(ctx, projectID)
+		if err != nil {
+			return MachineRevealState{}, notFoundOr(err)
+		}
+		return MachineRevealState{Enabled: row.MachineReveal == 1, Generation: row.MachineRevealGeneration}, nil
+	}
+	row, err := r.pg.ProjectMachineReveal(ctx, projectID)
+	if err != nil {
+		return MachineRevealState{}, notFoundOr(err)
+	}
+	return MachineRevealState{Enabled: row.MachineReveal, Generation: row.MachineRevealGeneration}, nil
+}
+
+// MachineRevealState is the per-project machine-reveal opt-in and its
+// generation, the counter every flip advances (bound into machine cursors).
+type MachineRevealState struct {
+	Enabled    bool
+	Generation int64
+}
+
 // PrincipalClass resolves a principal's class for the normative machine
 // allowlists. A human answers domain.ClassHuman; a machine answers its stored
 // class, and an unclassified machine answers the empty class, which every

@@ -195,15 +195,19 @@ that omits secret keys; it is not a client-side filter. `creationPolicy` is
 3. Create the `HikyoSecret`. A fresh workload principal receives config values
    and secret presence only, so an all-or-nothing sync refuses with
    `Delivery=False`, reason `UndeliveredSecrets`, naming the secret keys.
-4. A Hikyo operator enables the per-project machine-`reveal` opt-in. **This is
-   not yet available in the public API; it is tracked by #17 and #58.**
-5. Grant `reveal` to the workload principal. **This is also unavailable in the
-   public API until #17 and #58 ship.**
+4. A Hikyo operator enables the per-project machine-`reveal` opt-in:
+   `hikyo project-settings machine-reveal set --enabled true` (a
+   `project-settings` and `reveal` act at project scope; second factor
+   required). The Machine access page offers the same toggle.
+5. Grant `reveal` to the workload principal on the environment:
+   `hikyo access grant add --principal <mch_...> --capability reveal --env <env-id>`.
+   The grant runs the widening ceremony over the environments it reaches.
 
-Until steps 4–5 are available, a workload principal can deliver config values
-and secret presence only. A `HikyoSecret` mapping that names any secret key is
-therefore refused with `Delivery=False/UndeliveredSecrets`; it cannot deliver a
-complete mapped Secret through the public API today.
+Until steps 4–5 are done, a workload principal delivers config values and
+secret presence only, and a `HikyoSecret` mapping that names any secret key is
+refused with `Delivery=False/UndeliveredSecrets`. Withdrawing the opt-in later
+returns every workload in the project to that state on its next fetch, without
+touching the grants.
 
 ## Rollout triggering
 

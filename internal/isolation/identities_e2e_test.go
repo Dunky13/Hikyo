@@ -108,8 +108,14 @@ const (
 // be a deliberate per-project act), the fixture seeds the row directly. The
 // gates under test read the grant table, so they see the same state the
 // opt-in will eventually produce through the API.
+// seedMachineReveal writes a disclosure grant onto a machine principal by raw
+// SQL AND turns the project's machine-reveal opt-in on: a machine `reveal`
+// exists only under that opt-in (source-of-truth ADR), and the delivery path
+// reads it live, so a fixture that seeded the grant alone would be seeding a
+// state the product cannot reach.
 func seedMachineReveal(t *testing.T, db *store.DB, id string, p domain.PrincipalID, cap domain.Capability, env domain.EnvID) {
 	t.Helper()
+	execRaw(t, db, `UPDATE projects SET machine_reveal = TRUE WHERE id = 'prj_a1'`)
 	execRaw(t, db, `INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('`+
 		id+`', '`+string(p)+`', '`+string(cap)+`', 'org_a', 'prj_a1', '`+string(env)+`', `+ts+`)`)
 	seedOrigins(t, db)

@@ -260,7 +260,7 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 	// The advisory channel is in-process fan-out: one per server, wired into
 	// every surface that announces a change.
 	advisory := service.NewAdvisory()
-	authSvc := &service.Auth{DB: db, Keyring: kr, KDF: kdf, Admission: limiter, Log: log, ExternalOrigin: cfg.ExternalOrigin}
+	authSvc := &service.Auth{DB: db, Keyring: kr, KDF: kdf, Admission: limiter, Log: log, ExternalOrigin: cfg.ExternalOrigin, ReauthWindow: cfg.ReauthWindow}
 	samlProviders := &service.SAMLProviders{DB: db, Keyring: kr, ExternalOrigin: cfg.ExternalOrigin}
 	// RP ID + expected origins are immutable instance config derived from the
 	// configured external origin, never a request header (human-auth ADR §5). An

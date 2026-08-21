@@ -18,6 +18,27 @@ hikyo access grant add \
 
 Record the returned stable ID. List its grants before minting a credential.
 
+`--principal` takes the service account's **principal** ID (`mch_...`, the
+`principal_id` field of `hikyo sa list -o json`), not its `sa_...` row ID.
+
+## Secret delivery: the machine-reveal opt-in
+
+A workload or automation principal may hold `reveal` only under the project's
+explicit machine-reveal opt-in. It is off by default, and while it is off every
+machine fetch in the project delivers configuration and secret presence only.
+
+```bash
+hikyo project-settings machine-reveal get
+hikyo project-settings machine-reveal set --enabled true
+hikyo access grant add --principal <mch_...> --capability reveal --env <env-id>
+```
+
+Enabling needs `project-settings` and `reveal` at project scope and a
+second factor; it admits a standing decryption capability onto machine
+principals, which the command says before it writes. Withdrawing it
+(`--enabled false`) makes every machine `reveal` grant in the project inert on
+the next fetch and moves every machine cursor; grant rows are untouched.
+
 ## Bearer credential
 
 Mint to a new protected file:

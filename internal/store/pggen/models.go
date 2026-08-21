@@ -288,6 +288,8 @@ type CliReauthHandoff struct {
 	CreatedAt       pgtype.Timestamptz
 	ExpiresAt       pgtype.Timestamptz
 	ConsumedAt      pgtype.Timestamptz
+	Purpose         string
+	KeySet          string
 }
 
 type CredentialAuthority struct {
@@ -587,13 +589,15 @@ type Principal struct {
 }
 
 type Project struct {
-	ID                     string
-	OrgID                  string
-	Name                   string
-	CreatedAt              pgtype.Timestamptz
-	RetentionRevisionCount pgtype.Int8
-	RetentionAgeSeconds    pgtype.Int8
-	DefinitionsSource      string
+	ID                      string
+	OrgID                   string
+	Name                    string
+	CreatedAt               pgtype.Timestamptz
+	RetentionRevisionCount  pgtype.Int8
+	RetentionAgeSeconds     pgtype.Int8
+	DefinitionsSource       string
+	MachineReveal           bool
+	MachineRevealGeneration int64
 }
 
 type ProjectSchemaRevision struct {

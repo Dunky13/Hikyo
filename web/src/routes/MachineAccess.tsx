@@ -40,6 +40,7 @@ import {
   type ProjectRef,
   type ServiceAccount,
 } from '../api/identities.ts';
+import { useMachineReveal, useSetMachineReveal } from '../api/machineReveal.ts';
 import { runPasskeyCeremony, useEnvironments } from '../api/values.ts';
 import { useModalDialog } from './useModalDialog.ts';
 
@@ -91,6 +92,8 @@ export function MachineAccess() {
 
   const accountsQuery = useServiceAccounts(project);
   const grantsQuery = useProjectGrants(project);
+  const machineRevealQuery = useMachineReveal(project.org, project.project);
+  const machineReveal = machineRevealQuery.data?.enabled ?? false;
   const environmentsQuery = useEnvironments({ ...project, environment: '' });
 
   const accounts = useMemo(() => accountsQuery.data?.items ?? [], [accountsQuery.data]);
@@ -271,7 +274,7 @@ export function MachineAccess() {
       <div className="tabpanel" role="tabpanel" id="machine-panel" aria-labelledby={`machine-tab-${tab}`}>
         {tab === 'accounts' ? (
           <>
-            <PolicyStrip />
+            <PolicyStrip project={project} />
             <table className="values__table machine__table">
               <caption className="visually-hidden">
                 The project&apos;s service accounts. Credential values are never listed: a value is
@@ -308,12 +311,14 @@ export function MachineAccess() {
                       scope={scope}
                       open={open}
                       scopeKnown={grantsQuery.isSuccess && environmentsQuery.isSuccess}
+                      machineReveal={machineReveal}
                       lastUsed={newest === undefined ? 'never' : isoDay(newest)}
                       onToggle={() => setExpanded(open ? null : sa.id)}
                     >
                       <ExpansionBody
                         account={sa}
                         scope={scope}
+                        machineReveal={machineReveal}
                         bearers={bearers(rows)}
                         bindings={bindings(rows)}
                         now={now}
@@ -455,29 +460,176 @@ export function MachineAccess() {
 }
 
 /**
- * PolicyStrip is the per-project machine-reveal opt-in, stated rather than
- * offered.
+ * PolicyStrip is the per-project machine-reveal opt-in (source-of-truth ADR:
+ * "an explicit, documented, per-project operator opt-in, never a default").
  *
- * A toggle here would be a control whose only outcome is a refusal: the opt-in
- * has no server surface, and the permission model's machine allowlist admits
- * `read` and nothing else on a workload principal until it lands. The repo's
- * own precedent is the ceremony's TOTP cap — absent with the reason given, not
- * disabled — and for the same reason: a greyed-out switch invites a support
- * ticket that a sentence answers.
+ * It is a toggle with a ceremony both ways. Enabling states, at opt-in time,
+ * what the machine-identities ADR requires it to state: a machine principal
+ * holding reveal is a standing decryption capability, and a CI runner holding
+ * it is that capability in the most-attacked box in the system. Withdrawing
+ * states the other half: every machine reveal grant in the project goes inert
+ * on the next fetch, and every machine cursor moves. The write is
+ * project-settings ∧ reveal at project depth, so it is MFA-mandatory; a
+ * session short of that is told so by the server and the strip repeats it.
  */
-function PolicyStrip() {
+function PolicyStrip({ project }: { project: ProjectRef }) {
+  const query = useMachineReveal(project.org, project.project);
+  const write = useSetMachineReveal(project.org, project.project);
+  const [confirming, setConfirming] = useState<boolean | null>(null);
+  const [failure, setFailure] = useState<string | null>(null);
+
+  if (query.isPending) {
+    return (
+      <p className="notice machine__policy" role="status">
+        <span className="alert__glyph" aria-hidden="true">
+          ◆
+        </span>
+        <span>Reading the project&apos;s machine-reveal opt-in…</span>
+      </p>
+    );
+  }
+  if (query.isError) {
+    return (
+      <p className="alert machine__policy" role="alert">
+        <span className="alert__glyph" aria-hidden="true">
+          !
+        </span>
+        <span>
+          The project&apos;s machine-reveal opt-in could not be read: {identityRefusalText(query.error)}
+        </span>
+      </p>
+    );
+  }
+  const enabled = query.data.enabled;
+  const commit = (next: boolean) => {
+    setFailure(null);
+    write.mutate(next, {
+      onSuccess: () => setConfirming(null),
+      onError: (error) => setFailure(identityRefusalText(error)),
+    });
+  };
   return (
-    <p className="notice machine__policy" role="status">
-      <span className="alert__glyph" aria-hidden="true">
-        ◆
-      </span>
-      <span>
-        <strong>Machine secret delivery (per-project opt-in): off in this build.</strong> Every
-        workload delivery on this project is configuration and secret presence only. A credential
-        holding reveal would be a standing decryption capability, so the acknowledgement that admits
-        one is a deliberate per-project act — and it is not part of this build yet.
-      </span>
-    </p>
+    <>
+      <p className="notice machine__policy" role="status">
+        <span className="alert__glyph" aria-hidden="true">
+          ◆
+        </span>
+        <span>
+          <strong>
+            Machine secret delivery (per-project opt-in): {enabled ? 'on' : 'off'}.
+          </strong>{' '}
+          {enabled
+            ? 'Workload and automation principals in this project may hold reveal, and a credential holding it receives secret plaintext on fetch — a standing decryption capability.'
+            : 'Every workload delivery on this project is configuration and secret presence only, and the grant API refuses reveal on a machine principal until this is on.'}
+        </span>
+        <button
+          type="button"
+          className="btn machine__policy-toggle"
+          onClick={() => setConfirming(!enabled)}
+          disabled={write.isPending}
+        >
+          {enabled ? 'Withdraw the opt-in…' : 'Enable the opt-in…'}
+        </button>
+      </p>
+      {confirming !== null ? (
+        <MachineRevealDialog
+          enable={confirming}
+          busy={write.isPending}
+          failure={failure}
+          onConfirm={() => commit(confirming)}
+          onClose={() => {
+            setConfirming(null);
+            setFailure(null);
+          }}
+        />
+      ) : null}
+    </>
+  );
+}
+
+function MachineRevealDialog({
+  enable,
+  busy,
+  failure,
+  onConfirm,
+  onClose,
+}: {
+  enable: boolean;
+  busy: boolean;
+  failure: string | null;
+  onConfirm: () => void;
+  onClose: () => void;
+}) {
+  const dialog = useModalDialog();
+  const [acknowledged, setAcknowledged] = useState(false);
+  return (
+    <dialog
+      ref={dialog}
+      className="ceremony"
+      aria-labelledby="machine-reveal-title"
+      onClose={onClose}
+      onCancel={(event) => {
+        if (busy) {
+          event.preventDefault();
+        }
+      }}
+    >
+      <h2 className="ceremony__title" id="machine-reveal-title">
+        {enable ? 'Enable machine secret delivery' : 'Withdraw machine secret delivery'}
+      </h2>
+      {enable ? (
+        <>
+          <p>
+            A machine principal holding <strong>reveal</strong> is a standing decryption capability:
+            no second factor, no ceremony, every fetch delivers plaintext while the grant stands. A
+            CI runner holding it is that capability in the most-attacked box in the system.
+          </p>
+          <p>
+            Enabling admits <strong>reveal</strong> grants onto this project&apos;s workload and
+            automation principals; each grant still runs its own widening ceremony naming the
+            environments it reaches. Nothing is granted by this act alone.
+          </p>
+          <label className="ceremony__ack">
+            <input
+              type="checkbox"
+              checked={acknowledged}
+              onChange={(event) => setAcknowledged(event.target.checked)}
+              disabled={busy}
+            />{' '}
+            I understand this admits standing decryption capabilities onto machine principals in
+            this project.
+          </label>
+        </>
+      ) : (
+        <p>
+          Withdrawing makes every machine <strong>reveal</strong> grant in this project inert on the
+          next fetch and moves every machine cursor: workloads keep receiving configuration and
+          secret presence, and nothing else, until the opt-in is enabled again. The grant rows stay
+          where they are so the withdrawal is reversible by the same act.
+        </p>
+      )}
+      {failure !== null ? (
+        <p className="alert" role="alert">
+          <span className="alert__glyph" aria-hidden="true">
+            !
+          </span>
+          <span>{failure}</span>
+        </p>
+      ) : null}
+      <div className="ceremony__actions">
+        <button type="button" className="btn" onClick={onClose} disabled={busy}>
+          Cancel
+        </button>
+        <button
+          type="button"
+          className="btn btn--primary"
+          onClick={onConfirm}
+          disabled={busy || (enable && !acknowledged)}
+        >
+          {enable ? 'Enable the opt-in' : 'Withdraw the opt-in'}
+        </button>
+      </div>
+    </dialog>
   );
 }
 
@@ -486,6 +638,7 @@ function ExpandableRow({
   scope,
   open,
   scopeKnown,
+  machineReveal,
   lastUsed,
   onToggle,
   children,
@@ -495,12 +648,14 @@ function ExpandableRow({
   open: boolean;
   /** False when the grants or the environments could not be read: unknown is not "none". */
   scopeKnown: boolean;
+  /** The project's machine-reveal opt-in, as the server reports it. */
+  machineReveal: boolean;
   lastUsed: string;
   onToggle: () => void;
   children: ReactNode;
 }) {
   const reading = scope.filter((s) => s.read);
-  const journey = setupJourney(account.kind, scope);
+  const journey = setupJourney(account.kind, scope, machineReveal);
   const outstanding = journey?.findIndex((step) => step.state !== 'done') ?? -1;
   return (
     <>
@@ -561,6 +716,7 @@ function ExpandableRow({
 function ExpansionBody({
   account,
   scope,
+  machineReveal,
   bearers,
   bindings,
   now,
@@ -572,6 +728,7 @@ function ExpansionBody({
 }: {
   account: ServiceAccount;
   scope: readonly MachineEnvScope[];
+  machineReveal: boolean;
   bearers: readonly MachineCredential[];
   bindings: readonly MachineCredential[];
   now: Date;
@@ -582,7 +739,7 @@ function ExpansionBody({
   onGrant: () => void;
   onRevoke: (credential: MachineCredential) => void;
 }) {
-  const journey = setupJourney(account.kind, scope);
+  const journey = setupJourney(account.kind, scope, machineReveal);
   return (
     <>
       <div className="machine__grid">

@@ -102,6 +102,12 @@ func (a *TxAuthorizer) EnvironmentReauthSettings(ctx context.Context, envID stri
 	return a.r.EnvironmentReauthSettings(ctx, envID)
 }
 
+// ProjectMachineReveal reads the per-project machine-reveal opt-in
+// (source-of-truth ADR). ErrNotFound for an unknown project.
+func (a *TxAuthorizer) ProjectMachineReveal(ctx context.Context, projectID string) (authn.MachineRevealState, error) {
+	return a.r.ProjectMachineReveal(ctx, projectID)
+}
+
 // PrincipalClass resolves a principal's class for the normative machine
 // allowlists.
 func (a *TxAuthorizer) PrincipalClass(ctx context.Context, p domain.PrincipalID) (domain.PrincipalClass, error) {

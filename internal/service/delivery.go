@@ -348,6 +348,18 @@ func (s *Delivery) FetchAs(ctx context.Context, actor Actor, scope domain.Scope,
 		if err != nil {
 			return err
 		}
+		// The per-project machine-reveal opt-in is the second half of the
+		// per-key secret rule for a machine caller: `reveal` rows deliver
+		// plaintext only while the project has opted in (source-of-truth ADR).
+		// Read live on every fetch, like the grants; it is part of the
+		// authorized projection, so flipping it moves every machine cursor.
+		revealOptIn, revealGeneration, err := az.MachineRevealOptIn(ctx, caller, scope.Project)
+		if err != nil {
+			return err
+		}
+		if !revealOptIn {
+			grants = withoutReveal(grants)
+		}
 
 		rows, manifest, revision, snapshotRevision, err := deliveryRows(
 			ctx, r, p, sealer, scope, selected, grants, mode, pinnedNonCurrent)
@@ -382,7 +394,7 @@ func (s *Delivery) FetchAs(ctx context.Context, actor Actor, scope domain.Scope,
 			string(scope.Org), string(scope.Project), string(scope.Env),
 			delivery.EncodeCursor(delivery.Cursor{
 				ChangeToken:              changeToken,
-				Projection:               projectionOf(grants, scope),
+				Projection:               projectionOf(grants, scope, revealGeneration),
 				AuthorizationRevision:    revisionOfAuthority,
 				PinGeneration:            pinGeneration,
 				Mode:                     mode,
@@ -755,6 +767,21 @@ func deliveryRows(ctx context.Context, r store.Repos, p authz.Proof, sealer *cry
 	return keys, manifest, snapshot.SchemaRevision, snapshot.Revision, nil
 }
 
+// withoutReveal is the grant set a machine caller effectively holds while its
+// project's machine-reveal opt-in is off: every `reveal` and `reveal-history`
+// row is inert for delivery, so both the per-key rule and the cursor's
+// projection are computed as if they were not there.
+func withoutReveal(grants []authz.GrantRow) []authz.GrantRow {
+	out := make([]authz.GrantRow, 0, len(grants))
+	for _, g := range grants {
+		if g.Grant.Capability == domain.CapReveal || g.Grant.Capability == domain.CapRevealHistory {
+			continue
+		}
+		out = append(out, g)
+	}
+	return out
+}
+
 // projectionOf is the caller's AUTHORIZED DELIVERY PROJECTION: which of the
 // three delivery-relevant capabilities it holds at the addressed environment.
 //
@@ -770,13 +797,23 @@ func deliveryRows(ctx context.Context, r store.Repos, p authz.Proof, sealer *cry
 // disclosure capability is granted or revoked — which is exactly when what the
 // caller may receive changes, now that `reveal` and `reveal-history` gate
 // whether a secret's plaintext crosses (deliveryRows).
-func projectionOf(grants []authz.GrantRow, scope domain.Scope) []string {
+//
+// The machine-reveal opt-in's generation is the projection's last term for a
+// machine caller: the opt-in is part of what the caller is authorized to
+// receive, and binding its generation rather than its value makes every flip
+// move the cursor - also for a read-only principal the flip does not yet
+// affect, and across an off-on-off pair between two polls. Humans carry
+// generation 0 and no term.
+func projectionOf(grants []authz.GrantRow, scope domain.Scope, revealGeneration int64) []string {
 	at := domain.Scope{Org: scope.Org, Project: scope.Project, Env: scope.Env}
 	var out []string
 	for _, cap := range []domain.Capability{domain.CapRead, domain.CapReveal, domain.CapRevealHistory} {
 		if holds(grants, cap, at) {
 			out = append(out, string(cap))
 		}
+	}
+	if revealGeneration > 0 {
+		out = append(out, fmt.Sprintf("machine-reveal-generation:%d", revealGeneration))
 	}
 	return out
 }

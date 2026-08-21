@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import { ApiError } from './client.ts';
 import {
+  createEnvironmentRefusalText,
+  createProjectRefusalText,
   DAY_SECONDS,
   environmentSettingsReadState,
   formatRetentionAge,
@@ -272,6 +274,35 @@ describe('settings refusals', () => {
     );
     expect(settingsFailureText(new Error('network'), 'set-org-retention')).toBe(
       'The server failed; whether the change applied is unknown — reload to check.',
+    );
+  });
+});
+
+describe('authoring refusals', () => {
+  it('names manage-projects for a uniform 403/404 project refusal', () => {
+    const forbidden = createProjectRefusalText(new ApiError(403, 'x'));
+    expect(forbidden).toContain('manage-projects');
+    expect(forbidden).toContain('organisation scope');
+    expect(createProjectRefusalText(new ApiError(404, 'x'))).toBe(forbidden);
+  });
+
+  it('names definitions-edit for a uniform 403/404 environment refusal', () => {
+    const forbidden = createEnvironmentRefusalText(new ApiError(403, 'x'));
+    expect(forbidden).toContain('definitions-edit');
+    expect(createEnvironmentRefusalText(new ApiError(404, 'x'))).toBe(forbidden);
+  });
+
+  it('quotes a caller-safe conflict detail and falls back when there is none', () => {
+    expect(createProjectRefusalText(new ApiError(409, 'x', 'name taken'))).toBe('name taken');
+    expect(createEnvironmentRefusalText(new ApiError(409, 'x'))).toContain('already in use');
+  });
+
+  it('does not claim an unknown failure created anything', () => {
+    expect(createProjectRefusalText(new ApiError(500, 'x'))).toContain(
+      'whether the project was created is unknown',
+    );
+    expect(createEnvironmentRefusalText(new Error('network'))).toContain(
+      'whether the environment was created is unknown',
     );
   });
 });
