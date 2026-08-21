@@ -414,6 +414,11 @@ type ExportedValue struct {
 	Revealed bool
 }
 
+type revisionExportResult struct {
+	values   []ExportedValue
+	revision int64
+}
+
 // Export is the one bulk-disclosure verb: the resolved snapshot of one
 // environment, from committed state, never from live values.
 //
@@ -447,37 +452,35 @@ func (s *Revisions) Export(ctx context.Context, actor Actor, scope domain.Scope,
 	if err != nil {
 		return nil, 0, err
 	}
-	var out []ExportedValue
-	var served int64
 	var rateCharged bool
 	// A disclosing export runs in a WRITE transaction: its disclosure records
 	// must be durable BEFORE the plaintext leaves the server.
-	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
-		out, served = nil, 0
+	result, err := tx.WriteResult(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) (revisionExportResult, error) {
+		var result revisionExportResult
 		caller, err := actor.resolve(ctx, az, s.now())
 		if err != nil {
-			return err
+			return revisionExportResult{}, err
 		}
 		p, err := az.Authorize(ctx, caller, authz.OpValueExport, scope)
 		if err != nil {
-			return err
+			return revisionExportResult{}, err
 		}
 		// § 179 export rate: 5/min per principal (shares the "export" bucket with
 		// audit export), charged once here now the principal is known. The
 		// per-org/instance concurrency was taken at entry.
 		if err := s.Budget.chargeOnce(&rateCharged, budgetExportRate, budgetKeys{Principal: caller.Principal}); err != nil {
-			return err
+			return revisionExportResult{}, err
 		}
 		snapshot, err := readSnapshot(ctx, r.Snapshots(), p, revision)
 		if err != nil {
-			return err
+			return revisionExportResult{}, err
 		}
-		served = snapshot.Revision
+		result.revision = snapshot.Revision
 		historical := false
 		if revision > 0 {
 			latest, err := r.Snapshots().Latest(ctx, p)
 			if err != nil {
-				return err
+				return revisionExportResult{}, err
 			}
 			historical = snapshot.Revision != latest.Revision
 		}
@@ -493,12 +496,12 @@ func (s *Revisions) Export(ctx context.Context, actor Actor, scope domain.Scope,
 				revealOp = authz.OpValueExportRevealHistory
 			}
 			if p, err = az.Authorize(ctx, caller, revealOp, scope); err != nil {
-				return err
+				return revisionExportResult{}, err
 			}
 		}
 		entries, err := r.Snapshots().Entries(ctx, p, snapshot)
 		if err != nil {
-			return err
+			return revisionExportResult{}, err
 		}
 		if reveal {
 			unit := make([]string, 0, len(entries))
@@ -509,7 +512,7 @@ func (s *Revisions) Export(ctx context.Context, actor Actor, scope domain.Scope,
 			}
 			gate := ceremonyGate(ctx, s.Auth, az, caller, PurposeReveal, string(scope.Env))
 			if err := gate(unit); err != nil {
-				return err
+				return revisionExportResult{}, err
 			}
 		}
 		for _, entry := range entries {
@@ -518,11 +521,11 @@ func (s *Revisions) Export(ctx context.Context, actor Actor, scope domain.Scope,
 				plain, err := sealer.OpenField(snapshotAAD(
 					entry.OrgID, entry.ProjectID, entry.EnvironmentID, entry.KeyID, entry.SnapshotID, entry.ID), entry.Ciphertext)
 				if err != nil {
-					return fmt.Errorf("service: snapshot entry %s: %w", entry.ID, err)
+					return revisionExportResult{}, fmt.Errorf("service: snapshot entry %s: %w", entry.ID, err)
 				}
 				value.Value, value.Revealed = string(plain), true
 			}
-			out = append(out, value)
+			result.values = append(result.values, value)
 			if entry.Classification != string(schema.Secret) || !value.Revealed {
 				continue
 			}
@@ -534,13 +537,13 @@ func (s *Revisions) Export(ctx context.Context, actor Actor, scope domain.Scope,
 					"revision": snapshot.Revision,
 				})
 			if err != nil {
-				return err
+				return revisionExportResult{}, err
 			}
 			if err := r.Audit().InsertTenant(ctx, p, ev); err != nil {
-				return err
+				return revisionExportResult{}, err
 			}
 		}
-		slices.SortFunc(out, func(a, b ExportedValue) int {
+		slices.SortFunc(result.values, func(a, b ExportedValue) int {
 			switch {
 			case a.Name < b.Name:
 				return -1
@@ -549,12 +552,12 @@ func (s *Revisions) Export(ctx context.Context, actor Actor, scope domain.Scope,
 			}
 			return 0
 		})
-		return nil
+		return result, nil
 	})
 	if err != nil {
 		return nil, 0, err
 	}
-	return out, served, nil
+	return result.values, result.revision, nil
 }
 
 // TokenKeyRotation is one `rotate-token-key`.
@@ -663,31 +666,34 @@ func (s *Revisions) RotateScanningKey(ctx context.Context, actor Actor) (Scannin
 		return ScanningKeyRotation{}, err
 	}
 	next.CreatedAt = store.CanonTime(s.now())
-	var dropped int64
-	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+	dropped, err := tx.WriteResult(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) (int64, error) {
 		caller, err := actor.resolve(ctx, az, s.now())
 		if err != nil {
-			return err
+			return 0, err
 		}
 		p, err := az.Authorize(ctx, caller, authz.OpRotateScanningKey, domain.Scope{})
 		if err != nil {
-			return err
+			return 0, err
 		}
 		if err := r.Keys().RotateScanningKey(ctx, p, next); err != nil {
-			return err
+			return 0, err
 		}
 		// Every fingerprint is now unrecomputable under the new key: drop them
 		// all in the same transaction as the key swap.
-		if dropped, err = r.ScanningDismissals().DeleteAll(ctx, p); err != nil {
-			return err
+		dropped, err := r.ScanningDismissals().DeleteAll(ctx, p)
+		if err != nil {
+			return 0, err
 		}
 		ev, err := newAuditEvent(ctx, audit.EventScanningKeyRotated, caller.Principal,
 			audit.Object{Type: "instance", ID: "instance"}, audit.OutcomeSuccess, "",
 			audit.Payload{"key_version": int64(next.Version)})
 		if err != nil {
-			return err
+			return 0, err
 		}
-		return r.Audit().InsertInstance(ctx, p, ev)
+		if err := r.Audit().InsertInstance(ctx, p, ev); err != nil {
+			return 0, err
+		}
+		return dropped, nil
 	})
 	if errors.Is(err, store.ErrRotationSuperseded) {
 		return ScanningKeyRotation{}, fmt.Errorf("%w: %s", domain.ErrConflict, err)
