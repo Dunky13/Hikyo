@@ -511,7 +511,15 @@ jobs:
   test:
     needs: changes
     if: ${{ fromJSON(needs.changes.outputs.plan).test }}
-    runs-on: ubuntu-latest
+    # Metered-runner pilot, and deliberately the only job on one. GitHub-hosted
+    # minutes are free on a public repository, so a Blacksmith runner only earns
+    # its keep where wall clock is on the critical path: this job is ~420s of
+    # mostly CPU-bound `go test`, second only to the flow suite. Same vCPU count
+    # as the hosted runner it replaces, so the measured delta is attributable to
+    # the runner and not to a tier change. arm64 is safe here specifically:
+    # modernc.org/sqlite is pure Go, nothing carries an amd64 build constraint,
+    # and the pinned postgres index publishes linux/arm64/v8.
+    runs-on: blacksmith-4vcpu-ubuntu-2404-arm
     services:
       postgres:
         image: postgres:18@sha256:3a82e1f56c8f0f5616a11103ac3d47e632c3938698946a7ad26da0df1334744a
