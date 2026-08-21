@@ -340,7 +340,12 @@ func (s *Retention) Sweep(ctx context.Context) (int64, error) {
 			return total, s.recordFailedPruneRun(ctx, startedAt, store.CanonTime(s.now()), totalCandidates, total, err)
 		}
 		now := store.CanonTime(s.now())
+		// Failure telemetry is deliberately attempt-scoped, not a returned
+		// result: WriteResult publishes only committed data. Reset it before
+		// every retry so a terminal failure reports only rows that attempt saw.
+		attemptCandidates := 0
 		chunk, err := tx.WriteResult(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) (retentionSweepChunk, error) {
+			attemptCandidates = 0
 			var chunk retentionSweepChunk
 			p, err := authz.SystemAuthority(authz.SiteScheduler, az.Token())
 			if err != nil {
@@ -363,6 +368,7 @@ func (s *Retention) Sweep(ctx context.Context) (int64, error) {
 				return retentionSweepChunk{}, err
 			}
 			chunk.candidates = len(rows)
+			attemptCandidates = chunk.candidates
 			for _, row := range rows {
 				policy := formatRetentionPolicy(servicePolicy(row.Policy))
 				marked, err := r.Retention().MarkCollected(ctx, p, row.ID, policy, now)
@@ -415,7 +421,7 @@ func (s *Retention) Sweep(ctx context.Context) (int64, error) {
 		})
 		if err != nil {
 			return total, s.recordFailedPruneRun(ctx, startedAt, store.CanonTime(s.now()),
-				totalCandidates, total, err)
+				totalCandidates+int64(attemptCandidates), total, err)
 		}
 		if chunk.prunedPlans {
 			plansPruned = true

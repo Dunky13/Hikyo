@@ -31,6 +31,9 @@ to `WriteResult`.
   dismissal count
 - `internal/service/adapters.go`: credential replacement and revocation results,
   including publication only after the outer provider-fence retry succeeds
+- `internal/service/retention.go`: failed-sweep telemetry keeps the final
+  attempt's observed candidate count outside the committed-result channel and
+  resets it before each retry
 
 The remaining outer state found by the inventory is intentionally different:
 
@@ -49,6 +52,9 @@ The remaining outer state found by the inventory is intentionally different:
 
 - `go test -count=1 ./internal/store/tx ./internal/lint`: 40 passed
 - `go test -count=1 ./internal/service`: 145 passed
+- `go test -count=1 ./internal/isolation -run
+  '^TestRetentionFailedSweepCountsObservedCandidates(SQLite|Postgres)$'`:
+  2 passed across SQLite and PostgreSQL 18
 - `go test -race -count=1 ./internal/store/tx ./internal/service`: 159 passed
 - `go test -count=1 ./internal/isolation -run
   'TestInvariant09bTransactionResultsAreDetached|TestInvariant09TransactionLayerHandlesProof'`:
