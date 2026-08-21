@@ -637,6 +637,11 @@ type Environments struct {
 	Auth *Auth
 	// Advisory announces the new environment's revision 1, after commit.
 	Advisory *Advisory
+	// Budget applies the § 151 schema-revision rate limit (60/h per project):
+	// creating, renaming or deleting an environment bumps the project's schema
+	// revision, so it charges the same per-project budget key-catalogue edits do.
+	// Nil disables it.
+	Budget *Budget
 	// Scan: secret-scanning Surface-2 seam (#74). Environment names and notes
 	// are author-controlled declaration text.
 	Scan *scanning.Ruleset
@@ -713,6 +718,7 @@ func (s *Environments) create(ctx context.Context, actor Actor, scope domain.Sco
 	var created store.NewEnvironment
 	var clone CloneResult
 	var published PublishedEnvironment
+	var rateCharged bool
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		clone = CloneResult{}
 		caller, err := actor.resolve(ctx, az, time.Now().UTC())
@@ -763,6 +769,13 @@ func (s *Environments) create(ctx context.Context, actor Actor, scope domain.Sco
 			CreatedAt:    store.CanonTime(time.Now()),
 		}
 		if err := r.Environments().Create(ctx, p, created); err != nil {
+			return err
+		}
+		// § 151 schema-revision rate: an environment create advances the project's
+		// schema revision, so it charges the same per-project budget (see
+		// Keys.UpdateMetadata) — a delete/recreate loop must not mint revisions
+		// past the bound.
+		if err := s.Budget.chargeOnce(&rateCharged, budgetSchemaRevision, budgetKeys{Project: scope.Project}); err != nil {
 			return err
 		}
 		// The environment list is definitions-bundle desired state, so its change
@@ -864,6 +877,7 @@ func (s *Environments) Rename(ctx context.Context, actor Actor, scope domain.Sco
 		return Environment{}, err
 	}
 	var out store.Environment
+	var rateCharged bool
 	err := tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		caller, err := actor.resolve(ctx, az, time.Now().UTC())
 		if err != nil {
@@ -889,6 +903,11 @@ func (s *Environments) Rename(ctx context.Context, actor Actor, scope domain.Sco
 			return err
 		}
 		if err := r.Environments().Rename(ctx, p, name); err != nil {
+			return err
+		}
+		// § 151 schema-revision rate: a rename advances the project's schema
+		// revision (see Environments.create).
+		if err := s.Budget.chargeOnce(&rateCharged, budgetSchemaRevision, budgetKeys{Project: scope.Project}); err != nil {
 			return err
 		}
 		// The environment name is definitions-bundle desired state, so a rename
@@ -1005,6 +1024,7 @@ func (s *Environments) Reorder(ctx context.Context, actor Actor, scope domain.Sc
 // the set, so a gap is not a defect and closing it would be an unrequested
 // write to rows the operator did not name.
 func (s *Environments) Delete(ctx context.Context, actor Actor, scope domain.Scope) error {
+	var rateCharged bool
 	return tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		caller, err := actor.resolve(ctx, az, time.Now().UTC())
 		if err != nil {
@@ -1063,6 +1083,12 @@ func (s *Environments) Delete(ctx context.Context, actor Actor, scope domain.Sco
 			return err
 		}
 		if err := r.Environments().Delete(ctx, p); err != nil {
+			return err
+		}
+		// § 151 schema-revision rate: a delete advances the project's schema
+		// revision (see Environments.create) — the other half of the
+		// delete/recreate loop that would otherwise mint revisions unbounded.
+		if err := s.Budget.chargeOnce(&rateCharged, budgetSchemaRevision, budgetKeys{Project: scope.Project}); err != nil {
 			return err
 		}
 		// The environment list is definitions-bundle desired state, so its

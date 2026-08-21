@@ -258,6 +258,37 @@ func TestAuditExportChargesExpensiveBudget(t *testing.T) {
 	}
 }
 
+// TestBudgetChargeOnceIsRetryIdempotent proves the in-tx per-principal rate
+// charge (publish/values-export/adapter) is not multiplied by the transaction
+// retry loop: a single operation whose closure runs several times charges the
+// rate exactly once, so the 4× retry envelope cannot burn four rate slots.
+func TestBudgetChargeOnceIsRetryIdempotent(t *testing.T) {
+	c := &clock{t: time.Unix(1_700_000_000, 0)}
+	b := newTestBudget(c)
+	keys := budgetKeys{Principal: "p1"}
+
+	// One operation, whose closure the retry loop replays four times.
+	var charged bool
+	for range 4 {
+		if err := b.chargeOnce(&charged, budgetPublishRate, keys); err != nil {
+			t.Fatalf("chargeOnce refused within one operation's retries: %v", err)
+		}
+	}
+
+	// Only ONE hit landed, so the principal's 10/min publish rate still has 9
+	// left: nine more distinct operations succeed, the eleventh total is refused.
+	for i := 1; i < BudgetPublishRatePerMin; i++ {
+		var c2 bool
+		if err := b.chargeOnce(&c2, budgetPublishRate, keys); err != nil {
+			t.Fatalf("operation %d refused; retries leaked into the rate: %v", i+1, err)
+		}
+	}
+	var last bool
+	if err := b.chargeOnce(&last, budgetPublishRate, keys); !errors.Is(err, admission.ErrOverloaded) {
+		t.Fatalf("11th publish operation = %v, want rate ErrOverloaded", err)
+	}
+}
+
 func TestBudgetNilIsNoop(t *testing.T) {
 	var b *Budget
 	rel, err := b.acquire(budgetExport, principalKeys("p", "o", "pr"))
@@ -265,4 +296,9 @@ func TestBudgetNilIsNoop(t *testing.T) {
 		t.Fatalf("nil budget refused: %v", err)
 	}
 	rel() // must not panic
+	// chargeOnce must also be nil-safe (a build that wires no budget).
+	var charged bool
+	if err := b.chargeOnce(&charged, budgetPublishRate, budgetKeys{Principal: "p"}); err != nil {
+		t.Fatalf("nil budget chargeOnce refused: %v", err)
+	}
 }

@@ -340,7 +340,7 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 		// every value write re-seal under the project data key, in the
 		// transaction that writes the row. The ruleset (#74) reaches every
 		// surface that writes a config value or a declaration leaf.
-		Environments: &service.Environments{DB: db, Keyring: kr, Auth: authSvc, Advisory: advisory, Scan: ruleset},
+		Environments: &service.Environments{DB: db, Keyring: kr, Auth: authSvc, Advisory: advisory, Budget: budget, Scan: ruleset},
 		Folders:      &service.Folders{DB: db, Keyring: kr, Scan: ruleset},
 		Keys:         &service.Keys{DB: db, Keyring: kr, Advisory: advisory, Budget: budget, Scan: ruleset},
 		Definitions:  definitionsService,

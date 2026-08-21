@@ -1078,6 +1078,7 @@ func (s *Adapters) SyncTarget(ctx context.Context, actor Actor, scope domain.Sco
 	defer release()
 	now := store.CanonTime(s.now())
 	var result store.AdapterEnqueueResult
+	var rateCharged bool
 	err = retryAdapterProviderFence(ctx, func() error {
 		return tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 			caller, err := actor.resolve(ctx, az, now)
@@ -1086,6 +1087,12 @@ func (s *Adapters) SyncTarget(ctx context.Context, actor Actor, scope domain.Sco
 			}
 			proof, err := az.Authorize(ctx, caller, authz.OpAdapterSync, scope)
 			if err != nil {
+				return err
+			}
+			// § 179 adapter sync/trigger rate: 10/min per principal, charged once
+			// across both the provider-fence and tx retry loops. The per-org
+			// concurrency was taken at entry.
+			if err := s.Budget.chargeOnce(&rateCharged, budgetAdapterRate, budgetKeys{Principal: caller.Principal}); err != nil {
 				return err
 			}
 			target, err := r.Adapters().Target(ctx, proof, targetID)

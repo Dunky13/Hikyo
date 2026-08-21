@@ -36,16 +36,25 @@ type Budget struct {
 	now func() time.Time
 
 	mu sync.Mutex
-	// rate holds sliding-window hit timestamps, keyed by category+dimension+value.
-	rate map[string][]time.Time
+	// rate holds sliding-window buckets, keyed by category+dimension+value. Each
+	// bucket carries the window of the rule that records into it, so eviction can
+	// use the bucket's OWN window — a 1-minute machine-fetch bucket is reclaimed a
+	// minute after its last hit, not held for schema-rev's hour.
+	rate map[string]rateBucket
 	// inflight holds live concurrency counts, keyed the same way. An entry is
 	// deleted when it reaches zero so the map does not accumulate dead keys.
 	inflight map[string]int
 }
 
+// rateBucket is one subject's hit timestamps under one rule's window.
+type rateBucket struct {
+	hits   []time.Time
+	window time.Duration
+}
+
 // NewBudget constructs an enabled budget on the real clock.
 func NewBudget() *Budget {
-	return &Budget{now: time.Now, rate: map[string][]time.Time{}, inflight: map[string]int{}}
+	return &Budget{now: time.Now, rate: map[string]rateBucket{}, inflight: map[string]int{}}
 }
 
 // Ops-spec § 179 / § 20 / § 151 values, exported so the conformance registry's
@@ -116,22 +125,14 @@ type budgetCategory struct {
 // The named categories. Every category that a live call site charges is keyed
 // on a dimension the caller can supply AT METHOD ENTRY (before the operation's
 // own transaction), because the tx closure is retried up to four times and an
-// in-closure charge would multiply. Project / org / instance dims come from the
-// scope argument; the per-principal rate is charged only where the principal is
-// a method parameter already (audit export). The per-principal rate rules on
-// publish / values-export / adapter are DEFERRED: their principal is resolved
-// inside the operation's own transaction, so charging it at entry would need a
-// second resolve — their per-org concurrency, the load-bearing availability
-// control, IS enforced here, and the per-principal rate wiring is a tracked
-// follow-up. search / default are reference configs: there is no search
-// endpoint (SCIM search is a separate surface with its own bounds), and the
-// fail-closed default is the layer's documented catch-all, not a route middleware.
+// in-closure charge would multiply. Scope-keyed dims (project / org / instance)
+// come from the scope argument, so they are acquired at ENTRY and held. The
+// per-principal RATE dims need the resolved principal, which only exists inside
+// the operation's transaction — so those are charged there via chargeOnce,
+// idempotent across the retry loop. Concurrency and the per-principal rate are
+// two calls on the same shared budget, keyed on the same category name so they
+// share buckets.
 var (
-	budgetSearch = budgetCategory{
-		name:  "search",
-		rates: []budgetRateRule{{dimPrincipal, BudgetSearchRatePerMin, time.Minute}},
-		concs: []budgetConcRule{{dimOrg, BudgetSearchOrgConcurrency}},
-	}
 	// budgetExport is the tenant audit export: 5/min per principal, 2 concurrent
 	// per org, 6 per instance. Audit export takes the principal as a parameter,
 	// so the per-principal rate is charged at entry.
@@ -148,19 +149,36 @@ var (
 		rates: []budgetRateRule{{dimPrincipal, BudgetExportRatePerMin, time.Minute}},
 		concs: []budgetConcRule{{dimInstance, BudgetExportInstanceConcurrency}},
 	}
-	// budgetValuesExport shares the "export" concurrency pool but omits the
-	// per-principal rate (its principal is resolved in-tx, see above).
+	// budgetValuesExport takes the "export" concurrency at entry (org + instance);
+	// its 5/min per-principal rate is charged in-tx via budgetExportRate, so the
+	// two share the "export" rate bucket with audit export.
 	budgetValuesExport = budgetCategory{
 		name:  "export",
 		concs: []budgetConcRule{{dimOrg, BudgetExportOrgConcurrency}, {dimInstance, BudgetExportInstanceConcurrency}},
+	}
+	// budgetExportRate is the in-tx, per-principal half of the export budget, for
+	// values export (whose principal resolves inside its transaction).
+	budgetExportRate = budgetCategory{
+		name:  "export",
+		rates: []budgetRateRule{{dimPrincipal, BudgetExportRatePerMin, time.Minute}},
 	}
 	budgetPublish = budgetCategory{
 		name:  "publish",
 		concs: []budgetConcRule{{dimOrg, BudgetPublishOrgConcurrency}},
 	}
+	// budgetPublishRate is publish's in-tx per-principal rate (10/min).
+	budgetPublishRate = budgetCategory{
+		name:  "publish",
+		rates: []budgetRateRule{{dimPrincipal, BudgetPublishRatePerMin, time.Minute}},
+	}
 	budgetAdapter = budgetCategory{
 		name:  "adapter-sync",
 		concs: []budgetConcRule{{dimOrg, BudgetAdapterOrgConcurrency}},
+	}
+	// budgetAdapterRate is adapter sync/trigger's in-tx per-principal rate (10/min).
+	budgetAdapterRate = budgetCategory{
+		name:  "adapter-sync",
+		rates: []budgetRateRule{{dimPrincipal, BudgetAdapterRatePerMin, time.Minute}},
 	}
 	budgetMachineFetch = budgetCategory{
 		name: "machine-fetch",
@@ -173,8 +191,14 @@ var (
 		name:  "schema-revision",
 		rates: []budgetRateRule{{dimProject, BudgetSchemaRevisionPerHour, time.Hour}},
 	}
-	// budgetDefault is the fail-closed catch-all: no expensive category is left
-	// unbudgeted by omission.
+	// budgetDefault is the fail-closed reference for an expensive category not
+	// named above. §179 closes coverage "by omission" at the CATEGORY level:
+	// every expensive path today has a named category, and a future one adopts
+	// this default. It is not applied as blanket route middleware — a per-request
+	// budget needs the post-auth identity that only exists inside the service
+	// transaction, and classifying every endpoint as expensive-or-not is its own
+	// concern — so a NEW expensive category must charge it explicitly, enforced
+	// by review, not inferred. Exercised by TestBudgetFailClosedDefault.
 	budgetDefault = budgetCategory{
 		name:  "default",
 		rates: []budgetRateRule{{dimPrincipal, BudgetDefaultRatePerMin, time.Minute}},
@@ -198,8 +222,12 @@ func (k budgetKeys) value(dim budgetDimension) string {
 		return string(k.Project)
 	case dimOrg:
 		return string(k.Org)
-	default: // dimInstance — one bucket for the whole instance.
-		return ""
+	case dimInstance:
+		return "" // one bucket for the whole instance.
+	default:
+		// A dimension added without a case here must fail loudly, not silently
+		// collapse into the instance bucket and share a bound it was never meant to.
+		panic(fmt.Sprintf("service: unknown budget dimension %d", dim))
 	}
 }
 
@@ -231,51 +259,61 @@ func (b *Budget) acquire(cat budgetCategory, keys budgetKeys) (func(), error) {
 
 	// 1. Slide every rate window and confirm it has room — WITHOUT recording.
 	type slid struct {
-		key  string
-		kept []time.Time
+		key    string
+		kept   []time.Time
+		window time.Duration
+		isNew  bool // absent from the map, so recording it grows the tracking set.
 	}
 	pending := make([]slid, 0, len(cat.rates))
 	for _, r := range cat.rates {
 		key := budgetMapKey(cat.name, r.dim, keys.value(r.dim))
 		cutoff := at.Add(-r.window)
-		hits := b.rate[key]
-		kept := hits[:0]
-		for _, t := range hits {
+		bucket, ok := b.rate[key]
+		kept := bucket.hits[:0]
+		for _, t := range bucket.hits {
 			if t.After(cutoff) {
 				kept = append(kept, t)
 			}
 		}
 		if len(kept) >= r.limit {
-			b.rate[key] = kept // keep the compaction; charge nothing.
+			b.rate[key] = rateBucket{hits: kept, window: r.window} // keep the compaction; charge nothing.
 			return noopBudgetRelease, fmt.Errorf("%w: service: %s rate budget exhausted", admission.ErrOverloaded, cat.name)
 		}
-		pending = append(pending, slid{key, kept})
+		pending = append(pending, slid{key: key, kept: kept, window: r.window, isNew: !ok})
 	}
 
 	// 2. Confirm every concurrency bound has a free slot — WITHOUT taking one.
 	for _, c := range cat.concs {
 		key := budgetMapKey(cat.name, c.dim, keys.value(c.dim))
 		if b.inflight[key] >= c.limit {
-			for _, p := range pending {
-				b.rate[p.key] = p.kept // write back the compaction; charge nothing.
-			}
 			return noopBudgetRelease, fmt.Errorf("%w: service: %s concurrency budget exhausted", admission.ErrOverloaded, cat.name)
 		}
 	}
 
-	// 3. Every rule passed: record the rate hits and take the concurrency slots.
+	// 3. Tracking-bound check BEFORE any mutation, so a saturation refusal never
+	// leaves a partial charge (one rate rule recorded, a later one refused). If
+	// the brand-new rate buckets this acquire would add overflow the bound, evict
+	// stale buckets once; if that frees nothing, refuse. Refusing a new subject
+	// rather than growing unbounded is the safe direction under the threat model,
+	// exactly as the reveal gateLimiter decides it (admission evicts the oldest
+	// live entry instead — a deliberate divergence, since this map is shared
+	// across categories with a one-hour widest window).
+	newKeys := 0
 	for _, p := range pending {
-		if len(p.kept) == 0 && len(b.rate) >= budgetMaxTrackedSubjects {
-			b.evictStaleRate(at)
-			if len(b.rate) >= budgetMaxTrackedSubjects {
-				// Every tracked bucket is live and the map is full: refuse a brand
-				// new subject rather than grow unbounded. Availability loses to a
-				// memory bound under the threat model, exactly as the reveal
-				// gateLimiter and admission decide it.
-				return noopBudgetRelease, fmt.Errorf("%w: service: %s budget tracking saturated", admission.ErrOverloaded, cat.name)
-			}
+		if p.isNew {
+			newKeys++
 		}
-		b.rate[p.key] = append(p.kept, at)
+	}
+	if newKeys > 0 && len(b.rate)+newKeys > budgetMaxTrackedSubjects {
+		b.evictStaleRate(at)
+		if len(b.rate)+newKeys > budgetMaxTrackedSubjects {
+			return noopBudgetRelease, fmt.Errorf("%w: service: %s budget tracking saturated", admission.ErrOverloaded, cat.name)
+		}
+	}
+
+	// 4. Every rule passed: record the rate hits and take the concurrency slots.
+	for _, p := range pending {
+		b.rate[p.key] = rateBucket{hits: append(p.kept, at), window: p.window}
 	}
 	taken := make([]string, 0, len(cat.concs))
 	for _, c := range cat.concs {
@@ -300,24 +338,36 @@ func (b *Budget) acquire(cat budgetCategory, keys budgetKeys) (func(), error) {
 	}, nil
 }
 
-// evictStaleRate drops rate buckets whose windows have entirely elapsed. A
-// bucket with no live hits carries no information — it is indistinguishable from
-// one that never existed — so this is pure reclamation. The cutoff is the
-// widest window in play (an hour, for schema-rev), so a bucket is only dropped
-// when it is stale under every category that could share the map; in practice
-// each key is category-prefixed, so a bucket's own category window governs it.
+// chargeOnce records a rate-only budget category once per operation, from INSIDE
+// a tx.Write/tx.Read closure where the per-principal key first becomes known.
+// The retry loop replays the closure up to four times; *charged, owned by the
+// caller outside the closure, makes the charge idempotent: the first successful
+// attempt records the hit and flips the flag, later attempts skip it. A refusal
+// wraps admission.ErrOverloaded, which is not a retryable transaction error, so
+// the enclosing tx rolls back and the method surfaces the uniform 429. cat must
+// be rate-only; any concurrency slot it took could not be released from here.
+func (b *Budget) chargeOnce(charged *bool, cat budgetCategory, keys budgetKeys) error {
+	if *charged {
+		return nil
+	}
+	if _, err := b.acquire(cat, keys); err != nil {
+		return err
+	}
+	*charged = true
+	return nil
+}
+
+// evictStaleRate drops rate buckets whose windows have entirely elapsed, using
+// each bucket's OWN window rather than the widest one in play. A 1-minute
+// machine-fetch bucket is reclaimed a minute after its last hit, so a burst of
+// one-off subjects cannot hold the tracking set full long after their short
+// windows expired. A bucket with no live hit carries no information — it is
+// indistinguishable from one that never existed — so this is pure reclamation.
 func (b *Budget) evictStaleRate(at time.Time) {
-	for key, hits := range b.rate {
-		live := false
-		for _, t := range hits {
-			// The longest window is schema-rev's hour; anything older than that
-			// is stale for every category.
-			if t.After(at.Add(-time.Hour)) {
-				live = true
-				break
-			}
-		}
-		if !live {
+	for key, bucket := range b.rate {
+		// Hits are appended in clock order, so the last is the newest. If even it
+		// is outside the bucket's window, no live hit remains.
+		if len(bucket.hits) == 0 || !bucket.hits[len(bucket.hits)-1].After(at.Add(-bucket.window)) {
 			delete(b.rate, key)
 		}
 	}

@@ -252,6 +252,7 @@ func (s *Revisions) PublishPlanned(ctx context.Context, actor Actor, scope domai
 	}
 
 	var out PublishResult
+	var rateCharged bool
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		out = PublishResult{}
 		// The clock is read INSIDE the transaction: the sealer preflight can
@@ -267,6 +268,12 @@ func (s *Revisions) PublishPlanned(ctx context.Context, actor Actor, scope domai
 		// nonexistent answer is the only thing they see.
 		p, err := az.Authorize(ctx, caller, authz.OpValuePublish, scope)
 		if err != nil {
+			return err
+		}
+		// § 179 publish rate: 10/min per principal, charged here (the principal is
+		// only known now) and once across the retry loop. The per-org concurrency
+		// was already taken at entry.
+		if err := s.Budget.chargeOnce(&rateCharged, budgetPublishRate, budgetKeys{Principal: caller.Principal}); err != nil {
 			return err
 		}
 		if s.PublishProbe != nil {

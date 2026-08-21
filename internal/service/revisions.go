@@ -449,6 +449,7 @@ func (s *Revisions) Export(ctx context.Context, actor Actor, scope domain.Scope,
 	}
 	var out []ExportedValue
 	var served int64
+	var rateCharged bool
 	// A disclosing export runs in a WRITE transaction: its disclosure records
 	// must be durable BEFORE the plaintext leaves the server.
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
@@ -459,6 +460,12 @@ func (s *Revisions) Export(ctx context.Context, actor Actor, scope domain.Scope,
 		}
 		p, err := az.Authorize(ctx, caller, authz.OpValueExport, scope)
 		if err != nil {
+			return err
+		}
+		// § 179 export rate: 5/min per principal (shares the "export" bucket with
+		// audit export), charged once here now the principal is known. The
+		// per-org/instance concurrency was taken at entry.
+		if err := s.Budget.chargeOnce(&rateCharged, budgetExportRate, budgetKeys{Principal: caller.Principal}); err != nil {
 			return err
 		}
 		snapshot, err := readSnapshot(ctx, r.Snapshots(), p, revision)
