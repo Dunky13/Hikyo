@@ -553,7 +553,15 @@ jobs:
   test:
     needs: changes
     if: ${{ fromJSON(needs.changes.outputs.plan).test }}
-    runs-on: ubuntu-latest
+    # Metered-runner pilot, and deliberately the only job on one. GitHub-hosted
+    # minutes are free on a public repository, so a Blacksmith runner only earns
+    # its keep where wall clock is on the critical path: this job is ~420s of
+    # mostly CPU-bound `go test`, second only to the flow suite. Same vCPU count
+    # as the hosted runner it replaces, so the measured delta is attributable to
+    # the runner and not to a tier change. arm64 is safe here specifically:
+    # modernc.org/sqlite is pure Go, nothing carries an amd64 build constraint,
+    # and the pinned postgres index publishes linux/arm64/v8.
+    runs-on: blacksmith-4vcpu-ubuntu-2404-arm
     services:
       postgres:
         image: postgres:18@sha256:3a82e1f56c8f0f5616a11103ac3d47e632c3938698946a7ad26da0df1334744a
@@ -583,15 +591,18 @@ jobs:
         with:
           path: ~/go/pkg/mod
           key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+      # GOCACHE entries are keyed internally by GOARCH, so a cross-architecture
+      # restore is a few hundred megabytes downloaded to hit on nothing. The
+      # module cache above is exempt: it holds module source, not objects.
       - name: Restore test Go cache
         id: test-go-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
-          key: go-test-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: go-test-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            go-test-${{ runner.os }}-${{ hashFiles('go.sum') }}-
-            go-test-${{ runner.os }}-
+            go-test-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.sum') }}-
+            go-test-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Populate shared Go module cache
         run: go mod download
@@ -924,14 +935,19 @@ jobs:
         with:
           path: ~/go/pkg/mod
           key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
-      - name: Restore test Go cache
+      # This job used to read `test`'s GOCACHE. `test` is now the arm64 runner
+      # pilot, and a GOCACHE built for another GOARCH hits on nothing, so this
+      # job keeps its own amd64 lineage under its own prefix rather than paying
+      # to download one it cannot use.
+      - name: Restore headline-guarantee Go cache
+        id: headline-guarantee-go-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
-          key: go-test-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: go-headline-guarantee-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            go-test-${{ runner.os }}-${{ hashFiles('go.sum') }}-
-            go-test-${{ runner.os }}-
+            go-headline-guarantee-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.sum') }}-
+            go-headline-guarantee-${{ runner.os }}-${{ runner.arch }}-
       - name: Container round-trip, stanza exclusivity and truncation refusal
         run: go test -count=1 ./internal/crypto/backup/
       - name: Planted-plaintext scan of dump and backup, and credential replay refusal
@@ -942,6 +958,12 @@ jobs:
           -run 'TestBackupRestoreDrill|TestNoBulkAcceptInTheAPISurface'
       - name: Automatic pre-migration export, with recipients and without
         run: go test -count=1 ./internal/app/ -run TestPreMigrationExport
+      - name: Save headline-guarantee Go cache
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/go-build
+          key: ${{ steps.headline-guarantee-go-cache.outputs.cache-primary-key }}
 
   # The permanent required context. Every validation job is named here so a
   # future job split cannot accidentally weaken branch protection.
