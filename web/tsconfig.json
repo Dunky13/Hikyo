@@ -19,7 +19,8 @@
     "paths": {
       "@hikyo/client": ["../clients/ts/src/generated/index.ts"],
       "@hikyo/zod": ["../clients/ts/src/generated/zod.gen.ts"],
-      "@hikyo/runtime": ["../clients/ts/src/generated/client.gen.ts"]
+      "@hikyo/runtime": ["../clients/ts/src/generated/client.gen.ts"],
+      "@hikyo/runtime-core": ["../clients/ts/src/generated/client/index.ts"]
     }
   },
   "include": ["src", "e2e", "vite.config.ts", "playwright.config.ts"]

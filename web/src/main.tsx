@@ -4,11 +4,12 @@ import '@fontsource/ibm-plex-mono/500.css';
 import './styles/tokens.css';
 import './styles/app.css';
 
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider } from '@tanstack/react-query';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import { App } from './app/App.tsx';
+import { makeQueryClient } from './app/queryClient.ts';
 import { initTheme } from './app/theme.ts';
 
 // Paint the stored theme choice before first render, so a reload lands on it
@@ -20,19 +21,7 @@ initTheme();
 // relaxation and unsolicited egress the threat model's telemetry stance
 // forbids by default.
 
-const queries = new QueryClient({
-  defaultOptions: {
-    queries: {
-      // Authorization is evaluated per request at the server's chokepoint and
-      // is never cached there. A long client cache would not be an
-      // authorization cache — the server still decides — but it would show a
-      // revoked reader stale data, so the window stays short.
-      staleTime: 5_000,
-      refetchOnWindowFocus: false,
-      retry: false,
-    },
-  },
-});
+const queries = makeQueryClient();
 
 const host = document.getElementById('root');
 if (host === null) {

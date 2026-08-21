@@ -92,6 +92,28 @@ function forgetSession(origin: string, session: string): void {
   forgetWorkspace(origin);
 }
 
+/**
+ * dropWorkspaceValue is the transport's kill path (#71). A data call that comes
+ * back 401/403 has met a remote that no longer honours the exact bearer it was
+ * sent — the session was revoked in the remote's own list, or its origin was
+ * de-allowlisted — so the workspace is over the instant that lands, not one
+ * liveness poll later.
+ *
+ * It is keyed by the exact bearer VALUE, not the session id, because a step-up
+ * ELEVATES in place: same session id, a freshly ROTATED value. A 401 for the
+ * pre-rotation value proves that old value is dead — which it is, it was
+ * rotated — and must NOT take down the live post-rotation bearer that shares
+ * its session id. Only a 401 whose value is still the one we hold is a real
+ * revocation of the live credential.
+ */
+export function dropWorkspaceValue(origin: string, value: string): void {
+  const held = bearers.get(origin);
+  if (held === undefined || held.value !== value) {
+    return;
+  }
+  forgetWorkspace(origin);
+}
+
 /** strike counts one unreachable probe, keyed by SESSION for the same reason. */
 function strike(bearer: WorkspaceBearer): boolean {
   const held = bearers.get(bearer.origin);

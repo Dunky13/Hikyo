@@ -26,6 +26,12 @@ export default defineConfig({
       '@hikyo/client': here('../clients/ts/src/generated/index.ts'),
       '@hikyo/zod': here('../clients/ts/src/generated/zod.gen.ts'),
       '@hikyo/runtime': here('../clients/ts/src/generated/client.gen.ts'),
+      // The client FACTORY, not the shared singleton. `@hikyo/runtime` is the
+      // one same-origin `client` the SPA talks to itself through; the workspace
+      // tier (#71) needs a SECOND, origin-scoped client per remote, which means
+      // `createClient`/`createConfig` — they live in the generated core, not in
+      // client.gen.ts, so the alias points one level in.
+      '@hikyo/runtime-core': here('../clients/ts/src/generated/client/index.ts'),
     },
   },
   build: {
