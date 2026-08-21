@@ -447,22 +447,17 @@ export async function prepareWorkspace(
   const started = await remoteJSON(origin, '/api/v1/auth/workspace/start', zWorkspaceHandoffStarted, {
     body,
   });
+  // The approve URL carries only STATE and (for a step-up) the tiny purpose
+  // flag. The operation, environment and enumerated key set the approve page
+  // needs are NOT here: they are bound in the remote's own transaction row and
+  // the approve page reads them back by state (`showWorkspaceHandoff`). Putting
+  // the key set on the URL would cap a reveal-all at the browser's URL length;
+  // the server-bound transaction has no such ceiling and is the authoritative
+  // copy anyway, so a tampered parameter could never move the elevation's scope.
   const approve = new URL(`${origin}${APPROVE_PATH}`);
   approve.searchParams.set('state', started.state);
   if (stepUp !== undefined) {
     approve.searchParams.set('purpose', 'step-up');
-    approve.searchParams.set('operation', stepUp.operation);
-    approve.searchParams.set('environment', stepUp.environment);
-    // ponytail: the enumerated key set rides the approve URL so the popup can
-    // name it to the remote's reauth ceremony. A reveal-all over a very large
-    // environment can outgrow the browser/ingress URL limit and fail before the
-    // approval renders — a bounded ceiling, since key sets are usually small.
-    // Upgrade path when it bites: post the key set to a short-lived server-side
-    // transaction (it is already bound there from the start body) and have the
-    // approve page fetch it by `state`, mirroring cli-reauth's transaction read.
-    for (const key of stepUp.keySet) {
-      approve.searchParams.append('key', key);
-    }
   }
   return { origin, state: started.state, verifier, approveURL: approve.toString() };
 }

@@ -260,6 +260,7 @@ var wireRegistry = map[string]Class{
 	"http:POST /api/v1/instance/workspace-origins":          ClassInstance,
 	"http:DELETE /api/v1/instance/workspace-origins":        ClassInstance,
 	"http:POST /api/v1/auth/workspace/start":                ClassUnauthenticated,
+	"http:GET /api/v1/auth/workspace/transactions/{state}":  ClassUnauthenticated,
 	"http:POST /api/v1/auth/workspace/approve":              ClassUnauthenticated,
 	"http:POST /api/v1/auth/workspace/redeem":               ClassUnauthenticated,
 	"http:POST /api/v1/auth/cli-reauth/start":               ClassUnauthenticated,

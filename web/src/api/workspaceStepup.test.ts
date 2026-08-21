@@ -66,16 +66,19 @@ test('a step-up prepare binds the decision into the start body and the approve U
     redirect_uri: 'https://a.example/workspace/callback',
   });
 
-  // And ride the approve URL so the popup can name them when it runs the
-  // remote's own reauthentication ceremony.
+  // The approve URL carries ONLY state and the tiny purpose flag — never the
+  // operation, environment or (unbounded) key set. Those live in the
+  // server-bound transaction the approve page reads back by state, which is what
+  // keeps a large reveal-all off the URL-length ceiling and the binding
+  // authoritative.
   const url = new URL(prepared.approveURL);
   expect(url.origin).toBe(ORIGIN);
   expect(url.pathname).toBe('/workspace/approve');
   expect(url.searchParams.get('state')).toBe('hik_1_hs_abc');
   expect(url.searchParams.get('purpose')).toBe('step-up');
-  expect(url.searchParams.get('operation')).toBe('reveal');
-  expect(url.searchParams.get('environment')).toBe('env_1');
-  expect(url.searchParams.getAll('key')).toEqual(['k1', 'k2']);
+  expect(url.searchParams.get('operation')).toBeNull();
+  expect(url.searchParams.get('environment')).toBeNull();
+  expect(url.searchParams.getAll('key')).toEqual([]);
 });
 
 test('assertCompatible resolves against a well-formed meta at the floor', async () => {

@@ -1,6 +1,6 @@
-import { approveWorkspaceHandoff } from '@hikyo/client';
-import { zWorkspaceHandoffApproved } from '@hikyo/zod';
-import { useMutation } from '@tanstack/react-query';
+import { approveWorkspaceHandoff, showWorkspaceHandoff } from '@hikyo/client';
+import { zWorkspaceHandoffApproved, zWorkspaceHandoffTransaction } from '@hikyo/zod';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { useState, type FormEvent } from 'react';
 
 import { parsed } from '../api/client.ts';
@@ -51,9 +51,19 @@ export function WorkspaceApprove() {
   const [query] = useState(() => new URLSearchParams(globalThis.location.search));
   const state = query.get('state') ?? '';
   const isStepUp = query.get('purpose') === 'step-up';
-  const operation = query.get('operation') ?? '';
-  const environmentId = query.get('environment') ?? '';
-  const keyIds = query.getAll('key');
+
+  // The step-up's operation, environment and enumerated key set come from the
+  // SERVER-BOUND transaction, read by state — never from the URL, which carries
+  // only the state and the tiny purpose flag. That is what keeps a large
+  // reveal-all off the URL-length ceiling, and it makes the binding
+  // authoritative: nothing the popup was handed decides the elevation's scope.
+  // Gated on a session, because the read requires one (a step-up always has it).
+  const transaction = useQuery({
+    queryKey: ['workspace-handoff', state],
+    queryFn: () => parsed(showWorkspaceHandoff({ path: { state } }), zWorkspaceHandoffTransaction),
+    enabled: isStepUp && state !== '' && session.data != null,
+    retry: false,
+  });
 
   const approve = useMutation({
     mutationFn: async () => {
@@ -115,8 +125,10 @@ export function WorkspaceApprove() {
           {isStepUp ? (
             <>
               Signed in as <span className="mono">{name}</span>. A workspace you have open elsewhere
-              is asking to <strong>{operation || 'disclose'}</strong> over{' '}
-              {keyIds.length === 0 ? 'this environment' : `${keyIds.length} key${keyIds.length === 1 ? '' : 's'}`}
+              is asking to <strong>{transaction.data?.operation ?? 'disclose'}</strong> over{' '}
+              {(transaction.data?.key_ids.length ?? 0) === 0
+                ? 'this environment'
+                : `${transaction.data?.key_ids.length} key${transaction.data?.key_ids.length === 1 ? '' : 's'}`}
               . Reauthenticate here to allow it — this is a disclosure, not a new sign-in, and it
               covers only this one act.
             </>
@@ -143,13 +155,27 @@ export function WorkspaceApprove() {
         ) : null}
 
         {isStepUp ? (
-          <StepUpReauth
-            operation={operation}
-            environmentId={environmentId}
-            keyIds={keyIds}
-            onReauthed={() => approve.mutate()}
-            approving={approve.isPending}
-          />
+          transaction.isError ? (
+            <p className="alert" role="alert">
+              <span className="alert__glyph" aria-hidden="true">
+                !
+              </span>
+              <span>
+                This authorization request could not be read — it may have expired or been used
+                already. Close this window and start again from the instance you were browsing.
+              </span>
+            </p>
+          ) : transaction.data === undefined ? (
+            <p role="status">Loading…</p>
+          ) : (
+            <StepUpReauth
+              operation={transaction.data.operation ?? 'reveal'}
+              environmentId={transaction.data.environment ?? ''}
+              keyIds={transaction.data.key_ids}
+              onReauthed={() => approve.mutate()}
+              approving={approve.isPending}
+            />
+          )
         ) : (
           <>
             <button

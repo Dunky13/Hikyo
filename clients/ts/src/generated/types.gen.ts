@@ -3538,6 +3538,24 @@ export type WorkspaceSession = {
     window_expires_at?: Timestamp;
 };
 
+export type WorkspaceHandoffTransaction = {
+    state: string;
+    purpose: 'establishment' | 'step-up';
+    /**
+     * The disclosure the reauth authorizes. Absent for an establishment.
+     */
+    operation?: 'reveal' | 'copy' | 'publish';
+    /**
+     * The environment the elevation covers. Absent for an establishment.
+     */
+    environment?: Id;
+    /**
+     * The enumerated unit the elevation binds. Empty for an establishment.
+     */
+    key_ids: Array<Id>;
+    expires_at: Timestamp;
+};
+
 /**
  * One of the caller's own sessions. Metadata only; no verifier is ever returned.
  */
@@ -16489,6 +16507,46 @@ export type RedeemWorkspaceHandoffResponses = {
 };
 
 export type RedeemWorkspaceHandoffResponse = RedeemWorkspaceHandoffResponses[keyof RedeemWorkspaceHandoffResponses];
+
+export type ShowWorkspaceHandoffData = {
+    body?: never;
+    path: {
+        state: string;
+    };
+    query?: never;
+    url: '/api/v1/auth/workspace/transactions/{state}';
+};
+
+export type ShowWorkspaceHandoffErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type ShowWorkspaceHandoffError = ShowWorkspaceHandoffErrors[keyof ShowWorkspaceHandoffErrors];
+
+export type ShowWorkspaceHandoffResponses = {
+    /**
+     * The live transaction's bound step-up policy — identifiers only.
+     */
+    200: WorkspaceHandoffTransaction;
+};
+
+export type ShowWorkspaceHandoffResponse = ShowWorkspaceHandoffResponses[keyof ShowWorkspaceHandoffResponses];
 
 export type ListMySessionsData = {
     body?: never;

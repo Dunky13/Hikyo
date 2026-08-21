@@ -840,6 +840,66 @@ func (s *Workspace) ApproveHandoff(ctx context.Context, actor Actor, state strin
 	return code, redirectURI, nil
 }
 
+// HandoffView is a live handoff transaction's step-up policy as the remote's
+// approve page reads it: the operation, environment and enumerated key set the
+// transaction was opened against. Identifiers only — never a value, a bearer or
+// a verifier.
+type HandoffView struct {
+	Purpose   HandoffPurpose
+	Operation string
+	EnvID     string
+	KeySet    []string
+	ExpiresAt time.Time
+}
+
+// ShowHandoff returns the step-up policy a live transaction binds, so the
+// approve page can name the operation, environment and exact key set to this
+// instance's own reauthentication ceremony rather than trusting them from its
+// URL — the key set can be large, and a URL is the wrong place for the
+// authoritative binding to live.
+//
+// It READS, it does not consume, and it answers only the authenticated human on
+// this instance (the approve page always has that session for a step-up). What
+// it returns are identifiers; a stolen state would leak env and key ids, never
+// values, and only for the transaction's few live minutes.
+func (s *Workspace) ShowHandoff(ctx context.Context, actor Actor, state string) (HandoffView, error) {
+	if err := crypto.ParseArtifact(state, crypto.ArtifactHandoffState); err != nil {
+		return HandoffView{}, ErrHandoffInvalid
+	}
+	now := s.now()
+	var out HandoffView
+	err := tx.Read(ctx, s.DB, func(ctx context.Context, _ store.ReadRepos, az *authz.TxAuthorizer) error {
+		// A human session on THIS instance, or nothing. The approve page is
+		// signed in for a step-up; requiring it keeps a stolen state from
+		// reading a transaction's shape from outside the ceremony.
+		if _, err := az.Authenticate(ctx, actor.bearer, now); err != nil {
+			return err
+		}
+		h, err := az.WorkspaceHandoffByState(ctx, crypto.ArtifactVerifier(state))
+		if err != nil {
+			return ErrHandoffInvalid
+		}
+		if !h.Live(now) {
+			return ErrHandoffInvalid
+		}
+		out = HandoffView{
+			Purpose:   h.Purpose,
+			Operation: h.Operation,
+			EnvID:     h.EnvID,
+			KeySet:    []string{},
+			ExpiresAt: h.ExpiresAt,
+		}
+		if h.KeySet != "" {
+			out.KeySet = splitKeySet(h.KeySet)
+		}
+		return nil
+	})
+	if err != nil {
+		return HandoffView{}, err
+	}
+	return out, nil
+}
+
 // freshCeremonyClass is the step-up approval's factor-verification gate. It
 // returns the class of the reauthentication the approving human completed
 // INSIDE this popup, or a refusal.

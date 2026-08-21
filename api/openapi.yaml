@@ -7733,6 +7733,37 @@ paths:
         "500":
           $ref: "#/components/responses/Internal"
 
+  /api/v1/auth/workspace/transactions/{state}:
+    parameters:
+      - {name: state, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 512}}
+    get:
+      operationId: showWorkspaceHandoff
+      tags: [auth]
+      summary: Load the step-up policy a live workspace handoff binds.
+      description: |
+        The approve page reads the operation, environment and enumerated key set
+        the transaction was opened against, rather than trusting them from its
+        own URL — the key set can be large, and a URL is a poor and length-capped
+        place for the authoritative binding to live. Only the server-bound
+        transaction answers, and only to the authenticated human on this
+        instance; the numbers here are identifiers, never values or verifiers.
+      x-hikyo-class: unauthenticated
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "200":
+          description: The live transaction's bound step-up policy — identifiers only.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceHandoffTransaction"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/Internal"
+
   /api/v1/me/sessions:
     get:
       operationId: listMySessions
@@ -14521,6 +14552,32 @@ components:
           description: |
             When the reauthentication window this elevation opened lapses.
             Present only on an elevation.
+
+    WorkspaceHandoffTransaction:
+      type: object
+      additionalProperties: false
+      required: [state, purpose, key_ids, expires_at]
+      properties:
+        state:
+          type: string
+          minLength: 1
+        purpose:
+          type: string
+          enum: [establishment, step-up]
+        operation:
+          type: string
+          enum: [reveal, copy, publish]
+          description: The disclosure the reauth authorizes. Absent for an establishment.
+        environment:
+          allOf:
+            - $ref: "#/components/schemas/ID"
+          description: The environment the elevation covers. Absent for an establishment.
+        key_ids:
+          type: array
+          items: {$ref: "#/components/schemas/ID"}
+          description: The enumerated unit the elevation binds. Empty for an establishment.
+        expires_at:
+          $ref: "#/components/schemas/Timestamp"
 
     ActiveSession:
       type: object

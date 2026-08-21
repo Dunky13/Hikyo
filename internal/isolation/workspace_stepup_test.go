@@ -471,6 +471,67 @@ func TestStepUpBindingIsConsumedPostgres(t *testing.T) {
 	runStepUpBindingIsConsumed(t, seededDB(t, openPostgres))
 }
 
+// The approve page reads the step-up's operation, environment and key set back
+// from the SERVER-bound transaction by state, rather than trusting them from its
+// URL. This proves the read answers the bound policy, refuses without a session,
+// and refuses an unknown state — the three properties the approve page rests on.
+func runShowHandoffReturnsBoundPolicy(t *testing.T, db *store.DB) {
+	ctx := t.Context()
+	ws := stepUpWorkspace(t, db)
+	if _, err := ws.AddOrigin(ctx, service.LocalPrincipal(root), stepUpOrigin); err != nil {
+		t.Fatal(err)
+	}
+	approver := seedSessionFactors(t, db, root, `["password","totp"]`)
+	established := establishWorkspace(t, ws, approver)
+
+	_, challenge := pkcePair("show-handoff")
+	started, err := ws.StartHandoff(ctx, service.HandoffRequest{
+		Origin: stepUpOrigin, RedirectURI: stepUpOrigin + "/workspace/callback",
+		PKCEChallenge: challenge, Purpose: service.HandoffStepUp,
+		SessionID: established.SessionID, Operation: string(authz.OpValueReveal),
+		EnvID: string(envProd), KeySet: "key_one",
+	})
+	if err != nil {
+		t.Fatalf("start step-up handoff: %v", err)
+	}
+
+	view, err := ws.ShowHandoff(ctx, service.Bearer(approver), started.State)
+	if err != nil {
+		t.Fatalf("show handoff: %v", err)
+	}
+	if view.Purpose != service.HandoffStepUp {
+		t.Errorf("purpose = %q, want step-up", view.Purpose)
+	}
+	if view.Operation != string(authz.OpValueReveal) {
+		t.Errorf("operation = %q, want %q", view.Operation, authz.OpValueReveal)
+	}
+	if view.EnvID != string(envProd) {
+		t.Errorf("environment = %q, want %q", view.EnvID, envProd)
+	}
+	if len(view.KeySet) != 1 || view.KeySet[0] != "key_one" {
+		t.Errorf("key set = %v, want [key_one]", view.KeySet)
+	}
+
+	// No session, no read — the numbers here are the ceremony's, not the world's.
+	if _, err := ws.ShowHandoff(ctx, service.Bearer(""), started.State); !errors.Is(err, domain.ErrUnauthenticated) {
+		t.Errorf("show handoff without a session: err = %v, want ErrUnauthenticated", err)
+	}
+
+	// A malformed or unknown state is a uniform invalid-handoff refusal (a 404 at
+	// the transport), never a partial answer.
+	if _, err := ws.ShowHandoff(ctx, service.Bearer(approver), "not-a-state"); !errors.Is(err, service.ErrHandoffInvalid) {
+		t.Errorf("show handoff with a bogus state: err = %v, want ErrHandoffInvalid", err)
+	}
+}
+
+func TestShowHandoffReturnsBoundPolicySQLite(t *testing.T) {
+	runShowHandoffReturnsBoundPolicy(t, seededDB(t, openSQLite))
+}
+
+func TestShowHandoffReturnsBoundPolicyPostgres(t *testing.T) {
+	runShowHandoffReturnsBoundPolicy(t, seededDB(t, openPostgres))
+}
+
 // A workspace step-up for the reveal operation must be spendable by the real
 // value reveal path. The binding test above calls ConsumeReauthWindow directly;
 // this arc keeps the ceremony seam itself from silently presenting no operation.
