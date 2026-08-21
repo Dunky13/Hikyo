@@ -325,6 +325,12 @@ func (s *Retention) SetProject(ctx context.Context, actor Actor, scope domain.Sc
 // Sweep collects eligible payloads in bounded chunks. The caller supplies the
 // 10-minute run deadline. Each chunk owns one transaction, bounding its lock
 // window before the next chunk begins.
+type retentionSweepChunk struct {
+	candidates  int
+	collected   int64
+	prunedPlans bool
+}
+
 func (s *Retention) Sweep(ctx context.Context) (int64, error) {
 	startedAt := store.CanonTime(s.now())
 	var total, totalCandidates int64
@@ -334,14 +340,11 @@ func (s *Retention) Sweep(ctx context.Context) (int64, error) {
 			return total, s.recordFailedPruneRun(ctx, startedAt, store.CanonTime(s.now()), totalCandidates, total, err)
 		}
 		now := store.CanonTime(s.now())
-		var candidates int
-		var collected int64
-		var prunedThisChunk bool
-		err := tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
-			candidates, collected, prunedThisChunk = 0, 0, false
+		chunk, err := tx.WriteResult(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) (retentionSweepChunk, error) {
+			var chunk retentionSweepChunk
 			p, err := authz.SystemAuthority(authz.SiteScheduler, az.Token())
 			if err != nil {
-				return err
+				return retentionSweepChunk{}, err
 			}
 			// Expired definitions plans share the hourly GC lifecycle. Run once per
 			// sweep, including startup catch-up, before payload batching begins.
@@ -351,32 +354,32 @@ func (s *Retention) Sweep(ctx context.Context) (int64, error) {
 			// chunk rolled back and retried.
 			if !plansPruned {
 				if _, err := r.Definitions().PruneExpiredPlans(ctx, p, now); err != nil {
-					return err
+					return retentionSweepChunk{}, err
 				}
-				prunedThisChunk = true
+				chunk.prunedPlans = true
 			}
 			rows, err := r.Retention().Eligible(ctx, p, now, RetentionBatchSize)
 			if err != nil {
-				return err
+				return retentionSweepChunk{}, err
 			}
-			candidates = len(rows)
+			chunk.candidates = len(rows)
 			for _, row := range rows {
 				policy := formatRetentionPolicy(servicePolicy(row.Policy))
 				marked, err := r.Retention().MarkCollected(ctx, p, row.ID, policy, now)
 				if err != nil {
-					return err
+					return retentionSweepChunk{}, err
 				}
 				if !marked {
 					continue
 				}
 				if _, err := r.Retention().DeleteCollectedEntries(ctx, p, row.ID); err != nil {
-					return err
+					return retentionSweepChunk{}, err
 				}
 				auditProof, err := az.ScopedSystemAuthority(ctx, authz.SiteScheduler, domain.Scope{
 					Org: domain.OrgID(row.OrgID), Project: domain.ProjectID(row.ProjectID), Env: domain.EnvID(row.EnvironmentID),
 				})
 				if err != nil {
-					return err
+					return retentionSweepChunk{}, err
 				}
 				ev, err := newAuditEvent(ctx, audit.EventRetentionPayloadGC, "",
 					audit.Object{Type: "snapshot", ID: row.ID}, audit.OutcomeSuccess, "", audit.Payload{
@@ -385,39 +388,41 @@ func (s *Retention) Sweep(ctx context.Context) (int64, error) {
 						"collected_at": now.Format(time.RFC3339Nano),
 					})
 				if err != nil {
-					return err
+					return retentionSweepChunk{}, err
 				}
 				ev.Actor.Class = audit.ActorSystem
 				ev.OccurredAt = now
 				if err := r.Audit().InsertTenant(ctx, auditProof, ev); err != nil {
-					return err
+					return retentionSweepChunk{}, err
 				}
-				collected++
+				chunk.collected++
 			}
-			if candidates < RetentionBatchSize {
+			if chunk.candidates < RetentionBatchSize {
 				finishedAt := store.CanonTime(s.now())
 				if err := r.Retention().SetLastPruneSuccess(ctx, p, finishedAt); err != nil {
-					return err
+					return retentionSweepChunk{}, err
 				}
 				ev, err := pruneRunEvent(ctx, audit.OutcomeSuccess, startedAt, finishedAt,
-					totalCandidates+int64(candidates), total+collected, "")
+					totalCandidates+int64(chunk.candidates), total+chunk.collected, "")
 				if err != nil {
-					return err
+					return retentionSweepChunk{}, err
 				}
-				return r.Audit().InsertInstance(ctx, p, ev)
+				if err := r.Audit().InsertInstance(ctx, p, ev); err != nil {
+					return retentionSweepChunk{}, err
+				}
 			}
-			return nil
+			return chunk, nil
 		})
 		if err != nil {
 			return total, s.recordFailedPruneRun(ctx, startedAt, store.CanonTime(s.now()),
-				totalCandidates+int64(candidates), total, err)
+				totalCandidates, total, err)
 		}
-		if prunedThisChunk {
+		if chunk.prunedPlans {
 			plansPruned = true
 		}
-		total += collected
-		totalCandidates += int64(candidates)
-		if candidates < RetentionBatchSize {
+		total += chunk.collected
+		totalCandidates += int64(chunk.candidates)
+		if chunk.candidates < RetentionBatchSize {
 			return total, nil
 		}
 	}
