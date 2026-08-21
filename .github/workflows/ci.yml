@@ -187,6 +187,8 @@ jobs:
         run: ./scripts/ci/check-chart_test.sh
       - name: Trusted CI scripts fixture
         run: ./scripts/ci/check-trusted-ci-scripts_test.sh
+      - name: Build artifact reuse fixture
+        run: ./scripts/ci/check-build-artifact-reuse_test.sh
       - name: Cache policy fixture
         run: ./scripts/ci/check-cache-policy_test.sh
       - name: Fuzz finding classifier fixture
@@ -203,6 +205,60 @@ jobs:
         run: ./scripts/release/release-channel_test.sh
       - name: Pinned installer fixture
         run: ./scripts/release/render-installer_test.sh
+
+  # Build the release-shaped app once for both browser shards. Release snapshot
+  # stays parallel because waiting for this native build before its six-target
+  # GoReleaser build would lengthen the critical path. This run-scoped artifact
+  # is internal build plumbing, not a release.
+  app-build:
+    needs: changes
+    if: ${{ fromJSON(needs.changes.outputs.plan).web }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Restore shared Go module cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-v2-${{ runner.os }}-${{ hashFiles('go.mod', 'go.sum', 'scripts/ci/go-tool-modules.txt') }}
+          restore-keys: go-mod-v2-${{ runner.os }}-
+      - name: Select runner cache ABI
+        id: runner-cache-abi
+        run: ./scripts/ci/export-runner-cache-abi.sh
+      - name: Restore app-build Go cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/go-build
+          key: go-web-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-cache-abi.outputs.value }}-${{ hashFiles('go.mod', 'go.sum', 'scripts/ci/go-tool-modules.txt') }}
+          restore-keys: |
+            go-web-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-cache-abi.outputs.value }}-
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version-file: .nvmrc
+      - name: Enable pnpm
+        run: corepack enable
+      - name: Verify and build the SPA
+        run: ./scripts/ci/build-spa.sh --verify
+      - name: Build the release-shaped app
+        run: |
+          mkdir -p ci-artifacts
+          go build -tags ui -o ci-artifacts/hikyo-ui ./cmd/hikyo
+      - name: Upload app build for downstream validation
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: hikyo-app-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            internal/webui/dist/
+            ci-artifacts/hikyo-ui
+          if-no-files-found: error
+          retention-days: 1
 
   release-snapshot:
     needs: changes
@@ -239,22 +295,43 @@ jobs:
           node-version-file: .nvmrc
       - name: Enable pnpm
         run: corepack enable
-      # GoReleaser builds with the `ui` tag, so its isolated job must produce
-      # the embedded SPA before compiling all six release targets.
-      - name: Build the SPA (the `ui` build tag embeds it)
-        working-directory: web
-        run: |
-          pnpm --dir ../clients/ts install --frozen-lockfile
-          pnpm install --frozen-lockfile
-          pnpm build
+      # Keep this small build parallel with app-build. Serial reuse saves one
+      # sub-second Vite build but delays all six GoReleaser targets behind the
+      # native browser binary and frontend validation.
+      - name: Build the SPA for the release snapshot
+        run: ./scripts/ci/build-spa.sh
       - name: GoReleaser configuration and snapshot
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
           distribution: goreleaser
           version: v2.17.1
           args: release --snapshot --clean --skip=publish
+      # This fixture works on a temporary copy of dist. Keep it before upload:
+      # failed archive/version/manifest checks must not leave a download behind.
       - name: Classify complete snapshot manifest
         run: ./scripts/release/snapshot-manifest_test.sh
+      - name: Mark the snapshot as unsigned development output
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          printf '%s\n' \
+            'UNSIGNED DEVELOPMENT SNAPSHOT — NOT AN OFFICIAL HIKYO RELEASE' \
+            "Source commit: $GITHUB_SHA" \
+            'This artifact has checksums but no release manifest or signature.' \
+            'Do not use it for production or the offline release ceremony.' \
+            >dist/DEVELOPMENT-SNAPSHOT.txt
+      - name: Upload unsigned development snapshot
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: hikyo-development-${{ github.sha }}
+          path: |
+            dist/hikyo_*_Darwin_*.tar.gz
+            dist/hikyo_*_Linux_*.tar.gz
+            dist/hikyo_*_Windows_*.zip
+            dist/checksums.txt
+            dist/DEVELOPMENT-SNAPSHOT.txt
+          if-no-files-found: error
+          retention-days: 14
       - name: Save release-snapshot Go cache
         if: >-
           success() && steps.release-snapshot-go-cache.outputs.cache-hit != 'true' &&
@@ -433,7 +510,7 @@ jobs:
   # `check-required-jobs.sh` need no adjustment, and each leg keeps the ordering
   # above intact instead of starting a browser behind a Go suite that failed.
   web:
-    needs: changes
+    needs: [changes, app-build]
     if: ${{ fromJSON(needs.changes.outputs.plan).web }}
     runs-on: ubuntu-latest
     strategy:
@@ -447,6 +524,14 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+      - name: Download the exact app build
+        uses: actions/download-artifact@3e5f637d1b665217e8c8ac7d515d5f5f90f04786 # v8.0.1
+        with:
+          name: hikyo-app-${{ github.run_id }}-${{ github.run_attempt }}
+      # Actions artifacts intentionally normalize file modes. Restore execute
+      # permission before the browser harness starts the downloaded binary.
+      - name: Prepare the prebuilt app
+        run: chmod +x ci-artifacts/hikyo-ui
       - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
         with:
           node-version-file: .nvmrc
@@ -485,35 +570,12 @@ jobs:
         working-directory: web
         run: pnpm install --frozen-lockfile
 
-      - name: Typecheck
-        working-directory: web
-        run: pnpm run typecheck
-
-      # Unit tests include the flow registry's closure check and its own
-      # negative fixtures — a check that cannot fail is not a check.
-      - name: Unit tests and flow-registry closure
-        working-directory: web
-        run: pnpm run test
-
-      - name: Build the SPA
-        working-directory: web
-        run: pnpm run build
-
-      # The embed only compiles with the `ui` tag, and only after the build
-      # above. This is the step that proves the tagged binary is buildable at
-      # all; the untagged build and the full Go suite live in the `test` job
-      # and stay green without ever running pnpm.
-      - name: Build the binary with the embedded UI
-        run: go build -tags ui ./...
-
       # The release ships the `ui`-tagged binary, so the shipped shape gets
       # its own govulncheck pass here; `test` scans the untagged build that
       # every Go-only change exercises. One leg: the binary is identical.
       - name: govulncheck (vulnerabilities reachable from the release-shaped binary)
         if: matrix.project == 'desktop'
-        run: |
-          go build -tags ui -o "$RUNNER_TEMP/hikyo-ui" ./cmd/hikyo
-          ./scripts/ci/run-go-tool.sh govulncheck -mode=binary "$RUNNER_TEMP/hikyo-ui"
+        run: ./scripts/ci/run-go-tool.sh govulncheck -mode=binary ci-artifacts/hikyo-ui
 
       - name: Go tests (transport, serving rules, browser session)
         # Restored GOCACHE may contain passing test results. Compile from cache,
@@ -538,10 +600,12 @@ jobs:
           pnpm exec playwright install chromium
 
       # `playwright test` directly, not `pnpm run e2e`: the script rebuilds the
-      # SPA so a developer cannot run the flows against a stale bundle, and the
-      # step above has already built this run's.
+      # SPA so a developer cannot run the flows against a stale bundle, and
+      # app-build already supplied this run's exact bundle and binary.
       - name: Flow suite (${{ matrix.project }})
         working-directory: web
+        env:
+          HIKYO_E2E_BINARY: ${{ github.workspace }}/ci-artifacts/hikyo-ui
         run: pnpm exec playwright test --project=${{ matrix.project }}
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

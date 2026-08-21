@@ -4,6 +4,12 @@ CI builds and publishes an **unsigned draft**. It never receives either private
 key. The maintainer signs locally; only verified, already-published bytes become
 an official release.
 
+Ordinary `main` CI also retains GoReleaser archives for 14 days as an unsigned
+development artifact named for the exact source commit. Those snapshots carry
+checksums and an explicit warning, but no release manifest or signature. They
+are evaluation output only: they never create a GitHub Release and cannot enter
+this ceremony as a release candidate.
+
 ## Pinned tools
 
 - GoReleaser `v2.17.1`

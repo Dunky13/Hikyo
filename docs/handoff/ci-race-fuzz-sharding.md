@@ -11,6 +11,11 @@ No JUnit dependency or report format was added. The planner is exercised
 through its public command-line interface by native shell fixtures, matching
 the rest of the CI policy tests.
 
+The follow-up build optimization now produces the embedded SPA and native UI
+binary once in `app-build`. Both browser shards consume that exact run-scoped
+artifact. The six-target GoReleaser snapshot stays parallel: serializing it
+behind the native browser build would lengthen the critical path.
+
 ## Coverage and trust model
 
 - Race assigns all 56 Go packages except `internal/isolation` exactly once.
@@ -47,6 +52,25 @@ Local exact-DSN race validation completed the three warm shards in 1m45s,
 is not a hosted-runner benchmark. Record the first warm GitHub Actions timings
 after merge before treating the speedup as production evidence.
 
+Before the follow-up, frontend install, typecheck, unit tests, and build ran in
+both browser matrix legs. Browser global setup also linked four more UI binaries
+across the two isolated instances in each shard. The new graph runs browser
+frontend validation and build once and supplies one prebuilt binary to both
+shards. Release snapshot keeps its small SPA build so its six cross-platform
+builds can run concurrently. Hosted timing remains pending until this exact
+head runs on GitHub.
+
+## Development downloads
+
+A successful trusted `main` run retains the six GoReleaser archives,
+`checksums.txt`, and `DEVELOPMENT-SNAPSHOT.txt` for 14 days as
+`hikyo-development-<commit>`. Pull requests do not publish this artifact.
+
+This is deliberately not a GitHub Release. It is unsigned evaluation output
+without a release manifest, installer, upgrade promise, or production support.
+The tag-only draft, offline recovery binding, primary signing, verification,
+and publish sequence in `docs/release/signing.md` remains unchanged.
+
 ## Validation
 
 - Full PostgreSQL-backed `go test -count=1 ./...` passed.
@@ -55,4 +79,6 @@ after merge before treating the speedup as production evidence.
   with `-fuzztime=1x`.
 - Planner, changed-path, trusted-script, cache-policy, required-job, and fuzz
   reporting fixtures passed.
+- Build-artifact reuse fixture, web typecheck/unit/build, and docs verification
+  passed.
 - Actionlint, ShellCheck, Go build, Go vet, formatting, and diff checks passed.
