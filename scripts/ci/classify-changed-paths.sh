@@ -68,7 +68,7 @@ else
 		# their owning directory, so keep them on the full integration backstop.
 		go.mod | go.sum | sqlc.yaml | .goreleaser.yaml | \
 			web/package.json | web/pnpm-lock.yaml | web/tsconfig*.json | web/*.config.* | \
-			clients/ts/package.json | clients/ts/pnpm-lock.yaml | clients/ts/tsconfig*.json | clients/ts/*.config.* | \
+			clients/ts/package.json | clients/ts/pnpm-lock.yaml | clients/ts/pnpm-workspace.yaml | clients/ts/tsconfig*.json | clients/ts/*.config.* | \
 			docs/site/package.json | docs/site/pnpm-lock.yaml | docs/site/tsconfig*.json | docs/site/*.config.*)
 			all_jobs
 			;;
