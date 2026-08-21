@@ -21,9 +21,27 @@ import { createContext, useContext, type ReactNode } from 'react';
 export type WorkspaceContextValue = {
   /** The remote's canonical origin, e.g. `https://hikyo.went.io`. */
   readonly origin: string;
+  /** The remote's NAME — the `?remote=` value that intra-workspace links carry. */
+  readonly remote: string;
   /** The origin-scoped SDK client every call in this subtree routes through. */
   readonly client: Client;
 };
+
+/**
+ * withRemote keeps a link INSIDE the workspace. Navigation between the
+ * workspace's own surfaces — matrix → history, history → matrix — is
+ * client-side (the bearer is in memory), and the `?remote=` parameter is what
+ * marks a surface as operating a remote; a link that dropped it would silently
+ * fall back to this instance's own data on the next surface. `remote` is empty
+ * outside a workspace, and then the path is returned untouched.
+ */
+export function withRemote(path: string, remote: string): string {
+  if (remote === '') {
+    return path;
+  }
+  const separator = path.includes('?') ? '&' : '?';
+  return `${path}${separator}remote=${encodeURIComponent(remote)}`;
+}
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
 

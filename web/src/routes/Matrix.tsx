@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { generatePath, Link, useParams } from 'react-router';
 
 import { historyHref } from '../api/history.ts';
+import { useWorkspaceContext, withRemote } from '../api/transport.tsx';
 import { surfaceById } from '../app/navigation.ts';
 import {
   matrixPublishValidation,
@@ -71,6 +72,13 @@ type DisplayRow =
  */
 export function Matrix({ historyOpen = false }: { historyOpen?: boolean } = {}) {
   const params = useParams();
+  // Inside a workspace, every link to another of the workspace's own surfaces
+  // must carry the `?remote=` marker or it silently drops back to this
+  // instance's data. `remote` is '' at home, and `historyLink` is then a no-op.
+  const workspace = useWorkspaceContext();
+  const remote = workspace?.remote ?? '';
+  const historyLink = (input: Parameters<typeof historyHref>[0]) =>
+    withRemote(historyHref(input), remote);
   const ref: MatrixRef = { org: params['org'] ?? '', project: params['project'] ?? '' };
   const matrix = useMatrixProject(ref);
   const stage = useStageMatrixValue(ref);
@@ -625,7 +633,7 @@ export function Matrix({ historyOpen = false }: { historyOpen?: boolean } = {}) 
                             <Link
                               className="btn matrix__history-link"
                               data-history-environment={environment.id}
-                              to={historyHref({ ...ref, env: environment.id })}
+                              to={historyLink({ ...ref, env: environment.id })}
                               onClick={(event) => {
                                 historyOpener.current = event.currentTarget;
                               }}
@@ -709,7 +717,7 @@ export function Matrix({ historyOpen = false }: { historyOpen?: boolean } = {}) 
                           <Link
                             className="matrix__key mono"
                             aria-label={`History of ${key.name}`}
-                            to={historyHref({
+                            to={historyLink({
                               ...ref,
                               ...(firstVisibleEnvironment === undefined
                                 ? {}

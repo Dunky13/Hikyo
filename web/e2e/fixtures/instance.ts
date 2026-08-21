@@ -595,6 +595,117 @@ function seedDirectoryGrant(dir: string): void {
 }
 
 /**
+ * The serving instance's operable project (#71). A workspace can only be proven
+ * to OPERATE a remote if the remote has something to operate — so B gets one
+ * org, one project, one development environment and one CONFIG value (config is
+ * delivered in plaintext, so the matrix renders it without a reveal ceremony,
+ * which keeps this flow off the TOTP-in-a-popup path). Written to a file because
+ * setup and the workers are separate processes.
+ */
+export const SERVING = fileURLToPath(new URL('../.auth/serving.json', import.meta.url));
+
+const zServing = z.object({
+  org: z.string(),
+  project: z.string(),
+  dev: z.string(),
+  key: z.string(),
+  value: z.string(),
+  dbPath: z.string(),
+});
+
+export type ServingSeed = z.infer<typeof zServing>;
+
+/** readServing returns the serving instance's operable-project fixture. */
+export function readServing(): ServingSeed {
+  return zServing.parse(JSON.parse(readFileSync(SERVING, 'utf8')));
+}
+
+/** servingPrincipal reads the bootstrap human's id from the serving store. */
+function servingPrincipal(dir: string): string {
+  const db = new DatabaseSync(join(dir, 'hikyo-dev.db'));
+  try {
+    const row = db.prepare(`SELECT id FROM principals WHERE kind = 'human' LIMIT 1`).get();
+    const id = row === undefined ? undefined : Object(row)['id'];
+    if (typeof id !== 'string') {
+      throw new Error('no serving principal to grant capabilities to');
+    }
+    return id;
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * grantServingAdmin gives the serving instance's administrator the operating
+ * capabilities a workspace exercises over there. Break-glass, at instance scope,
+ * BEFORE the first sign-in — a grant that predates every session invalidates
+ * none, which is the ordering rule the whole fixture obeys.
+ */
+function grantServingAdmin(serving: Instance): void {
+  const principal = servingPrincipal(serving.dir);
+  for (const capability of ['read', 'edit', 'publish', 'manage-projects', 'definitions-edit']) {
+    run(serving.binary, ['admin', 'grant', '--principal', principal, '--capability', capability], {
+      cwd: serving.dir,
+      env: adminEnv(serving),
+    });
+  }
+}
+
+/**
+ * grantServingOrgRead grants an ORG-scoped read so the org appears in the
+ * serving admin's `listMyOrgs` — which is what the workspace project picker
+ * reads. Instance-scoped grants operate the project but do not NAME an org, so
+ * without this the picker would be empty even though every operation is allowed.
+ * Break-glass, so it needs no session; it invalidates the one held, which the
+ * caller re-establishes.
+ */
+function grantServingOrgRead(serving: Instance, org: string): void {
+  run(
+    serving.binary,
+    ['admin', 'grant', '--principal', servingPrincipal(serving.dir), '--capability', 'read', '--org', org],
+    { cwd: serving.dir, env: adminEnv(serving) },
+  );
+}
+
+/**
+ * seedServingProject creates the one operable project on the serving instance,
+ * as its stepped-up administrator. Returns the ids the workspace flow navigates
+ * by and the config value it asserts renders from the remote.
+ */
+async function seedServingProject(serving: Instance): Promise<Omit<ServingSeed, 'dbPath'>> {
+  const zId = z.object({ id: z.string() });
+  const created = async (path: string, body: unknown): Promise<string> =>
+    zId.parse(await api(serving, 'POST', path, body)).id;
+
+  const org = await created('/api/v1/orgs', { name: 'serving-co' });
+  const project = await created(`/api/v1/orgs/${org}/projects`, { name: 'vault' });
+  const dev = await created(`/api/v1/orgs/${org}/projects/${project}/environments`, {
+    name: 'development',
+  });
+  await created(`/api/v1/orgs/${org}/projects/${project}/keys`, {
+    name: 'API_URL',
+    classification: 'config',
+    folder_path: 'app',
+    declaration: { rule: { type: 'string' } },
+  });
+  const value = 'https://seeded-on-b.example';
+  const staged = z
+    .object({ version_id: z.string() })
+    .parse(
+      await api(
+        serving,
+        'PUT',
+        `/api/v1/orgs/${org}/projects/${project}/environments/${dev}/values/API_URL`,
+        { value },
+      ),
+    );
+  await api(serving, 'POST', `/api/v1/orgs/${org}/projects/${project}/environments/${dev}/publish`, {
+    version_ids: [staged.version_id],
+  });
+  return { org, project, dev, key: 'API_URL', value };
+}
+
+/**
  * startTLSFront brings up the pinned https peer `remote add` is performed
  * against. It PROXIES B's own directory endpoint, so the snapshot the entry
  * stores is B's real listing rather than a fabricated one.
@@ -704,6 +815,11 @@ export async function startInstance(): Promise<void> {
   mkdirSync(fileURLToPath(new URL('../.auth', import.meta.url)), { recursive: true });
   writeFileSync(SEEDED, JSON.stringify({ ...seeded, dbPath: join(viewing.dir, 'hikyo-dev.db') }));
 
+  // The serving admin's operating capabilities, break-glass BEFORE any B
+  // session, so no session is invalidated (#71). This is what lets a workspace
+  // read and edit B's project once the human has authenticated over there.
+  grantServingAdmin(serving);
+
   // B enrols its own factor: it has no seeded tenant and no passkey, and every
   // #71 act below it performs is instance-scope and therefore MFA-mandatory.
   await signIn(serving);
@@ -714,6 +830,17 @@ export async function startInstance(): Promise<void> {
   // does — enrol, then sign in again and present the new factor.
   await signIn(serving);
   await presentTotp(serving, servingOtpauth, '/api/v1/auth/totp/step-up');
+
+  // The operable project on B, created by its now-stepped-up administrator, then
+  // made visible to the project picker with an org-scoped read. That grant kills
+  // B's session (it advances the principal's generation), so the 2-factor
+  // session is re-established afterwards — the workspace inherits the factors the
+  // approving B session holds, and edit/publish over there are MFA-mandatory.
+  const serving_ = await seedServingProject(serving);
+  grantServingOrgRead(serving, serving_.org);
+  await signIn(serving);
+  await presentTotp(serving, servingOtpauth, '/api/v1/auth/totp/step-up');
+  writeFileSync(SERVING, JSON.stringify({ ...serving_, dbPath: join(serving.dir, 'hikyo-dev.db') }));
 
   // A's raw setup session, stepped up with the factor `seedTenant` enrolled.
   // `nextTotpCode` is what keeps the single-use-per-step bookkeeping honest

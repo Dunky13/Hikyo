@@ -172,7 +172,7 @@ function WorkspaceBoundary({ remote, children }: { remote: string; children: Rea
 
   return (
     <QueryClientProvider client={queries}>
-      <WorkspaceContextProvider value={{ origin, client }}>
+      <WorkspaceContextProvider value={{ origin, remote, client }}>
         <WorkspaceBanner origin={origin} />
         {children}
       </WorkspaceContextProvider>

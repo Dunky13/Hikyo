@@ -21,7 +21,7 @@ import {
 } from '../api/history.ts';
 import { useServiceAccounts } from '../api/identities.ts';
 import { ApiError, parsed } from '../api/client.ts';
-import { useTransport } from '../api/transport.tsx';
+import { useTransport, useWorkspaceContext, withRemote } from '../api/transport.tsx';
 import {
   matrixMutationError,
   rememberRestorePreview,
@@ -149,6 +149,7 @@ export function HistoryDrawer({
   const env = { ...refData, environment: environmentId };
 
   const transport = useTransport();
+  const workspace = useWorkspaceContext();
   const history = useRevisionHistory(env);
   const pins = useRevisionPins(env);
   const retention = useProjectRetention(refData);
@@ -247,7 +248,12 @@ export function HistoryDrawer({
     setParams(next, { replace: true });
   };
 
-  const matrixPath = generatePath(surfaceById('matrix').path, refData);
+  // Back into the matrix, keeping the workspace: closing the drawer inside a
+  // workspace must land on the remote's matrix, not this instance's (#71).
+  const matrixPath = withRemote(
+    generatePath(surfaceById('matrix').path, refData),
+    workspace?.remote ?? '',
+  );
 
   useEffect(() => {
     setSheet(null);

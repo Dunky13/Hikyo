@@ -472,7 +472,7 @@ function WorkspacePicker({ origin, remoteName }: { origin: string; remoteName: s
   const client = useMemo(() => createWorkspaceClient(origin), [origin]);
   return (
     <QueryClientProvider client={queries}>
-      <WorkspaceContextProvider value={{ origin, client }}>
+      <WorkspaceContextProvider value={{ origin, remote: remoteName, client }}>
         <PickerBody remoteName={remoteName} />
       </WorkspaceContextProvider>
     </QueryClientProvider>
