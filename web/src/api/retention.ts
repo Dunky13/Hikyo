@@ -48,3 +48,15 @@ export function retentionBanner(health: RetentionHealth | null | undefined, isEr
   }
   return isError ? ({ kind: 'error' } as const) : null;
 }
+
+/**
+ * The per-project storage high-water warn: a project has reached the 1 GiB warn
+ * threshold and is heading for the 4 GiB publish refusal. Absent (null) unless
+ * the server sets storage_warn, so the banner is silent below the water.
+ */
+export function storageBanner(health: RetentionHealth | null | undefined) {
+  if (health?.storage_warn === true) {
+    return { kind: 'storage', peakProjectBytes: health.peak_project_bytes } as const;
+  }
+  return null;
+}

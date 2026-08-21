@@ -1287,7 +1287,9 @@ export const zRetentionPolicy = z.object({
 export const zRetentionHealth = z.object({
     last_prune_success: z.iso.datetime().nullable(),
     stale: z.boolean(),
-    stale_after_seconds: z.literal(86400)
+    stale_after_seconds: z.literal(86400),
+    peak_project_bytes: z.int(),
+    storage_warn: z.boolean()
 });
 
 export const zProjectRetentionPolicy = z.object({

@@ -41,6 +41,34 @@ func TestValidateProjectRetentionAgainstOrgCap(t *testing.T) {
 	}
 }
 
+// TestHealthStorageWarnBoundary pins the § 141 warn threshold: health.StorageWarn
+// flips at exactly ProjectStorageWarnBytes (1 GiB), the `>=` boundary the doctor,
+// metric, and UI banner all read.
+func TestHealthStorageWarnBoundary(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0).UTC()
+	s := &Retention{Now: func() time.Time { return now }}
+	tests := []struct {
+		name string
+		peak int64
+		warn bool
+	}{
+		{"below", ProjectStorageWarnBytes - 1, false},
+		{"at", ProjectStorageWarnBytes, true},
+		{"above", ProjectStorageWarnBytes + 1, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := s.health(now, true, tt.peak)
+			if got.StorageWarn != tt.warn {
+				t.Fatalf("peak %d: StorageWarn = %v, want %v", tt.peak, got.StorageWarn, tt.warn)
+			}
+			if got.PeakProjectBytes != tt.peak {
+				t.Fatalf("peak %d: PeakProjectBytes = %d", tt.peak, got.PeakProjectBytes)
+			}
+		})
+	}
+}
+
 func TestValidateProjectRetentionAllowsBoundedOverrideUnderUnlimitedOrg(t *testing.T) {
 	err := validateProjectRetention(
 		RetentionPolicy{Unlimited: true},

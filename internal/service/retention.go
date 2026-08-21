@@ -40,6 +40,41 @@ type PruneHealth struct {
 	LastSuccess time.Time
 	Recorded    bool
 	Stale       bool
+	// PeakProjectBytes is the largest per-project stored payload across the
+	// whole instance — value cells plus published snapshot entries (#185).
+	// StorageWarn is true once it reaches ProjectStorageWarnBytes, the doctor /
+	// metric / UI-banner warn for the per-project storage high-water.
+	PeakProjectBytes int64
+	StorageWarn      bool
+}
+
+// peakProjectStorage sums each project's stored ciphertext bytes across both
+// payload tables and returns the largest — the operator storage high-water
+// (#185). Instance-scoped: the two reads span every tenant, merged by owning
+// project so a project's value and snapshot bytes count as one total.
+func peakProjectStorage(ctx context.Context, values store.ValueReader, snapshots store.SnapshotReader, p authz.Proof) (int64, error) {
+	valueRows, err := values.InstancePayloadByProject(ctx, p)
+	if err != nil {
+		return 0, err
+	}
+	snapshotRows, err := snapshots.InstancePayloadByProject(ctx, p)
+	if err != nil {
+		return 0, err
+	}
+	byProject := make(map[string]int64, len(valueRows)+len(snapshotRows))
+	for _, row := range valueRows {
+		byProject[row.OrgID+"/"+row.ProjectID] += row.Bytes
+	}
+	for _, row := range snapshotRows {
+		byProject[row.OrgID+"/"+row.ProjectID] += row.Bytes
+	}
+	var peak int64
+	for _, total := range byProject {
+		if total > peak {
+			peak = total
+		}
+	}
+	return peak, nil
 }
 
 // Retention owns tenant policy settings and the scheduler's payload sweep.
@@ -429,7 +464,8 @@ func (s *Retention) recordFailedPruneRun(ctx context.Context, startedAt, finishe
 }
 
 // LastPruneSuccess returns the persisted health timestamp. false means this
-// datastore has never completed a payload prune.
+// datastore has never completed a payload prune. It is the scheduler's
+// per-job success probe.
 func (s *Retention) LastPruneSuccess(ctx context.Context) (time.Time, bool, error) {
 	var at time.Time
 	var ok bool
@@ -447,21 +483,44 @@ func (s *Retention) LastPruneSuccess(ctx context.Context) (time.Time, bool, erro
 	return at, ok, err
 }
 
-func (s *Retention) health(at time.Time, recorded bool) PruneHealth {
+// health assembles the operator health snapshot from the persisted prune
+// timestamp and the per-project storage high-water.
+func (s *Retention) health(at time.Time, recorded bool, peakStorage int64) PruneHealth {
 	return PruneHealth{
-		LastSuccess: at,
-		Recorded:    recorded,
-		Stale:       !recorded || s.now().Sub(at) > PruneStaleAfter,
+		LastSuccess:      at,
+		Recorded:         recorded,
+		Stale:            !recorded || s.now().Sub(at) > PruneStaleAfter,
+		PeakProjectBytes: peakStorage,
+		StorageWarn:      peakStorage >= ProjectStorageWarnBytes,
 	}
 }
 
-// OperationalHealth reads scheduler health for local operational surfaces.
+// OperationalHealth reads scheduler health for local operational surfaces
+// (doctor, /metrics). One transaction under scheduler authority reads both the
+// last-prune timestamp and the per-project storage high-water (#185).
 func (s *Retention) OperationalHealth(ctx context.Context) (PruneHealth, error) {
-	at, recorded, err := s.LastPruneSuccess(ctx)
+	var at time.Time
+	var recorded bool
+	var peak int64
+	err := tx.Read(ctx, s.DB, func(ctx context.Context, r store.ReadRepos, az *authz.TxAuthorizer) error {
+		p, err := authz.SystemAuthority(authz.SiteScheduler, az.Token())
+		if err != nil {
+			return err
+		}
+		at, recorded, err = r.Retention().LastPruneSuccess(ctx, p)
+		if errors.Is(err, store.ErrNotFound) {
+			at, recorded, err = time.Time{}, false, nil
+		}
+		if err != nil {
+			return err
+		}
+		peak, err = peakProjectStorage(ctx, r.Values(), r.Snapshots(), p)
+		return err
+	})
 	if err != nil {
 		return PruneHealth{}, err
 	}
-	return s.health(at, recorded), nil
+	return s.health(at, recorded, peak), nil
 }
 
 // GetHealth authorizes and audits the instance API read in one transaction.
@@ -484,11 +543,16 @@ func (s *Retention) GetHealth(ctx context.Context, actor Actor) (PruneHealth, er
 		if err != nil {
 			return err
 		}
-		out = s.health(at, recorded)
+		peak, err := peakProjectStorage(ctx, r.Values(), r.Snapshots(), proof)
+		if err != nil {
+			return err
+		}
+		out = s.health(at, recorded, peak)
 		ev, err := domainEvent(ctx, audit.EventRetentionHealthRead, caller.Principal,
 			audit.Object{Type: "retention_health", ID: "payload_gc"}, audit.Payload{
 				"recorded": out.Recorded, "stale": out.Stale,
 				"stale_after_seconds": int64(PruneStaleAfter / time.Second),
+				"peak_project_bytes":  out.PeakProjectBytes, "storage_warn": out.StorageWarn,
 			})
 		if err != nil {
 			return err

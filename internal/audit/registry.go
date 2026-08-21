@@ -1673,6 +1673,10 @@ var registry = map[EventType]TypeSpec{
 		},
 	},
 	EventRetentionHealthRead: {
+		// SchemaVersion stays 1: the service emitter (newAuditEvent) stamps every
+		// event v1 by design in this pre-1.0 system, and there is no released v1
+		// contract to preserve nor any read-path revalidation of old rows. The
+		// #185 storage fields are an additive extension of the one live shape.
 		SchemaVersion: 1,
 		Retention:     RetentionAccess,
 		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
@@ -1681,6 +1685,9 @@ var registry = map[EventType]TypeSpec{
 			"recorded":            {Kind: KindBool, Required: true},
 			"stale":               {Kind: KindBool, Required: true},
 			"stale_after_seconds": {Kind: KindInt, Required: true},
+			// Per-project storage high-water reported alongside prune health (#185).
+			"peak_project_bytes": {Kind: KindInt, Required: true},
+			"storage_warn":       {Kind: KindBool, Required: true},
 		},
 	},
 	EventRetentionPayloadGC: {

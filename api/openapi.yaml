@@ -12527,7 +12527,7 @@ components:
     RetentionHealth:
       type: object
       additionalProperties: false
-      required: [last_prune_success, stale, stale_after_seconds]
+      required: [last_prune_success, stale, stale_after_seconds, peak_project_bytes, storage_warn]
       properties:
         last_prune_success:
           type: [string, "null"]
@@ -12537,6 +12537,17 @@ components:
         stale_after_seconds:
           type: integer
           const: 86400
+        peak_project_bytes:
+          type: integer
+          description: >-
+            Largest per-project stored payload across the instance, in bytes
+            (ciphertext of value cells plus published snapshot entries). The
+            per-project storage high-water surface.
+        storage_warn:
+          type: boolean
+          description: >-
+            True once peak_project_bytes reaches the 1 GiB warn threshold, well
+            before the 4 GiB publish refusal.
 
     ProjectRetentionPolicy:
       type: object

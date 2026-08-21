@@ -1261,3 +1261,62 @@ func (q *Queries) ReencryptSnapshotEntry(ctx context.Context, arg ReencryptSnaps
 	}
 	return result.RowsAffected(), nil
 }
+
+const sumSnapshotPayloadByProject = `-- name: SumSnapshotPayloadByProject :many
+SELECT org_id, project_id, COALESCE(SUM(OCTET_LENGTH(ciphertext)), 0)::bigint AS bytes
+FROM snapshot_entries
+GROUP BY org_id, project_id
+`
+
+type SumSnapshotPayloadByProjectRow struct {
+	OrgID     string
+	ProjectID string
+	Bytes     int64
+}
+
+// SumSnapshotPayloadByProject groups the published snapshot-entry ciphertext
+// bytes by owning project across the whole instance -- the operator storage
+// surface (doctor warn, metric). Cross-tenant by definition, so it is annotated
+// instance-scoped and content-pinned.
+// hikyo:instance-scoped
+func (q *Queries) SumSnapshotPayloadByProject(ctx context.Context) ([]SumSnapshotPayloadByProjectRow, error) {
+	rows, err := q.db.Query(ctx, sumSnapshotPayloadByProject)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SumSnapshotPayloadByProjectRow
+	for rows.Next() {
+		var i SumSnapshotPayloadByProjectRow
+		if err := rows.Scan(&i.OrgID, &i.ProjectID, &i.Bytes); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const sumSnapshotPayloadForProject = `-- name: SumSnapshotPayloadForProject :one
+SELECT COALESCE(SUM(OCTET_LENGTH(ciphertext)), 0)::bigint FROM snapshot_entries
+WHERE org_id = $1 AND project_id = $2
+`
+
+type SumSnapshotPayloadForProjectParams struct {
+	ChainOrgID     string
+	ChainProjectID string
+}
+
+// SumSnapshotPayloadForProject totals the ciphertext bytes of a project's
+// published snapshot entries across every environment and revision. Paired with
+// SumValuePayloadForProject, it is the other half of the per-project storage
+// high-water accounting (ops-spec section 8 / section 141). Fully chain-scoped,
+// no annotation.
+func (q *Queries) SumSnapshotPayloadForProject(ctx context.Context, arg SumSnapshotPayloadForProjectParams) (int64, error) {
+	row := q.db.QueryRow(ctx, sumSnapshotPayloadForProject, arg.ChainOrgID, arg.ChainProjectID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}

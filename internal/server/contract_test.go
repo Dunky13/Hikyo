@@ -328,7 +328,10 @@ func (s stubRetentionHealth) OperationalHealth(context.Context) (service.PruneHe
 func TestMetricsExposeRetentionPrunerHealthWithoutLabels(t *testing.T) {
 	last := time.Unix(1_800_000_000, 0).UTC()
 	srv := httptest.NewServer(server.New(stubReady{}, &server.API{
-		RetentionHealth: stubRetentionHealth{health: service.PruneHealth{LastSuccess: last, Recorded: true, Stale: true}},
+		RetentionHealth: stubRetentionHealth{health: service.PruneHealth{
+			LastSuccess: last, Recorded: true, Stale: true,
+			PeakProjectBytes: 1_500_000_000, StorageWarn: true,
+		}},
 	}, nil))
 	t.Cleanup(srv.Close)
 	resp, err := http.Get(srv.URL + "/metrics")
@@ -349,7 +352,11 @@ func TestMetricsExposeRetentionPrunerHealthWithoutLabels(t *testing.T) {
 	want := "# TYPE hikyo_last_prune_success_timestamp_seconds gauge\n" +
 		"hikyo_last_prune_success_timestamp_seconds 1800000000\n" +
 		"# TYPE hikyo_prune_stale gauge\n" +
-		"hikyo_prune_stale 1\n"
+		"hikyo_prune_stale 1\n" +
+		"# TYPE hikyo_project_storage_peak_bytes gauge\n" +
+		"hikyo_project_storage_peak_bytes 1500000000\n" +
+		"# TYPE hikyo_project_storage_warn gauge\n" +
+		"hikyo_project_storage_warn 1\n"
 	if string(body) != want {
 		t.Fatalf("metrics = %q, want %q", body, want)
 	}
@@ -374,6 +381,9 @@ func TestMetricsUseZeroWhenPruneNeverSucceeded(t *testing.T) {
 	}
 	if !strings.Contains(string(body), "hikyo_last_prune_success_timestamp_seconds 0\n") || !strings.Contains(string(body), "hikyo_prune_stale 1\n") {
 		t.Fatalf("never-recorded metrics = %q", body)
+	}
+	if !strings.Contains(string(body), "hikyo_project_storage_peak_bytes 0\n") || !strings.Contains(string(body), "hikyo_project_storage_warn 0\n") {
+		t.Fatalf("empty-instance storage metrics = %q", body)
 	}
 }
 

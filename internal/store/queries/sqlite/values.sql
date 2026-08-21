@@ -85,3 +85,22 @@ ORDER BY id LIMIT ?;
 -- name: ReencryptValueEntry :execrows
 UPDATE value_entries SET ciphertext = ?
 WHERE org_id = ? AND project_id = ? AND id = ? AND ciphertext = ?;
+
+-- SumValuePayloadForProject totals the ciphertext bytes of a project's live
+-- value cells across every environment. It backs the per-project storage
+-- high-water refusal at publish (ops-spec section 8 / section 141). LENGTH on a
+-- BLOB is its byte count; the CAST(COALESCE(...)) keeps an empty project's NULL
+-- sum a plain integer 0. Fully chain-scoped, so no annotation is needed.
+-- name: SumValuePayloadForProject :one
+SELECT CAST(COALESCE(SUM(LENGTH(ciphertext)), 0) AS INTEGER) FROM value_entries
+WHERE org_id = ? AND project_id = ?;
+
+-- SumValuePayloadByProject groups the live value-cell ciphertext bytes by owning
+-- project across the whole instance -- the operator storage surface (doctor warn,
+-- metric). Cross-tenant by definition: it addresses no tenant and carries no
+-- chain conjunct, so it is annotated instance-scoped and content-pinned.
+-- hikyo:instance-scoped
+-- name: SumValuePayloadByProject :many
+SELECT org_id, project_id, CAST(COALESCE(SUM(LENGTH(ciphertext)), 0) AS INTEGER) AS bytes
+FROM value_entries
+GROUP BY org_id, project_id;

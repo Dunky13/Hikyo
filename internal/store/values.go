@@ -65,6 +65,23 @@ type ValueReader interface {
 	// about to delete. Any count above zero is the unconditional
 	// environment-delete refusal (#70).
 	CountEnvironmentValues(ctx context.Context, p authz.Proof, environmentID string) (int64, error)
+	// PayloadBytesForProject sums the ciphertext bytes of the proof's project's
+	// live value cells across every environment — half of the per-project
+	// storage high-water accounting refused at publish (#185, ops-spec section 8).
+	PayloadBytesForProject(ctx context.Context, p authz.Proof) (int64, error)
+	// InstancePayloadByProject sums live value-cell ciphertext bytes grouped by
+	// owning project across the whole instance — the operator storage surface
+	// (doctor warn, metric). Cross-tenant by definition, so its query is
+	// instance-scoped; the proof licenses the read, not a tenant chain.
+	InstancePayloadByProject(ctx context.Context, p authz.Proof) ([]ProjectPayloadBytes, error)
+}
+
+// ProjectPayloadBytes is one project's stored ciphertext-byte total, from the
+// instance-scoped storage sweep behind the high-water operator surface (#185).
+type ProjectPayloadBytes struct {
+	OrgID     string
+	ProjectID string
+	Bytes     int64
 }
 
 // ValueRepo is the full value aggregate.

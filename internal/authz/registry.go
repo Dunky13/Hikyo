@@ -745,6 +745,15 @@ const (
 	StoreRetentionLastSuccess    StoreOp = "retention.LastPruneSuccess"
 	StoreRetentionSetLastSuccess StoreOp = "retention.SetLastPruneSuccess"
 
+	// Per-project storage high-water (#185, ops-spec section 8 / section 141).
+	// The two project-scoped byte sums are read at publish to refuse a project
+	// already at the 4 GiB high-water; the two instance-scoped by-project sums
+	// back the operator storage surface (doctor warn at 1 GiB, metric).
+	StoreValuesPayloadBytesForProject      StoreOp = "values.PayloadBytesForProject"
+	StoreSnapshotsPayloadBytesForProject   StoreOp = "snapshots.PayloadBytesForProject"
+	StoreValuesInstancePayloadByProject    StoreOp = "values.InstancePayloadByProject"
+	StoreSnapshotsInstancePayloadByProject StoreOp = "snapshots.InstancePayloadByProject"
+
 	// Keyring persistence (#43). These carry no tenant chain: wrapped-key
 	// rows are instance-scoped crypto material, and the scope a tier-3 key
 	// belongs to is part of its AAD, not a tenant predicate.
@@ -972,6 +981,10 @@ var readOnlyStoreOps = map[StoreOp]bool{
 	StorePendingListForOwnerInEnvironment:    true,
 	StorePendingListMarkers:                  true,
 	StorePendingCountForProjectExcludingCell: true,
+	StoreValuesPayloadBytesForProject:        true,
+	StoreSnapshotsPayloadBytesForProject:     true,
+	StoreValuesInstancePayloadByProject:      true,
+	StoreSnapshotsInstancePayloadByProject:   true,
 	StoreSnapshotsLatest:                     true,
 	StoreSnapshotsAtRevision:                 true,
 	StoreSnapshotsList:                       true,
@@ -2023,6 +2036,11 @@ var operations = map[Operation]opSpec{
 			StoreAdaptersEnqueuePublished:             true,
 			StoreKeysAssertActiveDEKVersion:           true,
 			StoreAuditTenantInsert:                    true,
+			// Per-project storage high-water (#185): the two byte sums read
+			// before the project's payload advances, to refuse a publish into a
+			// project already at the 4 GiB high-water.
+			StoreValuesPayloadBytesForProject:    true,
+			StoreSnapshotsPayloadBytesForProject: true,
 		},
 		events: []audit.EventType{
 			audit.EventRevisionPublished,
@@ -2744,6 +2762,10 @@ var operations = map[Operation]opSpec{
 		storeOps: map[StoreOp]bool{
 			StoreRetentionLastSuccess: true,
 			StoreAuditInstanceInsert:  true,
+			// Per-project storage high-water (#185): the operator health read
+			// also reports the instance's peak stored project, for the 1 GiB warn.
+			StoreValuesInstancePayloadByProject:    true,
+			StoreSnapshotsInstancePayloadByProject: true,
 		},
 		events: []audit.EventType{audit.EventRetentionHealthRead},
 	},
@@ -3508,6 +3530,11 @@ var systemSites = map[SystemSite]map[StoreOp]bool{
 		StoreAuditInstanceInsert: true,
 		// The hourly GC also prunes expired, unapplied definitions plans (#70).
 		StoreDefinitionsPlanPrune: true,
+		// The unauthenticated /metrics scrape rides scheduler authority to read
+		// the same operational storage high-water the audited health read serves
+		// (#185): a shared door, like the retention health read beside it.
+		StoreValuesInstancePayloadByProject:    true,
+		StoreSnapshotsInstancePayloadByProject: true,
 	},
 }
 

@@ -2,10 +2,15 @@ import { useEffect, useState } from 'react';
 import { generatePath, matchPath, NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 
 import { useLogout, useOrgs, type WhoAmI } from '../api/session.ts';
-import { retentionBanner, useRetentionHealth } from '../api/retention.ts';
+import { retentionBanner, storageBanner, useRetentionHealth } from '../api/retention.ts';
 import { effectiveTheme, prefersDark, useThemeChoice, type Theme } from '../app/theme.ts';
 import { needsOrg, SECTIONS, SURFACES, surfaceById, type Surface } from '../app/navigation.ts';
 import { StepUpBanner } from './StepUpBanner.tsx';
+
+/** Human-readable GiB for the storage high-water banner. */
+function formatGiB(bytes: number): string {
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GiB`;
+}
 
 /**
  * The application chrome skeleton (prototype/app-chrome iteration 15, sidebar
@@ -60,6 +65,7 @@ export function Shell({ session }: { session: WhoAmI }) {
     routeOrgId !== '' ? routeOrgId : fallbackOrg === undefined ? '' : fallbackOrg.id;
   const activeOrgName = items.find((org) => org.id === activeOrgId)?.name ?? activeOrgId;
   const pruneWarning = retentionBanner(retentionHealth.data, retentionHealth.isError);
+  const storageWarning = storageBanner(retentionHealth.data);
 
   /**
    * chooseOrg is what a rail circle does. Setting the state is only half of
@@ -205,6 +211,18 @@ export function Shell({ session }: { session: WhoAmI }) {
                   — retention bounds are not being enforced.
                 </>
               )}
+            </span>
+          </p>
+        ) : null}
+        {storageWarning !== null ? (
+          <p className="retention-warning" role="alert">
+            <span className="alert__glyph" aria-hidden="true">
+              !
+            </span>
+            <span>
+              A project has reached {formatGiB(storageWarning.peakProjectBytes)} of stored payload —
+              new publishes are refused at 4 GiB. Lower the project&apos;s retention window or
+              release pinned revisions to reclaim space.
             </span>
           </p>
         ) : null}

@@ -105,7 +105,7 @@ var Registry = []Bound{
 	{"Open plans per project", "ops-spec §8", "domain.ErrLimitExceeded (MaxOpenPlansPerProject)", "isolation definitions_e2e", StatusEnforced},
 	{"Pins quota per project", "ops-spec §8", "invalidDetail (PinQuota)", "conformance revisions_test", StatusEnforced},
 	{"Grants per org", "ops-spec §8", "domain.ErrLimitExceeded (MaxGrantsPerOrg)", "isolation.TestGrantPerOrgCap", StatusEnforced},
-	{"Per-project storage high-water (warn 1 GiB / refuse 4 GiB)", "ops-spec §8 (§141)", "publish refusal + doctor warn + metric + UI banner", "ENFORCEMENT-PENDING: the publish path EXISTS (internal/service/publish.go), but the refusal needs a per-project payload-byte accounting mechanism (SUM over value_entries+snapshot_entries) + a project-scoped store proof action + the 1 GiB doctor/metric surface — net-new infrastructure the v1.0 no-scope-expansion milestone defers. HUMAN-DISPOSITION -> issue #185.", StatusPending},
+	{"Per-project storage high-water (warn 1 GiB / refuse 4 GiB)", "ops-spec §8 (§141)", "domain.ErrLimitExceeded (MaxProjectStorageBytes) at publish + doctor/metric/UI-banner warn (ProjectStorageWarnBytes)", "isolation.TestProjectStorageHighWater", StatusEnforced},
 	{"Schema-revision rate 60/h per project", "ops-spec §8 (§151)", "loud rate-limit refusal", "ENFORCEMENT-PENDING: the schema-mutation path EXISTS, but the refusal needs a per-principal windowed rate-limit mechanism (the §179 expensive-path budget layer) that is not yet built anywhere. HUMAN-DISPOSITION -> issue #186.", StatusPending},
 
 	// §9 encryption.
@@ -200,6 +200,9 @@ func TestReconciledBoundsMatchOpsSpecValues(t *testing.T) {
 		{"store.AuditMaxPageSize", store.AuditMaxPageSize, 1000},
 		// §9 reencrypt chunk bound, enforced once the walk shipped (#187 / #192).
 		{"service.ReencryptChunkSize", service.ReencryptChunkSize, 100},
+		// Per-project storage high-water (#185).
+		{"service.MaxProjectStorageBytes", service.MaxProjectStorageBytes, 4 << 30},
+		{"service.ProjectStorageWarnBytes", service.ProjectStorageWarnBytes, 1 << 30},
 		// Already-conformant bounds, pinned so they cannot drift unnoticed.
 		{"schema.MaxKeysPerProject", schema.MaxKeysPerProject, 1000},
 		{"schema.MaxKeyGroupsPerProject", schema.MaxKeyGroupsPerProject, 100},

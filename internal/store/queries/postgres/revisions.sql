@@ -273,3 +273,22 @@ ORDER BY id LIMIT sqlc.arg(page_limit);
 UPDATE pending_changes SET ciphertext = sqlc.arg(new_ciphertext)
 WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id)
   AND id = sqlc.arg(id) AND ciphertext = sqlc.arg(old_ciphertext);
+
+-- SumSnapshotPayloadForProject totals the ciphertext bytes of a project's
+-- published snapshot entries across every environment and revision. Paired with
+-- SumValuePayloadForProject, it is the other half of the per-project storage
+-- high-water accounting (ops-spec section 8 / section 141). Fully chain-scoped,
+-- no annotation.
+-- name: SumSnapshotPayloadForProject :one
+SELECT COALESCE(SUM(OCTET_LENGTH(ciphertext)), 0)::bigint FROM snapshot_entries
+WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id);
+
+-- SumSnapshotPayloadByProject groups the published snapshot-entry ciphertext
+-- bytes by owning project across the whole instance -- the operator storage
+-- surface (doctor warn, metric). Cross-tenant by definition, so it is annotated
+-- instance-scoped and content-pinned.
+-- hikyo:instance-scoped
+-- name: SumSnapshotPayloadByProject :many
+SELECT org_id, project_id, COALESCE(SUM(OCTET_LENGTH(ciphertext)), 0)::bigint AS bytes
+FROM snapshot_entries
+GROUP BY org_id, project_id;

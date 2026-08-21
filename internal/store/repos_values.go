@@ -168,6 +168,34 @@ func (r sqliteValues) ClearKey(ctx context.Context, p authz.Proof, keyID string)
 	return n, constraint(err)
 }
 
+func (r sqliteValues) PayloadBytesForProject(ctx context.Context, p authz.Proof) (int64, error) {
+	chain, err := authz.Verify(p, authz.StoreValuesPayloadBytesForProject, r.tok)
+	if err != nil {
+		return 0, err
+	}
+	return r.q.SumValuePayloadForProject(ctx, sqlitegen.SumValuePayloadForProjectParams{
+		OrgID:     string(chain.Org),
+		ProjectID: string(chain.Project),
+	})
+}
+
+func (r sqliteValues) InstancePayloadByProject(ctx context.Context, p authz.Proof) ([]ProjectPayloadBytes, error) {
+	// No chain: the proof is instance-scope and addresses no tenant, which is
+	// why the statement carries no conjunct and is annotated instance-scoped.
+	if _, err := authz.Verify(p, authz.StoreValuesInstancePayloadByProject, r.tok); err != nil {
+		return nil, err
+	}
+	rows, err := r.q.SumValuePayloadByProject(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ProjectPayloadBytes, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, ProjectPayloadBytes{OrgID: row.OrgID, ProjectID: row.ProjectID, Bytes: row.Bytes})
+	}
+	return out, nil
+}
+
 func (r sqliteValues) Put(ctx context.Context, p authz.Proof, entry NewValueEntry) error {
 	chain, err := authz.Verify(p, authz.StoreValuesPut, r.tok)
 	if err != nil {
@@ -385,6 +413,32 @@ func (r pgValues) ClearKey(ctx context.Context, p authz.Proof, keyID string) (in
 		KeyID:          keyID,
 	})
 	return n, constraint(err)
+}
+
+func (r pgValues) PayloadBytesForProject(ctx context.Context, p authz.Proof) (int64, error) {
+	chain, err := authz.Verify(p, authz.StoreValuesPayloadBytesForProject, r.tok)
+	if err != nil {
+		return 0, err
+	}
+	return r.q.SumValuePayloadForProject(ctx, pggen.SumValuePayloadForProjectParams{
+		ChainOrgID:     string(chain.Org),
+		ChainProjectID: string(chain.Project),
+	})
+}
+
+func (r pgValues) InstancePayloadByProject(ctx context.Context, p authz.Proof) ([]ProjectPayloadBytes, error) {
+	if _, err := authz.Verify(p, authz.StoreValuesInstancePayloadByProject, r.tok); err != nil {
+		return nil, err
+	}
+	rows, err := r.q.SumValuePayloadByProject(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ProjectPayloadBytes, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, ProjectPayloadBytes{OrgID: row.OrgID, ProjectID: row.ProjectID, Bytes: row.Bytes})
+	}
+	return out, nil
 }
 
 func (r pgValues) Put(ctx context.Context, p authz.Proof, entry NewValueEntry) error {

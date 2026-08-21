@@ -115,12 +115,20 @@ func New(ready ReadyChecker, a *API, ui fs.FS) http.Handler {
 		if health.Stale {
 			stale = 1
 		}
+		storageWarn := 0
+		if health.StorageWarn {
+			storageWarn = 1
+		}
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 		w.WriteHeader(http.StatusOK)
 		_, _ = fmt.Fprintf(w, "# TYPE hikyo_last_prune_success_timestamp_seconds gauge\n"+
 			"hikyo_last_prune_success_timestamp_seconds %d\n"+
 			"# TYPE hikyo_prune_stale gauge\n"+
-			"hikyo_prune_stale %d\n", last, stale)
+			"hikyo_prune_stale %d\n"+
+			"# TYPE hikyo_project_storage_peak_bytes gauge\n"+
+			"hikyo_project_storage_peak_bytes %d\n"+
+			"# TYPE hikyo_project_storage_warn gauge\n"+
+			"hikyo_project_storage_warn %d\n", last, stale, health.PeakProjectBytes, storageWarn)
 	})
 
 	if a != nil {

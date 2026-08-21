@@ -245,6 +245,14 @@ type SnapshotReader interface {
 	// plan/apply value-snapshot pin (#70). Environments with no snapshot are
 	// absent from the map (revision 0).
 	ProjectRevisions(ctx context.Context, p authz.Proof) (map[string]int64, error)
+	// PayloadBytesForProject sums the ciphertext bytes of the proof's project's
+	// published snapshot entries across every environment and revision — the
+	// other half of the per-project storage high-water accounting (#185).
+	PayloadBytesForProject(ctx context.Context, p authz.Proof) (int64, error)
+	// InstancePayloadByProject sums published snapshot-entry ciphertext bytes
+	// grouped by owning project across the whole instance — the operator storage
+	// surface (doctor warn, metric). Instance-scoped, cross-tenant by definition.
+	InstancePayloadByProject(ctx context.Context, p authz.Proof) ([]ProjectPayloadBytes, error)
 }
 
 // SnapshotRepo is the full published-state aggregate. There is no update and

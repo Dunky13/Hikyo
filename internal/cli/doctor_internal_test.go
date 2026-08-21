@@ -17,14 +17,38 @@ func TestDoctorResultsUseServerWarningsWithoutRecalculation(t *testing.T) {
 			Message: "server message", EffectiveAt: effectiveAt,
 		}},
 	}}}, apigen.RetentionHealth{LastPruneSuccess: &lastPrune, Stale: false, StaleAfterSeconds: 86400}, effectiveAt)
-	if result.Status != "error" || len(result.Findings) != 2 {
+	// Findings: [0] retention-prune, [1] project-storage, [2] the provider error.
+	if result.Status != "error" || len(result.Findings) != 3 {
 		t.Fatalf("doctor result = %#v", result)
 	}
-	if got := result.Findings[1]; got.Provider != "corp" || got.Code != "metadata_expired" || got.Message != "server message" {
+	if got := result.Findings[2]; got.Provider != "corp" || got.Code != "metadata_expired" || got.Message != "server message" {
 		t.Fatalf("doctor finding = %#v", got)
 	}
-	if len(rows) != 2 || rows[1][4] != "server message" {
+	if len(rows) != 3 || rows[2][4] != "server message" {
 		t.Fatalf("doctor rows = %#v", rows)
+	}
+}
+
+func TestDoctorStorageFinding(t *testing.T) {
+	const gib = 1 << 30
+	tests := []struct {
+		name     string
+		health   apigen.RetentionHealth
+		severity string
+		message  string
+	}{
+		{"empty", apigen.RetentionHealth{PeakProjectBytes: 0, StorageWarn: false}, "ok", "peak project holds 0.0 MiB"},
+		{"under", apigen.RetentionHealth{PeakProjectBytes: 512 << 20, StorageWarn: false}, "ok", "peak project holds 512.0 MiB"},
+		{"warn", apigen.RetentionHealth{PeakProjectBytes: 3 * gib / 2, StorageWarn: true}, "warn",
+			"peak project holds 1.50 GiB, at or over the 1 GiB warn (4 GiB refuses new publishes)"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := doctorStorageFinding(tc.health)
+			if got.Severity != tc.severity || got.Message != tc.message {
+				t.Fatalf("finding = %#v", got)
+			}
+		})
 	}
 }
 
