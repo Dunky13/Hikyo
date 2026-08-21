@@ -22,6 +22,22 @@ const contentTypes = new Map([
 const server = createServer(async (request, response) => {
   try {
     const pathname = decodeURIComponent(new URL(request.url ?? '/', 'http://localhost').pathname);
+    if (!pathname.endsWith('/') && extname(pathname) === '') {
+      const directoryIndexPath = resolve(dist, `.${pathname}/index.html`);
+      if (!directoryIndexPath.startsWith(`${dist}${sep}`)) {
+        response.writeHead(403).end('Forbidden');
+        return;
+      }
+      try {
+        await readFile(directoryIndexPath);
+        response.writeHead(301, { Location: `${pathname}/` }).end();
+        return;
+      } catch (error) {
+        const code = error instanceof Error && 'code' in error ? error.code : undefined;
+        if (code !== 'ENOENT') throw error;
+      }
+    }
+
     const assetPath = pathname.endsWith('/') ? `${pathname}index.html` : pathname;
     const filePath = resolve(dist, `.${assetPath}`);
     if (!filePath.startsWith(`${dist}${sep}`)) {
@@ -93,6 +109,16 @@ try {
       }, { once: true });
     });
   });
+
+  const slashlessDocsResponse = await page.goto(`${origin}/docs/getting-started`, {
+    waitUntil: 'networkidle',
+  });
+  assert.ok(slashlessDocsResponse?.ok(), 'slashless docs route did not load successfully');
+  assert.equal(
+    await page.title(),
+    'Getting started — Hikyo',
+    'service worker navigation fallback replaced the slashless docs route',
+  );
 
   const prototypeResponse = await page.goto(`${origin}/prototypes/`, {
     waitUntil: 'networkidle',
