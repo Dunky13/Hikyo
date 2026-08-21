@@ -14,7 +14,13 @@ func (a *API) StartCLIReauth(ctx context.Context, req apigen.StartCLIReauthReque
 	for _, environmentID := range req.Body.EnvironmentIds {
 		environments = append(environments, string(environmentID))
 	}
-	result, err := a.Auth.StartCLIReauth(ctx, bearer(ctx), string(req.Body.Purpose), string(req.Body.Operation), environments, req.Body.PkceChallenge, req.Body.RedirectUri)
+	var keyIDs []string
+	if req.Body.KeyIds != nil {
+		for _, keyID := range *req.Body.KeyIds {
+			keyIDs = append(keyIDs, string(keyID))
+		}
+	}
+	result, err := a.Auth.StartCLIReauth(ctx, bearer(ctx), string(req.Body.Purpose), string(req.Body.Operation), environments, keyIDs, req.Body.PkceChallenge, req.Body.RedirectUri)
 	if err != nil {
 		return nil, err
 	}
@@ -33,7 +39,11 @@ func (a *API) ShowCLIReauthTransaction(ctx context.Context, req apigen.ShowCLIRe
 	for _, environment := range result.Environments {
 		environments = append(environments, apigen.CLIReauthEnvironmentPolicy{EnvironmentId: apigen.ID(environment.EnvironmentID), EffectiveWindowSeconds: environment.EffectiveWindowSeconds, RequiresWebauthn: environment.RequiresWebAuthn})
 	}
-	return apigen.ShowCLIReauthTransaction200JSONResponse{State: result.State, Operation: apigen.CLIReauthTransactionOperation(result.Operation), Environments: environments, RedirectUri: result.RedirectURI, ExpiresAt: result.ExpiresAt}, nil
+	keyIDs := make([]apigen.ID, 0, len(result.KeyIDs))
+	for _, keyID := range result.KeyIDs {
+		keyIDs = append(keyIDs, apigen.ID(keyID))
+	}
+	return apigen.ShowCLIReauthTransaction200JSONResponse{State: result.State, Purpose: apigen.CLIReauthTransactionPurpose(result.Purpose), Operation: apigen.CLIReauthTransactionOperation(result.Operation), Environments: environments, KeyIds: keyIDs, RedirectUri: result.RedirectURI, ExpiresAt: result.ExpiresAt}, nil
 }
 
 func (a *API) ApproveCLIReauth(ctx context.Context, req apigen.ApproveCLIReauthRequestObject) (apigen.ApproveCLIReauthResponseObject, error) {

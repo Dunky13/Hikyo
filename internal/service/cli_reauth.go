@@ -35,9 +35,12 @@ type CLIReauthEnvironmentPolicy struct {
 }
 
 type CLIReauthTransaction struct {
-	State, Operation, RedirectURI string
-	Environments                  []CLIReauthEnvironmentPolicy
-	ExpiresAt                     time.Time
+	State, Purpose, Operation, RedirectURI string
+	Environments                           []CLIReauthEnvironmentPolicy
+	// KeyIDs is the enumerated unit of a disclosure purpose (reveal, copy):
+	// exactly the keys the one browser decision will cover. Empty for adapter.
+	KeyIDs    []string
+	ExpiresAt time.Time
 }
 
 type CLIReauthApproval struct {
@@ -52,6 +55,37 @@ type cliApprovedWindow struct {
 	AuthenticatedAt time.Time `json:"authenticated_at"`
 	WindowExpiresAt time.Time `json:"window_expires_at"`
 	HardExpiresAt   time.Time `json:"hard_expires_at"`
+	// The binding the browser's window carried, reproduced verbatim on the
+	// CLI's window at redemption: an adapter window is bound to (purpose,
+	// operation, environment set); a disclosure window opened by a sliding
+	// TOTP ceremony is unbound, and a single-decision passkey window is bound
+	// through its ceremony's pinned (purpose, environment, key set) binding,
+	// which the ceremony id carries.
+	BoundPurpose        string `json:"bound_purpose,omitempty"`
+	BoundOperation      string `json:"bound_operation,omitempty"`
+	BoundEnvironmentSet string `json:"bound_environment_set,omitempty"`
+}
+
+// cliReauthPurposeOperation is the closed (purpose, operation) table the
+// handoff admits. A disclosure purpose maps to the one operation its
+// ceremony binds (ceremony.go operationForReauthPurpose); the adapter purpose
+// admits the four adapter operations.
+func cliReauthPurposeOperation(purpose ReauthPurpose, operation authz.Operation) bool {
+	switch purpose {
+	case PurposeAdapter:
+		return adapterReauthOperation(operation)
+	case PurposeReveal:
+		return operation == authz.OpValueReveal
+	case PurposeCopy:
+		return operation == authz.OpValueCopySource
+	}
+	return false
+}
+
+// cliReauthDisclosure reports whether the handoff carries a disclosure
+// purpose: one the browser satisfies with the enumerated-key-set ceremony.
+func cliReauthDisclosure(purpose string) bool {
+	return purpose == string(PurposeReveal) || purpose == string(PurposeCopy)
 }
 
 type CLIReauthRedeemed struct {
@@ -110,14 +144,27 @@ func (s *Auth) rejectCLIReauthRequest(ctx context.Context, phase string, failure
 	})
 }
 
-func (s *Auth) StartCLIReauth(ctx context.Context, presented, purpose, operation string, environmentIDs []string, pkceChallenge, redirectURI string) (CLIReauthStart, error) {
-	if purpose != string(PurposeAdapter) || !adapterReauthOperation(authz.Operation(operation)) || !validPKCEChallenge(pkceChallenge) || !validCLILoopbackRedirect(redirectURI) {
-		failure := fmt.Errorf("%w: adapter purpose, operation, environments and PKCE S256 are required", domain.ErrInvalid)
+func (s *Auth) StartCLIReauth(ctx context.Context, presented, purpose, operation string, environmentIDs, keyIDs []string, pkceChallenge, redirectURI string) (CLIReauthStart, error) {
+	if !cliReauthPurposeOperation(ReauthPurpose(purpose), authz.Operation(operation)) || !validPKCEChallenge(pkceChallenge) || !validCLILoopbackRedirect(redirectURI) {
+		failure := fmt.Errorf("%w: a known purpose with its operation, environments and PKCE S256 are required", domain.ErrInvalid)
 		return CLIReauthStart{}, s.rejectCLIReauthRequest(ctx, "start", failure)
 	}
 	environmentIDs = adapterEnvironmentSet(environmentIDs)
 	if len(environmentIDs) == 0 {
 		return CLIReauthStart{}, s.rejectCLIReauthRequest(ctx, "start", ErrReauthUnitMismatch)
+	}
+	// A disclosure handoff carries its enumerated unit; an adapter handoff
+	// carries none. The ceremony the browser runs binds exactly this set, and
+	// the CLI's disclosure consumes exactly this set, so a handoff without one
+	// would be a window any later disclosure could spend.
+	keySet := CanonicalKeySet(keyIDs)
+	if cliReauthDisclosure(purpose) == (keySet == "") {
+		return CLIReauthStart{}, s.rejectCLIReauthRequest(ctx, "start", ErrReauthUnitMismatch)
+	}
+	for _, keyID := range keyIDs {
+		if keyID == "" || strings.ContainsAny(keyID, "\n") {
+			return CLIReauthStart{}, s.rejectCLIReauthRequest(ctx, "start", ErrReauthUnitMismatch)
+		}
 	}
 	id, err := newID("crh")
 	if err != nil {
@@ -143,15 +190,14 @@ func (s *Auth) StartCLIReauth(ctx context.Context, presented, purpose, operation
 			if err != nil {
 				return captureCLIReauthFailure(ctx, az, "start", detail, "unauthorized", err)
 			}
-			project := domain.Scope{Org: domain.OrgID(chain.Org), Project: domain.ProjectID(chain.Project)}
-			if _, err := az.Authorize(ctx, caller, authz.Operation(operation), project); err != nil {
-				return captureCLIReauthFailure(ctx, az, "start", detail, "unauthorized", fmt.Errorf("authorize %s for %s: %w", operation, environmentID, err))
+			if err := cliReauthAuthorizeStart(ctx, az, caller, purpose, operation, chain, environmentID); err != nil {
+				return captureCLIReauthFailure(ctx, az, "start", detail, "unauthorized", err)
 			}
-			// The reveal conjunct is re-evaluated by the adapter operation after
-			// redemption. Authorizing adapter.push here would apply its MFA floor
-			// before this very ceremony has had a chance to elevate the CLI session.
+			// The reveal conjunct is re-evaluated by the real operation after
+			// redemption. Authorizing it here would apply its MFA floor before
+			// this very ceremony has had a chance to elevate the CLI session.
 		}
-		if err := az.CreateCLIReauthHandoff(ctx, authz.NewCLIReauthHandoff{ID: id, StateVerifier: verifier, SessionID: caller.SessionID, PrincipalID: caller.Principal, Operation: operation, EnvironmentSet: CanonicalEnvironmentSet(environmentIDs), PKCEChallenge: pkceChallenge, RedirectURI: redirectURI, CreatedAt: now, ExpiresAt: expires}); err != nil {
+		if err := az.CreateCLIReauthHandoff(ctx, authz.NewCLIReauthHandoff{ID: id, StateVerifier: verifier, SessionID: caller.SessionID, PrincipalID: caller.Principal, Purpose: purpose, Operation: operation, EnvironmentSet: CanonicalEnvironmentSet(environmentIDs), KeySet: keySet, PKCEChallenge: pkceChallenge, RedirectURI: redirectURI, CreatedAt: now, ExpiresAt: expires}); err != nil {
 			return err
 		}
 		return recordCLIReauthSuccess(ctx, az, "start", detail)
@@ -160,6 +206,29 @@ func (s *Auth) StartCLIReauth(ctx context.Context, presented, purpose, operation
 		return CLIReauthStart{}, err
 	}
 	return CLIReauthStart{State: state, ExpiresAt: expires}, nil
+}
+
+// cliReauthAuthorizeStart is the pre-ceremony authorization of a handoff:
+// what the initiating CLI session must already hold BEFORE the browser
+// elevates it. An adapter handoff authorizes the adapter operation at project
+// depth (its reveal conjunct is dynamic and re-evaluated after redemption). A
+// disclosure handoff authorizes `read` over the environment it will disclose
+// in: a principal who cannot read the environment is not offered a ceremony,
+// while the MFA-mandatory `reveal` conjunct is judged by the disclosure itself
+// once the session carries the factor the ceremony adds.
+func cliReauthAuthorizeStart(ctx context.Context, az *authz.TxAuthorizer, caller authz.Identity, purpose, operation string, chain authz.EnvironmentChain, environmentID string) error {
+	if cliReauthDisclosure(purpose) {
+		env := domain.Scope{Org: domain.OrgID(chain.Org), Project: domain.ProjectID(chain.Project), Env: domain.EnvID(environmentID)}
+		if _, err := az.Authorize(ctx, caller, authz.OpValueList, env); err != nil {
+			return fmt.Errorf("authorize read for %s: %w", environmentID, err)
+		}
+		return nil
+	}
+	project := domain.Scope{Org: domain.OrgID(chain.Org), Project: domain.ProjectID(chain.Project)}
+	if _, err := az.Authorize(ctx, caller, authz.Operation(operation), project); err != nil {
+		return fmt.Errorf("authorize %s for %s: %w", operation, environmentID, err)
+	}
+	return nil
 }
 
 func validCLILoopbackRedirect(raw string) bool {
@@ -202,13 +271,16 @@ func (s *Auth) CLIReauthTransaction(ctx context.Context, actor Actor, state stri
 		if h.PrincipalID != caller.Principal {
 			return captureCLIReauthFailure(ctx, az, "inspect", detail, "unauthorized", ErrCLIReauthInvalid)
 		}
-		out = CLIReauthTransaction{State: state, Operation: h.Operation, RedirectURI: h.RedirectURI, ExpiresAt: h.ExpiresAt, Environments: []CLIReauthEnvironmentPolicy{}}
+		out = CLIReauthTransaction{State: state, Purpose: h.Purpose, Operation: h.Operation, RedirectURI: h.RedirectURI, ExpiresAt: h.ExpiresAt, Environments: []CLIReauthEnvironmentPolicy{}, KeyIDs: []string{}}
+		if h.KeySet != "" {
+			out.KeyIDs = strings.Split(h.KeySet, "\n")
+		}
 		for _, environmentID := range strings.Split(h.EnvironmentSet, "\n") {
 			chain, err := az.EnvironmentChainByID(ctx, environmentID)
 			if err != nil {
 				return captureCLIReauthFailure(ctx, az, "inspect", detail, "unauthorized", err)
 			}
-			if _, err := az.Authorize(ctx, caller, authz.Operation(h.Operation), domain.Scope{Org: domain.OrgID(chain.Org), Project: domain.ProjectID(chain.Project)}); err != nil {
+			if err := cliReauthAuthorizeStart(ctx, az, caller, h.Purpose, h.Operation, chain, environmentID); err != nil {
 				return captureCLIReauthFailure(ctx, az, "inspect", detail, "unauthorized", err)
 			}
 			effective, err := s.effectiveReauthWindow(ctx, az, environmentID)
@@ -251,7 +323,7 @@ func (s *Auth) ApproveCLIReauth(ctx context.Context, actor Actor, state string) 
 			if err != nil {
 				return captureCLIReauthFailure(ctx, az, "approve", detail, "reauth_required", ErrReauthRequired)
 			}
-			if w.BoundPurpose != string(PurposeAdapter) || w.BoundOperation != h.Operation || w.BoundEnvironmentSet != h.EnvironmentSet || !now.Before(w.WindowExpiresAt) || !now.Before(w.HardExpiresAt) {
+			if !now.Before(w.WindowExpiresAt) || !now.Before(w.HardExpiresAt) {
 				return captureCLIReauthFailure(ctx, az, "approve", detail, "reauth_required", ErrReauthRequired)
 			}
 			effective, err := s.effectiveReauthWindow(ctx, az, environmentID)
@@ -259,6 +331,31 @@ func (s *Auth) ApproveCLIReauth(ctx context.Context, actor Actor, state string) 
 				return err
 			}
 			if effective <= 0 && (w.FactorClass != "webauthn" || !w.SingleDecision) {
+				return captureCLIReauthFailure(ctx, az, "approve", detail, "reauth_required", ErrReauthRequired)
+			}
+			if cliReauthDisclosure(h.Purpose) {
+				// The browser ran the disclosure ceremony: a single-decision
+				// passkey window carries its ceremony's pinned (purpose,
+				// environment, key set) binding, which must equal the handoff's
+				// unit byte-exact; a sliding window is unbound by construction and
+				// is accepted as the environment-wide consent it is.
+				if w.BoundPurpose != "" || w.BoundEnvironmentSet != "" {
+					return captureCLIReauthFailure(ctx, az, "approve", detail, "reauth_required", ErrReauthUnitMismatch)
+				}
+				if w.SingleDecision {
+					ceremony, err := az.WebAuthnCeremonyByID(ctx, w.CeremonyID)
+					if err != nil {
+						return err
+					}
+					want, err := operationBinding(ReauthPurpose(h.Purpose), environmentID, strings.Split(h.KeySet, "\n"))
+					if err != nil {
+						return err
+					}
+					if ceremony.OperationBinding != want {
+						return captureCLIReauthFailure(ctx, az, "approve", detail, "reauth_required", ErrReauthUnitMismatch)
+					}
+				}
+			} else if w.BoundPurpose != string(PurposeAdapter) || w.BoundOperation != h.Operation || w.BoundEnvironmentSet != h.EnvironmentSet {
 				return captureCLIReauthFailure(ctx, az, "approve", detail, "reauth_required", ErrReauthRequired)
 			}
 			if w.SingleDecision {
@@ -270,7 +367,8 @@ func (s *Auth) ApproveCLIReauth(ctx context.Context, actor Actor, state string) 
 					return captureCLIReauthFailure(ctx, az, "approve", detail, "already_consumed", ErrReauthWindowSpent)
 				}
 			}
-			windows = append(windows, cliApprovedWindow{EnvironmentID: environmentID, CeremonyID: w.CeremonyID, FactorClass: w.FactorClass, SingleDecision: w.SingleDecision, AuthenticatedAt: w.AuthenticatedAt, WindowExpiresAt: w.WindowExpiresAt, HardExpiresAt: w.HardExpiresAt})
+			windows = append(windows, cliApprovedWindow{EnvironmentID: environmentID, CeremonyID: w.CeremonyID, FactorClass: w.FactorClass, SingleDecision: w.SingleDecision, AuthenticatedAt: w.AuthenticatedAt, WindowExpiresAt: w.WindowExpiresAt, HardExpiresAt: w.HardExpiresAt,
+				BoundPurpose: w.BoundPurpose, BoundOperation: w.BoundOperation, BoundEnvironmentSet: w.BoundEnvironmentSet})
 		}
 		windowJSON, err := json.Marshal(windows)
 		if err != nil {
@@ -356,7 +454,11 @@ func (s *Auth) RedeemCLIReauth(ctx context.Context, code, pkceVerifier string) (
 			if err != nil {
 				return err
 			}
-			if err := az.OpenReauthWindow(ctx, authz.NewReauthWindow{ID: id, SessionID: caller.SessionID, EnvironmentID: approved.EnvironmentID, CeremonyID: approved.CeremonyID, FactorClass: approved.FactorClass, SingleDecision: approved.SingleDecision, AuthenticatedAt: approved.AuthenticatedAt, WindowExpiresAt: approved.WindowExpiresAt, HardExpiresAt: approved.HardExpiresAt, CredentialEpoch: epoch, CreatedAt: now, BoundPurpose: string(PurposeAdapter), BoundOperation: h.Operation, BoundEnvironmentSet: h.EnvironmentSet}); err != nil {
+			// The CLI's window reproduces the browser window's binding exactly:
+			// an adapter share stays bound to its (purpose, operation, set); a
+			// disclosure window stays bound through its ceremony id alone, so
+			// the CLI's disclosure is matched against the same pinned unit.
+			if err := az.OpenReauthWindow(ctx, authz.NewReauthWindow{ID: id, SessionID: caller.SessionID, EnvironmentID: approved.EnvironmentID, CeremonyID: approved.CeremonyID, FactorClass: approved.FactorClass, SingleDecision: approved.SingleDecision, AuthenticatedAt: approved.AuthenticatedAt, WindowExpiresAt: approved.WindowExpiresAt, HardExpiresAt: approved.HardExpiresAt, CredentialEpoch: epoch, CreatedAt: now, BoundPurpose: approved.BoundPurpose, BoundOperation: approved.BoundOperation, BoundEnvironmentSet: approved.BoundEnvironmentSet}); err != nil {
 				return err
 			}
 			out.Windows = append(out.Windows, ReauthResult{SessionID: caller.SessionID, EnvironmentID: approved.EnvironmentID, SingleDecision: approved.SingleDecision, WindowExpires: approved.WindowExpiresAt})

@@ -84,13 +84,15 @@ The output path must not already exist. Consume it, then remove it through your
 normal secure-file procedure.
 
 A disclosure needs a reauthentication window over the environment. When none is
-live the CLI prompts for an authenticator code at the terminal and opens one
-(the session token rotates and is stored). Where the environment's effective
-window is `0` — a protected environment, or an instance that keeps the
-production default `HIKYO_REAUTH_WINDOW_SECONDS=0` — a code cannot open a
-window by design: reveal in the browser with a passkey, or raise the window for
-that environment with `hikyo project-settings set --env <env-id>
---reauth-window-seconds 300`. `--dev` instances default to a 15-minute window.
+live the CLI opens one: where the environment's effective window is above `0`
+it prompts for an authenticator code at the terminal; where it is `0` — a
+protected environment, or an instance that keeps the production default
+`HIKYO_REAUTH_WINDOW_SECONDS=0` — a code cannot bind the decision, so the CLI
+opens the browser to the same purpose-bound passkey ceremony the Values page
+runs, naming exactly the secret keys the command will open, and continues once
+you approve. Either way the session token rotates and is stored. `--dev`
+instances default to a 15-minute window; raise an environment's window with
+`hikyo project-settings set --env <env-id> --reauth-window-seconds 300`.
 
 ## Import an existing `.env`
 

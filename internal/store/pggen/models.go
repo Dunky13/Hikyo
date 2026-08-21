@@ -288,6 +288,8 @@ type CliReauthHandoff struct {
 	CreatedAt       pgtype.Timestamptz
 	ExpiresAt       pgtype.Timestamptz
 	ConsumedAt      pgtype.Timestamptz
+	Purpose         string
+	KeySet          string
 }
 
 type CredentialAuthority struct {

@@ -9,6 +9,8 @@ describe('CLI reauthentication callback binding', () => {
     environments: [
       { environment_id: 'env_one', effective_window_seconds: 0, requires_webauthn: true },
     ],
+    purpose: 'adapter' as const,
+    key_ids: [] as string[],
     redirect_uri: 'http://127.0.0.1:43123/callback',
     expires_at: '2026-08-17T22:10:00Z',
   };

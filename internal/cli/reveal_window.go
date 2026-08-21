@@ -56,18 +56,31 @@ func forbidden(err error) bool {
 	return strings.Contains(msg, "not permitted") || strings.Contains(msg, "reauthenticate over the environments")
 }
 
+// disclosure names what a CLI disclosure is about to do, for the ceremony
+// that may have to precede it: the purpose and the keys per environment.
+type disclosure struct {
+	// purpose is "reveal" or "copy" (service.ReauthPurpose on the wire).
+	purpose string
+	// keys resolves the enumerated unit for one environment: the ids of the
+	// secret keys the act will open there. It is consulted only when a
+	// browser handoff is needed, so the common case costs no extra request.
+	keys func(ctx context.Context, env string) ([]string, error)
+}
+
 // withRevealCeremony runs a disclosure, and on the server's refusal opens the
-// reauthentication window over each named environment (inline TOTP) and runs
-// it exactly once more. The attempt comes first so a live window costs no
-// extra round trip and a config-only copy never prompts.
+// reauthentication window over each named environment and runs it exactly
+// once more: inline TOTP where the environment's window allows it, the
+// browser's purpose-bound passkey ceremony (handoff) where it does not. The
+// attempt comes first so a live window costs no extra round trip and a
+// config-only copy never prompts.
 func withRevealCeremony(ctx context.Context, client *Client, st *State, ios IO, artifact SessionArtifact,
-	projectBase string, envs []string, attempt func() error) error {
+	projectBase string, envs []string, d disclosure, attempt func() error) error {
 	err := attempt()
 	if err == nil || !forbidden(err) {
 		return err
 	}
 	for _, env := range envs {
-		if cerr := ensureRevealWindow(ctx, client, st, ios, &artifact, projectBase, env, err); cerr != nil {
+		if cerr := ensureRevealWindow(ctx, client, st, ios, &artifact, projectBase, env, d, err); cerr != nil {
 			return cerr
 		}
 	}
@@ -80,7 +93,7 @@ func withRevealCeremony(ctx context.Context, client *Client, st *State, ios IO, 
 // `read ∧ reveal` here - the chokepoint's answer is not second-guessed, and a
 // ceremony is never offered to someone the server would refuse anyway.
 func ensureRevealWindow(ctx context.Context, client *Client, st *State, ios IO, artifact *SessionArtifact,
-	projectBase, env string, refusal error) error {
+	projectBase, env string, d disclosure, refusal error) error {
 	var window apigen.RevealWindow
 	if err := client.Do(ctx, http.MethodGet, revealWindowPath(projectBase, env), nil, &window); err != nil {
 		return err
@@ -92,13 +105,26 @@ func ensureRevealWindow(ctx context.Context, client *Client, st *State, ios IO, 
 		return refusal
 	}
 	if window.EffectiveWindowSeconds == 0 || !window.TotpOffered {
+		// The 0-window case: only the browser's purpose-bound, enumerated-key-set
+		// passkey ceremony may open it. Hand off, naming the reason first.
 		why := "its reveal window is 0"
 		if window.Protected {
-			why = "it is a protected environment, so every disclosure takes its own passkey ceremony"
+			why = "it is a protected environment"
 		}
-		return failf(ExitAuth, "a disclosure in %s needs a reauthentication window and %s: "+
-			"reveal it in the browser (passkey), or raise the window with `hikyo project-settings set --env %s --reauth-window-seconds 300` "+
-			"(instance default: HIKYO_REAUTH_WINDOW_SECONDS)", env, why, env)
+		if d.keys == nil || d.purpose == "" || ios.OpenURL == nil {
+			return failf(ExitAuth, "a disclosure in %s needs a reauthentication window and %s: every disclosure there takes its own passkey ceremony in the browser, "+
+				"which this invocation cannot open; reveal it in the browser, or raise the window with `hikyo project-settings set --env %s --reauth-window-seconds 300`", env, why, env)
+		}
+		keyIDs, err := d.keys(ctx, env)
+		if err != nil {
+			return err
+		}
+		operation := "value.reveal"
+		if d.purpose == "copy" {
+			operation = "value.copy-source"
+		}
+		fmt.Fprintf(ios.Stderr, "disclosure in %s: %s, so every disclosure takes its own passkey ceremony. Opening the browser to authorize %d key(s)...\n", env, why, len(keyIDs))
+		return runCLIDisclosureReauth(ctx, client, st, *artifact, d.purpose, operation, env, keyIDs, ios.OpenURL)
 	}
 	code, err := ios.readPassword(fmt.Sprintf(
 		"Disclosure in %s needs a reauthentication window (%ds). Enter the code from your authenticator: ",

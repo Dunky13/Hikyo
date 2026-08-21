@@ -99,7 +99,7 @@ func (q *Queries) ApproveCLIReauthHandoff(ctx context.Context, arg ApproveCLIRea
 }
 
 const cLIReauthHandoffByCode = `-- name: CLIReauthHandoffByCode :one
-SELECT id, state_verifier, code_verifier, session_id, principal_id, operation, environment_set, pkce_challenge, redirect_uri, approved_windows, created_at, expires_at, consumed_at FROM cli_reauth_handoffs WHERE code_verifier = $1
+SELECT id, state_verifier, code_verifier, session_id, principal_id, operation, environment_set, pkce_challenge, redirect_uri, approved_windows, created_at, expires_at, consumed_at, purpose, key_set FROM cli_reauth_handoffs WHERE code_verifier = $1
 `
 
 // hikyo:authn-resolution
@@ -120,12 +120,14 @@ func (q *Queries) CLIReauthHandoffByCode(ctx context.Context, codeVerifier []byt
 		&i.CreatedAt,
 		&i.ExpiresAt,
 		&i.ConsumedAt,
+		&i.Purpose,
+		&i.KeySet,
 	)
 	return i, err
 }
 
 const cLIReauthHandoffByState = `-- name: CLIReauthHandoffByState :one
-SELECT id, state_verifier, code_verifier, session_id, principal_id, operation, environment_set, pkce_challenge, redirect_uri, approved_windows, created_at, expires_at, consumed_at FROM cli_reauth_handoffs WHERE state_verifier = $1
+SELECT id, state_verifier, code_verifier, session_id, principal_id, operation, environment_set, pkce_challenge, redirect_uri, approved_windows, created_at, expires_at, consumed_at, purpose, key_set FROM cli_reauth_handoffs WHERE state_verifier = $1
 `
 
 // hikyo:authn-resolution
@@ -146,6 +148,8 @@ func (q *Queries) CLIReauthHandoffByState(ctx context.Context, stateVerifier []b
 		&i.CreatedAt,
 		&i.ExpiresAt,
 		&i.ConsumedAt,
+		&i.Purpose,
+		&i.KeySet,
 	)
 	return i, err
 }
@@ -1187,8 +1191,8 @@ func (q *Queries) InsertAccount(ctx context.Context, arg InsertAccountParams) er
 }
 
 const insertCLIReauthHandoff = `-- name: InsertCLIReauthHandoff :exec
-INSERT INTO cli_reauth_handoffs (id,state_verifier,session_id,principal_id,operation,environment_set,pkce_challenge,redirect_uri,created_at,expires_at)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+INSERT INTO cli_reauth_handoffs (id,state_verifier,session_id,principal_id,purpose,operation,environment_set,key_set,pkce_challenge,redirect_uri,created_at,expires_at)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
 `
 
 type InsertCLIReauthHandoffParams struct {
@@ -1196,8 +1200,10 @@ type InsertCLIReauthHandoffParams struct {
 	StateVerifier  []byte
 	SessionID      string
 	PrincipalID    string
+	Purpose        string
 	Operation      string
 	EnvironmentSet string
+	KeySet         string
 	PkceChallenge  string
 	RedirectUri    string
 	CreatedAt      pgtype.Timestamptz
@@ -1211,8 +1217,10 @@ func (q *Queries) InsertCLIReauthHandoff(ctx context.Context, arg InsertCLIReaut
 		arg.StateVerifier,
 		arg.SessionID,
 		arg.PrincipalID,
+		arg.Purpose,
 		arg.Operation,
 		arg.EnvironmentSet,
+		arg.KeySet,
 		arg.PkceChallenge,
 		arg.RedirectUri,
 		arg.CreatedAt,

@@ -668,8 +668,8 @@ ORDER BY principals.id;
 
 -- hikyo:authn-resolution
 -- name: InsertCLIReauthHandoff :exec
-INSERT INTO cli_reauth_handoffs (id,state_verifier,session_id,principal_id,operation,environment_set,pkce_challenge,redirect_uri,created_at,expires_at)
-VALUES (?,?,?,?,?,?,?,?,?,?);
+INSERT INTO cli_reauth_handoffs (id,state_verifier,session_id,principal_id,purpose,operation,environment_set,key_set,pkce_challenge,redirect_uri,created_at,expires_at)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?);
 
 -- hikyo:authn-resolution
 -- name: CLIReauthHandoffByState :one

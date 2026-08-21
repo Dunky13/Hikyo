@@ -438,6 +438,8 @@ const (
 	CLIReauthStartRequestOperationAdapterConfigure     CLIReauthStartRequestOperation = "adapter.configure"
 	CLIReauthStartRequestOperationAdapterCredentialSet CLIReauthStartRequestOperation = "adapter.credential-set"
 	CLIReauthStartRequestOperationAdapterSync          CLIReauthStartRequestOperation = "adapter.sync"
+	CLIReauthStartRequestOperationValueCopySource      CLIReauthStartRequestOperation = "value.copy-source"
+	CLIReauthStartRequestOperationValueReveal          CLIReauthStartRequestOperation = "value.reveal"
 )
 
 // Valid indicates whether the value is a known member of the CLIReauthStartRequestOperation enum.
@@ -451,6 +453,10 @@ func (e CLIReauthStartRequestOperation) Valid() bool {
 		return true
 	case CLIReauthStartRequestOperationAdapterSync:
 		return true
+	case CLIReauthStartRequestOperationValueCopySource:
+		return true
+	case CLIReauthStartRequestOperationValueReveal:
+		return true
 	default:
 		return false
 	}
@@ -459,12 +465,18 @@ func (e CLIReauthStartRequestOperation) Valid() bool {
 // Defines values for CLIReauthStartRequestPurpose.
 const (
 	CLIReauthStartRequestPurposeAdapter CLIReauthStartRequestPurpose = "adapter"
+	CLIReauthStartRequestPurposeCopy    CLIReauthStartRequestPurpose = "copy"
+	CLIReauthStartRequestPurposeReveal  CLIReauthStartRequestPurpose = "reveal"
 )
 
 // Valid indicates whether the value is a known member of the CLIReauthStartRequestPurpose enum.
 func (e CLIReauthStartRequestPurpose) Valid() bool {
 	switch e {
 	case CLIReauthStartRequestPurposeAdapter:
+		return true
+	case CLIReauthStartRequestPurposeCopy:
+		return true
+	case CLIReauthStartRequestPurposeReveal:
 		return true
 	default:
 		return false
@@ -477,6 +489,8 @@ const (
 	CLIReauthTransactionOperationAdapterConfigure     CLIReauthTransactionOperation = "adapter.configure"
 	CLIReauthTransactionOperationAdapterCredentialSet CLIReauthTransactionOperation = "adapter.credential-set"
 	CLIReauthTransactionOperationAdapterSync          CLIReauthTransactionOperation = "adapter.sync"
+	CLIReauthTransactionOperationValueCopySource      CLIReauthTransactionOperation = "value.copy-source"
+	CLIReauthTransactionOperationValueReveal          CLIReauthTransactionOperation = "value.reveal"
 )
 
 // Valid indicates whether the value is a known member of the CLIReauthTransactionOperation enum.
@@ -489,6 +503,31 @@ func (e CLIReauthTransactionOperation) Valid() bool {
 	case CLIReauthTransactionOperationAdapterCredentialSet:
 		return true
 	case CLIReauthTransactionOperationAdapterSync:
+		return true
+	case CLIReauthTransactionOperationValueCopySource:
+		return true
+	case CLIReauthTransactionOperationValueReveal:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CLIReauthTransactionPurpose.
+const (
+	CLIReauthTransactionPurposeAdapter CLIReauthTransactionPurpose = "adapter"
+	CLIReauthTransactionPurposeCopy    CLIReauthTransactionPurpose = "copy"
+	CLIReauthTransactionPurposeReveal  CLIReauthTransactionPurpose = "reveal"
+)
+
+// Valid indicates whether the value is a known member of the CLIReauthTransactionPurpose enum.
+func (e CLIReauthTransactionPurpose) Valid() bool {
+	switch e {
+	case CLIReauthTransactionPurposeAdapter:
+		return true
+	case CLIReauthTransactionPurposeCopy:
+		return true
+	case CLIReauthTransactionPurposeReveal:
 		return true
 	default:
 		return false
@@ -2193,12 +2232,18 @@ type CLIReauthStart struct {
 	State     string    `json:"state"`
 }
 
-// CLIReauthStartRequest defines model for CLIReauthStartRequest.
+// CLIReauthStartRequest `adapter` carries an adapter-routing decision over an environment set.
+// `reveal` and `copy` carry a DISCLOSURE: the browser runs the same
+// purpose-bound, enumerated-key-set ceremony the UI runs, so `key_ids`
+// is required and names exactly the keys the one decision covers.
 type CLIReauthStartRequest struct {
-	EnvironmentIds []ID                           `json:"environment_ids"`
-	Operation      CLIReauthStartRequestOperation `json:"operation"`
-	PkceChallenge  string                         `json:"pkce_challenge"`
-	Purpose        CLIReauthStartRequestPurpose   `json:"purpose"`
+	EnvironmentIds []ID `json:"environment_ids"`
+
+	// KeyIds The enumerated unit of a disclosure purpose; absent or empty for `adapter`.
+	KeyIds        *[]ID                          `json:"key_ids,omitempty"`
+	Operation     CLIReauthStartRequestOperation `json:"operation"`
+	PkceChallenge string                         `json:"pkce_challenge"`
+	Purpose       CLIReauthStartRequestPurpose   `json:"purpose"`
 
 	// RedirectUri Exact ephemeral loopback callback, http://127.0.0.1:PORT/callback or the bracketed ::1 equivalent.
 	RedirectUri string `json:"redirect_uri"`
@@ -2215,14 +2260,21 @@ type CLIReauthTransaction struct {
 	Environments []CLIReauthEnvironmentPolicy `json:"environments"`
 
 	// ExpiresAt RFC 3339 UTC, microsecond precision.
-	ExpiresAt   Timestamp                     `json:"expires_at"`
+	ExpiresAt Timestamp `json:"expires_at"`
+
+	// KeyIds The enumerated unit the ceremony binds; empty for `adapter`.
+	KeyIds      []ID                          `json:"key_ids"`
 	Operation   CLIReauthTransactionOperation `json:"operation"`
+	Purpose     CLIReauthTransactionPurpose   `json:"purpose"`
 	RedirectUri string                        `json:"redirect_uri"`
 	State       string                        `json:"state"`
 }
 
 // CLIReauthTransactionOperation defines model for CLIReauthTransaction.Operation.
 type CLIReauthTransactionOperation string
+
+// CLIReauthTransactionPurpose defines model for CLIReauthTransaction.Purpose.
+type CLIReauthTransactionPurpose string
 
 // Capability One atom from the permission ADR's CLOSED capability set. The server
 // refuses anything outside it rather than storing a row nothing can ever

@@ -729,7 +729,7 @@
     "engine": "postgres",
     "name": "InsertCLIReauthHandoff",
     "annotation": "authn-resolution",
-    "hash": "6b47e651594b1223e0996fe20d201bcf877c40cac868c0cf63419bf365facdb3"
+    "hash": "b72ad449e94f36d55c75a3a6f6d5a9da888fd5343fa7945e1121fb0b6e3721b6"
   },
   {
     "engine": "postgres",
@@ -2169,7 +2169,7 @@
     "engine": "sqlite",
     "name": "InsertCLIReauthHandoff",
     "annotation": "authn-resolution",
-    "hash": "6a97964ade60e0598a6982d557bdd0e42481b8be63775fd92c4de19c928debe7"
+    "hash": "1c4645f45c68984dabe8482356d60594c9a484cf9208d3ff39de8746f13040a7"
   },
   {
     "engine": "sqlite",

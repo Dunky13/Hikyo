@@ -451,10 +451,21 @@ export type TotpReauthRequest = {
     code: string;
 };
 
+/**
+ * `adapter` carries an adapter-routing decision over an environment set.
+ * `reveal` and `copy` carry a DISCLOSURE: the browser runs the same
+ * purpose-bound, enumerated-key-set ceremony the UI runs, so `key_ids`
+ * is required and names exactly the keys the one decision covers.
+ *
+ */
 export type CliReauthStartRequest = {
-    purpose: 'adapter';
-    operation: 'adapter.configure' | 'adapter.credential-set' | 'adapter.adopt' | 'adapter.sync';
+    purpose: 'adapter' | 'reveal' | 'copy';
+    operation: 'adapter.configure' | 'adapter.credential-set' | 'adapter.adopt' | 'adapter.sync' | 'value.reveal' | 'value.copy-source';
     environment_ids: Array<Id>;
+    /**
+     * The enumerated unit of a disclosure purpose; absent or empty for `adapter`.
+     */
+    key_ids?: Array<Id>;
     pkce_challenge: string;
     /**
      * Exact ephemeral loopback callback, http://127.0.0.1:PORT/callback or the bracketed ::1 equivalent.
@@ -494,8 +505,13 @@ export type CliReauthEnvironmentPolicy = {
 
 export type CliReauthTransaction = {
     state: string;
-    operation: 'adapter.configure' | 'adapter.credential-set' | 'adapter.adopt' | 'adapter.sync';
+    purpose: 'adapter' | 'reveal' | 'copy';
+    operation: 'adapter.configure' | 'adapter.credential-set' | 'adapter.adopt' | 'adapter.sync' | 'value.reveal' | 'value.copy-source';
     environments: Array<CliReauthEnvironmentPolicy>;
+    /**
+     * The enumerated unit the ceremony binds; empty for `adapter`.
+     */
+    key_ids: Array<Id>;
     redirect_uri: string;
     expires_at: Timestamp;
 };

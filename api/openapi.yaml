@@ -9954,10 +9954,21 @@ components:
       type: object
       additionalProperties: false
       required: [purpose, operation, environment_ids, pkce_challenge, redirect_uri]
+      description: |
+        `adapter` carries an adapter-routing decision over an environment set.
+        `reveal` and `copy` carry a DISCLOSURE: the browser runs the same
+        purpose-bound, enumerated-key-set ceremony the UI runs, so `key_ids`
+        is required and names exactly the keys the one decision covers.
       properties:
-        purpose: {type: string, enum: [adapter]}
-        operation: {type: string, enum: [adapter.configure, adapter.credential-set, adapter.adopt, adapter.sync]}
+        purpose: {type: string, enum: [adapter, reveal, copy]}
+        operation: {type: string, enum: [adapter.configure, adapter.credential-set, adapter.adopt, adapter.sync, value.reveal, value.copy-source]}
         environment_ids: {type: array, minItems: 1, uniqueItems: true, items: {$ref: "#/components/schemas/ID"}}
+        key_ids:
+          type: array
+          uniqueItems: true
+          maxItems: 500
+          items: {$ref: "#/components/schemas/ID"}
+          description: The enumerated unit of a disclosure purpose; absent or empty for `adapter`.
         pkce_challenge: {type: string, minLength: 43, maxLength: 43, pattern: "^[A-Za-z0-9_-]{43}$"}
         redirect_uri:
           type: string
@@ -10001,11 +10012,16 @@ components:
     CLIReauthTransaction:
       type: object
       additionalProperties: false
-      required: [state, operation, environments, redirect_uri, expires_at]
+      required: [state, purpose, operation, environments, key_ids, redirect_uri, expires_at]
       properties:
         state: {type: string, minLength: 1}
-        operation: {type: string, enum: [adapter.configure, adapter.credential-set, adapter.adopt, adapter.sync]}
+        purpose: {type: string, enum: [adapter, reveal, copy]}
+        operation: {type: string, enum: [adapter.configure, adapter.credential-set, adapter.adopt, adapter.sync, value.reveal, value.copy-source]}
         environments: {type: array, minItems: 1, items: {$ref: "#/components/schemas/CLIReauthEnvironmentPolicy"}}
+        key_ids:
+          type: array
+          items: {$ref: "#/components/schemas/ID"}
+          description: The enumerated unit the ceremony binds; empty for `adapter`.
         redirect_uri: {type: string, format: uri}
         expires_at: {$ref: "#/components/schemas/Timestamp"}
 

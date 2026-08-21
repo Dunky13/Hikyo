@@ -112,9 +112,10 @@ The shared dimensions are `--instance`, `--org`, `--project`, `--env`, and
 `--use-human-session` runs under the stored human session, but only when all of a
 controlling terminal with stderr on it, an enumerated confirmation of the
 environment and key set, and a live disclosure window hold. Without a live
-window the CLI opens one from the terminal with an authenticator code where the
-environment's window allows it, and exits `3` naming the browser path where it
-does not. The four conditions hold under `--config-only` too.
+window the CLI opens one: an authenticator code at the terminal where the
+environment's window allows it, otherwise a browser handoff to the passkey
+ceremony over the keys it will inject. The four conditions hold under
+`--config-only` too.
 
 ```text
 hikyo run [--config-only] [--allow-override KEY,KEY] [--project-directory DIR] [--token-file PATH] -- <command> [args...]

@@ -171,7 +171,7 @@ func runCLIAdapterReauthHandoff(t *testing.T, db *store.DB) {
 	if got := queryString(t, db, "SELECT principal_id FROM sessions WHERE id = '"+cliConfirmed.SessionID+"'"); got != string(boot.PrincipalID) {
 		t.Fatalf("CLI principal = %q, bootstrap = %q", got, boot.PrincipalID)
 	}
-	start, err := auth.StartCLIReauth(t.Context(), cliConfirmed.SessionToken, string(service.PurposeAdapter), string(authz.OpAdapterSync), []string{"env_prod"}, challenge, "http://127.0.0.1:40123/callback")
+	start, err := auth.StartCLIReauth(t.Context(), cliConfirmed.SessionToken, string(service.PurposeAdapter), string(authz.OpAdapterSync), []string{"env_prod"}, nil, challenge, "http://127.0.0.1:40123/callback")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -982,4 +982,114 @@ func blobLit(db *store.DB, b []byte) string {
 		return `'\x` + string(sb) + `'`
 	}
 	return `x'` + string(sb) + `'`
+}
+
+func TestCLIDisclosureReauthHandoffSQLite(t *testing.T) {
+	runCLIDisclosureReauthHandoff(t, seededDB(t, openSQLite))
+}
+
+func TestCLIDisclosureReauthHandoffPostgres(t *testing.T) {
+	runCLIDisclosureReauthHandoff(t, seededDB(t, openPostgres))
+}
+
+// runCLIDisclosureReauthHandoff: the handoff carries a DISCLOSURE purpose
+// with its enumerated key set (api-cli-surface ADR § Login and reauth
+// transports). The start refuses a disclosure without a unit and an adapter
+// with one; the transaction reports purpose and unit; the browser's
+// environment-wide window satisfies the approval; redemption hands the CLI an
+// UNBOUND window mirroring the browser's, under which the CLI's reveal
+// succeeds, while the adapter-bound shape is untouched.
+func runCLIDisclosureReauthHandoff(t *testing.T, db *store.DB) {
+	auth, boot, password := bootstrapFactorAdmin(t, db)
+	identityFixtures(t, db)
+	seedDeliveryCatalogue(t, db)
+	for _, row := range [][2]string{{"read", "g_cli_disc_read"}, {"reveal", "g_cli_disc_reveal"}} {
+		execRaw(t, db, `INSERT INTO grants (id,principal_id,capability,org_id,project_id,env_id,created_at) VALUES ('`+row[1]+`','`+string(boot.PrincipalID)+`','`+row[0]+`','org_a','prj_a1','env_a1',`+ts+`)`)
+		execRaw(t, db, `INSERT INTO grant_origins (id,grant_id,kind,subject,created_at) VALUES ('gor_`+row[1]+`','`+row[1]+`','manual','`+string(boot.PrincipalID)+`',`+ts+`)`)
+	}
+	base := time.Date(2026, 8, 21, 3, 0, 0, 0, time.UTC)
+	clock := base
+	auth.Now = func() time.Time { return clock }
+	auth.ReauthWindow = 5 * time.Minute
+	cliLogin, err := auth.LocalLogin(t.Context(), "factor-admin", password, service.ArtifactCLI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uri, err := auth.EnrolTOTPStart(t.Context(), cliLogin.SessionToken, password)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clock = base.Add(30 * time.Second)
+	cliConfirmed, err := auth.EnrolTOTPConfirm(t.Context(), cliLogin.SessionToken, totpCode(t, uri, clock))
+	if err != nil {
+		t.Fatal(err)
+	}
+	browser, err := auth.LocalLogin(t.Context(), "factor-admin", password, service.ArtifactBrowser)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clock = base.Add(time.Minute)
+	browserWindow, err := auth.ReauthTOTP(t.Context(), browser.SessionToken, "env_a1", totpCode(t, uri, clock))
+	if err != nil {
+		t.Fatal(err)
+	}
+	secretKeys := strings.Split(queryStrings(t, db, `SELECT id FROM keys WHERE project_id = 'prj_a1' AND classification = 'secret' ORDER BY id`), "\n")
+	if len(secretKeys) == 0 || secretKeys[0] == "" {
+		t.Fatal("the seeded catalogue has no secret key to bind")
+	}
+	verifierBytes := sha256.Sum256([]byte("cli disclosure reauth pkce verifier"))
+	verifier := base64.RawURLEncoding.EncodeToString(verifierBytes[:])
+	challengeBytes := sha256.Sum256([]byte(verifier))
+	challenge := base64.RawURLEncoding.EncodeToString(challengeBytes[:])
+	redirect := "http://127.0.0.1:40124/callback"
+
+	if _, err := auth.StartCLIReauth(t.Context(), cliConfirmed.SessionToken, string(service.PurposeReveal), string(authz.OpValueReveal), []string{"env_a1"}, nil, challenge, redirect); !errors.Is(err, service.ErrReauthUnitMismatch) {
+		t.Fatalf("disclosure handoff without a key set = %v, want unit mismatch", err)
+	}
+	if _, err := auth.StartCLIReauth(t.Context(), cliConfirmed.SessionToken, string(service.PurposeAdapter), string(authz.OpAdapterSync), []string{"env_a1"}, secretKeys, challenge, redirect); !errors.Is(err, service.ErrReauthUnitMismatch) {
+		t.Fatalf("adapter handoff with a key set = %v, want unit mismatch", err)
+	}
+	if _, err := auth.StartCLIReauth(t.Context(), cliConfirmed.SessionToken, string(service.PurposeReveal), string(authz.OpAdapterSync), []string{"env_a1"}, secretKeys, challenge, redirect); !errors.Is(err, domain.ErrInvalid) {
+		t.Fatalf("reveal purpose with an adapter operation = %v, want invalid", err)
+	}
+	start, err := auth.StartCLIReauth(t.Context(), cliConfirmed.SessionToken, string(service.PurposeReveal), string(authz.OpValueReveal), []string{"env_a1"}, secretKeys, challenge, redirect)
+	if err != nil {
+		t.Fatalf("start disclosure handoff: %v", err)
+	}
+	transaction, err := auth.CLIReauthTransaction(t.Context(), service.Bearer(browserWindow.SessionToken), start.State)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if transaction.Purpose != string(service.PurposeReveal) || transaction.Operation != string(authz.OpValueReveal) || strings.Join(transaction.KeyIDs, "\n") != service.CanonicalKeySet(secretKeys) {
+		t.Fatalf("transaction = %+v", transaction)
+	}
+	approved, err := auth.ApproveCLIReauth(t.Context(), service.Bearer(browserWindow.SessionToken), start.State)
+	if err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+	redeemed, err := auth.RedeemCLIReauth(t.Context(), approved.Code, verifier)
+	if err != nil {
+		t.Fatalf("redeem: %v", err)
+	}
+	if len(redeemed.Windows) != 1 || redeemed.Windows[0].EnvironmentID != "env_a1" || redeemed.Windows[0].SingleDecision {
+		t.Fatalf("redeemed windows = %+v", redeemed.Windows)
+	}
+	if got := queryString(t, db, "SELECT COALESCE(bound_purpose, '') FROM reauth_windows WHERE session_id = '"+cliConfirmed.SessionID+"'"); got != "" {
+		t.Fatalf("the CLI's disclosure window is bound to purpose %q; a mirrored sliding window must be unbound", got)
+	}
+	values := valueSvc(t, db)
+	values.Auth = auth
+	cells, err := values.List(t.Context(), service.Bearer(redeemed.SessionToken), scopeEnv(orgA, prjA1, envA1), true)
+	if err != nil {
+		t.Fatalf("reveal under the redeemed bearer: %v", err)
+	}
+	revealed := 0
+	for _, c := range cells {
+		if c.Classification == "secret" && c.Revealed {
+			revealed++
+		}
+	}
+	if revealed != len(secretKeys) {
+		t.Fatalf("revealed %d secrets under the handoff window, want %d", revealed, len(secretKeys))
+	}
 }

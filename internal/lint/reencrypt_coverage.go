@@ -106,6 +106,8 @@ var reencryptExemptBlobs = map[string]string{
 	"saml_transactions.relay_state_verifier":     "SAML relay-state verifier (flow)",
 	"cli_reauth_handoffs.code_verifier":          "CLI reauth PKCE code verifier (flow)",
 	"cli_reauth_handoffs.state_verifier":         "CLI reauth state verifier (flow)",
+	"cli_reauth_handoffs_new.code_verifier":      "CLI reauth PKCE code verifier on a table-rebuild copy",
+	"cli_reauth_handoffs_new.state_verifier":     "CLI reauth state verifier on a table-rebuild copy",
 	"workspace_handoffs.code_verifier":           "workspace handoff code verifier (flow)",
 	"workspace_handoffs.state_verifier":          "workspace handoff state verifier (flow)",
 	"webauthn_ceremonies.challenge_verifier":     "WebAuthn ceremony challenge verifier (flow)",

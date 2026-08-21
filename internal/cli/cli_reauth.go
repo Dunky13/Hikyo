@@ -24,6 +24,22 @@ const cliReauthCallbackPath = "/callback"
 // runCLIAdapterReauth binds the callback before opening the browser, then
 // silently rotates the local bearer after an exact state + PKCE exchange.
 func runCLIAdapterReauth(ctx context.Context, client *Client, state *State, artifact SessionArtifact, operation string, environmentIDs []string, openURL func(string) error) error {
+	return runCLIReauthHandoff(ctx, client, state, artifact, "adapter", operation, environmentIDs, nil, openURL)
+}
+
+// runCLIDisclosureReauth is the browser handoff for a disclosure the terminal
+// cannot satisfy itself: a 0-window or protected environment, where only the
+// purpose-bound, enumerated-key-set passkey ceremony the UI runs may open a
+// window (api-cli-surface ADR § Login and reauth transports). The key set is
+// the unit the browser decision covers and the unit the disclosure consumes.
+func runCLIDisclosureReauth(ctx context.Context, client *Client, state *State, artifact SessionArtifact, purpose, operation, environmentID string, keyIDs []string, openURL func(string) error) error {
+	if len(keyIDs) == 0 {
+		return failf(ExitRefused, "a disclosure ceremony needs the keys it covers, and none resolved")
+	}
+	return runCLIReauthHandoff(ctx, client, state, artifact, purpose, operation, []string{environmentID}, keyIDs, openURL)
+}
+
+func runCLIReauthHandoff(ctx context.Context, client *Client, state *State, artifact SessionArtifact, purpose, operation string, environmentIDs, keyIDs []string, openURL func(string) error) error {
 	listener, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
 		return failf(ExitUnavailable, "binding the CLI reauthentication callback: %v", err)
@@ -42,14 +58,22 @@ func runCLIAdapterReauth(ctx context.Context, client *Client, state *State, arti
 	for i, environmentID := range environmentIDs {
 		environments[i] = apigen.ID(environmentID)
 	}
-	var started apigen.CLIReauthStart
-	if err := client.Do(ctx, http.MethodPost, api.PathPrefix+"/auth/cli-reauth/start", apigen.CLIReauthStartRequest{
-		Purpose:        apigen.CLIReauthStartRequestPurpose("adapter"),
+	request := apigen.CLIReauthStartRequest{
+		Purpose:        apigen.CLIReauthStartRequestPurpose(purpose),
 		Operation:      apigen.CLIReauthStartRequestOperation(operation),
 		EnvironmentIds: environments,
 		PkceChallenge:  challenge,
 		RedirectUri:    redirectURI,
-	}, &started); err != nil {
+	}
+	if len(keyIDs) > 0 {
+		keys := make([]apigen.ID, len(keyIDs))
+		for i, keyID := range keyIDs {
+			keys[i] = apigen.ID(keyID)
+		}
+		request.KeyIds = &keys
+	}
+	var started apigen.CLIReauthStart
+	if err := client.Do(ctx, http.MethodPost, api.PathPrefix+"/auth/cli-reauth/start", request, &started); err != nil {
 		return err
 	}
 

@@ -165,3 +165,74 @@ func TestRevealCeremonyCoversExport(t *testing.T) {
 		t.Fatalf("export did not carry the revealed value after the ceremony: %q", stdout.String())
 	}
 }
+
+// A 0-window environment hands off to the browser's purpose-bound,
+// enumerated-key-set ceremony: the CLI resolves the unit (the secret keys the
+// act opens), starts a disclosure-purpose handoff carrying it, opens the
+// browser, redeems the code for a rotated bearer, and runs the disclosure
+// under it. The bearer never reaches stdout/stderr.
+func TestRevealCeremonyHandsOffToTheBrowserAtZeroWindow(t *testing.T) {
+	const rotated = "hik_1_cli_handoff-rotated"
+	live := false
+	var callbackURI string
+	var startBody map[string]any
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/reveal-window"):
+			_ = json.NewEncoder(w).Encode(apigen.RevealWindow{CanReveal: true, Protected: true, EffectiveWindowSeconds: 0, Live: live})
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/environments/env_70/values"):
+			_ = json.NewEncoder(w).Encode(apigen.ValueList{Items: []apigen.ValueCell{
+				{Name: "DATABASE_PASSWORD", Classification: "secret", KeyId: "key_pw", Set: true},
+				{Name: "LOG_LEVEL", Classification: "config", KeyId: "key_ll", Set: true},
+			}})
+		case strings.HasSuffix(r.URL.Path, "/auth/cli-reauth/start"):
+			_ = json.NewDecoder(r.Body).Decode(&startBody)
+			callbackURI, _ = startBody["redirect_uri"].(string)
+			_, _ = w.Write([]byte(`{"state":"hik_1_hs_reveal","expires_at":"2030-01-01T00:00:00Z"}`))
+		case strings.HasSuffix(r.URL.Path, "/auth/cli-reauth/redeem"):
+			live = true
+			_, _ = w.Write([]byte(`{"session_id":"ses_handoff","session_token":"` + rotated + `","windows":[{"environment_id":"env_70","session_id":"ses_handoff","single_decision":true,"window_expires":"2030-01-01T00:00:00Z"}]}`))
+		case strings.HasSuffix(r.URL.Path, "/values/DATABASE_PASSWORD/reveal"):
+			if !live || !strings.Contains(r.Header.Get("Authorization"), rotated) {
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(`{"error":{"code":"forbidden","message":"not permitted"}}`))
+				return
+			}
+			v := "s3cret"
+			_ = json.NewEncoder(w).Encode(apigen.ValueCell{Name: "DATABASE_PASSWORD", Classification: "secret", KeyId: "key_pw", Set: true, Revealed: true, Value: &v})
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	ios, stdout, stderr := definitionsTestIO(t, handler)
+	ios.ReadPassword = func(string) (string, error) { t.Fatal("a 0-window handoff must not prompt for a code"); return "", nil }
+	ios.OpenURL = func(browserURL string) error {
+		if !strings.Contains(browserURL, "/reauth/cli?transaction=hik_1_hs_reveal") {
+			t.Errorf("browser opened at %q", browserURL)
+		}
+		go func() {
+			resp, _ := http.Get(callbackURI + "?code=hik_1_hc_reveal&state=hik_1_hs_reveal")
+			if resp != nil {
+				_ = resp.Body.Close()
+			}
+		}()
+		return nil
+	}
+	if code := cli.Run(t.Context(), ios, revealArgs()); code != cli.ExitOK {
+		t.Fatalf("exit %d, want ok; stderr=%s", code, stderr.String())
+	}
+	if startBody["purpose"] != "reveal" || startBody["operation"] != "value.reveal" {
+		t.Fatalf("handoff started with purpose=%v operation=%v", startBody["purpose"], startBody["operation"])
+	}
+	keys, _ := startBody["key_ids"].([]any)
+	if len(keys) != 1 || keys[0] != "key_pw" {
+		t.Fatalf("handoff bound key set %v, want exactly the one secret key the act opens", keys)
+	}
+	if !strings.Contains(stdout.String(), "s3cret") {
+		t.Fatalf("the disclosure did not run under the redeemed bearer: %q", stdout.String())
+	}
+	if strings.Contains(stdout.String(), rotated) || strings.Contains(stderr.String(), rotated) {
+		t.Fatal("the rotated bearer reached command output")
+	}
+}

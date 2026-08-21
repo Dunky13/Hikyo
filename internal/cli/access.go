@@ -166,7 +166,10 @@ func runAccessGrant(ctx context.Context, ios IO, args []string) error {
 			if perr != nil {
 				return perr
 			}
-			err = withRevealCeremony(ctx, client, st, ios, artifact, base, []string{env}, attempt)
+			// No browser handoff for a widening: a 0-window environment's grant
+			// is made in the browser's Machine access page, which runs the
+			// mint-purpose passkey ceremony itself.
+			err = withRevealCeremony(ctx, client, st, ios, artifact, base, []string{env}, disclosure{}, attempt)
 		} else {
 			err = attempt()
 		}

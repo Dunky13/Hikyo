@@ -7,7 +7,12 @@ import {
   loadCLIReauthTransaction,
 } from '../api/cliReauth.ts';
 import { useSession } from '../api/session.ts';
-import { runAdapterPasskeyCeremony, runAdapterTOTPCeremony } from '../api/values.ts';
+import {
+  runAdapterPasskeyCeremony,
+  runAdapterTOTPCeremony,
+  runPasskeyCeremony,
+  runTOTPCeremony,
+} from '../api/values.ts';
 import { Login } from './Login.tsx';
 
 /** Browser half of the CLI's state + PKCE reauthentication handoff. */
@@ -30,17 +35,35 @@ export function CLIReauth() {
         throw new Error('the CLI authorization transaction is unavailable');
       }
       const environmentIds = handoff.environments.map((environment) => environment.environment_id);
-      if (handoff.environments.some((environment) => !environment.requires_webauthn)) {
-        await runAdapterTOTPCeremony(handoff.operation, environmentIds, totp);
-      }
-      for (const environment of handoff.environments.filter(
-        (candidate) => candidate.requires_webauthn,
-      )) {
-        await runAdapterPasskeyCeremony({
-          operation: handoff.operation,
-          environmentId: environment.environment_id,
-          environmentIds,
-        });
+      if (handoff.purpose === 'adapter') {
+        if (handoff.environments.some((environment) => !environment.requires_webauthn)) {
+          await runAdapterTOTPCeremony(adapterOperation(handoff.operation), environmentIds, totp);
+        }
+        for (const environment of handoff.environments.filter(
+          (candidate) => candidate.requires_webauthn,
+        )) {
+          await runAdapterPasskeyCeremony({
+            operation: adapterOperation(handoff.operation),
+            environmentId: environment.environment_id,
+            environmentIds,
+          });
+        }
+      } else {
+        // A disclosure handoff: the SAME purpose-bound, enumerated-key-set
+        // ceremony the Values page runs, one decision per environment over
+        // exactly the keys the terminal named. A 0-window environment takes
+        // the passkey; a sliding environment accepts the authenticator code.
+        for (const environment of handoff.environments) {
+          if (environment.requires_webauthn) {
+            await runPasskeyCeremony({
+              operation: handoff.purpose,
+              environmentId: environment.environment_id,
+              keyIds: handoff.key_ids,
+            });
+          } else {
+            await runTOTPCeremony(environment.environment_id, totp);
+          }
+        }
       }
       const approved = await approveCLIReauth(handoff.state);
       globalThis.location.assign(cliReauthCallbackURL(handoff, approved));
@@ -71,8 +94,27 @@ export function CLIReauth() {
         {transaction.data !== undefined ? (
           <>
             <p className="login__lede">
-              Approve <span className="mono">{transaction.data.operation}</span> for the environments below.
+              {transaction.data.purpose === 'adapter' ? (
+                <>
+                  Approve <span className="mono">{transaction.data.operation}</span> for the
+                  environments below.
+                </>
+              ) : (
+                <>
+                  The terminal asks to <strong>{transaction.data.purpose}</strong>{' '}
+                  {transaction.data.key_ids.length} secret key
+                  {transaction.data.key_ids.length === 1 ? '' : 's'} in the environments below.
+                  This is one decision over exactly those keys; nothing else is authorized.
+                </>
+              )}
             </p>
+            {transaction.data.purpose !== 'adapter' ? (
+              <ul className="mono">
+                {transaction.data.key_ids.map((keyId) => (
+                  <li key={keyId}>{keyId}</li>
+                ))}
+              </ul>
+            ) : null}
             <ul>
               {transaction.data.environments.map((environment) => (
                 <li key={environment.environment_id}>
@@ -103,4 +145,19 @@ function CLIReauthMessage(input: { title: string; text: string }) {
   return (
     <main className="login"><div className="login__card"><h1 className="login__title">{input.title}</h1><p className="alert" role="alert"><span className="alert__glyph" aria-hidden="true">!</span><span>{input.text}</span></p></div></main>
   );
+}
+
+type AdapterOperation = 'adapter.configure' | 'adapter.credential-set' | 'adapter.adopt' | 'adapter.sync';
+
+/** adapterOperation narrows the transaction's operation to the adapter set without a cast. */
+function adapterOperation(operation: string): AdapterOperation {
+  switch (operation) {
+    case 'adapter.configure':
+    case 'adapter.credential-set':
+    case 'adapter.adopt':
+    case 'adapter.sync':
+      return operation;
+    default:
+      throw new Error(`an adapter handoff named a non-adapter operation: ${operation}`);
+  }
 }

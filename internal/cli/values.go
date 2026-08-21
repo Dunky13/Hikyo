@@ -215,8 +215,16 @@ func runValues(ctx context.Context, ios IO, args []string) error {
 	// environments it discloses in (reveal_window.go): the call is made, and on
 	// the server's refusal a window is opened by inline TOTP and the call made
 	// once more. Non-revealing reads never go through it.
-	ceremony := func(envs []string, attempt func() error) error {
-		return withRevealCeremony(ctx, client, st, ios, artifact, project, envs, attempt)
+	// The enumerated unit a browser handoff binds, resolved only when one is
+	// needed: the secret keys the act opens in the environment (all of them,
+	// or the named subset).
+	unit := func(names []string) func(context.Context, string) ([]string, error) {
+		return func(ctx context.Context, env string) ([]string, error) {
+			return secretKeyIDs(ctx, client, project, env, names)
+		}
+	}
+	ceremony := func(envs []string, d disclosure, attempt func() error) error {
+		return withRevealCeremony(ctx, client, st, ios, artifact, project, envs, d, attempt)
 	}
 
 	switch sub {
@@ -227,7 +235,7 @@ func runValues(ctx context.Context, ios IO, args []string) error {
 		}
 		var list apigen.ValueList
 		if reveal {
-			err = ceremony([]string{resolved.Get(DimEnv)}, func() error {
+			err = ceremony([]string{resolved.Get(DimEnv)}, disclosure{purpose: "reveal", keys: unit(nil)}, func() error {
 				return client.Do(ctx, http.MethodPost, base+"/reveal", nil, &list)
 			})
 		} else {
@@ -249,7 +257,7 @@ func runValues(ctx context.Context, ios IO, args []string) error {
 		target := base + "/" + url.PathEscape(flags.positional())
 		var cell apigen.ValueCell
 		if reveal {
-			err = ceremony([]string{resolved.Get(DimEnv)}, func() error {
+			err = ceremony([]string{resolved.Get(DimEnv)}, disclosure{purpose: "reveal", keys: unit([]string{flags.positional()})}, func() error {
 				return client.Do(ctx, http.MethodPost, target+"/reveal", nil, &cell)
 			})
 		} else {
@@ -300,7 +308,7 @@ func runValues(ctx context.Context, ios IO, args []string) error {
 	case "diff":
 		var out apigen.ValueDiff
 		if reveal {
-			err = ceremony([]string{left, right}, func() error {
+			err = ceremony([]string{left, right}, disclosure{purpose: "reveal", keys: unit(nil)}, func() error {
 				return client.Do(ctx, http.MethodPost, project+"/values/diff/reveal",
 					apigen.RevealDiffRequest{Left: left, Right: right}, &out)
 			})
@@ -330,7 +338,7 @@ func runValues(ctx context.Context, ios IO, args []string) error {
 		// environment's reveal guard (values service: the reveal conjunct
 		// consumes the session's window over the SOURCE); a config-only copy
 		// is refused by nothing here and therefore never prompts.
-		if err := ceremony([]string{source}, func() error {
+		if err := ceremony([]string{source}, disclosure{purpose: "copy", keys: unit(splitList(keyNames))}, func() error {
 			return client.Do(ctx, http.MethodPost, project+"/values/copy", body, &result)
 		}); err != nil {
 			return err
@@ -396,7 +404,7 @@ func runValues(ctx context.Context, ios IO, args []string) error {
 		}
 		var out apigen.ExportedValues
 		exportEnv := resolved.Get(DimEnv)
-		if err := ceremony([]string{exportEnv}, func() error {
+		if err := ceremony([]string{exportEnv}, disclosure{purpose: "reveal", keys: unit(nil)}, func() error {
 			return client.Do(ctx, http.MethodPost, base+"/values/export", body, &out)
 		}); err != nil {
 			return err
@@ -698,4 +706,30 @@ func renderCell(ios IO, f Format, cell apigen.ValueCell, outputFile string, dang
 		return failf(ExitRefused, "disclosing the value: %v", err)
 	}
 	return nil
+}
+
+// secretKeyIDs resolves the enumerated unit of a disclosure in one
+// environment: the ids of its secret keys (all of them, or the named subset).
+// It reads the non-revealing list, which discloses nothing; the ids are what
+// the browser ceremony binds and what the disclosure then consumes.
+func secretKeyIDs(ctx context.Context, client *Client, projectBase, env string, names []string) ([]string, error) {
+	var list apigen.ValueList
+	if err := client.Do(ctx, http.MethodGet, projectBase+"/environments/"+url.PathEscape(env)+"/values", nil, &list); err != nil {
+		return nil, err
+	}
+	wanted := map[string]bool{}
+	for _, n := range names {
+		wanted[n] = true
+	}
+	var out []string
+	for _, cell := range list.Items {
+		if cell.Classification != apigen.KeyClassificationSecret {
+			continue
+		}
+		if len(wanted) > 0 && !wanted[cell.Name] {
+			continue
+		}
+		out = append(out, string(cell.KeyId))
+	}
+	return out, nil
 }

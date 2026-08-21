@@ -58,7 +58,7 @@ type AuthService interface {
 	ReauthPasskeyFinish(ctx context.Context, presented string, responseJSON []byte) (service.ReauthResult, error)
 	ReauthTOTP(ctx context.Context, presented, environmentID, code string) (service.ReauthResult, error)
 	ReauthAdapterTOTP(ctx context.Context, presented, operation string, environmentIDs []string, code string) ([]service.ReauthResult, error)
-	StartCLIReauth(ctx context.Context, presented, purpose, operation string, environmentIDs []string, pkceChallenge, redirectURI string) (service.CLIReauthStart, error)
+	StartCLIReauth(ctx context.Context, presented, purpose, operation string, environmentIDs, keyIDs []string, pkceChallenge, redirectURI string) (service.CLIReauthStart, error)
 	CLIReauthTransaction(ctx context.Context, actor service.Actor, state string) (service.CLIReauthTransaction, error)
 	ApproveCLIReauth(ctx context.Context, actor service.Actor, state string) (service.CLIReauthApproval, error)
 	RedeemCLIReauth(ctx context.Context, code, pkceVerifier string) (service.CLIReauthRedeemed, error)

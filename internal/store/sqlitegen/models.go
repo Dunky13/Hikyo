@@ -278,8 +278,10 @@ type CliReauthHandoff struct {
 	CodeVerifier    []byte
 	SessionID       string
 	PrincipalID     string
+	Purpose         string
 	Operation       string
 	EnvironmentSet  string
+	KeySet          string
 	PkceChallenge   string
 	RedirectUri     string
 	ApprovedWindows string

@@ -349,7 +349,9 @@ test.describe('multi-instance', () => {
               contentType: 'application/json',
               body: JSON.stringify({
                 state: cliTransactionState,
+                purpose: 'adapter',
                 operation: 'adapter.sync',
+                key_ids: [],
                 environments: [
                   {
                     environment_id: 'env_00000000-0000-4000-8000-000000000001',
