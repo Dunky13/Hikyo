@@ -402,10 +402,11 @@ export function useCreateOrg(onCreated?: (org: Org) => void) {
   });
 }
 
-export function useDeleteOrg() {
+export function useDeleteOrg(onDeleted?: () => void) {
   const queries = useQueryClient();
   return useMutation({
     mutationFn: (input: { org: string }) => ok(deleteOrgOp, { path: { org: input.org } }),
+    onSuccess: onDeleted,
     onSettled: () => queries.invalidateQueries(),
   });
 }

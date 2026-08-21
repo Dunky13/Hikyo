@@ -397,7 +397,7 @@ test.describe('instance administration', () => {
       expect(response.status()).toBe(201);
       const created = zOrg.parse(await response.json());
 
-      const toast = page.getByRole('status').filter({ hasText: `Created ${name}` });
+      const toast = page.locator('.toast').filter({ hasText: `Created ${name}` });
       await expect(toast).toBeInViewport();
       await expect(toast).toContainText('granted you organisation admin access');
       await expect(page.getByRole('heading', { name: 'Sign in to Hikyo', level: 1 })).toBeVisible();

@@ -44,6 +44,11 @@ function instanceGrantPath(principal: string, capability: string): string {
   return `/api/v1/instance/grants?${query.toString()}`;
 }
 
+function orgGrantPath(principal: string, capability: string): string {
+  const query = new URLSearchParams({ principal, capability });
+  return `/api/v1/orgs/${seed.org}/grants?${query.toString()}`;
+}
+
 /** apiCall drives the API from inside the page, on the page's own cookies. */
 async function apiCall(
   page: Page,
@@ -639,10 +644,15 @@ test.describe('write-only editing', () => {
     await page.goto(VALUES_PATH);
     await establishSession(page);
 
-    // Take `reveal` away. It was granted through the API precisely so it can
-    // be: a break-glass origin is not one the grant surface owns.
-    const revoked = await apiCall(page, 'DELETE', instanceGrantPath(seed.principal, 'reveal'));
-    expect(revoked, 'revoking reveal').toBe(204);
+    // Take both inherited `reveal` lines away: the original instance grant and
+    // the creator-admin grant now installed at org scope.
+    let revoked = await apiCall(page, 'DELETE', instanceGrantPath(seed.principal, 'reveal'));
+    expect(revoked, 'revoking instance reveal').toBe(204);
+    await context.clearCookies();
+    await page.goto(VALUES_PATH);
+    await establishSession(page);
+    revoked = await apiCall(page, 'DELETE', orgGrantPath(seed.principal, 'reveal'));
+    expect(revoked, 'revoking org reveal').toBe(204);
 
     try {
       // The revoke killed that session with it, which is the deprovisioning
@@ -691,11 +701,19 @@ test.describe('write-only editing', () => {
       await context.clearCookies();
       await page.goto(VALUES_PATH);
       await establishSession(page);
-      const restored = await apiCall(page, 'POST', '/api/v1/instance/grants', {
+      let restored = await apiCall(page, 'POST', '/api/v1/instance/grants', {
         principal: seed.principal,
         capability: 'reveal',
       });
-      expect(restored, 'restoring reveal').toBe(200);
+      expect(restored, 'restoring instance reveal').toBe(200);
+      await context.clearCookies();
+      await page.goto(VALUES_PATH);
+      await establishSession(page);
+      restored = await apiCall(page, 'POST', `/api/v1/orgs/${seed.org}/grants`, {
+        principal: seed.principal,
+        capability: 'reveal',
+      });
+      expect(restored, 'restoring org reveal').toBe(200);
     }
 
     // Restored, so read it back: the blind rotation stored exactly what was

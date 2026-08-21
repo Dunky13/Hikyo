@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -413,10 +414,11 @@ func (s *Orgs) Rename(ctx context.Context, actor Actor, org domain.OrgID, name s
 	return orgOf(out), nil
 }
 
-// Delete removes an org. It never cascades: an org that still has projects (or
-// grants pointing into it) is refused by the ancestry constraints, which
-// surface as a conflict. Deleting a tenant's contents out from under it is a
-// different, auditable operation and not one this ticket invents.
+// Delete removes an org. Authority scoped inside the org is part of the org,
+// so it is released in the same transaction; otherwise the creator-admin
+// grants installed by Create would make even a brand-new org undeletable.
+// Other descendants still do not cascade: a project (or any content below it)
+// keeps the ancestry constraint live and the whole transaction rolls back.
 func (s *Orgs) Delete(ctx context.Context, actor Actor, org domain.OrgID) error {
 	return tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		caller, err := actor.resolve(ctx, az, time.Now().UTC())
@@ -430,6 +432,40 @@ func (s *Orgs) Delete(ctx context.Context, actor Actor, org domain.OrgID) error 
 		before, err := r.Orgs().Get(ctx, p)
 		if err != nil {
 			return err
+		}
+		lines, err := az.GrantLinesInOrg(ctx, string(org))
+		if err != nil {
+			return err
+		}
+		principals := make([]domain.PrincipalID, 0, len(lines))
+		seen := make(map[domain.PrincipalID]struct{}, len(lines))
+		for _, line := range lines {
+			if _, ok := seen[line.Principal]; ok {
+				continue
+			}
+			seen[line.Principal] = struct{}{}
+			principals = append(principals, line.Principal)
+		}
+		slices.Sort(principals)
+		for _, principal := range principals {
+			if err := az.LockTargetPrincipal(ctx, principal); err != nil {
+				return err
+			}
+		}
+		for _, line := range lines {
+			for _, origin := range line.Origins {
+				if _, err := az.ReleaseGrantOrigin(ctx, line.ID, line.Principal, origin); err != nil {
+					return err
+				}
+			}
+			if _, err := az.DeleteGrantRow(ctx, line.ID, line.Principal); err != nil {
+				return err
+			}
+		}
+		for _, principal := range principals {
+			if err := invalidateGrantChange(ctx, az, principal); err != nil {
+				return err
+			}
 		}
 		if err := r.Orgs().Delete(ctx, p); err != nil {
 			return err

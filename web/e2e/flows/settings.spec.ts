@@ -202,6 +202,11 @@ test.describe('organisation settings', () => {
       }
       await page.unroute(targetRead);
       await browserApi(page, 'DELETE', `/api/v1/orgs/${target.id}`, z.null());
+      // Org deletion removes its contained creator grants and therefore kills
+      // this principal's sessions. Re-mint before the next serial drill.
+      await context.clearCookies();
+      await page.goto('/');
+      await establishSession(page);
     }
   });
 
@@ -220,9 +225,17 @@ test.describe('organisation settings', () => {
     await danger.getByLabel('Delete this organisation').fill(drillName);
     await expect(danger.getByRole('status')).toContainText('The name matches');
     await expect(remove).toBeEnabled();
+    const responsePromise = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'DELETE' &&
+        new URL(response.url()).pathname === `/api/v1/orgs/${drillOrg}`,
+    );
     await remove.click();
-    await expect(page.locator('.notice').filter({ hasText: 'Organisation deleted' })).toBeVisible();
+    const response = await responsePromise;
+    expect(response.status()).toBe(204);
     drillOrg = '';
+    await expect(page.locator('.toast').filter({ hasText: 'Organisation deleted' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Sign in to Hikyo', level: 1 })).toBeVisible();
   });
 
 });
@@ -609,6 +622,9 @@ test.describe('project settings', () => {
         z.null(),
       );
       await browserApi(page, 'DELETE', `/api/v1/orgs/${otherOrg.id}`, z.null());
+      await context.clearCookies();
+      await page.goto('/');
+      await establishSession(page);
     }
   });
 
