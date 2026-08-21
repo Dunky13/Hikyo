@@ -254,7 +254,7 @@ func (a *API) EstablishCredential(ctx context.Context, req apigen.EstablishCrede
 	switch {
 	case err == nil:
 		return apigen.EstablishCredential204Response{}, nil
-	case errors.Is(err, service.ErrWeakPassword), errors.Is(err, service.ErrCommonPassword):
+	case passwordPrecondition(err):
 		// The one loud refusal on this path: it is the caller's own input,
 		// evaluated before anything is looked up, so naming the rule helps
 		// the human and reveals nothing.
@@ -314,17 +314,6 @@ func (a *API) Logout(ctx context.Context, _ apigen.LogoutRequestObject) (apigen.
 // mutations reissue the acting session and step-up rotates it, so each returns
 // a fresh token the client must persist in place of the old one.
 
-// factorPrecondition reports a loud structural refusal — a caller acting on
-// their OWN authenticated account, so the state (already enrolled, nothing to
-// confirm, no factor) is theirs to know and 400 names it. A bad code or
-// password stays the uniform 401.
-func factorPrecondition(err error) bool {
-	return errors.Is(err, service.ErrTOTPAlreadyEnrolled) ||
-		errors.Is(err, service.ErrNoPendingTOTP) ||
-		errors.Is(err, service.ErrNoTOTPFactor) ||
-		errors.Is(err, service.ErrNoProofCredential)
-}
-
 func (a *API) EnrolTotpStart(ctx context.Context, req apigen.EnrolTotpStartRequestObject) (apigen.EnrolTotpStartResponseObject, error) {
 	uri, err := a.Auth.EnrolTOTPStart(ctx, bearer(ctx), req.Body.Password)
 	if err != nil {
@@ -382,7 +371,7 @@ func (a *API) RemoveTotp(ctx context.Context, req apigen.RemoveTotpRequestObject
 func (a *API) GetTotpStatus(ctx context.Context, _ apigen.GetTotpStatusRequestObject) (apigen.GetTotpStatusResponseObject, error) {
 	status, err := a.Auth.TOTPStatus(ctx, bearer(ctx))
 	if err != nil {
-		switch classify(err) {
+		switch wireErrorFor(err).code {
 		case apigen.ErrorCodeUnauthenticated:
 			return apigen.GetTotpStatus401JSONResponse{UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, ""))}, nil
 		case apigen.ErrorCodeTooManyRequests:
@@ -425,7 +414,7 @@ func (a *API) BeginRecovery(ctx context.Context, req apigen.BeginRecoveryRequest
 		// passwordless account is refused loudly. Only a caller holding a VALID
 		// code reaches it, so naming the structural state reveals nothing an
 		// enumerator could not already learn — and the refusal is non-destructive.
-		if errors.Is(err, service.ErrPasskeyOnlyViolation) {
+		if recoveryPrecondition(err) {
 			return apigen.BeginRecovery400JSONResponse{BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, ""))}, nil
 		}
 		return nil, err
@@ -498,7 +487,7 @@ func (a *API) CreateOrg(ctx context.Context, req apigen.CreateOrgRequestObject) 
 func (a *API) ListMyOrgs(ctx context.Context, _ apigen.ListMyOrgsRequestObject) (apigen.ListMyOrgsResponseObject, error) {
 	orgs, err := a.Orgs.ListMine(ctx, service.Bearer(bearer(ctx)))
 	if err != nil {
-		if classify(err) == apigen.ErrorCodeUnauthenticated {
+		if wireErrorFor(err).code == apigen.ErrorCodeUnauthenticated {
 			return apigen.ListMyOrgs401JSONResponse{UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, ""))}, nil
 		}
 		return nil, err
@@ -727,21 +716,21 @@ func (a *API) validateAgainstContract(next http.Handler) http.Handler {
 		case err == nil:
 			ctx, ok := api.WithRequestOperation(r.Context(), r)
 			if !ok {
-				writeError(w, apigen.ErrorCodeInternal, "")
+				writeError(w, wirePolicyForCode(apigen.ErrorCodeInternal), "")
 				return
 			}
 			next.ServeHTTP(w, r.WithContext(ctx))
 		case errors.Is(err, api.ErrNoRoute):
 			// A path the contract does not describe. 404, like any other
 			// thing that is not there.
-			writeError(w, apigen.ErrorCodeNotFound, "")
+			writeError(w, wirePolicyForCode(apigen.ErrorCodeNotFound), "")
 		default:
 			var verr *api.ValidationError
 			detail := ""
 			if errors.As(err, &verr) {
 				detail = verr.Member
 			}
-			writeError(w, apigen.ErrorCodeBadRequest, detail)
+			writeError(w, wirePolicyForCode(apigen.ErrorCodeBadRequest), detail)
 		}
 	})
 }

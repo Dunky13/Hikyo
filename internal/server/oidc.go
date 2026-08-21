@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 
 	"github.com/Hikyo-Org/hikyo/api/apigen"
@@ -87,21 +86,15 @@ func oidcStartError(a *API, ctx context.Context, err error) apigen.OidcStartResp
 	// unauthenticated link/reauth, so a pre-auth prober cannot enumerate
 	// provider config by status (the timing is uniform too — login admission
 	// runs before provider resolution in the service).
-	switch {
-	case errors.Is(err, service.ErrProviderNotFound),
-		errors.Is(err, service.ErrBadPurpose),
-		errors.Is(err, service.ErrReauthNoPolicy),
-		errors.Is(err, service.ErrReauthNoEnvironment):
-		return apigen.OidcStart401JSONResponse{UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, ""))}
-	}
-	switch classify(err) {
-	case apigen.ErrorCodeUnauthenticated:
-		return apigen.OidcStart401JSONResponse{UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, ""))}
+	policy := wireErrorFor(err)
+	switch policy.code {
 	case apigen.ErrorCodeTooManyRequests:
 		return apigen.OidcStart429JSONResponse{TooManyRequestsJSONResponse: tooMany()}
-	default:
+	case apigen.ErrorCodeInternal:
 		a.fault(ctx, "oidc start", err)
 		return apigen.OidcStart500JSONResponse{InternalJSONResponse: apigen.InternalJSONResponse(errorBody(apigen.ErrorCodeInternal, ""))}
+	default:
+		return apigen.OidcStart401JSONResponse{UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, ""))}
 	}
 }
 
@@ -121,17 +114,15 @@ func (a *API) OidcCallback(ctx context.Context, req apigen.OidcCallbackRequestOb
 		// oidc_refused cause are indistinguishable on the wire, so a stolen or
 		// observed state cannot be probed for the transaction's purpose or
 		// lifecycle. Only a true fault is 500.
-		if errors.Is(err, service.ErrReauthWindowClosed) || errors.Is(err, service.ErrBadPurpose) {
-			return apigen.OidcCallback401JSONResponse{UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, ""))}, nil
-		}
-		switch classify(err) {
-		case apigen.ErrorCodeUnauthenticated:
-			return apigen.OidcCallback401JSONResponse{UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, ""))}, nil
+		policy := wireErrorFor(err)
+		switch policy.code {
 		case apigen.ErrorCodeTooManyRequests:
 			return apigen.OidcCallback429JSONResponse{TooManyRequestsJSONResponse: tooMany()}, nil
-		default:
+		case apigen.ErrorCodeInternal:
 			a.fault(ctx, "oidc callback", err)
 			return apigen.OidcCallback500JSONResponse{InternalJSONResponse: apigen.InternalJSONResponse(errorBody(apigen.ErrorCodeInternal, ""))}, nil
+		default:
+			return apigen.OidcCallback401JSONResponse{UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, ""))}, nil
 		}
 	}
 	return sessionResponse(result.Login), nil
@@ -140,7 +131,7 @@ func (a *API) OidcCallback(ctx context.Context, req apigen.OidcCallbackRequestOb
 func (a *API) ListIdentities(ctx context.Context, _ apigen.ListIdentitiesRequestObject) (apigen.ListIdentitiesResponseObject, error) {
 	rows, err := a.Auth.ListIdentities(ctx, bearer(ctx))
 	if err != nil {
-		if classify(err) == apigen.ErrorCodeUnauthenticated {
+		if wireErrorFor(err).code == apigen.ErrorCodeUnauthenticated {
 			return apigen.ListIdentities401JSONResponse{UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, ""))}, nil
 		}
 		a.fault(ctx, "list identities", err)
@@ -162,15 +153,14 @@ func (a *API) LinkIdentity(ctx context.Context, req apigen.LinkIdentityRequestOb
 	}
 	result, err := a.Auth.OIDCStart(ctx, req.Body.Provider, "link", "", bearer(ctx), req.Body.Proof)
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrProviderNotFound):
-			return apigen.LinkIdentity404JSONResponse{NotFoundJSONResponse: apigen.NotFoundJSONResponse(errorBody(apigen.ErrorCodeNotFound, ""))}, nil
-		case errors.Is(err, service.ErrNoProofCredential):
-			return apigen.LinkIdentity400JSONResponse{BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, ""))}, nil
-		}
-		switch classify(err) {
+		policy := wireErrorFor(err)
+		switch policy.code {
+		case apigen.ErrorCodeNotFound:
+			return apigen.LinkIdentity404JSONResponse{NotFoundJSONResponse: apigen.NotFoundJSONResponse(policy.body(err))}, nil
+		case apigen.ErrorCodeBadRequest:
+			return apigen.LinkIdentity400JSONResponse{BadRequestJSONResponse: apigen.BadRequestJSONResponse(policy.body(err))}, nil
 		case apigen.ErrorCodeUnauthenticated:
-			return apigen.LinkIdentity401JSONResponse{UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, ""))}, nil
+			return apigen.LinkIdentity401JSONResponse{UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(policy.body(err))}, nil
 		case apigen.ErrorCodeTooManyRequests:
 			return apigen.LinkIdentity429JSONResponse{TooManyRequestsJSONResponse: tooMany()}, nil
 		default:
@@ -187,13 +177,12 @@ func (a *API) UnlinkIdentity(ctx context.Context, req apigen.UnlinkIdentityReque
 	}
 	result, err := a.Auth.UnlinkIdentity(ctx, bearer(ctx), string(req.Id), req.Body.Proof)
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrIdentityNotFound), errors.Is(err, service.ErrLastCredential), errors.Is(err, service.ErrNoProofCredential):
-			return apigen.UnlinkIdentity400JSONResponse{BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, ""))}, nil
-		}
-		switch classify(err) {
+		policy := wireErrorFor(err)
+		switch policy.code {
+		case apigen.ErrorCodeBadRequest:
+			return apigen.UnlinkIdentity400JSONResponse{BadRequestJSONResponse: apigen.BadRequestJSONResponse(policy.body(err))}, nil
 		case apigen.ErrorCodeUnauthenticated:
-			return apigen.UnlinkIdentity401JSONResponse{UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, ""))}, nil
+			return apigen.UnlinkIdentity401JSONResponse{UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(policy.body(err))}, nil
 		case apigen.ErrorCodeTooManyRequests:
 			return apigen.UnlinkIdentity429JSONResponse{TooManyRequestsJSONResponse: tooMany()}, nil
 		default:
@@ -229,7 +218,7 @@ func (a *API) ListOidcProviders(ctx context.Context, _ apigen.ListOidcProvidersR
 }
 
 func providerListErr(a *API, ctx context.Context, err error) apigen.ListOidcProvidersResponseObject {
-	switch classify(err) {
+	switch wireErrorFor(err).code {
 	case apigen.ErrorCodeUnauthenticated:
 		return apigen.ListOidcProviders401JSONResponse{UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, ""))}
 	case apigen.ErrorCodeForbidden:
@@ -245,10 +234,10 @@ func providerListErr(a *API, ctx context.Context, err error) apigen.ListOidcProv
 func (a *API) GetOidcProvider(ctx context.Context, req apigen.GetOidcProviderRequestObject) (apigen.GetOidcProviderResponseObject, error) {
 	v, err := a.Providers.Get(ctx, service.Bearer(bearer(ctx)), string(req.Slug))
 	if err != nil {
-		if errors.Is(err, service.ErrProviderNotFound) {
-			return apigen.GetOidcProvider404JSONResponse{NotFoundJSONResponse: apigen.NotFoundJSONResponse(errorBody(apigen.ErrorCodeNotFound, ""))}, nil
-		}
-		switch classify(err) {
+		policy := wireErrorFor(err)
+		switch policy.code {
+		case apigen.ErrorCodeNotFound:
+			return apigen.GetOidcProvider404JSONResponse{NotFoundJSONResponse: apigen.NotFoundJSONResponse(policy.body(err))}, nil
 		case apigen.ErrorCodeUnauthenticated:
 			return apigen.GetOidcProvider401JSONResponse{UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, ""))}, nil
 		case apigen.ErrorCodeForbidden:
@@ -274,11 +263,10 @@ func (a *API) PutOidcProvider(ctx context.Context, req apigen.PutOidcProviderReq
 	}
 	v, err := a.Providers.Put(ctx, service.Bearer(bearer(ctx)), string(req.Slug), in)
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrIssuerImmutable), errors.Is(err, service.ErrProviderDiscovery), errors.Is(err, service.ErrProviderExists):
-			return apigen.PutOidcProvider400JSONResponse{BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, ""))}, nil
-		}
-		switch classify(err) {
+		policy := wireErrorFor(err)
+		switch policy.code {
+		case apigen.ErrorCodeBadRequest:
+			return apigen.PutOidcProvider400JSONResponse{BadRequestJSONResponse: apigen.BadRequestJSONResponse(policy.body(err))}, nil
 		case apigen.ErrorCodeUnauthenticated:
 			return apigen.PutOidcProvider401JSONResponse{UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, ""))}, nil
 		case apigen.ErrorCodeForbidden:
@@ -295,13 +283,13 @@ func (a *API) PutOidcProvider(ctx context.Context, req apigen.PutOidcProviderReq
 
 func (a *API) DeleteOidcProvider(ctx context.Context, req apigen.DeleteOidcProviderRequestObject) (apigen.DeleteOidcProviderResponseObject, error) {
 	err := a.Providers.Delete(ctx, service.Bearer(bearer(ctx)), string(req.Slug))
-	switch {
+	switch policy := wireErrorFor(err); {
 	case err == nil:
 		return apigen.DeleteOidcProvider204Response{}, nil
-	case errors.Is(err, service.ErrProviderNotFound):
-		return apigen.DeleteOidcProvider404JSONResponse{NotFoundJSONResponse: apigen.NotFoundJSONResponse(errorBody(apigen.ErrorCodeNotFound, ""))}, nil
+	case policy.code == apigen.ErrorCodeNotFound:
+		return apigen.DeleteOidcProvider404JSONResponse{NotFoundJSONResponse: apigen.NotFoundJSONResponse(policy.body(err))}, nil
 	}
-	switch classify(err) {
+	switch wireErrorFor(err).code {
 	case apigen.ErrorCodeUnauthenticated:
 		return apigen.DeleteOidcProvider401JSONResponse{UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, ""))}, nil
 	case apigen.ErrorCodeForbidden:
