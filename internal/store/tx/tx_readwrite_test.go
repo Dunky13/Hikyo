@@ -58,3 +58,33 @@ func TestReadTransactionDoesNotBlockWriter(t *testing.T) {
 		t.Fatalf("writer took %v with a read transaction open — the read pool is taking write intent", elapsed)
 	}
 }
+
+func TestWriteResultPublishesOnlyCommittedAttemptValue(t *testing.T) {
+	cfg := store.Config{Engine: store.EngineSQLite, Path: filepath.Join(t.TempDir(), "write-result.db")}
+	if err := migrate.Run(t.Context(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	db, err := store.Open(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+
+	attempts := 0
+	got, err := WriteResult(t.Context(), db, func(context.Context, store.Repos, *authz.TxAuthorizer) (string, error) {
+		attempts++
+		if attempts == 1 {
+			return "rolled-back-attempt", store.ErrRetrySerialization
+		}
+		return "committed-attempt", nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if attempts != 2 {
+		t.Fatalf("attempts = %d, want 2", attempts)
+	}
+	if got != "committed-attempt" {
+		t.Fatalf("result = %q, want committed attempt value", got)
+	}
+}
