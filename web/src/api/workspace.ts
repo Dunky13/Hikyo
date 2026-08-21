@@ -389,27 +389,71 @@ export type PreparedWorkspace = {
 };
 
 /**
+ * StepUpParams turns a `prepareWorkspace` into an elevation rather than an
+ * establishment (#71, multi-instance ADR § The handoff and the workspace
+ * session). Every field is bound into the remote's own transaction row, so an
+ * elevated consent cannot be replayed against a different operation, environment
+ * or key set.
+ */
+export type StepUpParams = {
+  /** The workspace session being elevated. A step-up NEVER mints a second one. */
+  readonly session: string;
+  /** What the reauthentication authorizes, as the reveal endpoint consumes it. */
+  readonly operation: 'reveal' | 'copy' | 'publish';
+  /** The environment the elevation covers. */
+  readonly environment: string;
+  /** The enumerated key unit the elevation covers. */
+  readonly keySet: readonly string[];
+};
+
+/**
  * prepareWorkspace performs the live compatibility check and opens the handoff
  * transaction on the remote. It touches no window.
+ *
+ * With `stepUp` it opens an ELEVATION of an existing session rather than a first
+ * establishment. The bound fields ride the approve URL as well as the start
+ * body: the approve page needs the environment and key set to run the remote's
+ * OWN reauthentication ceremony over them before it may approve — while the
+ * server still validates the fresh reauth window against the transaction's own
+ * bound environment, so a tampered URL parameter only fails closed.
  */
-export async function prepareWorkspace(origin: string): Promise<PreparedWorkspace> {
+export async function prepareWorkspace(
+  origin: string,
+  stepUp?: StepUpParams,
+): Promise<PreparedWorkspace> {
   await assertCompatible(origin);
 
   const verifier = newVerifier();
-  const started = await remoteJSON(origin, '/api/v1/auth/workspace/start', zWorkspaceHandoffStarted, {
-    body: {
-      origin: globalThis.location.origin,
-      redirect_uri: globalThis.location.origin + CALLBACK_PATH,
-      pkce_challenge: await challengeFor(verifier),
-      purpose: 'establishment',
-    },
-  });
-  return {
-    origin,
-    state: started.state,
-    verifier,
-    approveURL: `${origin}${APPROVE_PATH}?state=${encodeURIComponent(started.state)}`,
+  const base = {
+    origin: globalThis.location.origin,
+    redirect_uri: globalThis.location.origin + CALLBACK_PATH,
+    pkce_challenge: await challengeFor(verifier),
   };
+  const body =
+    stepUp === undefined
+      ? { ...base, purpose: 'establishment' as const }
+      : {
+          ...base,
+          purpose: 'step-up' as const,
+          session: stepUp.session,
+          operation: stepUp.operation,
+          environment: stepUp.environment,
+          key_set: [...stepUp.keySet],
+        };
+  const started = await remoteJSON(origin, '/api/v1/auth/workspace/start', zWorkspaceHandoffStarted, {
+    body,
+  });
+  const approve = new URL(`${origin}${APPROVE_PATH}`);
+  approve.searchParams.set('state', started.state);
+  if (stepUp !== undefined) {
+    approve.searchParams.set('purpose', 'step-up');
+    approve.searchParams.set('operation', stepUp.operation);
+    approve.searchParams.set('environment', stepUp.environment);
+    for (const key of stepUp.keySet) {
+      approve.searchParams.append('key', key);
+    }
+  }
+  return { origin, state: started.state, verifier, approveURL: approve.toString() };
 }
 
 /**

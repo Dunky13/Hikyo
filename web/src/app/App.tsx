@@ -18,6 +18,7 @@ import { Shell } from '../routes/Shell.tsx';
 import { Values } from '../routes/Values.tsx';
 import { WorkspaceApprove } from '../routes/WorkspaceApprove.tsx';
 import { WorkspaceCallback } from '../routes/WorkspaceCallback.tsx';
+import { WorkspaceScope } from '../routes/WorkspaceScope.tsx';
 import { CHROMELESS, SURFACES, surfaceById, type Surface, type SurfaceId } from './navigation.ts';
 
 /**
@@ -40,12 +41,27 @@ const ELEMENTS: Record<SurfaceId, ReactElement> = {
   'project-settings': <ProjectSettings />,
   'instance-admin': <InstanceAdmin />,
   settings: <AccountSecurity />,
-  matrix: <Matrix />,
+  // The three product surfaces are wrapped in WorkspaceScope: reached with a
+  // `?remote=<name>` parameter they operate that remote over its bearer, and
+  // without one they render exactly as before against this instance (#71).
+  matrix: (
+    <WorkspaceScope>
+      <Matrix />
+    </WorkspaceScope>
+  ),
   // The same surface with its history drawer open. The route table is the only
   // place that knows the path, so the element reads the state as a prop rather
   // than sniffing the location.
-  history: <Matrix historyOpen />,
-  values: <Values />,
+  history: (
+    <WorkspaceScope>
+      <Matrix historyOpen />
+    </WorkspaceScope>
+  ),
+  values: (
+    <WorkspaceScope>
+      <Values />
+    </WorkspaceScope>
+  ),
   'machine-access': <MachineAccess />,
   'cli-reauth': <CLIReauth />,
   'workspace-approve': <WorkspaceApprove />,

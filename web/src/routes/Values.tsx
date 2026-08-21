@@ -15,6 +15,7 @@ import {
   type RevealWindow,
   type ValueCell,
 } from '../api/values.ts';
+import { useTransport } from '../api/transport.tsx';
 import { Ceremony, type CeremonyPurpose, type CeremonyRequest } from './Ceremony.tsx';
 
 /**
@@ -83,6 +84,7 @@ export function Values() {
     environment: params['environment'] ?? '',
   };
 
+  const transport = useTransport();
   const values = useValues(env);
   const environmentsQuery = useEnvironments(env);
   const revealGuard = useRevealWindow(env);
@@ -184,7 +186,7 @@ export function Values() {
         }
         let state: RevealWindow;
         try {
-          state = await fetchRevealWindow({ ...env, environment: target.id });
+          state = await fetchRevealWindow({ ...env, environment: target.id }, transport.client);
         } catch {
           setRefusal('The reveal window could not be read, so nothing was disclosed.');
           return;
@@ -210,7 +212,7 @@ export function Values() {
       }
       await act();
     },
-    [env],
+    [env, transport.client],
   );
 
   const noteDisclosure = useCallback((names: string[]) => {

@@ -1,11 +1,19 @@
-import { useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 
+import { useWorkspaceContext } from '../api/transport.tsx';
 import {
   ceremonyRefusalText,
   runPasskeyCeremony,
   runTOTPCeremony,
   type RevealWindow,
 } from '../api/values.ts';
+import {
+  openPrepared,
+  prepareWorkspace,
+  workspaceBearer,
+  WorkspaceError,
+  type PreparedWorkspace,
+} from '../api/workspace.ts';
 import { useModalDialog } from './useModalDialog.ts';
 
 /**
@@ -115,6 +123,12 @@ export function Ceremony({
   const [failure, setFailure] = useState<string | null>(null);
   const first = useRef<HTMLButtonElement>(null);
   const dialog = useModalDialog(first);
+  // A workspace disclosure cannot run its ceremony here: a passkey assertion is
+  // bound to THIS origin's relying-party id, and the remote would reject it. So
+  // inside a workspace the modal hands off to the remote's own origin in a
+  // popup (#71), where the remote runs its own locked ceremony and elevates the
+  // workspace session — the same modal, a different executor.
+  const workspace = useWorkspaceContext();
 
   const attempt = async (run: () => Promise<void>) => {
     setBusy(true);
@@ -164,6 +178,13 @@ export function Ceremony({
       <p className="ceremony__lede">
         This confirms a <strong>disclosure</strong>, not your account security. It is separate from
         signing in and from any step-up you have already done.
+        {workspace === null ? null : (
+          <>
+            {' '}
+            You will authorise it on <span className="mono">{workspace.origin}</span> — the instance
+            that holds this value — in a popup on its own origin.
+          </>
+        )}
       </p>
 
       <p className="ceremony__scope" id="ceremony-scope">
@@ -187,55 +208,181 @@ export function Ceremony({
         </p>
       ) : null}
 
-      {request.window.totp_offered ? null : (
-        // Stated, never a disabled control. "Protected" and "the window is
-        // set to 0" are different sentences and the human is owed whichever
-        // one is true.
-        <p className="ceremony__cap" role="status">
+      {workspace === null ? (
+        <>
+          {request.window.totp_offered ? null : (
+            // Stated, never a disabled control. "Protected" and "the window is
+            // set to 0" are different sentences and the human is owed whichever
+            // one is true.
+            <p className="ceremony__cap" role="status">
+              <span className="alert__glyph" aria-hidden="true">
+                ⚿
+              </span>
+              <span>
+                {request.window.protected
+                  ? 'This environment is protected, so every disclosure takes its own passkey ceremony. A code cannot authorise it.'
+                  : 'This environment allows no reauthentication window, so every disclosure takes its own passkey ceremony. A code cannot authorise it.'}
+              </span>
+            </p>
+          )}
+
+          <div className="ceremony__actions">
+            <button
+              className="btn btn--primary"
+              type="button"
+              ref={first}
+              onClick={onPasskey}
+              disabled={busy}
+            >
+              {busy ? 'Waiting for your passkey…' : 'Use a passkey'}
+            </button>
+            <button className="btn" type="button" onClick={onCancel} disabled={busy}>
+              Cancel
+            </button>
+          </div>
+
+          {request.window.totp_offered ? (
+            <form className="ceremony__totp" onSubmit={onCode}>
+              <div className="field">
+                <label htmlFor="ceremony-code">Or a code from your authenticator</label>
+                <input
+                  id="ceremony-code"
+                  name="code"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  value={code}
+                  onChange={(e) => setCode(e.target.value)}
+                />
+              </div>
+              <button className="btn" type="submit" disabled={busy || code.length < 6}>
+                Authorise with a code
+              </button>
+            </form>
+          ) : null}
+        </>
+      ) : (
+        <WorkspaceStepUp
+          origin={workspace.origin}
+          operation={SIGNED_OPERATION[request.purpose]}
+          environmentId={request.environmentId}
+          keyIds={request.keys.map((k) => k.id)}
+          firstRef={first}
+          onAuthorised={onAuthorised}
+          onCancel={onCancel}
+        />
+      )}
+    </dialog>
+  );
+}
+
+/**
+ * WorkspaceStepUp is the modal's executor when the disclosure is a remote's.
+ *
+ * The elevation transaction is opened EAGERLY on mount, because the window that
+ * completes it can only be opened from a real user gesture — a `window.open`
+ * after an `await` is a blocked popup — so the network round trip happens first
+ * and the button that opens the popup is synchronous to the click. On approval
+ * the remote elevates this very workspace session in place (a rotated bearer,
+ * the same session id), `openPrepared` installs it, and the caller resumes the
+ * disclosure over the now-elevated transport.
+ */
+function WorkspaceStepUp({
+  origin,
+  operation,
+  environmentId,
+  keyIds,
+  firstRef,
+  onAuthorised,
+  onCancel,
+}: {
+  origin: string;
+  operation: 'reveal' | 'copy' | 'publish';
+  environmentId: string;
+  keyIds: readonly string[];
+  firstRef: React.RefObject<HTMLButtonElement | null>;
+  onAuthorised: () => void;
+  onCancel: () => void;
+}) {
+  const [prepared, setPrepared] = useState<PreparedWorkspace | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
+
+  useEffect(() => {
+    const bearer = workspaceBearer(origin);
+    if (bearer === undefined) {
+      setFailure('This workspace is no longer connected. Reconnect to the remote and try again.');
+      return;
+    }
+    let live = true;
+    prepareWorkspace(origin, {
+      session: bearer.session,
+      operation,
+      environment: environmentId,
+      keySet: keyIds,
+    })
+      .then((ready) => {
+        if (live) setPrepared(ready);
+      })
+      .catch((error: unknown) => {
+        if (live)
+          setFailure(
+            error instanceof WorkspaceError
+              ? error.message
+              : 'The remote could not be reached to authorise this disclosure.',
+          );
+      });
+    return () => {
+      live = false;
+    };
+    // Bound to the exact decision: a re-prepare is only warranted if the target
+    // itself changes, which stages a new modal rather than re-running this one.
+  }, [origin, operation, environmentId, keyIds]);
+
+  // Must stay synchronous to the click: the popup inside openPrepared only
+  // survives the blocker on a live user gesture.
+  const go = (ready: PreparedWorkspace) => {
+    setBusy(true);
+    setFailure(null);
+    openPrepared(ready)
+      .then(() => onAuthorised())
+      .catch((error: unknown) => {
+        setBusy(false);
+        setFailure(
+          error instanceof WorkspaceError
+            ? error.message
+            : 'The authorisation did not complete. Nothing was disclosed.',
+        );
+      });
+  };
+
+  return (
+    <>
+      {failure === null ? null : (
+        <p className="alert" role="alert">
           <span className="alert__glyph" aria-hidden="true">
-            ⚿
+            !
           </span>
-          <span>
-            {request.window.protected
-              ? 'This environment is protected, so every disclosure takes its own passkey ceremony. A code cannot authorise it.'
-              : 'This environment allows no reauthentication window, so every disclosure takes its own passkey ceremony. A code cannot authorise it.'}
-          </span>
+          <span>{failure}</span>
         </p>
       )}
-
       <div className="ceremony__actions">
         <button
           className="btn btn--primary"
           type="button"
-          ref={first}
-          onClick={onPasskey}
-          disabled={busy}
+          ref={firstRef}
+          onClick={() => (prepared === null ? undefined : go(prepared))}
+          disabled={busy || prepared === null}
         >
-          {busy ? 'Waiting for your passkey…' : 'Use a passkey'}
+          {busy
+            ? 'Authorising…'
+            : prepared === null
+              ? 'Contacting…'
+              : `Continue to ${origin} to authorise`}
         </button>
         <button className="btn" type="button" onClick={onCancel} disabled={busy}>
           Cancel
         </button>
       </div>
-
-      {request.window.totp_offered ? (
-        <form className="ceremony__totp" onSubmit={onCode}>
-          <div className="field">
-            <label htmlFor="ceremony-code">Or a code from your authenticator</label>
-            <input
-              id="ceremony-code"
-              name="code"
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-            />
-          </div>
-          <button className="btn" type="submit" disabled={busy || code.length < 6}>
-            Authorise with a code
-          </button>
-        </form>
-      ) : null}
-    </dialog>
+    </>
   );
 }

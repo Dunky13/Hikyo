@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 
+import { useTransport } from '../api/transport.tsx';
 import { fetchRevealWindow, type EnvRef } from '../api/values.ts';
 import type { CeremonyPurpose, CeremonyRequest } from './Ceremony.tsx';
 
@@ -31,6 +32,7 @@ export function useProtectedPublishCeremony(refData: Omit<EnvRef, 'environment'>
   const [request, setRequest] = useState<CeremonyRequest | null>(null);
   const [error, setError] = useState<string | null>(null);
   const resume = useRef<(() => void) | null>(null);
+  const transport = useTransport();
 
   const run = async (
     targets: readonly ProtectedPublishTarget[],
@@ -49,10 +51,13 @@ export function useProtectedPublishCeremony(refData: Omit<EnvRef, 'environment'>
     }
     setError(null);
     try {
-      const window = await fetchRevealWindow({
-        ...refData,
-        environment: target.environmentId,
-      });
+      const window = await fetchRevealWindow(
+        {
+          ...refData,
+          environment: target.environmentId,
+        },
+        transport.client,
+      );
       if (window.live && !window.single_decision) {
         await run(targets.slice(1), onComplete, failureMessage);
         return;
