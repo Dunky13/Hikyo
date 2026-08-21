@@ -345,8 +345,25 @@ jobs:
       - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
         with:
           node-version-file: .nvmrc
+      # verify-docs.sh installs Chromium for the docs site's own browser gates.
+      # Same payload, same cache directory as the `web` job, but keyed on the
+      # docs lockfile because that is what pins the docs site's Playwright.
+      - name: Restore Playwright browsers
+        id: playwright-browsers
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-docs-${{ runner.os }}-${{ hashFiles('docs/site/pnpm-lock.yaml') }}
       - name: Typecheck, build, and assert O4-O6 policy content
         run: ./scripts/ci/verify-docs.sh
+      - name: Save Playwright browsers
+        if: >-
+          success() && steps.playwright-browsers.outputs.cache-hit != 'true' &&
+          github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ steps.playwright-browsers.outputs.cache-primary-key }}
 
   compose-demo:
     needs: changes
@@ -480,9 +497,22 @@ jobs:
         # but always execute this job's tests against its fresh build.
         run: go test -count=1 -tags ui ./internal/server/... ./internal/webui/...
 
+      # The browser payload is ~130 MB pulled from cdn.playwright.dev on every
+      # leg, and both matrix legs pay it. Only the apt half (`install-deps`)
+      # genuinely has to run on a fresh runner; the download half is keyed on
+      # the lockfile that pins @playwright/test, so a version bump is the only
+      # thing that re-downloads it.
+      - name: Restore Playwright browsers
+        id: playwright-browsers
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-web-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml') }}
       - name: Install Chromium
         working-directory: web
-        run: pnpm exec playwright install --with-deps chromium
+        run: |
+          pnpm exec playwright install-deps chromium
+          pnpm exec playwright install chromium
 
       # `playwright test` directly, not `pnpm run e2e`: the script rebuilds the
       # SPA so a developer cannot run the flows against a stale bundle, and the
@@ -507,6 +537,18 @@ jobs:
         with:
           path: ~/.cache/go-build
           key: ${{ steps.web-go-cache.outputs.cache-primary-key }}
+      # Same single-writer rule as the Go cache above, and the same reason PR
+      # runs never write: this graph executes untrusted PR code, so only a main
+      # push is trusted to publish a browser payload every later run restores.
+      - name: Save Playwright browsers
+        if: >-
+          success() && steps.playwright-browsers.outputs.cache-hit != 'true' &&
+          github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+          matrix.project == 'desktop'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ steps.playwright-browsers.outputs.cache-primary-key }}
 
   test:
     needs: changes
