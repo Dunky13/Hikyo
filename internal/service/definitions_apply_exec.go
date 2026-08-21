@@ -47,7 +47,7 @@ func (s *Definitions) Apply(ctx context.Context, actor Actor, scope domain.Scope
 		return ApplyResult{}, err
 	}
 
-	publisher, err := prepareSchemaPublish(ctx, s.DB, s.Keyring, s.Advisory, actor, authz.OpDefinitionsApply, scope)
+	publisher, err := prepareSchemaPublish(ctx, s.DB, s.Keyring, s.Advisory, s.Budget, actor, authz.OpDefinitionsApply, scope)
 	if err != nil {
 		return ApplyResult{}, err
 	}

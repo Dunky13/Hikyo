@@ -119,6 +119,9 @@ type Keys struct {
 	// they were never validated at.
 	Keyring  *crypto.Keyring
 	Advisory *Advisory
+	// Budget applies the § 151 schema-revision rate limit (60/h per project) to
+	// every semantic schema mutation, via prepareSchemaPublish. Nil disables it.
+	Budget *Budget
 	// Scan is the secret-scanning ruleset (#74). Surface-2 declaration ingresses
 	// (key create/rename/metadata/declaration edits) block on a finding; the
 	// secret→config declassification leg of Reclassify is a Surface-1 warn.
@@ -130,6 +133,7 @@ type KeyGroups struct {
 	DB       *store.DB
 	Keyring  *crypto.Keyring
 	Advisory *Advisory
+	Budget   *Budget
 	// Scan: secret-scanning Surface-2 seam (#74). Group names are
 	// author-controlled declaration text.
 	Scan *scanning.Ruleset
@@ -151,10 +155,19 @@ type schemaPublisher struct {
 // transaction that asked for it. It is resolved after authorization for the
 // reason #50 recorded: an unauthorized caller must not leave a wrapped-key row
 // behind for an arbitrary (org, project).
-func prepareSchemaPublish(ctx context.Context, db *store.DB, keyring *crypto.Keyring, advisory *Advisory,
+func prepareSchemaPublish(ctx context.Context, db *store.DB, keyring *crypto.Keyring, advisory *Advisory, budget *Budget,
 	actor Actor, op authz.Operation, scope domain.Scope) (*schemaPublisher, error) {
 	sealer, err := sealerFor(ctx, db, keyring, actor, op, scope)
 	if err != nil {
+		return nil, err
+	}
+	// § 151 (§ 8) schema-revision rate limit: 60/h per project. This is the one
+	// point every semantic schema mutation converges on, before its own
+	// transaction opens — so a single charge here bounds them all, and the tx
+	// retry loop cannot multiply it. Charged AFTER sealerFor authorizes, so an
+	// unauthorized caller cannot burn a project's revision budget. Rate-only, so
+	// the returned release is a no-op and needs no defer.
+	if _, err := budget.acquire(budgetSchemaRevision, budgetKeys{Project: scope.Project}); err != nil {
 		return nil, err
 	}
 	return &schemaPublisher{sealer: sealer, keyring: keyring, advisory: advisory}, nil
@@ -588,7 +601,7 @@ func (s *Keys) Create(ctx context.Context, actor Actor, scope domain.Scope, spec
 	if err != nil {
 		return Key{}, err
 	}
-	publisher, err := prepareSchemaPublish(ctx, s.DB, s.Keyring, s.Advisory, actor, authz.OpKeyCreate, scope)
+	publisher, err := prepareSchemaPublish(ctx, s.DB, s.Keyring, s.Advisory, s.Budget, actor, authz.OpKeyCreate, scope)
 	if err != nil {
 		return Key{}, err
 	}
@@ -771,7 +784,7 @@ func (s *Keys) Rename(ctx context.Context, actor Actor, scope domain.Scope, id, 
 	// ForProject re-reads the wrapped-key row, mints nothing, and a Surface-2
 	// block below leaves no orphan row — the in-transaction scan is safe here. If
 	// key creation ever stops minting the DEK, move to scanSurface2Preflight.
-	publisher, err := prepareSchemaPublish(ctx, s.DB, s.Keyring, s.Advisory, actor, authz.OpKeyRename, scope)
+	publisher, err := prepareSchemaPublish(ctx, s.DB, s.Keyring, s.Advisory, s.Budget, actor, authz.OpKeyRename, scope)
 	if err != nil {
 		return Key{}, err
 	}
@@ -994,7 +1007,7 @@ func (s *Keys) UpdateDeclaration(ctx context.Context, actor Actor, scope domain.
 	// wrong shape for a pre-flight — the scan is gated on the DB-derived no-op
 	// short-circuit below, which the §6.1 no-retro-scan rule needs; an
 	// unconditional pre-flight scan would block a canonically-identical resubmit.
-	publisher, err := prepareSchemaPublish(ctx, s.DB, s.Keyring, s.Advisory, actor, authz.OpKeyUpdateDeclaration, scope)
+	publisher, err := prepareSchemaPublish(ctx, s.DB, s.Keyring, s.Advisory, s.Budget, actor, authz.OpKeyUpdateDeclaration, scope)
 	if err != nil {
 		return Key{}, err
 	}
@@ -1149,7 +1162,7 @@ func (s *Keys) Reclassify(ctx context.Context, actor Actor, scope domain.Scope, 
 	}
 	var out Key
 	var findings []Finding
-	publisher, err := prepareSchemaPublish(ctx, s.DB, s.Keyring, s.Advisory, actor, authz.OpKeyReclassify, scope)
+	publisher, err := prepareSchemaPublish(ctx, s.DB, s.Keyring, s.Advisory, s.Budget, actor, authz.OpKeyReclassify, scope)
 	if err != nil {
 		return Key{}, nil, err
 	}
@@ -1320,7 +1333,7 @@ func (s *Keys) scanDeclassified(ctx context.Context, r store.Repos, az *authz.Tx
 // previewed.
 func (s *Keys) SetGroup(ctx context.Context, actor Actor, scope domain.Scope, id, groupID string) (Key, error) {
 	var out Key
-	publisher, err := prepareSchemaPublish(ctx, s.DB, s.Keyring, s.Advisory, actor, authz.OpKeySetGroup, scope)
+	publisher, err := prepareSchemaPublish(ctx, s.DB, s.Keyring, s.Advisory, s.Budget, actor, authz.OpKeySetGroup, scope)
 	if err != nil {
 		return Key{}, err
 	}
@@ -1395,7 +1408,7 @@ func (s *Keys) SetGroup(ctx context.Context, actor Actor, scope domain.Scope, id
 // Delete removes a key from the catalogue. Its explicit presence rows go with
 // it and it drops out of its group; the group itself survives, possibly inert.
 func (s *Keys) Delete(ctx context.Context, actor Actor, scope domain.Scope, id string) error {
-	publisher, err := prepareSchemaPublish(ctx, s.DB, s.Keyring, s.Advisory, actor, authz.OpKeyDelete, scope)
+	publisher, err := prepareSchemaPublish(ctx, s.DB, s.Keyring, s.Advisory, s.Budget, actor, authz.OpKeyDelete, scope)
 	if err != nil {
 		return err
 	}
@@ -1683,7 +1696,7 @@ func (s *KeyGroups) Rename(ctx context.Context, actor Actor, scope domain.Scope,
 // it coupled: a group is a coupling, and removing a coupling is not removing
 // what it coupled.
 func (s *KeyGroups) Delete(ctx context.Context, actor Actor, scope domain.Scope, id string) error {
-	publisher, err := prepareSchemaPublish(ctx, s.DB, s.Keyring, s.Advisory, actor, authz.OpKeyGroupDelete, scope)
+	publisher, err := prepareSchemaPublish(ctx, s.DB, s.Keyring, s.Advisory, s.Budget, actor, authz.OpKeyGroupDelete, scope)
 	if err != nil {
 		return err
 	}

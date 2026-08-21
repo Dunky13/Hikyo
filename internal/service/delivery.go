@@ -162,7 +162,11 @@ type Delivery struct {
 	// opens. Nil means only bearer credentials may fetch, which is what a build
 	// that did not wire federation should do.
 	Federation *Federation
-	Now        func() time.Time
+	// Budget applies the § 179 machine-fetch aggregate rate: 300/min per org,
+	// 1000/min per instance, on top of § 5's per-principal fetch rate. Nil
+	// disables it.
+	Budget *Budget
+	Now    func() time.Time
 	// FetchProbe is a conformance-only retry seam. Production leaves it nil;
 	// it is invoked immediately after attempt-local response state is reset.
 	FetchProbe DeliveryConformanceProbe
@@ -261,6 +265,14 @@ func (s *Delivery) FetchAs(ctx context.Context, actor Actor, scope domain.Scope,
 	sealer, err := sealerFor(ctx, s.DB, s.Keyring, actor, authz.OpDeliveryFetch, scope)
 	if err != nil {
 		return FetchResult{}, s.recordUnbound(ctx, actor, err)
+	}
+	// § 179 machine-fetch aggregates: 300/min per org, 1000/min per instance (on
+	// top of § 5's per-principal fetch rate). Charged AFTER sealerFor authorizes,
+	// so an unauthenticated caller cannot burn a target org's fetch budget by
+	// guessing its id — the same authorize-first property the reveal gate keeps.
+	// Rate-only, so the release is a no-op.
+	if _, err := s.Budget.acquire(budgetMachineFetch, budgetKeys{Org: scope.Org}); err != nil {
+		return FetchResult{}, err
 	}
 
 	var out FetchResult

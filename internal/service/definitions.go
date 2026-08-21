@@ -38,6 +38,9 @@ type Definitions struct {
 	DB       *store.DB
 	Keyring  *crypto.Keyring
 	Advisory *Advisory
+	// Budget applies the § 151 schema-revision rate limit (60/h per project) to
+	// the definitions-apply path, via prepareSchemaPublish. Nil disables it.
+	Budget *Budget
 	// Scan is the secret-scanning Surface-2 seam (#74 SS3, ADR §7 (b)/(c)): the
 	// plan/apply chokepoints scan every author-controlled bundle leaf before an
 	// immutable plan persists (plan) and re-scan on ruleset-snapshot skew (apply),

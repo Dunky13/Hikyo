@@ -60,7 +60,12 @@ type Revisions struct {
 	// Auth supplies the reveal guard for the one disclosing method here,
 	// Export. Nil refuses every disclosure loudly.
 	Auth *Auth
-	Now  func() time.Time
+	// Budget applies the § 179 expensive-path concurrency bounds: publish 4 per
+	// org, values export 2 per org / 6 per instance. Nil disables it. The
+	// per-principal rate half of these two categories is deferred (the principal
+	// resolves inside the transaction; see budget.go).
+	Budget *Budget
+	Now    func() time.Time
 	// PublishProbe is the service-layer conformance seam for forcing two real
 	// publish transactions to overlap around the project lock. Production
 	// leaves it nil; it decides no behavior and sees no material.
@@ -233,6 +238,14 @@ func (s *Revisions) PublishPlanned(ctx context.Context, actor Actor, scope domai
 	if dup, ok := firstDuplicate(versionIDs); ok {
 		return PublishResult{}, invalidDetail("pending change %q is named more than once", dup)
 	}
+	// § 179 publish concurrency: 4 per org, held for the duration of the publish
+	// fan-out. Acquired at entry, before the sealer preflight opens its own
+	// transactions, so the bound cannot be multiplied by the tx retry loop.
+	release, err := s.Budget.acquire(budgetPublish, budgetKeys{Org: scope.Org})
+	if err != nil {
+		return PublishResult{}, err
+	}
+	defer release()
 	sealer, err := sealerFor(ctx, s.DB, s.Keyring, actor, authz.OpValuePublish, scope)
 	if err != nil {
 		return PublishResult{}, err

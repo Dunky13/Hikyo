@@ -19,9 +19,13 @@ import (
 )
 
 type Adapters struct {
-	DB             *store.DB
-	Auth           *Auth
-	Keyring        *crypto.Keyring
+	DB      *store.DB
+	Auth    *Auth
+	Keyring *crypto.Keyring
+	// Budget applies the § 179 adapter sync/trigger concurrency bound (4 per
+	// org). Nil disables it. The per-principal 10/min rate is deferred (see
+	// budget.go).
+	Budget         *Budget
 	Now            func() time.Time
 	PlanModule     func(origin, credential string) (adapter.Module, func(), error)
 	ProviderModule func(provider, origin, credential string) (adapter.Module, func(), error)
@@ -1066,9 +1070,15 @@ func (s *Adapters) SyncTarget(ctx context.Context, actor Actor, scope domain.Sco
 	if scope.Project == "" || scope.Env != "" || targetID == "" {
 		return store.AdapterEnqueueResult{}, fmt.Errorf("%w: manual adapter sync requires project scope and target id", domain.ErrInvalid)
 	}
+	// § 179 adapter sync/trigger concurrency: 4 per org. Held for the enqueue.
+	release, err := s.Budget.acquire(budgetAdapter, budgetKeys{Org: scope.Org})
+	if err != nil {
+		return store.AdapterEnqueueResult{}, err
+	}
+	defer release()
 	now := store.CanonTime(s.now())
 	var result store.AdapterEnqueueResult
-	err := retryAdapterProviderFence(ctx, func() error {
+	err = retryAdapterProviderFence(ctx, func() error {
 		return tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 			caller, err := actor.resolve(ctx, az, now)
 			if err != nil {

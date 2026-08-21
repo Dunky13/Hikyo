@@ -427,6 +427,15 @@ func (s *Revisions) Export(ctx context.Context, actor Actor, scope domain.Scope,
 	if s.Keyring == nil {
 		return nil, 0, errors.New("service: value export requires a keyring")
 	}
+	// § 179 export concurrency: 2 per org, 6 per instance — shared with audit
+	// export. Held for the duration; acquired at entry, before the sealer
+	// preflight, so the tx retry loop cannot multiply it. (The per-principal
+	// 5/min rate on this path is deferred; see budget.go.)
+	release, err := s.Budget.acquire(budgetValuesExport, budgetKeys{Org: scope.Org})
+	if err != nil {
+		return nil, 0, err
+	}
+	defer release()
 	// The sealer is resolved under the READ half of the formula; the
 	// disclosure half is authorized in-transaction below, once the snapshot is
 	// in hand and "current or historical" is a fact rather than a guess. The
