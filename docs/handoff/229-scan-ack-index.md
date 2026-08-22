@@ -58,5 +58,13 @@ the prior successful dependency artifact; a full rerun safely replaces it with
 `overwrite: true` after the exact-head build succeeds. The policy fixture pins
 both requirements and rejects future attempt-scoped app artifact names.
 
+The fresh exact-head run then reproduced the original shutdown on a second
+hosted runner. `no-egress.sh` was terminating a derived process group after the
+probe; when `setsid` forked, that group could include the runner shell. The
+probe now enables strace's `--kill-on-exit` ownership and kills only the exact
+tracer PID. A lifecycle fixture rejects negative process-group signals, and the
+Ubuntu 24.04 probe completes without leaving the traced server behind.
+
 CI-repair validation: build-artifact reuse, required-jobs, changed-path,
-trusted-script, cache-policy, ShellCheck, and actionlint checks passed locally.
+trusted-script, cache-policy, no-egress lifecycle, ShellCheck, actionlint, and
+the complete Ubuntu 24.04 no-egress probe passed locally.
