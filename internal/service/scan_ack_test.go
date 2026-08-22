@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -19,7 +20,7 @@ import (
 // unforgeable, it binds one surface/locator/rule/content/snapshot, it expires,
 // and a tampered or foreign token opens to nothing.
 
-func ackTestKeyring(t *testing.T) *crypto.Keyring {
+func ackTestKeyring(t testing.TB) *crypto.Keyring {
 	t.Helper()
 	cfg := store.Config{Engine: store.EngineSQLite, Path: filepath.Join(t.TempDir(), "ack.db")}
 	if err := migrate.Run(t.Context(), cfg); err != nil {
@@ -205,6 +206,148 @@ func TestAckSetSurplusReported(t *testing.T) {
 	if n := set.unconsumed(); n != 0 {
 		t.Fatalf("unconsumed = %d, want 0 after match", n)
 	}
+}
+
+func TestAckSetOpensEachPresentedTokenOnce(t *testing.T) {
+	kr := ackTestKeyring(t)
+	now := time.Unix(1_700_000_100, 0)
+	const tokenCount = 8
+	tokens := make([]string, 0, tokenCount)
+	for i := range tokenCount - 1 {
+		tok, err := sealAck(kr, ackBinding{
+			kind:       ackKindDecl,
+			locator:    fmt.Sprintf("token-locator-%d", i),
+			ruleDigest: fmt.Sprintf("token-rule-%d", i),
+			contentSHA: contentDigest([]byte(fmt.Sprintf("token-content-%d", i))),
+			snapshot:   "snap",
+			mintNano:   now.Add(-time.Minute).UnixNano(),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		tokens = append(tokens, tok)
+	}
+	tokens = append(tokens, "unreadable-token")
+
+	set := newAckSet(tokens)
+	openCount := 0
+	set.open = func(kr *crypto.Keyring, token string) (ackBinding, error) {
+		openCount++
+		return openAck(kr, token)
+	}
+
+	findings := make([]declFinding, tokenCount)
+	for i := range findings {
+		findings[i] = declFinding{
+			locator:    fmt.Sprintf("finding-locator-%d", i),
+			ruleID:     fmt.Sprintf("finding-rule-id-%d", i),
+			ruleDigest: fmt.Sprintf("finding-rule-%d", i),
+			cSHA:       contentDigest([]byte(fmt.Sprintf("finding-content-%d", i))),
+		}
+		set.match(kr, ackKindDecl, findings[i].locator, findings[i].ruleDigest, "snap", findings[i].cSHA, now)
+	}
+	set.classifyRejections(kr, findings, "snap", now)
+
+	if openCount != len(tokens) {
+		t.Fatalf("openAck calls = %d, want %d (once per presented token)", openCount, len(tokens))
+	}
+}
+
+func TestAckSetRejectionPrecedenceAndInputOrder(t *testing.T) {
+	kr := ackTestKeyring(t)
+	now := time.Unix(1_700_000_100, 0)
+	currentSHA := contentDigest([]byte("AKIAIOSFODNN7EXAMPLE"))
+	staleSHA := contentDigest([]byte("AKIAI44QH8DHBEXAMPLE"))
+	const digest = "sha256:rule-digest"
+	findings := []declFinding{{
+		locator: locDeclPattern, ruleID: "aws-access-key-id", ruleDigest: digest, cSHA: currentSHA,
+	}}
+	mint := func(kind, locator, snapshot string, cSHA [32]byte, age time.Duration) string {
+		t.Helper()
+		tok, err := sealAck(kr, ackBinding{
+			kind: kind, locator: locator, ruleDigest: digest, contentSHA: cSHA,
+			snapshot: snapshot, mintNano: now.Add(-age).UnixNano(),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tok
+	}
+
+	valid := mint(ackKindDecl, locDeclPattern, "snap", currentSHA, time.Minute)
+	tokens := []string{
+		valid,
+		"unreadable-token",
+		valid,
+		mint(ackKindDecl, "missing-locator", "old-snap", staleSHA, ackTTL+time.Minute),
+		mint(ackKindDecl, locDeclPattern, "old-snap", staleSHA, ackTTL+time.Minute),
+		mint(ackKindDecl, locDeclPattern, "snap", staleSHA, ackTTL+time.Minute),
+		mint(ackKindDecl, locDeclPattern, "snap", currentSHA, ackTTL+time.Minute),
+		mint(ackKindValue, locDeclPattern, "snap", currentSHA, time.Minute),
+	}
+	set := newAckSet(tokens)
+	if got, matched := set.match(kr, ackKindDecl, locDeclPattern, digest, "snap", currentSHA, now); !matched || got != valid {
+		t.Fatal("first exact token did not match in original input order")
+	}
+
+	got := set.classifyRejections(kr, findings, "snap", now)
+	want := []struct {
+		index  int
+		reason string
+	}{
+		{1, rejectUnreadable},
+		{2, rejectSurplus},
+		{3, rejectSurplus},
+		{4, rejectVersionSkew},
+		{5, rejectStale},
+		{6, rejectExpired},
+		{7, rejectUnreadable},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("rejections = %d, want %d: %+v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i].Index != want[i].index || got[i].Reason != want[i].reason {
+			t.Errorf("rejection[%d] = {Index:%d Reason:%q}, want {Index:%d Reason:%q}",
+				i, got[i].Index, got[i].Reason, want[i].index, want[i].reason)
+		}
+	}
+}
+
+func BenchmarkAckSetMaximum(b *testing.B) {
+	kr := ackTestKeyring(b)
+	now := time.Unix(1_700_000_100, 0)
+	tokens := make([]string, maxRequestFindings)
+	findings := make([]declFinding, maxRequestFindings)
+	for i := range maxRequestFindings {
+		locator := fmt.Sprintf("locator-%03d", i)
+		digest := fmt.Sprintf("digest-%03d", i)
+		cSHA := contentDigest([]byte(fmt.Sprintf("content-%03d", i)))
+		tok, err := sealAck(kr, ackBinding{
+			kind: ackKindDecl, locator: locator, ruleDigest: digest, contentSHA: cSHA,
+			snapshot: "snap", mintNano: now.Add(-time.Minute).UnixNano(),
+		})
+		if err != nil {
+			b.Fatal(err)
+		}
+		tokens[i] = tok
+		findings[i] = declFinding{locator: locator, ruleID: fmt.Sprintf("rule-%03d", i), ruleDigest: digest, cSHA: cSHA}
+	}
+
+	b.Run("match", func(b *testing.B) {
+		for b.Loop() {
+			set := newAckSet(tokens)
+			for _, finding := range findings {
+				set.match(kr, ackKindDecl, finding.locator, finding.ruleDigest, "snap", finding.cSHA, now)
+			}
+		}
+	})
+	b.Run("reject", func(b *testing.B) {
+		for b.Loop() {
+			set := newAckSet(tokens)
+			set.classifyRejections(kr, findings[1:], "snap", now)
+		}
+	})
 }
 
 // TestScanRejectionsNamedByClass proves a resubmitted token that no current
