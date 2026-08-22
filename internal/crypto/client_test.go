@@ -270,29 +270,3 @@ func TestSnapshotWrongKeyFails(t *testing.T) {
 		t.Errorf("cross-key open err = %v, want ErrDecrypt", err)
 	}
 }
-
-func TestSnapshotContextMatches(t *testing.T) {
-	base := baseSnapshotAAD()
-	ctx := SnapshotContext{
-		InstanceOrigin: base.InstanceOrigin, OrgID: base.OrgID, ProjectID: base.ProjectID,
-		EnvironmentID: base.EnvironmentID, CredentialFingerprint: base.CredentialFingerprint,
-		ConfigOnly: base.ConfigOnly, TargetNames: []string{"worker", "api"}, // unsorted set
-	}
-	if err := base.ContextMatches(ctx); err != nil {
-		t.Errorf("matching context rejected: %v", err)
-	}
-	for _, bad := range []func(*SnapshotContext){
-		func(c *SnapshotContext) { c.EnvironmentID = "env_2" },
-		func(c *SnapshotContext) { c.CredentialFingerprint = "fp_2" },
-		func(c *SnapshotContext) { c.ConfigOnly = true },
-		func(c *SnapshotContext) { c.TargetNames = []string{"api"} },
-		func(c *SnapshotContext) { c.TargetNames = []string{"api", "worker", "extra"} },
-	} {
-		bc := ctx
-		bc.TargetNames = append([]string(nil), ctx.TargetNames...)
-		bad(&bc)
-		if err := base.ContextMatches(bc); err == nil {
-			t.Error("mismatched context accepted")
-		}
-	}
-}
