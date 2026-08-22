@@ -340,7 +340,7 @@ func boot(ctx context.Context, cfg *config.Config, log *slog.Logger, resources b
 	// schema revision.
 	budget := serviceBudget(cfg)
 	authSvc := &service.Auth{DB: db, Keyring: kr, KDF: kdf, Admission: limiter, Log: log, ExternalOrigin: cfg.ExternalOrigin, ReauthWindow: cfg.ReauthWindow}
-	samlProviders := &service.SAMLProviders{DB: db, Keyring: kr, ExternalOrigin: cfg.ExternalOrigin}
+	samlProviders := service.NewSAMLProviders(db, kr, cfg.ExternalOrigin)
 	// RP ID + expected origins are immutable instance config derived from the
 	// configured external origin, never a request header (human-auth ADR §5). An
 	// origin that cannot yield a valid relying party is a boot refusal, not a

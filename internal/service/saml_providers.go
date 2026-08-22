@@ -45,11 +45,20 @@ var (
 
 // SAMLProviders is instance-scoped SAML provider administration.
 type SAMLProviders struct {
-	DB             *store.DB
-	Keyring        *wencrypto.Keyring
-	ExternalOrigin string
-	HTTPClient     *http.Client
-	Now            func() time.Time
+	DB                *store.DB
+	Keyring           *wencrypto.Keyring
+	ExternalOrigin    string
+	Now               func() time.Time
+	metadataTransport metadataTransportPrimitives
+}
+
+// NewSAMLProviders builds the production SAML provider service. Metadata URL
+// retrieval always enters through the guarded transport assembled here.
+func NewSAMLProviders(db *store.DB, keyring *wencrypto.Keyring, externalOrigin string) *SAMLProviders {
+	return &SAMLProviders{
+		DB: db, Keyring: keyring, ExternalOrigin: externalOrigin,
+		metadataTransport: productionMetadataTransport(),
+	}
 }
 
 func (s *SAMLProviders) now() time.Time {
@@ -905,22 +914,18 @@ func (s *SAMLProviders) metadataBytes(ctx context.Context, source string, docume
 
 func (s *SAMLProviders) fetchMetadata(ctx context.Context, rawURL string) ([]byte, error) {
 	target, err := url.Parse(rawURL)
-	if err != nil || target.Scheme != "https" || target.Host == "" || target.User != nil ||
-		target.Fragment != "" || metadataHostIsNonPublic(target.Hostname()) {
+	if err != nil || !metadataURLIsAllowed(target) {
 		return nil, ErrSAMLMetadataFetch
 	}
-	client := s.HTTPClient
-	if client == nil {
-		client = publicMetadataHTTPClient()
-	}
+	client := publicMetadataHTTPClient(s.metadataTransport)
 	copyClient := *client
 	priorRedirect := copyClient.CheckRedirect
 	copyClient.CheckRedirect = func(request *http.Request, via []*http.Request) error {
+		if !metadataURLIsAllowed(request.URL) {
+			return errors.New("service: SAML metadata redirect has an invalid target")
+		}
 		if request.URL.Scheme != target.Scheme || request.URL.Host != target.Host {
 			return errors.New("service: SAML metadata redirect changed origin")
-		}
-		if metadataHostIsNonPublic(request.URL.Hostname()) {
-			return errors.New("service: SAML metadata redirect resolved to a non-public target")
 		}
 		if priorRedirect != nil {
 			return priorRedirect(request, via)
@@ -954,6 +959,11 @@ func (s *SAMLProviders) fetchMetadata(ctx context.Context, rawURL string) ([]byt
 	return payload, nil
 }
 
+func metadataURLIsAllowed(target *url.URL) bool {
+	return target != nil && target.Scheme == "https" && target.Host != "" && target.Hostname() != "" &&
+		target.User == nil && target.Fragment == "" && !metadataHostIsNonPublic(target.Hostname())
+}
+
 func metadataHostIsNonPublic(host string) bool {
 	host = strings.TrimSuffix(strings.ToLower(host), ".")
 	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
@@ -967,12 +977,43 @@ func metadataIPIsNonPublic(address netip.Addr) bool {
 	return netpolicy.IsNonPublic(address)
 }
 
-func publicMetadataHTTPClient() *http.Client {
+type metadataDialer interface {
+	DialContext(context.Context, string, string) (net.Conn, error)
+}
+
+type metadataTransportPrimitives struct {
+	resolver metadataResolver
+	dialer   metadataDialer
+	roots    *x509.CertPool
+	timeout  time.Duration
+}
+
+func productionMetadataTransport() metadataTransportPrimitives {
+	return metadataTransportPrimitives{
+		resolver: net.DefaultResolver,
+		dialer:   &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second},
+		timeout:  15 * time.Second,
+	}
+}
+
+func publicMetadataHTTPClient(primitives metadataTransportPrimitives) *http.Client {
+	defaults := productionMetadataTransport()
+	if primitives.resolver == nil {
+		primitives.resolver = defaults.resolver
+	}
+	if primitives.dialer == nil {
+		primitives.dialer = defaults.dialer
+	}
+	if primitives.timeout <= 0 {
+		primitives.timeout = defaults.timeout
+	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.DialContext = primitives.dialer.DialContext
 	transport.ResponseHeaderTimeout = 10 * time.Second
+	transport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: primitives.roots}
 	return &http.Client{
-		Transport: &publicMetadataRoundTripper{base: transport, resolver: net.DefaultResolver},
-		Timeout:   15 * time.Second,
+		Transport: &publicMetadataRoundTripper{base: transport, resolver: primitives.resolver},
+		Timeout:   primitives.timeout,
 	}
 }
 
