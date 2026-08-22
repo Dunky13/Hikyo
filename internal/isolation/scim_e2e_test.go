@@ -129,7 +129,7 @@ func runSCIMBindingLifecycle(t *testing.T, db *store.DB) {
 	// §8: the credential must match the binding IN THE PATH. A mismatch is an
 	// authentication failure, never a SCIM 400.
 	other, _ := newSCIMBinding(t, db, "keycloak")
-	_, err = s.CreateUser(ctx, service.SCIMCredentialActor(token, other), orgA, other, service.SCIMUserInput{
+	_, err = s.CreateUser(ctx, service.SCIMCredentialActor(token, other), orgA, other, service.DesiredUser{Active: true,
 		UserName: "wrong@example.test", SubjectRaw: "wrong",
 	})
 	if !errors.Is(err, domain.ErrUnauthenticated) {
@@ -170,7 +170,7 @@ func runSCIMUserLifecycle(t *testing.T, db *store.DB) {
 
 	// §5.2: create makes an account with its external identity ALREADY BOUND,
 	// and ZERO grants.
-	user, err := s.CreateUser(ctx, wire, orgA, bindingID, service.SCIMUserInput{
+	user, err := s.CreateUser(ctx, wire, orgA, bindingID, service.DesiredUser{Active: true,
 		UserName: "dana@example.test", ExternalID: "ext-dana", SubjectRaw: "ext-dana",
 	})
 	if err != nil {
@@ -197,7 +197,7 @@ func runSCIMUserLifecycle(t *testing.T, db *store.DB) {
 	execRaw(t, db, `INSERT INTO external_identities (id, account_id, kind, issuer, subject, provider_id, credential_epoch, created_at) `+
 		`VALUES ('eid_invited', 'acc_invited', 'oidc', 'https://okta.example.test', 'ext-kim', 'okta', 0, `+ts+`)`)
 
-	attached, err := s.CreateUser(ctx, wire, orgA, bindingID, service.SCIMUserInput{
+	attached, err := s.CreateUser(ctx, wire, orgA, bindingID, service.DesiredUser{Active: true,
 		UserName: "kim-scim@example.test", ExternalID: "ext-kim", SubjectRaw: "ext-kim",
 	})
 	if err != nil {
@@ -218,7 +218,7 @@ func runSCIMUserLifecycle(t *testing.T, db *store.DB) {
 
 	// §5.1: the subject is WRITE-ONCE. A mutation that would move it is refused
 	// by name — deprovision-and-recreate is the explicit path.
-	_, err = s.ReplaceUser(ctx, wire, orgA, bindingID, user.ID, service.SCIMUserInput{
+	_, err = s.ReplaceUser(ctx, wire, orgA, bindingID, user.ID, service.DesiredUser{Active: true,
 		UserName: "dana@example.test", ExternalID: "ext-dana-moved", SubjectRaw: "ext-dana-moved",
 	})
 	if !errors.Is(err, service.ErrSCIMSubjectWriteOnce) {
@@ -226,9 +226,10 @@ func runSCIMUserLifecycle(t *testing.T, db *store.DB) {
 	}
 
 	// §5.4: an attribute update leaves grants untouched.
-	if _, err := s.PatchUser(ctx, wire, orgA, bindingID, user.ID, service.SCIMUserInput{
-		Attributes: map[string]any{"displayName": "Dana"},
-	}); err != nil {
+	if _, err := s.PatchUser(ctx, wire, orgA, bindingID, user.ID,
+		[]service.UserPatchCommand{service.UserPatchMergeAttributes{
+			Attributes: map[string]any{"displayName": "Dana"},
+		}}); err != nil {
 		t.Fatalf("user update: %v", err)
 	}
 
@@ -246,7 +247,8 @@ func runSCIMUserLifecycle(t *testing.T, db *store.DB) {
 	// §5.4: `active: true -> false`, then `false -> true`. Reactivation is
 	// DESIRED STATE, recreated from the current memberships and mapping rows.
 	off := false
-	if _, err := s.PatchUser(ctx, wire, orgA, bindingID, user.ID, service.SCIMUserInput{Active: &off}); err != nil {
+	if _, err := s.PatchUser(ctx, wire, orgA, bindingID, user.ID,
+		[]service.UserPatchCommand{service.UserPatchSetActive{Active: off}}); err != nil {
 		t.Fatalf("deprovision: %v", err)
 	}
 	if got := grantsForSCIMUser(t, db, bindingID, user.ID); got != grantsBefore {
@@ -259,7 +261,8 @@ func runSCIMUserLifecycle(t *testing.T, db *store.DB) {
 			generationBefore, generationAfter)
 	}
 	on := true
-	if _, err := s.PatchUser(ctx, wire, orgA, bindingID, user.ID, service.SCIMUserInput{Active: &on}); err != nil {
+	if _, err := s.PatchUser(ctx, wire, orgA, bindingID, user.ID,
+		[]service.UserPatchCommand{service.UserPatchSetActive{Active: on}}); err != nil {
 		t.Fatalf("reactivate: %v", err)
 	}
 
@@ -284,7 +287,7 @@ func runSCIMUserLifecycle(t *testing.T, db *store.DB) {
 
 	// §5.4: a re-create after DELETE gets a FRESH id, so a stale member
 	// reference cannot exist.
-	recreated, err := s.CreateUser(ctx, wire, orgA, bindingID, service.SCIMUserInput{
+	recreated, err := s.CreateUser(ctx, wire, orgA, bindingID, service.DesiredUser{Active: true,
 		UserName: "dana@example.test", ExternalID: "ext-dana", SubjectRaw: "ext-dana",
 	})
 	if err != nil {
@@ -311,14 +314,14 @@ func runSCIMMappingReconciliation(t *testing.T, db *store.DB) {
 	bindingID, token := newSCIMBinding(t, db, "okta")
 	wire := service.SCIMCredentialActor(token, bindingID)
 
-	user, err := s.CreateUser(ctx, wire, orgA, bindingID, service.SCIMUserInput{
+	user, err := s.CreateUser(ctx, wire, orgA, bindingID, service.DesiredUser{Active: true,
 		UserName: "eve@example.test", ExternalID: "ext-eve", SubjectRaw: "ext-eve",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	group, err := s.CreateGroup(ctx, wire, orgA, bindingID, service.SCIMGroupInput{
-		DisplayName: "Engineering", Members: []string{user.ID}, MembersPresent: true,
+	group, err := s.CreateGroup(ctx, wire, orgA, bindingID, service.DesiredGroup{
+		DisplayName: "Engineering", Members: []string{user.ID},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -382,9 +385,8 @@ func runSCIMMappingReconciliation(t *testing.T, db *store.DB) {
 	}
 
 	// §5.4: group membership removal releases EXACTLY that group's origins.
-	if _, err := s.PatchGroup(ctx, wire, orgA, bindingID, group.ID, service.SCIMGroupInput{
-		Members: nil, MembersPresent: true,
-	}); err != nil {
+	if _, err := s.PatchGroup(ctx, wire, orgA, bindingID, group.ID,
+		[]service.GroupPatchCommand{service.GroupPatchClearMembers{}}); err != nil {
 		t.Fatalf("member removal: %v", err)
 	}
 	if held(t, db, principal, domain.CapRead, domain.Scope{Org: orgA, Project: prjA1}) {
@@ -440,14 +442,14 @@ func runSCIMLockoutRetention(t *testing.T, db *store.DB) {
 	bindingID, token := newSCIMBinding(t, db, "okta")
 	wire := service.SCIMCredentialActor(token, bindingID)
 
-	user, err := s.CreateUser(ctx, wire, orgA, bindingID, service.SCIMUserInput{
+	user, err := s.CreateUser(ctx, wire, orgA, bindingID, service.DesiredUser{Active: true,
 		UserName: "frank@example.test", ExternalID: "ext-frank", SubjectRaw: "ext-frank",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	group, err := s.CreateGroup(ctx, wire, orgA, bindingID, service.SCIMGroupInput{
-		DisplayName: "Admins", Members: []string{user.ID}, MembersPresent: true,
+	group, err := s.CreateGroup(ctx, wire, orgA, bindingID, service.DesiredGroup{
+		DisplayName: "Admins", Members: []string{user.ID},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -465,9 +467,8 @@ func runSCIMLockoutRetention(t *testing.T, db *store.DB) {
 
 	// The IdP withdraws the user from the group. A human revoke here would be
 	// REFUSED; the SCIM release instead converts, so the IdP is never wedged.
-	if _, err := s.PatchGroup(ctx, wire, orgA, bindingID, group.ID, service.SCIMGroupInput{
-		Members: nil, MembersPresent: true,
-	}); err != nil {
+	if _, err := s.PatchGroup(ctx, wire, orgA, bindingID, group.ID,
+		[]service.GroupPatchCommand{service.GroupPatchClearMembers{}}); err != nil {
 		t.Fatalf("member removal under lockout: %v", err)
 	}
 	if n := queryInt(t, db,
@@ -516,7 +517,7 @@ func runSCIMProviderFailClosed(t *testing.T, db *store.DB) {
 	bindingID, token := newSCIMBinding(t, db, "okta")
 	wire := service.SCIMCredentialActor(token, bindingID)
 
-	user, err := s.CreateUser(ctx, wire, orgA, bindingID, service.SCIMUserInput{
+	user, err := s.CreateUser(ctx, wire, orgA, bindingID, service.DesiredUser{Active: true,
 		UserName: "gil@example.test", ExternalID: "ext-gil", SubjectRaw: "ext-gil",
 	})
 	if err != nil {
@@ -526,7 +527,7 @@ func runSCIMProviderFailClosed(t *testing.T, db *store.DB) {
 	disableSCIMProvider(t, db, "okta", false)
 
 	// Writes refuse.
-	if _, err := s.CreateUser(ctx, wire, orgA, bindingID, service.SCIMUserInput{
+	if _, err := s.CreateUser(ctx, wire, orgA, bindingID, service.DesiredUser{Active: true,
 		UserName: "hal@example.test", ExternalID: "ext-hal", SubjectRaw: "ext-hal",
 	}); !errors.Is(err, service.ErrSCIMProviderUnavailable) {
 		t.Fatalf("write under a disabled provider: want ErrSCIMProviderUnavailable, got %v", err)
@@ -580,25 +581,25 @@ func runSCIMLifecycle(t *testing.T, db *store.DB) {
 		t.Fatal("a second live credential must be recorded as a rotation")
 	}
 
-	user, err := s.CreateUser(ctx, wire, orgA, bindingID, service.SCIMUserInput{ // user_provisioned, attention_cleared (stale)
+	user, err := s.CreateUser(ctx, wire, orgA, bindingID, service.DesiredUser{Active: true, // user_provisioned, attention_cleared (stale)
 		UserName: "ida@example.test", ExternalID: "ext-ida", SubjectRaw: "ext-ida",
 	})
 	if err != nil {
 		t.Fatalf("scim.user_provisioned: %v", err)
 	}
-	if _, err := s.PatchUser(ctx, wire, orgA, bindingID, user.ID, service.SCIMUserInput{ // user_updated
-		Attributes: map[string]any{"displayName": "Ida"},
+	if _, err := s.PatchUser(ctx, wire, orgA, bindingID, user.ID, []service.UserPatchCommand{ // user_updated
+		service.UserPatchMergeAttributes{Attributes: map[string]any{"displayName": "Ida"}},
 	}); err != nil {
 		t.Fatalf("scim.user_updated: %v", err)
 	}
-	group, err := s.CreateGroup(ctx, wire, orgA, bindingID, service.SCIMGroupInput{ // group_created, group_membership_changed
-		DisplayName: "Lifecycle", Members: []string{user.ID}, MembersPresent: true,
+	group, err := s.CreateGroup(ctx, wire, orgA, bindingID, service.DesiredGroup{ // group_created, group_membership_changed
+		DisplayName: "Lifecycle", Members: []string{user.ID},
 	})
 	if err != nil {
 		t.Fatalf("scim.group_created: %v", err)
 	}
-	if _, err := s.PatchGroup(ctx, wire, orgA, bindingID, group.ID, service.SCIMGroupInput{ // group_updated
-		DisplayName: "Lifecycle Team",
+	if _, err := s.PatchGroup(ctx, wire, orgA, bindingID, group.ID, []service.GroupPatchCommand{ // group_updated
+		service.GroupPatchSetDisplayName{DisplayName: "Lifecycle Team"},
 	}); err != nil {
 		t.Fatalf("scim.group_updated: %v", err)
 	}
@@ -624,7 +625,8 @@ func runSCIMLifecycle(t *testing.T, db *store.DB) {
 		t.Fatalf("scim discovery: %v", err)
 	}
 	off := false
-	if _, err := s.PatchUser(ctx, wire, orgA, bindingID, user.ID, service.SCIMUserInput{Active: &off}); err != nil { // user_deprovisioned
+	if _, err := s.PatchUser(ctx, wire, orgA, bindingID, user.ID,
+		[]service.UserPatchCommand{service.UserPatchSetActive{Active: off}}); err != nil { // user_deprovisioned
 		t.Fatalf("scim.user_deprovisioned: %v", err)
 	}
 	if _, err := s.DeleteMapping(ctx, service.LocalPrincipal(orgAdmin), orgA, bindingID, service.SCIMMappingSpec{ // mapping_deleted
@@ -680,14 +682,14 @@ func runSCIMLockoutPair(t *testing.T, db *store.DB, g *service.Grants) {
 	bindingID, token := newSCIMBinding(t, db, "lockout")
 	wire := service.SCIMCredentialActor(token, bindingID)
 
-	user, err := s.CreateUser(ctx, wire, orgA, bindingID, service.SCIMUserInput{
+	user, err := s.CreateUser(ctx, wire, orgA, bindingID, service.DesiredUser{Active: true,
 		UserName: "jo@example.test", ExternalID: "ext-jo", SubjectRaw: "ext-jo",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	group, err := s.CreateGroup(ctx, wire, orgA, bindingID, service.SCIMGroupInput{
-		DisplayName: "Lockout Admins", Members: []string{user.ID}, MembersPresent: true,
+	group, err := s.CreateGroup(ctx, wire, orgA, bindingID, service.DesiredGroup{
+		DisplayName: "Lockout Admins", Members: []string{user.ID},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -704,9 +706,8 @@ func runSCIMLockoutPair(t *testing.T, db *store.DB, g *service.Grants) {
 	execRaw(t, db, `DELETE FROM grants WHERE capability = 'manage-members' AND principal_id <> '`+
 		string(principalOf(t, db, accountOf(t, db, user.ID)))+`'`)
 
-	if _, err := s.PatchGroup(ctx, wire, orgA, bindingID, group.ID, service.SCIMGroupInput{
-		Members: nil, MembersPresent: true,
-	}); err != nil {
+	if _, err := s.PatchGroup(ctx, wire, orgA, bindingID, group.ID,
+		[]service.GroupPatchCommand{service.GroupPatchClearMembers{}}); err != nil {
 		t.Fatalf("lockout conversion: %v", err)
 	}
 	// Restore orgAdmin's authority through the break-glass path, which is the
@@ -849,9 +850,8 @@ func runSCIMPutReplacementSemantics(t *testing.T, db *store.DB) {
 	bindingID, token := newSCIMBinding(t, db, "okta")
 	wire := service.SCIMCredentialActor(token, bindingID)
 
-	user, err := s.CreateUser(ctx, wire, orgA, bindingID, service.SCIMUserInput{
+	user, err := s.CreateUser(ctx, wire, orgA, bindingID, service.DesiredUser{Active: true,
 		UserName: "nia@example.test", ExternalID: "ext-nia",
-		Resource:   map[string]any{"userName": "nia@example.test", "externalId": "ext-nia"},
 		Attributes: map[string]any{"nickName": "Nee"},
 	})
 	if err != nil {
@@ -860,7 +860,8 @@ func runSCIMPutReplacementSemantics(t *testing.T, db *store.DB) {
 
 	// Deactivate first, so the PUT below can be shown to reactivate.
 	off := false
-	if _, err := s.PatchUser(ctx, wire, orgA, bindingID, user.ID, service.SCIMUserInput{Active: &off}); err != nil {
+	if _, err := s.PatchUser(ctx, wire, orgA, bindingID, user.ID,
+		[]service.UserPatchCommand{service.UserPatchSetActive{Active: off}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -869,9 +870,8 @@ func runSCIMPutReplacementSemantics(t *testing.T, db *store.DB) {
 	// RETAINED, not cleared-then-refused, exactly as an extension-path binding
 	// behaves. The other omitted mutables DO clear, and `active` defaults true.
 	on := true
-	replaced, err := s.ReplaceUser(ctx, wire, orgA, bindingID, user.ID, service.SCIMUserInput{
-		UserName: "nia@example.test", Active: &on,
-		Resource: map[string]any{"userName": "nia@example.test"},
+	replaced, err := s.ReplaceUser(ctx, wire, orgA, bindingID, user.ID, service.DesiredUser{
+		UserName: "nia@example.test", Active: on,
 	})
 	if err != nil {
 		t.Fatalf("a PUT omitting the subject source must be accepted (it is exempt): %v", err)
@@ -888,7 +888,7 @@ func runSCIMPutReplacementSemantics(t *testing.T, db *store.DB) {
 	// A REAL group the user is not a member of, so the bogus `groups` below
 	// names something that actually exists — a client claiming membership of a
 	// nonexistent group is the easy half.
-	other, err := s.CreateGroup(ctx, wire, orgA, bindingID, service.SCIMGroupInput{
+	other, err := s.CreateGroup(ctx, wire, orgA, bindingID, service.DesiredGroup{
 		DisplayName: "Not Mine",
 	})
 	if err != nil {
@@ -922,10 +922,9 @@ func runSCIMPutReplacementSemantics(t *testing.T, db *store.DB) {
 			len(decoded.Groups))
 	}
 	membersBefore := queryInt(t, db, `SELECT COUNT(*) FROM scim_group_members WHERE binding_id = '`+bindingID+`'`)
-	afterBogus, err := s.ReplaceUser(ctx, wire, orgA, bindingID, replaced.ID, service.SCIMUserInput{
+	afterBogus, err := s.ReplaceUser(ctx, wire, orgA, bindingID, replaced.ID, service.DesiredUser{Active: true,
 		UserName: replaced.UserName, ExternalID: replaced.ExternalID,
 		SubjectRaw: replaced.ExternalID,
-		Resource:   map[string]any{"userName": replaced.UserName, "groups": bogus["groups"]},
 		// `groups` is handed to the service INSIDE the display map too, which
 		// is stronger than relying on the transport to have stripped it: even
 		// a caller that passes it through must not move a membership.
@@ -946,9 +945,8 @@ func runSCIMPutReplacementSemantics(t *testing.T, db *store.DB) {
 
 	// A PUT that EXPLICITLY supplies a different subject value is still the
 	// migration attempt the identity model exists to refuse.
-	if _, err := s.ReplaceUser(ctx, wire, orgA, bindingID, user.ID, service.SCIMUserInput{
-		UserName: "nia@example.test",
-		Resource: map[string]any{"userName": "nia@example.test", "externalId": "ext-moved"},
+	if _, err := s.ReplaceUser(ctx, wire, orgA, bindingID, user.ID, service.DesiredUser{Active: true,
+		UserName: "nia@example.test", ExternalID: "ext-moved",
 	}); !errors.Is(err, service.ErrSCIMSubjectWriteOnce) {
 		t.Fatalf("an explicit subject change must refuse write-once, got %v", err)
 	}
@@ -970,40 +968,44 @@ func runSCIMPutReplacementSemantics(t *testing.T, db *store.DB) {
 	}
 	extWire := service.SCIMCredentialActor(extMint.Token, ext.ID)
 	const extPath = "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User"
-	extUser, err := s.CreateUser(ctx, extWire, orgA, ext.ID, service.SCIMUserInput{
+	extUser, err := s.CreateUser(ctx, extWire, orgA, ext.ID, service.DesiredUser{Active: true,
 		UserName: "omar@example.test", ExternalID: "ext-omar",
-		Resource: map[string]any{
-			"userName": "omar@example.test", "externalId": "ext-omar",
-			extPath: map[string]any{"employeeNumber": "E-1"},
-		},
+		Attributes: map[string]any{extPath: map[string]any{"employeeNumber": "E-1"}},
 	})
 	if err != nil {
 		t.Fatalf("extension-path provisioning: %v", err)
 	}
-	if _, err := s.ReplaceUser(ctx, extWire, orgA, ext.ID, extUser.ID, service.SCIMUserInput{
+	extReplaced, err := s.ReplaceUser(ctx, extWire, orgA, ext.ID, extUser.ID, service.DesiredUser{Active: true,
 		UserName: "omar@example.test",
-		Resource: map[string]any{"userName": "omar@example.test"},
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("an extension-path PUT omitting the subject source must be accepted: %v", err)
 	}
-	if _, err := s.ReplaceUser(ctx, extWire, orgA, ext.ID, extUser.ID, service.SCIMUserInput{
-		UserName: "omar@example.test",
-		Resource: map[string]any{
-			"userName": "omar@example.test",
-			extPath:    map[string]any{"employeeNumber": "E-2"},
-		},
+	extAttrs, ok := extReplaced.Attributes[extPath].(map[string]any)
+	if !ok || extAttrs["employeeNumber"] != "E-1" {
+		t.Fatalf("the extension subject source must survive replacement, got %v", extReplaced.Attributes)
+	}
+	if _, err := s.ReplaceUser(ctx, extWire, orgA, ext.ID, extUser.ID, service.DesiredUser{Active: true,
+		UserName:   "omar@example.test",
+		Attributes: map[string]any{extPath: map[string]any{"employeeNumber": "E-2"}},
 	}); !errors.Is(err, service.ErrSCIMSubjectWriteOnce) {
 		t.Fatal("an explicit extension-path subject change must refuse write-once")
 	}
+	if _, err := s.PatchUser(ctx, extWire, orgA, ext.ID, extUser.ID,
+		[]service.UserPatchCommand{service.UserPatchMergeAttributes{
+			Attributes: map[string]any{extPath: nil},
+		}}); !errors.Is(err, service.ErrSCIMSubjectWriteOnce) {
+		t.Fatalf("removing an extension-path subject source must refuse write-once, got %v", err)
+	}
 
 	// ReplaceGroup: displayName replaced, member set replaced wholesale.
-	g, err := s.CreateGroup(ctx, wire, orgA, bindingID, service.SCIMGroupInput{
-		DisplayName: "Before", Members: []string{user.ID}, MembersPresent: true,
+	g, err := s.CreateGroup(ctx, wire, orgA, bindingID, service.DesiredGroup{
+		DisplayName: "Before", Members: []string{user.ID},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	after, err := s.ReplaceGroup(ctx, wire, orgA, bindingID, g.ID, service.SCIMGroupInput{
+	after, err := s.ReplaceGroup(ctx, wire, orgA, bindingID, g.ID, service.DesiredGroup{
 		DisplayName: "After",
 	})
 	if err != nil {
@@ -1035,7 +1037,7 @@ func runSCIMEmailNeverLinks(t *testing.T, db *store.DB) {
 	execRaw(t, db, `INSERT INTO accounts (id, principal_id, username, display_name, created_at) `+
 		`VALUES ('acc_unrelated', 'usr_unrelated', 'collide@example.test', 'Unrelated', `+ts+`)`)
 
-	pushed, err := s.CreateUser(ctx, wire, orgA, bindingID, service.SCIMUserInput{
+	pushed, err := s.CreateUser(ctx, wire, orgA, bindingID, service.DesiredUser{Active: true,
 		UserName: "pushed@example.test", ExternalID: "ext-pushed", SubjectRaw: "ext-pushed",
 		Attributes: map[string]any{
 			"emails": []any{map[string]any{"value": "collide@example.test", "primary": true}},
@@ -1077,11 +1079,11 @@ func runSCIMGroupDisplayNameIsNotUnique(t *testing.T, db *store.DB) {
 	bindingID, token := newSCIMBinding(t, db, "okta")
 	wire := service.SCIMCredentialActor(token, bindingID)
 
-	first, err := s.CreateGroup(ctx, wire, orgA, bindingID, service.SCIMGroupInput{DisplayName: "Sales and Marketing"})
+	first, err := s.CreateGroup(ctx, wire, orgA, bindingID, service.DesiredGroup{DisplayName: "Sales and Marketing"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := s.CreateGroup(ctx, wire, orgA, bindingID, service.SCIMGroupInput{DisplayName: "Sales and Marketing"})
+	second, err := s.CreateGroup(ctx, wire, orgA, bindingID, service.DesiredGroup{DisplayName: "Sales and Marketing"})
 	if err != nil {
 		t.Fatalf("two same-named groups must coexist: %v", err)
 	}
@@ -1136,15 +1138,15 @@ func runSCIMManualRemainsMeansManual(t *testing.T, db *store.DB) {
 		{first, firstToken, "one"}, {second, secondToken, "two"},
 	} {
 		wire := service.SCIMCredentialActor(b.token, b.id)
-		u, err := s.CreateUser(ctx, wire, orgA, b.id, service.SCIMUserInput{
+		u, err := s.CreateUser(ctx, wire, orgA, b.id, service.DesiredUser{Active: true,
 			UserName: "dual-" + b.name + "@example.test", ExternalID: "dual", SubjectRaw: "dual",
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
 		users[b.id] = u.ID
-		g, err := s.CreateGroup(ctx, wire, orgA, b.id, service.SCIMGroupInput{
-			DisplayName: "Dual " + b.name, Members: []string{u.ID}, MembersPresent: true,
+		g, err := s.CreateGroup(ctx, wire, orgA, b.id, service.DesiredGroup{
+			DisplayName: "Dual " + b.name, Members: []string{u.ID},
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -1160,7 +1162,7 @@ func runSCIMManualRemainsMeansManual(t *testing.T, db *store.DB) {
 	// binding's origin — and that is not a manual grant.
 	off := false
 	if _, err := s.PatchUser(ctx, service.SCIMCredentialActor(firstToken, first),
-		orgA, first, users[first], service.SCIMUserInput{Active: &off}); err != nil {
+		orgA, first, users[first], []service.UserPatchCommand{service.UserPatchSetActive{Active: off}}); err != nil {
 		t.Fatal(err)
 	}
 	if !held(t, db, domain.PrincipalID("usr_dual"), domain.CapRead, domain.Scope{Org: orgA, Project: prjA1}) {
@@ -1180,7 +1182,7 @@ func runSCIMManualRemainsMeansManual(t *testing.T, db *store.DB) {
 		t.Fatal(err)
 	}
 	if _, err := s.PatchUser(ctx, service.SCIMCredentialActor(secondToken, second),
-		orgA, second, users[second], service.SCIMUserInput{Active: &off}); err != nil {
+		orgA, second, users[second], []service.UserPatchCommand{service.UserPatchSetActive{Active: off}}); err != nil {
 		t.Fatal(err)
 	}
 	if n := queryInt(t, db,

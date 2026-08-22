@@ -33,113 +33,11 @@ type SCIMGroupResource struct {
 	UpdatedAt   time.Time
 }
 
-// SCIMGroupInput is a create or a full replacement.
-type SCIMGroupInput struct {
-	DisplayName string
-	ExternalID  string
-	// Members is the desired member set. On PUT it REPLACES; on PATCH the
-	// caller has already resolved the accepted matrix cell into a desired set.
-	Members []string
-	// MembersPresent distinguishes "no members named" from "an empty member
-	// set", which are different desired states: the first leaves membership
-	// alone on a PATCH, the second clears it.
-	MembersPresent bool
-	// ExternalIDCleared marks an EXPLICIT `remove externalId`, which omission
-	// does not. Same reason as the User field: without presence state the
-	// removal became a silent no-op.
-	ExternalIDCleared bool
-	// MemberOps is the ORDERED PATCH membership script. A PATCH is a sequence,
-	// not a set of buckets: `add X` then `remove members[value eq X]` and the
-	// same two operations reversed are different requests with different final
-	// states, and collapsing them into "adds" and "removes" produced the same
-	// answer for both. Only this side can see the stored set, so the script is
-	// folded here, in order, into the single desired set `setMembers`
-	// reconciles against.
-	MemberOps []SCIMMemberOp
-	// Patch marks a partial update, so a PATCH that never mentions displayName
-	// leaves it alone while a PUT clears it.
-	Patch bool
-}
-
-// SCIMMemberOp is one membership operation of a PATCH, in the order the
-// identity provider sent it.
-type SCIMMemberOp struct {
-	// Kind is the accepted matrix cell: `add` (union), `replace` (whole set),
-	// `clear` (remove on `members`), or `remove-one` (`members[value eq "…"]`).
-	Kind SCIMMemberOpKind
-	// Members is the operand of `add` and `replace`.
-	Members []string
-	// Value is the reference `remove-one` names.
-	Value string
-}
-
-// SCIMMemberOpKind is the closed set of membership operations the §8 matrix
-// admits on a Group.
-type SCIMMemberOpKind string
-
-const (
-	SCIMMemberAdd       SCIMMemberOpKind = "add"
-	SCIMMemberReplace   SCIMMemberOpKind = "replace"
-	SCIMMemberClear     SCIMMemberOpKind = "clear"
-	SCIMMemberRemoveOne SCIMMemberOpKind = "remove-one"
-)
-
 // ErrSCIMNoTarget refuses a filtered member removal naming somebody who is not
 // a member. RFC 7644 calls that `noTarget`, and answering success would tell
 // the identity provider a removal happened that did not.
 var ErrSCIMNoTarget = fmt.Errorf(
 	"%w: service: the members filter names no member of this group", domain.ErrNotFound)
-
-// desiredMembers turns whatever the request expressed into the ONE desired set
-// `setMembers` reconciles against. It refuses a removal that targets nothing.
-//
-// A PATCH script is folded IN ORDER over the stored set, so each operation sees
-// what its predecessors did: `add X` then `remove members[value eq X]` ends
-// without X, the reverse ends with X, and a `remove-one` naming a member an
-// earlier operation in the SAME request added is a legitimate target rather
-// than a `noTarget` refusal.
-func (in SCIMGroupInput) desiredMembers(current []store.SCIMGroupMember) ([]string, error) {
-	stored := make([]string, 0, len(current))
-	for _, m := range current {
-		stored = append(stored, m.UserID)
-	}
-	if len(in.MemberOps) == 0 {
-		// PUT and create: the named set replaces wholesale, and an unnamed set
-		// leaves the stored one alone.
-		if !in.MembersPresent {
-			return dedupe(stored), nil
-		}
-		return dedupe(in.Members), nil
-	}
-	set := dedupe(stored)
-	for _, op := range in.MemberOps {
-		switch op.Kind {
-		case SCIMMemberReplace:
-			set = dedupe(op.Members)
-		case SCIMMemberClear:
-			set = nil
-		case SCIMMemberAdd:
-			set = dedupe(append(append([]string{}, set...), op.Members...))
-		case SCIMMemberRemoveOne:
-			next := make([]string, 0, len(set))
-			found := false
-			for _, id := range set {
-				if id == op.Value {
-					found = true
-					continue
-				}
-				next = append(next, id)
-			}
-			if !found {
-				return nil, ErrSCIMNoTarget
-			}
-			set = next
-		default:
-			return nil, fmt.Errorf("service: unknown SCIM member operation %q", op.Kind)
-		}
-	}
-	return set, nil
-}
 
 // dedupe keeps the first occurrence of each id, in order. An identity provider
 // repeating a reference in one request must not make the second insertion a
@@ -158,15 +56,9 @@ func dedupe(in []string) []string {
 	return out
 }
 
-// touchesMembers reports whether the request said anything about membership at
-// all. A PATCH that only renames must not reconcile the member set.
-func (in SCIMGroupInput) touchesMembers() bool {
-	return in.MembersPresent || len(in.MemberOps) > 0
-}
-
 // CreateGroup mints a group and applies any mapping rows already pointing at
 // the id — normally none, because mapping rows reference the id minted HERE.
-func (s *SCIM) CreateGroup(ctx context.Context, actor Actor, org domain.OrgID, bindingID string, in SCIMGroupInput) (SCIMGroupResource, error) {
+func (s *SCIM) CreateGroup(ctx context.Context, actor Actor, org domain.OrgID, bindingID string, in DesiredGroup) (SCIMGroupResource, error) {
 	var out SCIMGroupResource
 	err := s.wireTx(ctx, actor, org, bindingID, authz.OpSCIMGroupCreate,
 		func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer, c scimContext, now time.Time) ([]grantEventInput, error) {
@@ -210,19 +102,18 @@ func (s *SCIM) CreateGroup(ctx context.Context, actor Actor, org domain.OrgID, b
 
 // ReplaceGroup is RFC replacement: omitted mutable attributes clear, and the
 // member set is replaced wholesale.
-func (s *SCIM) ReplaceGroup(ctx context.Context, actor Actor, org domain.OrgID, bindingID, id string, in SCIMGroupInput) (SCIMGroupResource, error) {
-	in.MembersPresent = true
-	return s.mutateGroup(ctx, actor, org, bindingID, id, authz.OpSCIMGroupReplace, in, true)
+func (s *SCIM) ReplaceGroup(ctx context.Context, actor Actor, org domain.OrgID, bindingID, id string, desired DesiredGroup) (SCIMGroupResource, error) {
+	return s.mutateGroup(ctx, actor, org, bindingID, id, authz.OpSCIMGroupReplace, &desired, nil)
 }
 
-// PatchGroup applies the accepted matrix cells the transport already validated.
-func (s *SCIM) PatchGroup(ctx context.Context, actor Actor, org domain.OrgID, bindingID, id string, in SCIMGroupInput) (SCIMGroupResource, error) {
-	return s.mutateGroup(ctx, actor, org, bindingID, id, authz.OpSCIMGroupPatch, in, false)
+// PatchGroup reduces the validated command sequence over stored desired state.
+func (s *SCIM) PatchGroup(ctx context.Context, actor Actor, org domain.OrgID, bindingID, id string, commands []GroupPatchCommand) (SCIMGroupResource, error) {
+	return s.mutateGroup(ctx, actor, org, bindingID, id, authz.OpSCIMGroupPatch, nil, commands)
 }
 
 func (s *SCIM) mutateGroup(
 	ctx context.Context, actor Actor, org domain.OrgID, bindingID, id string,
-	op authz.Operation, in SCIMGroupInput, replace bool,
+	op authz.Operation, replacement *DesiredGroup, commands []GroupPatchCommand,
 ) (SCIMGroupResource, error) {
 	var out SCIMGroupResource
 	err := s.wireTx(ctx, actor, org, bindingID, op,
@@ -231,20 +122,37 @@ func (s *SCIM) mutateGroup(
 			if err != nil {
 				return nil, err
 			}
+			touchesMembers := replacement != nil
+			desired := DesiredGroup{DisplayName: row.DisplayName, ExternalID: row.ExternalID}
+			if replacement == nil {
+				current, err := r.SCIM().GroupMembers(ctx, c.proof, c.binding.ID, id)
+				if err != nil {
+					return nil, err
+				}
+				desired.Members = make([]string, 0, len(current))
+				for _, member := range current {
+					desired.Members = append(desired.Members, member.UserID)
+				}
+			}
+			if replacement != nil {
+				desired = *replacement
+			} else {
+				reduced, err := ReduceGroupPatch(desired, commands)
+				if err != nil {
+					return nil, err
+				}
+				desired, touchesMembers = reduced.Desired, reduced.MembersTouched
+			}
+			if desired.DisplayName == "" {
+				return nil, fmt.Errorf("%w: service: displayName is required", domain.ErrInvalid)
+			}
 			next := row
 			// dirty is "the stored row would actually differ", for the same
 			// reason the User path carries one: a re-assertion that changes
 			// nothing must not bump `UpdatedAt` or emit an update event.
 			dirty := false
-			if replace || in.DisplayName != "" {
-				if in.DisplayName == "" {
-					return nil, fmt.Errorf("%w: service: displayName is required", domain.ErrInvalid)
-				}
-				next.DisplayName, next.DisplayNameLower = in.DisplayName, fold(in.DisplayName)
-			}
-			if replace || in.ExternalID != "" || in.ExternalIDCleared {
-				next.ExternalID = in.ExternalID
-			}
+			next.DisplayName, next.DisplayNameLower = desired.DisplayName, fold(desired.DisplayName)
+			next.ExternalID = desired.ExternalID
 			// Compared RAW: a case-only rename is a change the identity provider
 			// made, and the folded column is a lookup key, not the value.
 			if next.DisplayName != row.DisplayName || next.ExternalID != row.ExternalID {
@@ -261,16 +169,8 @@ func (s *SCIM) mutateGroup(
 			}
 			var events []grantEventInput
 			var added, removed []string
-			if in.touchesMembers() {
-				current, err := r.SCIM().GroupMembers(ctx, c.proof, c.binding.ID, id)
-				if err != nil {
-					return nil, err
-				}
-				desired, err := in.desiredMembers(current)
-				if err != nil {
-					return nil, err
-				}
-				evs, a, rm, err := s.setMembers(ctx, r, az, c, id, desired, now)
+			if touchesMembers {
+				evs, a, rm, err := s.setMembers(ctx, r, az, c, id, desired.Members, now)
 				if err != nil {
 					return nil, err
 				}
