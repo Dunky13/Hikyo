@@ -164,35 +164,32 @@ func runGrantDedup(t *testing.T, db *store.DB) {
 	ctx := t.Context()
 	spec := service.GrantSpec{Target: grantee, Capability: domain.CapRead, Scope: prjScope()}
 
-	first, err := g.Create(ctx, service.LocalPrincipal(orgAdmin), spec)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !first.Created {
-		t.Fatal("the first grant of a triple must create a row")
-	}
-	// The same grantor, again: idempotent, no second origin, no second row.
-	repeat, err := g.Create(ctx, service.LocalPrincipal(orgAdmin), spec)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if repeat.Created || repeat.OriginAdded || repeat.GrantID != first.GrantID {
-		t.Fatalf("re-granting the same triple from the same grantor must be a no-op, got %+v", repeat)
-	}
-	if n := originCount(t, db, grantee, domain.CapRead, prjScope()); n != 1 {
-		t.Fatalf("origins after an idempotent repeat = %d, want 1", n)
-	}
-
-	// A SECOND grantor: same row, second origin.
-	second, err := g.Create(ctx, service.LocalPrincipal(prjAdmin), spec)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if second.Created || !second.OriginAdded || second.GrantID != first.GrantID {
-		t.Fatalf("a second grantor must join the existing row, got %+v", second)
-	}
-	if n := originCount(t, db, grantee, domain.CapRead, prjScope()); n != 2 {
-		t.Fatalf("origins after a second grantor = %d, want 2", n)
+	var grantID string
+	for _, tc := range []struct {
+		name        string
+		actor       domain.PrincipalID
+		want        service.GrantOutcome
+		wantOrigins int
+	}{
+		{name: "new grant", actor: orgAdmin, want: service.GrantCreated(), wantOrigins: 1},
+		{name: "idempotent repeat", actor: orgAdmin, want: service.GrantUnchanged(), wantOrigins: 1},
+		{name: "second origin", actor: prjAdmin, want: service.GrantOriginAdded(), wantOrigins: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := g.Create(ctx, service.LocalPrincipal(tc.actor), spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if grantID == "" {
+				grantID = result.GrantID
+			}
+			if result.Outcome != tc.want || result.GrantID != grantID {
+				t.Fatalf("grant result = %+v, want outcome %q and id %q", result, tc.want, grantID)
+			}
+			if got := originCount(t, db, grantee, domain.CapRead, prjScope()); got != tc.wantOrigins {
+				t.Fatalf("origin count = %d, want %d", got, tc.wantOrigins)
+			}
+		})
 	}
 
 	// A grant at a DIFFERENT scope is a different row, not a dedup: the two
@@ -459,8 +456,8 @@ func runBreakGlassGrant(t *testing.T, db *store.DB) {
 	if err != nil {
 		t.Fatalf("break-glass grant: %v", err)
 	}
-	if !res.Created {
-		t.Fatal("break-glass must have created the recovery grant")
+	if res.Outcome != service.GrantCreated() {
+		t.Fatalf("break-glass outcome = %q, want %q", res.Outcome, service.GrantCreated())
 	}
 	lines, err := g.List(ctx, service.LocalPrincipal(root), orgAScope)
 	if err != nil {
@@ -951,7 +948,7 @@ func runGrantLifecycleEvents(t *testing.T, db *store.DB) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Created || res.OriginAdded {
+	if res.Outcome != service.GrantUnchanged() {
 		t.Fatalf("the idempotent repeat changed state: %+v", res)
 	}
 	if n := count("grant.modified"); n != beforeModified {
@@ -1053,7 +1050,7 @@ func runOriginAddKeepsSessionAlive(t *testing.T, db *store.DB) {
 	if err != nil {
 		t.Fatalf("second origin: %v", err)
 	}
-	if res.Created || !res.OriginAdded {
+	if res.Outcome != service.GrantOriginAdded() {
 		t.Fatalf("expected an origin join on an existing row, got %+v", res)
 	}
 	if _, err := auth.Identity(ctx, login.SessionToken); err != nil {

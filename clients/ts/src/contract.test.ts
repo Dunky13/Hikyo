@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { zCreateOrgRequest, zErrorCode, zMeta, zProtocolCapability } from './generated/zod.gen.ts';
+import {
+  zCreateOrgRequest,
+  zErrorCode,
+  zGrantResult,
+  zMeta,
+  zProtocolCapability,
+} from './generated/zod.gen.ts';
 
 // The TypeScript half of the bound 3.1 profile (system-architecture ADR,
 // 2026-08-07 amendment): the round-trip fixtures must run through the Zod
@@ -38,6 +44,27 @@ test('a closed enum refuses an unknown value', () => {
   // a contract this client does not have.
   assert.equal(zErrorCode.parse('not_found'), 'not_found');
   assert.throws(() => zErrorCode.parse('teapot'));
+});
+
+test('grant mutations expose exactly one closed outcome', () => {
+  const grantId = 'grt_0198b727-19e3-7c31-a2df-904b89224e4c';
+  for (const outcome of ['created', 'origin_added', 'unchanged']) {
+    assert.equal(
+      zGrantResult.parse({ grant_id: grantId, capability: 'read', outcome }).outcome,
+      outcome,
+    );
+  }
+  assert.throws(() =>
+    zGrantResult.parse({ grant_id: grantId, capability: 'read', outcome: 'partly_created' }),
+  );
+  assert.throws(() =>
+    zGrantResult.parse({
+      grant_id: grantId,
+      capability: 'read',
+      created: false,
+      origin_added: true,
+    }),
+  );
 });
 
 test('a request missing a required member is refused before it is sent', () => {

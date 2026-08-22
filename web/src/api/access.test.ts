@@ -12,6 +12,7 @@ import {
   expandTemplate,
   GrantPartialFailure,
   grantFailureText,
+  grantOutcomeSummary,
   grantScopeLabel,
   membershipFailureText,
   membershipRows,
@@ -181,14 +182,17 @@ describe('scope ordering and the safe default', () => {
 describe('grant refusals', () => {
   it('maps a partial failure with explicit progress and the mapped refusal cause', () => {
     const failure = new GrantPartialFailure(
-      ['read', 'edit'],
+      [
+        { capability: 'read', outcome: 'origin_added' },
+        { capability: 'edit', outcome: 'unchanged' },
+      ],
       'publish',
       3,
       new ApiError(403, 'forbidden'),
     );
 
     expect(grantFailureText(failure)).toBe(
-      'Granted: read, edit (2 of 3, live and listed below). publish was refused: Managing members needs a second factor. Sign in again and present your passkey or a code, then retry.',
+      'Completed 2 of 3 (live and listed below). Created: none. Origin added: read. Unchanged: edit. publish was refused: Managing members needs a second factor. Sign in again and present your passkey or a code, then retry.',
     );
   });
 });
@@ -307,15 +311,56 @@ describe('sequential grant creation', () => {
       if (capability === 'publish') {
         throw refusal;
       }
+      if (capability === 'read') {
+        return { capability, outcome: 'origin_added' };
+      }
+      return { capability, outcome: 'unchanged' };
     });
 
     await expect(run).rejects.toMatchObject({
-      granted: ['read', 'edit'],
+      completed: [
+        { capability: 'read', outcome: 'origin_added' },
+        { capability: 'edit', outcome: 'unchanged' },
+      ],
       failedCapability: 'publish',
       cause: refusal,
     });
     await expect(run).rejects.toBeInstanceOf(GrantPartialFailure);
     expect(attempted).toEqual(['read', 'edit', 'publish']);
+  });
+
+  it('returns each server outcome instead of treating every success as a new grant', async () => {
+    const result = await createGrantsSequentially(
+      ['read', 'edit', 'publish'],
+      async (capability) => {
+        switch (capability) {
+          case 'read':
+            return { capability, outcome: 'created' };
+          case 'edit':
+            return { capability, outcome: 'origin_added' };
+          default:
+            return { capability, outcome: 'unchanged' };
+        }
+      },
+    );
+
+    expect(result).toEqual([
+      { capability: 'read', outcome: 'created' },
+      { capability: 'edit', outcome: 'origin_added' },
+      { capability: 'publish', outcome: 'unchanged' },
+    ]);
+  });
+});
+
+describe('grant outcome rendering', () => {
+  it('renders all three closed outcomes', () => {
+    expect(
+      grantOutcomeSummary([
+        { capability: 'read', outcome: 'created' },
+        { capability: 'edit', outcome: 'origin_added' },
+        { capability: 'publish', outcome: 'unchanged' },
+      ]),
+    ).toBe('Created: read. Origin added: edit. Unchanged: publish.');
   });
 });
 

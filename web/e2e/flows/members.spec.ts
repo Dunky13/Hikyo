@@ -324,7 +324,7 @@ test.describe('members and grants', () => {
       await dialog.getByLabel('Scope').selectOption(`env:${seed.project}:${seed.dev}`);
       await dialog.getByRole('button', { name: 'Grant', exact: true }).click();
 
-      const partial = page.getByRole('alert').filter({ hasText: 'Granted: read, edit' });
+      const partial = page.getByRole('alert').filter({ hasText: 'Completed 2 of 3' });
       await expect(partial).toContainText('2 of 3');
       await expect(partial).toContainText('pin was refused');
       await expect(partial).toContainText('live and listed below');
@@ -348,9 +348,12 @@ test.describe('members and grants', () => {
       await dialog.getByLabel('Scope').selectOption(`env:${seed.project}:${seed.dev}`);
       await dialog.getByRole('button', { name: 'Grant', exact: true }).click();
 
-      const feedback = page.locator('.notice').filter({ hasText: 'Granted' });
+      const feedback = page.locator('.notice').filter({ hasText: 'Grant results' });
       await expectStatusIsTextAndAria(page, feedback);
-      await expect(feedback).toContainText('separate lines');
+      await expect(feedback).toContainText('Created: read, edit');
+      await expect(feedback).toContainText('Origin added: none');
+      await expect(feedback).toContainText('Unchanged: none');
+      await expect(feedback).toContainText('independently revocable');
 
       // Two independent rows, not a bundle.
       const row = page.getByRole('row').filter({ hasText: principal });

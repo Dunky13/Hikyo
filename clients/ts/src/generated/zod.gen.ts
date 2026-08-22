@@ -1260,8 +1260,11 @@ export const zGrantList = z.object({
 export const zGrantResult = z.object({
     grant_id: zId,
     capability: zCapability,
-    created: z.boolean(),
-    origin_added: z.boolean()
+    outcome: z.enum([
+        'created',
+        'origin_added',
+        'unchanged'
+    ])
 });
 
 export const zGrantResultList = z.object({
@@ -3236,7 +3239,7 @@ export const zListInstanceGrantsResponse = zGrantList;
 export const zCreateInstanceGrantBody = zCreateGrantRequest;
 
 /**
- * The grant, created or joined by a second origin.
+ * The grant mutation result, including an idempotent repeat.
  */
 export const zCreateInstanceGrantResponse = zGrantResult;
 
@@ -3277,7 +3280,7 @@ export const zCreateOrgGrantPath = z.object({
 });
 
 /**
- * The grant, created or joined by a second origin.
+ * The grant mutation result, including an idempotent repeat.
  */
 export const zCreateOrgGrantResponse = zGrantResult;
 
@@ -3325,7 +3328,7 @@ export const zCreateProjectGrantPath = z.object({
 });
 
 /**
- * The grant, created or joined by a second origin.
+ * The grant mutation result, including an idempotent repeat.
  */
 export const zCreateProjectGrantResponse = zGrantResult;
 
@@ -3366,7 +3369,7 @@ export const zCreateEnvGrantPath = z.object({
 });
 
 /**
- * The grant, created or joined by a second origin.
+ * The grant mutation result, including an idempotent repeat.
  */
 export const zCreateEnvGrantResponse = zGrantResult;
 

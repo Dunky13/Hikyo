@@ -2215,13 +2215,10 @@ export type GrantResult = {
     grant_id: Id;
     capability: Capability;
     /**
-     * False when an existing row was deduplicated and this call only attached an origin.
+     * The only possible mutation results: a new grant row, a new origin on an existing row, or an idempotent repeat that changed nothing.
+     *
      */
-    created: boolean;
-    /**
-     * False when the caller's own origin already held the row - a genuinely idempotent repeat.
-     */
-    origin_added: boolean;
+    outcome: 'created' | 'origin_added' | 'unchanged';
 };
 
 export type GrantResultList = {
@@ -6483,7 +6480,7 @@ export type CreateInstanceGrantError = CreateInstanceGrantErrors[keyof CreateIns
 
 export type CreateInstanceGrantResponses = {
     /**
-     * The grant, created or joined by a second origin.
+     * The grant mutation result, including an idempotent repeat.
      */
     200: GrantResult;
 };
@@ -6781,7 +6778,7 @@ export type CreateOrgGrantError = CreateOrgGrantErrors[keyof CreateOrgGrantError
 
 export type CreateOrgGrantResponses = {
     /**
-     * The grant, created or joined by a second origin.
+     * The grant mutation result, including an idempotent repeat.
      */
     200: GrantResult;
 };
@@ -7096,7 +7093,7 @@ export type CreateProjectGrantError = CreateProjectGrantErrors[keyof CreateProje
 
 export type CreateProjectGrantResponses = {
     /**
-     * The grant, created or joined by a second origin.
+     * The grant mutation result, including an idempotent repeat.
      */
     200: GrantResult;
 };
@@ -7353,7 +7350,7 @@ export type CreateEnvGrantError = CreateEnvGrantErrors[keyof CreateEnvGrantError
 
 export type CreateEnvGrantResponses = {
     /**
-     * The grant, created or joined by a second origin.
+     * The grant mutation result, including an idempotent repeat.
      */
     200: GrantResult;
 };

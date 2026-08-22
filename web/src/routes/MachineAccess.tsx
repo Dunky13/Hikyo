@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
 import { useParams } from 'react-router';
 
-import type { FederatedClaimPin } from '@hikyo/client';
+import type { FederatedClaimPin, GrantResult } from '@hikyo/client';
 
+import { grantOutcomeSummary } from '../api/access.ts';
 import {
   BINDING_LIFETIMES,
   bindingFailureText,
@@ -447,10 +448,10 @@ export function MachineAccess() {
           // that stopped authenticating weeks ago.
           liveCredentials={dialog.account.live_credentials}
           onClose={() => setDialog(null)}
-          onGranted={(environment) => {
+          onGranted={(environment, result) => {
             setDialog(null);
             setNotice(
-              `Granted. Every credential this service account already holds now reads ${environment}.`,
+              `Grant result for ${environment}: ${grantOutcomeSummary([result])}`,
             );
           }}
         />
@@ -1584,7 +1585,7 @@ function GrantDialog({
   scope: readonly MachineEnvScope[];
   liveCredentials: number;
   onClose: () => void;
-  onGranted: (environment: string) => void;
+  onGranted: (environment: string, result: GrantResult) => void;
 }) {
   const dialog = useModalDialog();
   const grantable = scope.filter((s) => !s.read);
@@ -1651,7 +1652,7 @@ function GrantBody({
   /** GrantDialog's Escape gate — held while the mutation is in flight. */
   inFlight: MutableRefObject<boolean>;
   onClose: () => void;
-  onGranted: (environment: string) => void;
+  onGranted: (environment: string, result: GrantResult) => void;
 }) {
   const grant = useGrantEnvironment(project);
   const refreshGrants = useRefreshGrants(project);
@@ -1701,12 +1702,12 @@ function GrantBody({
         });
       }
       issued = true;
-      await grant.mutateAsync({
+      const result = await grant.mutateAsync({
         environment,
         principal: account.principal_id,
         capability: 'read',
       });
-      onGranted(chosen?.name ?? environment);
+      onGranted(chosen?.name ?? environment, result);
     } catch (error) {
       if (issued) {
         refreshGrants();

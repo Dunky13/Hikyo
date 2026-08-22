@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	api "github.com/Hikyo-Org/hikyo/api"
 	"github.com/go-chi/chi/v5"
 	"github.com/oapi-codegen/runtime"
 )
@@ -3464,14 +3465,11 @@ type GrantResult struct {
 	// the contract additive as later tickets register their atoms.
 	Capability Capability `json:"capability"`
 
-	// Created False when an existing row was deduplicated and this call only attached an origin.
-	Created bool `json:"created"`
-
 	// GrantId A prefixed UUIDv7, e.g. `org_0198…`.
 	GrantId ID `json:"grant_id"`
 
-	// OriginAdded False when the caller's own origin already held the row - a genuinely idempotent repeat.
-	OriginAdded bool `json:"origin_added"`
+	// Outcome The only possible mutation results: a new grant row, a new origin on an existing row, or an idempotent repeat that changed nothing.
+	Outcome api.GrantOutcome `json:"outcome"`
 }
 
 // GrantResultList defines model for GrantResultList.
