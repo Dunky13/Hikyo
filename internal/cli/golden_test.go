@@ -3,6 +3,7 @@ package cli_test
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"net/http"
@@ -332,38 +333,213 @@ func TestCanonicalOriginRefusesWhatIsNotAnOrigin(t *testing.T) {
 }
 
 func TestTargetResolutionPrecedence(t *testing.T) {
-	// Per dimension, first hit wins: flags, then environment, then the pin
-	// file, then the named context. Overriding ONE dimension is legitimate
-	// exactly because the others re-resolve within the same chain.
-	ios, _, _ := testIO(t, map[string]string{"HIKYO_PROJECT": "from-env"})
-	if err := os.WriteFile(filepath.Join(ios.Workdir, cli.PinFileName),
-		[]byte(`{"instance":"pinned","org":"pinned-org","project":"pinned-project","env":"pinned-env"}`), 0o644); err != nil {
-		t.Fatal(err)
+	// First hit wins independently for each dimension. The table documents the
+	// full order and proves an explicit child may inherit its missing parents
+	// from lower-precedence authoritative selections.
+	for _, tc := range []struct {
+		name    string
+		flags   cli.Flags
+		env     map[string]string
+		pin     string
+		context cli.Context
+		want    map[cli.Dimension]struct {
+			value  string
+			source cli.Source
+		}
+	}{
+		{
+			name:  "flag beats environment pin and context",
+			flags: cli.Flags{Context: "selected", Instance: "flag-instance", Org: "flag-org", Project: "flag-project", Env: "flag-env"},
+			env: map[string]string{
+				"HIKYO_INSTANCE": "env-instance", "HIKYO_ORG": "env-org",
+				"HIKYO_PROJECT": "env-project", "HIKYO_ENV": "env-env",
+			},
+			pin:     `{"instance":"pin-instance","org":"pin-org","project":"pin-project","env":"pin-env"}`,
+			context: cli.Context{Name: "selected", Instance: "context-instance", Org: "context-org", Project: "context-project", Env: "context-env"},
+			want:    resolvedWant("flag-instance", "flag-org", "flag-project", "flag-env", cli.SourceFlag),
+		},
+		{
+			name:  "environment beats pin and context",
+			flags: cli.Flags{Context: "selected"},
+			env: map[string]string{
+				"HIKYO_INSTANCE": "env-instance", "HIKYO_ORG": "env-org",
+				"HIKYO_PROJECT": "env-project", "HIKYO_ENV": "env-env",
+			},
+			pin:     `{"instance":"pin-instance","org":"pin-org","project":"pin-project","env":"pin-env"}`,
+			context: cli.Context{Name: "selected", Instance: "context-instance", Org: "context-org", Project: "context-project", Env: "context-env"},
+			want:    resolvedWant("env-instance", "env-org", "env-project", "env-env", cli.SourceEnv),
+		},
+		{
+			name:    "pin beats context",
+			flags:   cli.Flags{Context: "selected"},
+			pin:     `{"instance":"pin-instance","org":"pin-org","project":"pin-project","env":"pin-env"}`,
+			context: cli.Context{Name: "selected", Instance: "context-instance", Org: "context-org", Project: "context-project", Env: "context-env"},
+			want:    resolvedWant("pin-instance", "pin-org", "pin-project", "pin-env", cli.SourcePinFile),
+		},
+		{
+			name:    "context fills unresolved dimensions",
+			flags:   cli.Flags{Context: "selected"},
+			context: cli.Context{Name: "selected", Instance: "context-instance", Org: "context-org", Project: "context-project", Env: "context-env"},
+			want:    resolvedWant("context-instance", "context-org", "context-project", "context-env", cli.SourceContext),
+		},
+		{
+			name:  "mixed override retains complete parents",
+			flags: cli.Flags{Context: "selected", Env: "flag-env"},
+			env:   map[string]string{"HIKYO_PROJECT": "env-project"},
+			pin:   `{"org":"pin-org"}`,
+			context: cli.Context{
+				Name: "selected", Instance: "context-instance",
+			},
+			want: map[cli.Dimension]struct {
+				value  string
+				source cli.Source
+			}{
+				cli.DimInstance: {"context-instance", cli.SourceContext},
+				cli.DimOrg:      {"pin-org", cli.SourcePinFile},
+				cli.DimProject:  {"env-project", cli.SourceEnv},
+				cli.DimEnv:      {"flag-env", cli.SourceFlag},
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ios, _, _ := testIO(t, tc.env)
+			if tc.pin != "" {
+				if err := os.WriteFile(filepath.Join(ios.Workdir, cli.PinFileName), []byte(tc.pin), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			st, err := cli.NewState(ios.Env)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.context.Name != "" {
+				if err := st.PutContext(tc.context); err != nil {
+					t.Fatal(err)
+				}
+			}
+			resolved, err := cli.Resolve(st, ios.Env, tc.flags, ios.Workdir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for dim, want := range tc.want {
+				if got := resolved.Get(dim); got != want.value {
+					t.Errorf("%s = %q, want %q", dim, got, want.value)
+				}
+				if got := resolved.Sources[dim]; got != want.source {
+					t.Errorf("%s came from %q, want %q", dim, got, want.source)
+				}
+			}
+		})
 	}
-	st, err := cli.NewState(ios.Env)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resolved, err := cli.Resolve(st, ios.Env, cli.Flags{Env: "from-flag"}, ios.Workdir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := map[cli.Dimension]struct {
+}
+
+func resolvedWant(instance, org, project, environment string, source cli.Source) map[cli.Dimension]struct {
+	value  string
+	source cli.Source
+} {
+	return map[cli.Dimension]struct {
 		value  string
 		source cli.Source
 	}{
-		cli.DimEnv:      {"from-flag", cli.SourceFlag},
-		cli.DimProject:  {"from-env", cli.SourceEnv},
-		cli.DimOrg:      {"pinned-org", cli.SourcePinFile},
-		cli.DimInstance: {"pinned", cli.SourcePinFile},
+		cli.DimInstance: {instance, source},
+		cli.DimOrg:      {org, source},
+		cli.DimProject:  {project, source},
+		cli.DimEnv:      {environment, source},
 	}
-	for dim, w := range want {
-		if got := resolved.Get(dim); got != w.value {
-			t.Errorf("%s = %q, want %q", dim, got, w.value)
-		}
-		if got := resolved.Sources[dim]; got != w.source {
-			t.Errorf("%s came from %q, want %q", dim, got, w.source)
-		}
+}
+
+func TestTenantScopeConstructsOnlyContiguousHierarchy(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		values  map[cli.Dimension]string
+		want    cli.TenantScopeKind
+		wantErr string
+	}{
+		{name: "instance", values: map[cli.Dimension]string{}, want: cli.TenantScopeInstance},
+		{name: "org", values: map[cli.Dimension]string{cli.DimOrg: "org_one"}, want: cli.TenantScopeOrg},
+		{name: "project", values: map[cli.Dimension]string{cli.DimOrg: "org_one", cli.DimProject: "project_one"}, want: cli.TenantScopeProject},
+		{name: "environment", values: map[cli.Dimension]string{cli.DimOrg: "org_one", cli.DimProject: "project_one", cli.DimEnv: "env_one"}, want: cli.TenantScopeEnvironment},
+		{name: "project gap", values: map[cli.Dimension]string{cli.DimProject: "project_one"}, wantErr: "project"},
+		{name: "environment gap", values: map[cli.Dimension]string{cli.DimOrg: "org_one", cli.DimEnv: "env_one"}, wantErr: "environment"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			scope, err := cli.NewTenantScope(cli.Resolved{Values: tc.values})
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("error = %v, want error naming %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if scope.Kind() != tc.want {
+				t.Fatalf("kind = %v, want %v", scope.Kind(), tc.want)
+			}
+		})
+	}
+}
+
+func TestTenantScopeRejectsSparseHierarchyFromEveryResolutionSource(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		flags   cli.Flags
+		env     map[string]string
+		pin     string
+		context cli.Context
+		want    string
+	}{
+		{name: "flag project gap", flags: cli.Flags{Project: "project_one"}, want: "project"},
+		{name: "flag environment gap", flags: cli.Flags{Org: "org_one", Env: "env_one"}, want: "environment"},
+		{name: "environment project gap", env: map[string]string{"HIKYO_PROJECT": "project_one"}, want: "project"},
+		{name: "environment environment gap", env: map[string]string{"HIKYO_ORG": "org_one", "HIKYO_ENV": "env_one"}, want: "environment"},
+		{name: "pin project gap", pin: `{"project":"project_one"}`, want: "project"},
+		{name: "pin environment gap", pin: `{"org":"org_one","env":"env_one"}`, want: "environment"},
+		{
+			name:    "context project gap",
+			flags:   cli.Flags{Context: "selected"},
+			context: cli.Context{Name: "selected", Project: "project_one"},
+			want:    "project",
+		},
+		{
+			name:    "context environment gap",
+			flags:   cli.Flags{Context: "selected"},
+			context: cli.Context{Name: "selected", Org: "org_one", Env: "env_one"},
+			want:    "environment",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ios, _, _ := testIO(t, tc.env)
+			if tc.pin != "" {
+				if err := os.WriteFile(filepath.Join(ios.Workdir, cli.PinFileName), []byte(tc.pin), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			st, err := cli.NewState(ios.Env)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.context.Name != "" {
+				if err := st.PutContext(tc.context); err != nil {
+					t.Fatal(err)
+				}
+			}
+			resolved, err := cli.Resolve(st, ios.Env, tc.flags, ios.Workdir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = cli.NewTenantScope(resolved)
+			if err == nil {
+				t.Fatal("sparse scope was accepted")
+			}
+			var cliErr *cli.Error
+			if !errors.As(err, &cliErr) || cliErr.Code != cli.ExitUsage {
+				t.Fatalf("error = %v, want ExitUsage", err)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error %q does not name %q", err, tc.want)
+			}
+		})
 	}
 }
 
