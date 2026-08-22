@@ -159,13 +159,13 @@ func New(ready ReadyChecker, a *API, ui fs.FS) http.Handler {
 		})
 	} else {
 		r.NotFound(func(w http.ResponseWriter, _ *http.Request) {
-			writeError(w, apigen.ErrorCodeNotFound, "")
+			writeError(w, wirePolicyForCode(apigen.ErrorCodeNotFound), "")
 		})
 	}
 	r.MethodNotAllowed(func(w http.ResponseWriter, _ *http.Request) {
 		// A method the contract does not describe on a path it does is,
 		// from outside, the same fact as a path that is not there.
-		writeError(w, apigen.ErrorCodeNotFound, "")
+		writeError(w, wirePolicyForCode(apigen.ErrorCodeNotFound), "")
 	})
 	return r
 }

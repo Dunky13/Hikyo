@@ -271,7 +271,7 @@ func serveAsset(ui fs.FS, w http.ResponseWriter, r *http.Request) {
 func serveSPA(ui fs.FS, w http.ResponseWriter, r *http.Request) {
 	if reservedFromFallback(r.URL.Path) ||
 		(r.Method != http.MethodGet && r.Method != http.MethodHead) {
-		writeError(w, apigen.ErrorCodeNotFound, "")
+		writeError(w, wirePolicyForCode(apigen.ErrorCodeNotFound), "")
 		return
 	}
 	// A root-relative file the build emitted (favicon, manifest) is served as
@@ -297,13 +297,13 @@ func serveSPA(ui fs.FS, w http.ResponseWriter, r *http.Request) {
 	// Everything past here is the application's own routing, and only a
 	// navigation should receive a document.
 	if !wantsHTML(r) {
-		writeError(w, apigen.ErrorCodeNotFound, "")
+		writeError(w, wirePolicyForCode(apigen.ErrorCodeNotFound), "")
 		return
 	}
 	body, err := fs.ReadFile(ui, indexPath)
 	if err != nil {
 		// An asset tree without a document is a broken build, not a route.
-		writeError(w, apigen.ErrorCodeNotFound, "")
+		writeError(w, wirePolicyForCode(apigen.ErrorCodeNotFound), "")
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

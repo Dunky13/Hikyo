@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"errors"
 
 	"github.com/Hikyo-Org/hikyo/api/apigen"
 	"github.com/Hikyo-Org/hikyo/internal/service"
@@ -22,17 +21,9 @@ func (a *API) ResetCredential(ctx context.Context, req apigen.ResetCredentialReq
 	// holder, who transmits it to the target out of band.
 	result, err := a.Auth.ResetCredential(ctx, service.Bearer(bearer(ctx)), string(req.Principal), "response")
 	if err != nil {
-		// An unknown or non-human target — and an instance-capability target with
-		// no network path — answer the SAME uniform 401 as an unauthorized one, so
-		// the response cannot distinguish "exists but is not reachable here" from
-		// "you may not reach it" (classify would otherwise fault it to 500 — a
-		// status-code oracle on an enumeration-uniform route).
-		if errors.Is(err, service.ErrNoResetTarget) {
-			return apigen.ResetCredential401JSONResponse{
-				UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, "")),
-			}, nil
-		}
-		switch classify(err) {
+		// Every recognized refusal collapses to the same 401 on this
+		// enumeration-uniform route; only overload and faults remain distinct.
+		switch wireErrorFor(err).code {
 		case apigen.ErrorCodeTooManyRequests:
 			return apigen.ResetCredential429JSONResponse{TooManyRequestsJSONResponse: tooMany()}, nil
 		case apigen.ErrorCodeInternal:

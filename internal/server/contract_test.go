@@ -258,6 +258,20 @@ func (stubProviders) Delete(context.Context, service.Actor, string) error {
 	return domain.ErrUnauthorized
 }
 
+type stubWorkspace struct {
+	server.WorkspaceService
+	show   func(context.Context, service.Actor, string) (service.HandoffView, error)
+	redeem func(context.Context, string, string, string) (service.WorkspaceSession, error)
+}
+
+func (s stubWorkspace) ShowHandoff(ctx context.Context, actor service.Actor, state string) (service.HandoffView, error) {
+	return s.show(ctx, actor, state)
+}
+
+func (s stubWorkspace) RedeemHandoff(ctx context.Context, code, verifier, origin string) (service.WorkspaceSession, error) {
+	return s.redeem(ctx, code, verifier, origin)
+}
+
 type stubOrgs struct {
 	create func(ctx context.Context, a service.Actor, name string, active bool, meta json.RawMessage) (service.Org, error)
 	get    func(ctx context.Context, a service.Actor, org domain.OrgID) (service.Org, error)
@@ -1556,6 +1570,74 @@ func TestConflictAndLimitRenderUniformly(t *testing.T) {
 				t.Errorf("the limit refusal does not name its bound: %q", body.Error.Message)
 			}
 		})
+	}
+}
+
+type unknownSafeDetailError struct {
+	cause error
+}
+
+func (e unknownSafeDetailError) Error() string      { return "private storage failure: must not escape" }
+func (e unknownSafeDetailError) Unwrap() error      { return e.cause }
+func (e unknownSafeDetailError) SafeDetail() string { return "private row tenant-secret-7c31" }
+
+func TestUnknownHandlerErrorsFailClosedOnTheWire(t *testing.T) {
+	unknown := errors.New("private storage failure")
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{"plain", unknown},
+		{"wrapped", fmt.Errorf("query project: %w", unknown)},
+		{"safe detail carrier", unknownSafeDetailError{cause: unknown}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := hierarchyServer(t, tc.err)
+			resp, payload := call(t, srv, http.MethodPost,
+				api.PathPrefix+"/orgs/"+testOrgID+"/projects", "hik_1_cli_x",
+				apigen.CreateProjectRequest{Name: "p"})
+			if resp.StatusCode != http.StatusInternalServerError {
+				t.Fatalf("status %d, want 500", resp.StatusCode)
+			}
+			body := decodeError(t, payload)
+			if body.Error.Code != apigen.ErrorCodeInternal || body.Error.Message != "internal error" {
+				t.Fatalf("body = %+v, want uniform internal refusal", body)
+			}
+			if body.Error.Detail != nil || bytes.Contains(payload, []byte("storage")) || bytes.Contains(payload, []byte("tenant-secret")) {
+				t.Fatalf("internal refusal leaked cause or detail: %s", payload)
+			}
+		})
+	}
+}
+
+func TestWorkspaceHandoffInvalidPreservesContextualRefusals(t *testing.T) {
+	workspace := stubWorkspace{
+		show: func(context.Context, service.Actor, string) (service.HandoffView, error) {
+			return service.HandoffView{}, fmt.Errorf("lookup: %w", service.ErrHandoffInvalid)
+		},
+		redeem: func(context.Context, string, string, string) (service.WorkspaceSession, error) {
+			return service.WorkspaceSession{}, fmt.Errorf("redeem: %w", service.ErrHandoffInvalid)
+		},
+	}
+	srv := httptest.NewServer(server.New(stubReady{}, &server.API{
+		Auth: stubAuth{identity: liveIdentityFn}, Orgs: stubOrgs{}, Providers: stubProviders{},
+		Projects: stubHierarchy{}, Environments: stubEnvs{}, Values: stubValues{}, Folders: stubFolders{},
+		Workspace: workspace, Version: "test",
+	}, nil))
+	t.Cleanup(srv.Close)
+
+	showResp, showPayload := call(t, srv, http.MethodGet,
+		api.PathPrefix+"/auth/workspace/transactions/stale-state", "hik_1_cli_x", nil)
+	if showResp.StatusCode != http.StatusNotFound || decodeError(t, showPayload).Error.Code != apigen.ErrorCodeNotFound {
+		t.Fatalf("show refusal = %d %s, want 404 not_found", showResp.StatusCode, showPayload)
+	}
+
+	redeemResp, redeemPayload := call(t, srv, http.MethodPost,
+		api.PathPrefix+"/auth/workspace/redeem", "", apigen.RedeemWorkspaceHandoffRequest{
+			Code: "spent-code", PkceVerifier: strings.Repeat("a", 43), Origin: "https://shell.example",
+		})
+	if redeemResp.StatusCode != http.StatusForbidden || decodeError(t, redeemPayload).Error.Code != apigen.ErrorCodeForbidden {
+		t.Fatalf("redeem refusal = %d %s, want 403 forbidden", redeemResp.StatusCode, redeemPayload)
 	}
 }
 

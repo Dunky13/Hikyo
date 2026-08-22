@@ -2,13 +2,11 @@ package server
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"time"
 
 	"github.com/Hikyo-Org/hikyo/api/apigen"
 	"github.com/Hikyo-Org/hikyo/internal/audit"
-	"github.com/Hikyo-Org/hikyo/internal/domain"
 	"github.com/Hikyo-Org/hikyo/internal/remotefetch"
 	"github.com/Hikyo-Org/hikyo/internal/service"
 )
@@ -184,20 +182,21 @@ func (a *API) StartWorkspaceHandoff(ctx context.Context, req apigen.StartWorkspa
 func (a *API) ShowWorkspaceHandoff(ctx context.Context, req apigen.ShowWorkspaceHandoffRequestObject) (apigen.ShowWorkspaceHandoffResponseObject, error) {
 	view, err := a.Workspace.ShowHandoff(ctx, service.Bearer(bearer(ctx)), req.State)
 	if err != nil {
-		if errors.Is(err, domain.ErrUnauthenticated) {
+		policy := workspaceHandoffLookupWireErrorFor(err)
+		switch policy.code {
+		case apigen.ErrorCodeUnauthenticated:
 			return apigen.ShowWorkspaceHandoff401JSONResponse{
 				UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(
-					errorBody(apigen.ErrorCodeUnauthenticated, ""),
+					policy.body(err),
 				),
 			}, nil
-		}
-		// A not-found or expired/consumed transaction is a 404, not a 403: to a
-		// caller holding a stale state the answer is "there is no such live
-		// transaction", uniformly, whichever of those it is.
-		if errors.Is(err, service.ErrHandoffInvalid) {
+		case apigen.ErrorCodeNotFound:
+			// A not-found or expired/consumed transaction is a 404, not a 403: to a
+			// caller holding a stale state the answer is "there is no such live
+			// transaction", uniformly, whichever of those it is.
 			return apigen.ShowWorkspaceHandoff404JSONResponse{
 				NotFoundJSONResponse: apigen.NotFoundJSONResponse(
-					errorBody(apigen.ErrorCodeNotFound, ""),
+					policy.body(err),
 				),
 			}, nil
 		}
@@ -271,7 +270,7 @@ func (a *API) enterWorkspaceAdmission(ctx context.Context) (func(), error) {
 func (a *API) ListMySessions(ctx context.Context, _ apigen.ListMySessionsRequestObject) (apigen.ListMySessionsResponseObject, error) {
 	sessions, err := a.Workspace.ListSessions(ctx, service.Bearer(bearer(ctx)))
 	if err != nil {
-		if classify(err) == apigen.ErrorCodeUnauthenticated {
+		if wireErrorFor(err).code == apigen.ErrorCodeUnauthenticated {
 			return apigen.ListMySessions401JSONResponse{
 				UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, "")),
 			}, nil
