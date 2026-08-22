@@ -320,7 +320,7 @@ func runSCIMCreateIsOneQueryPath(t *testing.T, db *store.DB) {
 		t.Fatalf("other-org credential: %v", err)
 	}
 	if _, err := s.CreateUser(ctx, service.SCIMCredentialActor(otherMint.Token, otherBinding.ID),
-		orgB, otherBinding.ID, service.SCIMUserInput{
+		orgB, otherBinding.ID, service.DesiredUser{Active: true,
 			UserName: "cross-q@example.test", ExternalID: "cross-q", SubjectRaw: "cross-q",
 		}); err != nil {
 		t.Fatalf("other-org create: %v", err)
@@ -340,7 +340,7 @@ func runSCIMCreateIsOneQueryPath(t *testing.T, db *store.DB) {
 			mu.Unlock()
 		})
 		defer restore()
-		if _, err := s.CreateUser(ctx, wire, orgA, bindingID, service.SCIMUserInput{
+		if _, err := s.CreateUser(ctx, wire, orgA, bindingID, service.DesiredUser{Active: true,
 			UserName: userName, ExternalID: subject, SubjectRaw: subject,
 		}); err != nil {
 			t.Fatalf("create %q: %v", subject, err)
@@ -462,7 +462,7 @@ func runSCIMPushEmitsPerEvent(t *testing.T, db *store.DB) {
 	// so the grant events are three users' worth and not one summary.
 	ids := make([]string, 0, 3)
 	for _, name := range []string{"one", "two", "three"} {
-		u, err := s.CreateUser(ctx, wire, orgA, bindingID, service.SCIMUserInput{
+		u, err := s.CreateUser(ctx, wire, orgA, bindingID, service.DesiredUser{Active: true,
 			UserName: name + "@push.test", ExternalID: "push-" + name, SubjectRaw: "push-" + name,
 		})
 		if err != nil {
@@ -474,8 +474,8 @@ func runSCIMPushEmitsPerEvent(t *testing.T, db *store.DB) {
 		t.Fatalf("a 3-user push must emit 3 scim.user_provisioned events, got %d", got)
 	}
 
-	group, err := s.CreateGroup(ctx, wire, orgA, bindingID, service.SCIMGroupInput{
-		DisplayName: "Pushed", Members: ids, MembersPresent: true,
+	group, err := s.CreateGroup(ctx, wire, orgA, bindingID, service.DesiredGroup{
+		DisplayName: "Pushed", Members: ids,
 	})
 	if err != nil {
 		t.Fatal(err)

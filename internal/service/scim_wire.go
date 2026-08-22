@@ -187,45 +187,6 @@ type SCIMUserResource struct {
 	UpdatedAt time.Time
 }
 
-// SCIMUserInput is a create or a full replacement. It is DESIRED STATE: PUT is
-// RFC replacement, so an omitted mutable attribute clears to its default and an
-// omitted `active` defaults TRUE, which reactivates.
-type SCIMUserInput struct {
-	UserName   string
-	ExternalID string
-	// Active is a pointer so "omitted" and "explicitly false" stay different
-	// inputs at this boundary; PUT resolves omitted to true, PATCH leaves it.
-	Active *bool
-	// SubjectRaw is the value found at the binding's declared subject-source
-	// attribute path. It is raw IdP material; deriveSubject turns it into the
-	// byte-exact subject the login path computes.
-	//
-	// The WIRE never sets it: it sets Resource, and the service reads the value
-	// out at the binding's declared path. Below-the-wire callers (fixtures,
-	// and anything that already knows the identity material) set it directly.
-	// Keeping the extraction on this side means "what the subject source means"
-	// exists once, beside the binding that declares it, rather than in a
-	// transport that would need its own copy of the binding to know.
-	SubjectRaw string
-	// Resource is the decoded SCIM resource, when the caller is the wire.
-	Resource map[string]any
-	// Attributes is everything else, round-tripped as display metadata. A nil
-	// VALUE inside it is an explicit CLEAR; an absent key is an omission. PUT
-	// replaces the whole map; PATCH merges into the stored one.
-	Attributes map[string]any
-	// ExternalIDCleared marks an EXPLICIT removal of `externalId` (the PATCH
-	// `remove externalId` cell), which is a different request from omitting it.
-	// Without presence state the two collapsed onto `ExternalID == ""`, so an
-	// explicit removal became a silent no-op on a mutable field — and, worse,
-	// silently SUCCEEDED against a subject-source binding instead of refusing
-	// the identity mutation with `mutability`.
-	ExternalIDCleared bool
-	// Patch marks a partial update. PUT is RFC replacement and PATCH is a
-	// delta, and collapsing the two made every PATCH drop every attribute it
-	// did not mention.
-	Patch bool
-}
-
 // CreateUser is §5.2: an account with its external identity ALREADY BOUND —
 // no invitation token, no credential-establishment authority, no session, no
 // assurance — and ZERO grants beyond what the user's current group memberships
@@ -236,7 +197,7 @@ type SCIMUserInput struct {
 // Both legs follow ONE query path and return a byte-shape-identical resource,
 // so a caller cannot tell a fresh create from an attach — which is the whole
 // point, because "it existed already" would otherwise be a cross-org oracle.
-func (s *SCIM) CreateUser(ctx context.Context, actor Actor, org domain.OrgID, bindingID string, in SCIMUserInput) (SCIMUserResource, error) {
+func (s *SCIM) CreateUser(ctx context.Context, actor Actor, org domain.OrgID, bindingID string, in DesiredUser) (SCIMUserResource, error) {
 	var out SCIMUserResource
 	err := s.wireTx(ctx, actor, org, bindingID, authz.OpSCIMUserCreate,
 		func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer, c scimContext, now time.Time) ([]grantEventInput, error) {
@@ -274,14 +235,10 @@ func (s *SCIM) CreateUser(ctx context.Context, actor Actor, org domain.OrgID, bi
 			if err != nil {
 				return nil, err
 			}
-			active := true
-			if in.Active != nil {
-				active = *in.Active
-			}
 			if err := r.SCIM().CreateUser(ctx, c.proof, store.NewSCIMUser{
 				ID: id, BindingID: bindingID, AccountID: accountID,
 				UserName: in.UserName, UserNameLower: fold(in.UserName),
-				ExternalID: in.ExternalID, Subject: subject, Active: active,
+				ExternalID: in.ExternalID, Subject: subject, Active: in.Active,
 				Attributes: attrs, CreatedAt: now, UpdatedAt: now,
 			}); err != nil {
 				return nil, err
@@ -328,7 +285,7 @@ func (s *SCIM) CreateUser(ctx context.Context, actor Actor, org domain.OrgID, bi
 // timing discipline #23 claims composes.
 func (s *SCIM) attachOrCreateAccount(
 	ctx context.Context, az *authz.TxAuthorizer, c scimContext,
-	subject string, in SCIMUserInput, now time.Time,
+	subject string, in DesiredUser, now time.Time,
 ) (accountID, disposition string, err error) {
 	kind := identityKind(c.binding)
 	link, err := az.ExternalIdentityByKey(ctx, kind, c.binding.ProviderIssuer, subject)
@@ -412,19 +369,19 @@ func isUniquenessRace(err error) bool { return errors.Is(err, store.ErrConflict)
 // their defaults, `active` defaults TRUE — so an omitted `active` REACTIVATES,
 // per the transition table — `userName` is required, the subject source is
 // exempt from replacement (write-once), and `groups` is ignored on input.
-func (s *SCIM) ReplaceUser(ctx context.Context, actor Actor, org domain.OrgID, bindingID, id string, in SCIMUserInput) (SCIMUserResource, error) {
-	return s.mutateUser(ctx, actor, org, bindingID, id, authz.OpSCIMUserReplace, in, true)
+func (s *SCIM) ReplaceUser(ctx context.Context, actor Actor, org domain.OrgID, bindingID, id string, desired DesiredUser) (SCIMUserResource, error) {
+	return s.mutateUser(ctx, actor, org, bindingID, id, authz.OpSCIMUserReplace, &desired, nil)
 }
 
-// PatchUser applies the accepted cells of the matrix. The caller has already
-// validated them against the closed table; what arrives here is desired state.
-func (s *SCIM) PatchUser(ctx context.Context, actor Actor, org domain.OrgID, bindingID, id string, in SCIMUserInput) (SCIMUserResource, error) {
-	return s.mutateUser(ctx, actor, org, bindingID, id, authz.OpSCIMUserPatch, in, false)
+// PatchUser reduces the validated command sequence over stored desired state,
+// then persists the one resulting resource.
+func (s *SCIM) PatchUser(ctx context.Context, actor Actor, org domain.OrgID, bindingID, id string, commands []UserPatchCommand) (SCIMUserResource, error) {
+	return s.mutateUser(ctx, actor, org, bindingID, id, authz.OpSCIMUserPatch, nil, commands)
 }
 
 func (s *SCIM) mutateUser(
 	ctx context.Context, actor Actor, org domain.OrgID, bindingID, id string,
-	op authz.Operation, in SCIMUserInput, replace bool,
+	op authz.Operation, replacement *DesiredUser, commands []UserPatchCommand,
 ) (SCIMUserResource, error) {
 	var out SCIMUserResource
 	err := s.wireTx(ctx, actor, org, bindingID, op,
@@ -432,6 +389,25 @@ func (s *SCIM) mutateUser(
 			row, err := r.SCIM().User(ctx, c.proof, bindingID, id)
 			if err != nil {
 				return nil, err
+			}
+			storedAttributes, err := unmarshalAttributes(row.Attributes)
+			if err != nil {
+				return nil, err
+			}
+			desired := DesiredUser{
+				UserName: row.UserName, ExternalID: row.ExternalID, Active: row.Active,
+				Attributes: storedAttributes,
+			}
+			if replacement != nil {
+				desired = *replacement
+			} else {
+				desired, err = ReduceUserPatch(desired, commands)
+				if err != nil {
+					return nil, err
+				}
+			}
+			if desired.UserName == "" {
+				return nil, ErrSCIMUserNameRequired
 			}
 			next := row
 			var changed []string
@@ -444,28 +420,20 @@ func (s *SCIM) mutateUser(
 			// updates that updated nothing.
 			dirty := false
 
-			if replace || in.UserName != "" {
-				if in.UserName == "" {
-					return nil, ErrSCIMUserNameRequired
+			if fold(desired.UserName) != row.UserNameLower {
+				if _, err := r.SCIM().UserByUserName(ctx, c.proof, bindingID, fold(desired.UserName)); err == nil {
+					return nil, ErrSCIMUniqueness
+				} else if !errors.Is(err, domain.ErrNotFound) {
+					return nil, err
 				}
-				if fold(in.UserName) != row.UserNameLower {
-					if _, err := r.SCIM().UserByUserName(ctx, c.proof, bindingID, fold(in.UserName)); err == nil {
-						return nil, ErrSCIMUniqueness
-					} else if !errors.Is(err, domain.ErrNotFound) {
-						return nil, err
-					}
-				}
-				// Compared RAW, not folded: `Dana@x` to `dana@x` is a change
-				// the identity provider made and the trail must record, and a
-				// folded comparison called it a no-op. The uniqueness probe
-				// above stays folded, because that is what caseExact:false
-				// means for collisions.
-				if in.UserName != row.UserName {
-					dirty = true
-					changed = append(changed, "userName")
-				}
-				next.UserName, next.UserNameLower = in.UserName, fold(in.UserName)
 			}
+			// Compared RAW: case-only changes remain visible while uniqueness
+			// stays case-insensitive.
+			if desired.UserName != row.UserName {
+				dirty = true
+				changed = append(changed, "userName")
+			}
+			next.UserName, next.UserNameLower = desired.UserName, fold(desired.UserName)
 			// THE SUBJECT SOURCE IS EXEMPT FROM REPLACEMENT (§8), and on an
 			// `externalId`-source binding that exemption has to be honoured
 			// HERE, because `externalId` is then both an ordinary attribute and
@@ -482,9 +450,19 @@ func (s *SCIM) mutateUser(
 			// refused; that is a real migration attempt and the rebinding
 			// hazard the identity model exists to prevent.
 			subjectSourced := c.binding.SubjectSource == domain.SubjectSourceExternalID
-			material := subjectMaterial(c, in)
-			switch {
-			case material != "":
+			sourceTouched := desiredUserTouchesSubjectSource(desired, c.binding.SubjectSource)
+			if replacement == nil {
+				sourceTouched = userPatchTouchesSubjectSource(commands, c.binding.SubjectSource)
+			}
+			if !subjectSourced && !sourceTouched {
+				desired.Attributes = preserveSubjectSource(
+					desired.Attributes, storedAttributes, c.binding.SubjectSource)
+			}
+			material := subjectMaterial(c, desired)
+			if sourceTouched && material == "" {
+				return nil, ErrSCIMSubjectWriteOnce
+			}
+			if material != "" {
 				subject, err := s.deriveSubject(c, material)
 				if err != nil {
 					return nil, err
@@ -492,66 +470,39 @@ func (s *SCIM) mutateUser(
 				if subject != row.Subject {
 					return nil, ErrSCIMSubjectWriteOnce
 				}
-			case subjectSourced && in.ExternalID != "" && in.ExternalID != row.ExternalID:
-				// A PATCH naming externalId directly on an externalId-source
-				// binding is the same migration attempt by another route.
-				return nil, ErrSCIMSubjectWriteOnce
-			case subjectSourced && in.ExternalIDCleared:
-				// And an EXPLICIT removal is a third route to the same place.
-				// Silently ignoring it would tell the identity provider it had
-				// unbound an identity it did not unbind; the write-once rule
-				// covers deletion as much as it covers replacement.
+			}
+			if subjectSourced && replacement == nil && desired.ExternalID != row.ExternalID {
 				return nil, ErrSCIMSubjectWriteOnce
 			}
-			switch {
-			case subjectSourced:
+			if subjectSourced {
 				// Exempt: retained whatever the request said or did not say.
 				next.ExternalID = row.ExternalID
-			case replace || in.ExternalID != "" || in.ExternalIDCleared:
-				if in.ExternalID != row.ExternalID {
+			} else {
+				if desired.ExternalID != row.ExternalID {
 					dirty = true
 					changed = append(changed, "externalId")
 				}
-				next.ExternalID = in.ExternalID
+				next.ExternalID = desired.ExternalID
 			}
-			if in.Attributes != nil || replace {
-				stored, err := unmarshalAttributes(row.Attributes)
-				if err != nil {
-					return nil, err
-				}
-				desired := in.Attributes
-				if in.Patch {
-					// A PATCH is a DELTA. Replacing the stored map wholesale
-					// dropped every attribute the request did not mention,
-					// which is what PUT means and PATCH does not.
-					desired = mergeAttributes(stored, in.Attributes)
-				}
-				if err := c.checkDeclaredSchemas(desired); err != nil {
-					return nil, err
-				}
-				attrs, err := marshalAttributes(desired)
-				if err != nil {
-					return nil, err
-				}
-				if attrs != row.Attributes {
-					dirty = true
-					changed = append(changed, changedAttributeNames(stored, desired)...)
-				}
-				next.Attributes = attrs
+			if err := c.checkDeclaredSchemas(desired.Attributes); err != nil {
+				return nil, err
 			}
-			active := row.Active
-			if in.Active != nil {
-				active = *in.Active
-			} else if replace {
-				active = true // RFC replacement: omitted `active` defaults true
+			attrs, err := marshalAttributes(desired.Attributes)
+			if err != nil {
+				return nil, err
 			}
+			if attrs != row.Attributes {
+				dirty = true
+				changed = append(changed, changedAttributeNames(storedAttributes, desired.Attributes)...)
+			}
+			next.Attributes = attrs
 
 			events := []grantEventInput{}
-			if active != row.Active {
+			if desired.Active != row.Active {
 				dirty = true
 				changed = append(changed, "active")
 			}
-			next.Active = active
+			next.Active = desired.Active
 			if dirty {
 				if err := r.SCIM().UpdateUser(ctx, c.proof, store.SCIMUserUpdate{
 					ID: id, BindingID: bindingID, UserName: next.UserName,
@@ -565,13 +516,13 @@ func (s *SCIM) mutateUser(
 			// The two lifecycle transitions, which are about ACTIVE and nothing
 			// else. An attribute update leaves grants untouched (§5.4).
 			switch {
-			case row.Active && !active:
+			case row.Active && !desired.Active:
 				evs, err := s.deprovision(ctx, r, az, c, next, domain.CauseDeprovision, now)
 				if err != nil {
 					return nil, err
 				}
 				events = append(events, evs...)
-			case !row.Active && active:
+			case !row.Active && desired.Active:
 				// Reactivation is DESIRED STATE, deterministic: recreate from
 				// the CURRENT group memberships and mapping rows, not from
 				// whatever was released when the user went inactive.
@@ -936,11 +887,18 @@ func unmarshalAttributes(raw string) (map[string]any, error) {
 // subjectMaterial reads the identity material out of the request, at the
 // attribute path the BINDING declared. A wire caller hands over the decoded
 // resource; a below-the-wire caller hands over the value itself.
-func subjectMaterial(c scimContext, in SCIMUserInput) string {
-	if in.Resource == nil {
+func subjectMaterial(c scimContext, in DesiredUser) string {
+	if in.SubjectRaw != "" {
 		return in.SubjectRaw
 	}
-	return extractAttribute(in.Resource, c.binding.SubjectSource)
+	resource := cloneAttributes(in.Attributes)
+	if resource == nil {
+		resource = map[string]any{}
+	}
+	resource["userName"] = in.UserName
+	resource["externalId"] = in.ExternalID
+	resource["active"] = in.Active
+	return extractAttribute(resource, c.binding.SubjectSource)
 }
 
 // extractAttribute walks a SCIM attribute path. Two shapes are recognised,
