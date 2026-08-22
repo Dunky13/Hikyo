@@ -67,23 +67,36 @@ type accessScope struct {
 // silently widening it to the org would be the surface handing out more than
 // the operator asked for.
 func resolveAccessScope(resolved Resolved, flags commonFlags, instanceScope bool, verb string) (accessScope, error) {
+	var tenant TenantScope
+	var err error
 	if instanceScope {
 		if flags.Org != "" || flags.Project != "" || flags.Env != "" {
 			return accessScope{}, failf(ExitUsage,
 				"hikyo %s: --instance-scope and --org/--project/--env name two different scopes; choose one", verb)
 		}
-		return accessScope{path: api.PathPrefix + "/instance/grants", label: "instance"}, nil
+		// --instance-scope explicitly overrides lower-precedence tenant selections.
+		// Still construct the Instance variant through the one scope validator.
+		tenant, err = NewTenantScope(Resolved{})
+	} else {
+		tenant, err = NewTenantScope(resolved)
 	}
-	org, err := resolved.Require(DimOrg)
 	if err != nil {
 		return accessScope{}, err
 	}
+	if tenant.Kind() == TenantScopeInstance {
+		if instanceScope {
+			return accessScope{path: api.PathPrefix + "/instance/grants", label: "instance"}, nil
+		}
+		_, err := resolved.Require(DimOrg)
+		return accessScope{}, err
+	}
+	org := tenant.Get(DimOrg)
 	path := api.PathPrefix + "/orgs/" + url.PathEscape(org)
 	label := org
-	if project := resolved.Get(DimProject); project != "" {
+	if project := tenant.Get(DimProject); project != "" {
 		path += "/projects/" + url.PathEscape(project)
 		label += "/" + project
-		if env := resolved.Get(DimEnv); env != "" {
+		if env := tenant.Get(DimEnv); env != "" {
 			path += "/environments/" + url.PathEscape(env)
 			label += "/" + env
 		}
@@ -133,11 +146,15 @@ func runAccessGrant(ctx context.Context, ios IO, args []string) error {
 		return failf(ExitUsage, "usage: hikyo access grant template --principal <id> --template <name>")
 	}
 
-	client, artifact, resolved, err := authenticatedTarget(st, ios, flags)
+	resolved, err := Resolve(st, ios.Env, flags.Flags, ios.Workdir)
 	if err != nil {
 		return err
 	}
 	scope, err := resolveAccessScope(resolved, flags, instanceScope, "access grant "+sub)
+	if err != nil {
+		return err
+	}
+	client, artifact, _, err := authenticatedResolvedTarget(st, ios, flags, resolved)
 	if err != nil {
 		return err
 	}
@@ -251,11 +268,15 @@ func runAccessMember(ctx context.Context, ios IO, args []string) error {
 		return failf(ExitUsage, "usage: hikyo access member remove --principal <id>")
 	}
 
-	client, _, resolved, err := authenticatedTarget(st, ios, flags)
+	resolved, err := Resolve(st, ios.Env, flags.Flags, ios.Workdir)
 	if err != nil {
 		return err
 	}
 	scope, err := resolveAccessScope(resolved, flags, instanceScope, "access member "+sub)
+	if err != nil {
+		return err
+	}
+	client, _, _, err := authenticatedResolvedTarget(st, ios, flags, resolved)
 	if err != nil {
 		return err
 	}
