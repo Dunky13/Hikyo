@@ -262,7 +262,7 @@ func TestWriteArtifactsRefusesValuesFilePhaseTwoCannotRead(t *testing.T) {
 }
 
 func TestWriteArtifactsEmitsCanonicalDefinitionsBundle(t *testing.T) {
-	bundle, err := definitions.Normalize(definitions.Bundle{
+	bundle, err := definitions.Canonicalize(definitions.Bundle{
 		FormatVersion: definitions.FormatVersion,
 		Environments:  []definitions.Environment{},
 		KeyGroups:     []definitions.KeyGroup{},
@@ -293,7 +293,8 @@ func TestWriteArtifactsEmitsCanonicalDefinitionsBundle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("emitted definitions-bundle.json is not canonical bundle input: %v\n%s", err, raw)
 	}
-	if !parsed.Additive() || len(parsed.Keys) != 1 || parsed.Keys[0].Name != "DATABASE_URL" {
+	model := parsed.WireBundle()
+	if !parsed.Additive() || len(model.Keys) != 1 || model.Keys[0].Name != "DATABASE_URL" {
 		t.Fatalf("emitted bundle = %+v", parsed)
 	}
 	want, err := definitions.Encode(bundle)
