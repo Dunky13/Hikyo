@@ -1,4 +1,4 @@
-// Package fixtureref validates qualified references to executable Go test
+// Package fixtureref validates qualified references to executable test
 // fixtures. It is intended for test registries, not production code.
 package fixtureref
 
@@ -25,15 +25,22 @@ type Kind string
 const (
 	// KindTest names a top-level TestXxx function.
 	KindTest Kind = "test"
+	// KindBenchmark names a top-level BenchmarkXxx function.
+	KindBenchmark Kind = "benchmark"
 	// KindSubtest names a slash-qualified path of literal t.Run names below a test.
 	KindSubtest Kind = "subtest"
 	// KindHelper names a top-level, non-Test helper function in a _test.go file.
 	KindHelper Kind = "helper"
+	// KindPlaywrightTest names one executable static-title test in an exact spec file.
+	KindPlaywrightTest Kind = "playwright-test"
 )
 
-// FixtureRef is an exact reference to an executable fixture in one Go package.
+// FixtureRef is an exact reference to an executable fixture. Package is a Go
+// import path for Go fixtures and a repository-relative directory for
+// Playwright. File is optional for Go and required for Playwright.
 type FixtureRef struct {
 	Package  string
+	File     string
 	TestName string
 	Kind     Kind
 }
@@ -50,11 +57,12 @@ type fixtureDefinition struct {
 }
 
 // Validate proves that every reference exists exactly once, with the declared
-// kind, in the declared package. It parses every _test.go file in the package,
-// including files excluded by current build tags.
+// kind, in the declared package/file. Go validation parses every _test.go file
+// in the package, including files excluded by current build tags.
 func Validate(root string, refs []FixtureRef) error {
 	var problems []error
 	seen := make(map[FixtureRef]struct{}, len(refs))
+	resolved := make(map[FixtureRef]struct{}, len(refs))
 	packages := make(map[string][]FixtureRef)
 	for _, ref := range refs {
 		if ref.Package == "" || ref.TestName == "" {
@@ -62,7 +70,7 @@ func Validate(root string, refs []FixtureRef) error {
 			continue
 		}
 		switch ref.Kind {
-		case KindTest, KindSubtest, KindHelper:
+		case KindTest, KindBenchmark, KindSubtest, KindHelper, KindPlaywrightTest:
 		default:
 			problems = append(problems, fmt.Errorf("fixture %s.%s has unsupported kind %q", ref.Package, ref.TestName, ref.Kind))
 			continue
@@ -72,6 +80,12 @@ func Validate(root string, refs []FixtureRef) error {
 			continue
 		}
 		seen[ref] = struct{}{}
+		if ref.Kind == KindPlaywrightTest {
+			if err := validatePlaywrightRef(root, ref); err != nil {
+				problems = append(problems, err)
+			}
+			continue
+		}
 		packages[ref.Package] = append(packages[ref.Package], ref)
 	}
 
@@ -94,6 +108,15 @@ func Validate(root string, refs []FixtureRef) error {
 		}
 		for _, ref := range packageRefs {
 			matches := definitions[ref.TestName]
+			if ref.File != "" {
+				inFile := make([]fixtureDefinition, 0, len(matches))
+				for _, match := range matches {
+					if match.file == ref.File {
+						inFile = append(inFile, match)
+					}
+				}
+				matches = inFile
+			}
 			var sameKind []fixtureDefinition
 			for _, match := range matches {
 				if match.kind == ref.Kind {
@@ -102,12 +125,27 @@ func Validate(root string, refs []FixtureRef) error {
 			}
 			switch len(sameKind) {
 			case 1:
+				identity := FixtureRef{
+					Package:  metadata.ImportPath,
+					File:     sameKind[0].file,
+					TestName: ref.TestName,
+					Kind:     ref.Kind,
+				}
+				if _, duplicate := resolved[identity]; duplicate {
+					problems = append(problems, fmt.Errorf("duplicate fixture reference %s/%s.%s (%s)", identity.Package, identity.File, identity.TestName, identity.Kind))
+					continue
+				}
+				resolved[identity] = struct{}{}
 				continue
 			case 0:
+				location := ref.Package
+				if ref.File != "" {
+					location += "/" + ref.File
+				}
 				if len(matches) > 0 {
-					problems = append(problems, fmt.Errorf("fixture %s.%s requested as %s but exists as %s", ref.Package, ref.TestName, ref.Kind, matches[0].kind))
+					problems = append(problems, fmt.Errorf("fixture %s.%s requested as %s but exists as %s", location, ref.TestName, ref.Kind, matches[0].kind))
 				} else {
-					problems = append(problems, fmt.Errorf("fixture %s.%s (%s) not found", ref.Package, ref.TestName, ref.Kind))
+					problems = append(problems, fmt.Errorf("fixture %s.%s (%s) not found", location, ref.TestName, ref.Kind))
 				}
 			default:
 				files := make([]string, 0, len(sameKind))
@@ -166,12 +204,15 @@ func indexFixtures(metadata packageMetadata) (map[string][]fixtureDefinition, er
 				continue
 			}
 			kind := KindHelper
-			if isTestFunction(file, fn) {
+			switch {
+			case isTestFunction(file, fn):
 				kind = KindTest
+			case isBenchmarkFunction(file, fn):
+				kind = KindBenchmark
 			}
 			definitions[fn.Name.Name] = append(definitions[fn.Name.Name], fixtureDefinition{kind: kind, file: entry.Name()})
 			if kind == KindTest {
-				receiver, _ := testingParameter(file, fn.Type)
+				receiver, _ := testingParameter(file, fn.Type, "T")
 				indexLiteralSubtests(file, fn.Body, receiver, fn.Name.Name, entry.Name(), definitions)
 			}
 		}
@@ -180,25 +221,33 @@ func indexFixtures(metadata packageMetadata) (map[string][]fixtureDefinition, er
 }
 
 func isTestFunction(file *ast.File, fn *ast.FuncDecl) bool {
-	if !goTestName(fn.Name.Name) || fieldCount(fn.Type.Results) != 0 || fn.Type.TypeParams != nil {
+	if !goEntryPointName(fn.Name.Name, "Test") || fieldCount(fn.Type.Results) != 0 || fn.Type.TypeParams != nil {
 		return false
 	}
-	_, ok := testingParameter(file, fn.Type)
+	_, ok := testingParameter(file, fn.Type, "T")
 	return ok
 }
 
-func goTestName(name string) bool {
-	if !strings.HasPrefix(name, "Test") {
+func isBenchmarkFunction(file *ast.File, fn *ast.FuncDecl) bool {
+	if !goEntryPointName(fn.Name.Name, "Benchmark") || fieldCount(fn.Type.Results) != 0 || fn.Type.TypeParams != nil {
 		return false
 	}
-	if len(name) == len("Test") {
+	_, ok := testingParameter(file, fn.Type, "B")
+	return ok
+}
+
+func goEntryPointName(name, prefix string) bool {
+	if !strings.HasPrefix(name, prefix) {
+		return false
+	}
+	if len(name) == len(prefix) {
 		return true
 	}
-	next, _ := utf8.DecodeRuneInString(name[len("Test"):])
+	next, _ := utf8.DecodeRuneInString(name[len(prefix):])
 	return !unicode.IsLower(next)
 }
 
-func testingParameter(file *ast.File, function *ast.FuncType) (*ast.Object, bool) {
+func testingParameter(file *ast.File, function *ast.FuncType, testingTypeName string) (*ast.Object, bool) {
 	if fieldCount(function.Params) != 1 || len(function.Params.List) != 1 {
 		return nil, false
 	}
@@ -208,15 +257,15 @@ func testingParameter(file *ast.File, function *ast.FuncType) (*ast.Object, bool
 		return nil, false
 	}
 	testingName, dotImported := testingImport(file)
-	isTestingT := false
+	isTestingType := false
 	switch testingType := star.X.(type) {
 	case *ast.SelectorExpr:
 		qualifier, ok := testingType.X.(*ast.Ident)
-		isTestingT = ok && qualifier.Name == testingName && testingType.Sel.Name == "T"
+		isTestingType = ok && qualifier.Name == testingName && testingType.Sel.Name == testingTypeName
 	case *ast.Ident:
-		isTestingT = dotImported && testingType.Name == "T"
+		isTestingType = dotImported && testingType.Name == testingTypeName
 	}
-	if !isTestingT {
+	if !isTestingType {
 		return nil, false
 	}
 	if len(param.Names) == 0 {
@@ -286,7 +335,7 @@ func indexLiteralSubtests(source *ast.File, body *ast.BlockStmt, receiver *ast.O
 		definitions[qualified] = append(definitions[qualified], fixtureDefinition{kind: KindSubtest, file: file})
 		callback, ok := call.Args[1].(*ast.FuncLit)
 		if ok {
-			nestedReceiver, valid := testingParameter(source, callback.Type)
+			nestedReceiver, valid := testingParameter(source, callback.Type, "T")
 			if valid && fieldCount(callback.Type.Results) == 0 {
 				indexLiteralSubtests(source, callback.Body, nestedReceiver, qualified, file, definitions)
 			}

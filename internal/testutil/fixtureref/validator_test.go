@@ -11,10 +11,11 @@ func TestValidateAcceptsQualifiedExecutableReferences(t *testing.T) {
 	root := fixtureModule(t)
 
 	err := Validate(root, []FixtureRef{
-		{Package: "example.test/fixtures/alpha", TestName: "TestTop", Kind: KindTest},
+		{Package: "example.test/fixtures/alpha", TestName: "BenchmarkTop", Kind: KindBenchmark},
 		{Package: "example.test/fixtures/alpha", TestName: "fixtureHelper", Kind: KindHelper},
 		{Package: "example.test/fixtures/alpha", TestName: "TestTop/nested/leaf", Kind: KindSubtest},
 		{Package: "example.test/fixtures/alpha", TestName: "TestTagged", Kind: KindTest},
+		{Package: "example.test/fixtures/alpha", File: "alpha_test.go", TestName: "TestTop", Kind: KindTest},
 	})
 	if err != nil {
 		t.Fatalf("Validate() error = %v", err)
@@ -39,9 +40,19 @@ func TestValidateRejectsInvalidReferences(t *testing.T) {
 			want: "not found",
 		},
 		{
+			name: "same name in wrong file",
+			refs: []FixtureRef{{Package: "example.test/fixtures/alpha", File: "tagged_test.go", TestName: "TestTop", Kind: KindTest}},
+			want: "not found",
+		},
+		{
 			name: "wrong kind",
 			refs: []FixtureRef{{Package: "example.test/fixtures/alpha", TestName: "fixtureHelper", Kind: KindTest}},
 			want: "exists as helper",
+		},
+		{
+			name: "benchmark requested as test",
+			refs: []FixtureRef{{Package: "example.test/fixtures/alpha", TestName: "BenchmarkTop", Kind: KindTest}},
+			want: "exists as benchmark",
 		},
 		{
 			name: "test-shaped helper with wrong signature",
@@ -53,6 +64,14 @@ func TestValidateRejectsInvalidReferences(t *testing.T) {
 			refs: []FixtureRef{
 				{Package: "example.test/fixtures/alpha", TestName: "TestTop", Kind: KindTest},
 				{Package: "example.test/fixtures/alpha", TestName: "TestTop", Kind: KindTest},
+			},
+			want: "duplicate fixture reference",
+		},
+		{
+			name: "qualified and unqualified duplicate",
+			refs: []FixtureRef{
+				{Package: "example.test/fixtures/alpha", TestName: "TestTop", Kind: KindTest},
+				{Package: "example.test/fixtures/alpha", File: "alpha_test.go", TestName: "TestTop", Kind: KindTest},
 			},
 			want: "duplicate fixture reference",
 		},
@@ -125,6 +144,7 @@ func TestTop(t *testing.T) {
 	}
 }
 
+func BenchmarkTop(b *testing.B) {}
 func fixtureHelper(t *testing.T) { t.Helper() }
 
 type customRunner struct{}
@@ -142,11 +162,8 @@ func TestTagged(t *testing.T) {}
 type T struct{}
 
 func TestWrongSignature(t *T) {}
-
 func Testlowercase(t *testing.T) {}
-
 func TestWithResult(t *testing.T) bool { return true }
-
 func TestGroupedParameters(a, b *testing.T) {}
 `)
 	writeFixtureFile(t, root, "beta/beta.go", "package beta\n")
