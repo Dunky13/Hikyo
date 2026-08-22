@@ -138,6 +138,20 @@ func (s *State) Sessions() (map[string]SessionArtifact, error) {
 	if err != nil {
 		return nil, err
 	}
+	// sessions.json was historically an unversioned map of instance reference
+	// to human session. Keep reading that shape byte-for-byte. A future
+	// versioned envelope must fail as a version mismatch instead of decoding
+	// its metadata keys into zero-value SessionArtifacts.
+	var root map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &root); err != nil {
+		return nil, fmt.Errorf("session file at %s is unreadable: %w", s.sessionsPath(), err)
+	}
+	if encodedVersion, ok := root["version"]; ok {
+		var version int
+		if err := json.Unmarshal(encodedVersion, &version); err == nil {
+			return nil, fmt.Errorf("session file at %s uses state version %d; upgrade the Hikyo CLI before using this state", s.sessionsPath(), version)
+		}
+	}
 	var out map[string]SessionArtifact
 	if err := json.Unmarshal(raw, &out); err != nil {
 		return nil, fmt.Errorf("session file at %s is unreadable: %w", s.sessionsPath(), err)
