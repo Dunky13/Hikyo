@@ -208,8 +208,3 @@ func (a *TxAuthorizer) PinGeneration(ctx context.Context, p domain.PrincipalID, 
 func (a *TxAuthorizer) SetPinGeneration(ctx context.Context, p domain.PrincipalID, env domain.EnvID, generation int64) error {
 	return a.r.SetPinGeneration(ctx, p, env, generation)
 }
-
-// DeletePinGenerationsForPrincipal releases cursor rows during workload teardown.
-func (a *TxAuthorizer) DeletePinGenerationsForPrincipal(ctx context.Context, p domain.PrincipalID) error {
-	return a.r.DeletePinGenerationsForPrincipal(ctx, p)
-}

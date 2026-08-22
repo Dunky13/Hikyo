@@ -238,18 +238,15 @@ var ResolutionSurfaceWriters = map[string]bool{
 	// None can hold a proof for the same reason the session writers cannot —
 	// they mutate the artifacts that decide WHO a machine caller is, and a
 	// machine credential resolves at the same chokepoint as authorize().
-	// DeleteMachinePrincipal additionally releases the principal's grants, so
-	// deprovisioning is one transaction; it takes the principal-row lock like
-	// every other grant writer.
-	"CreateMachinePrincipal":      true,
-	"DeleteMachinePrincipal":      true,
-	"CreateServiceAccount":        true,
-	"DeleteServiceAccount":        true,
-	"CreateMachineCredential":     true,
-	"RevokeMachineCredential":     true,
-	"RevokeAllMachineCredentials": true,
-	"DeleteMachineCredentials":    true,
-	"TouchMachineCredential":      true,
+	// Service-account creation/deprovisioning are aggregate writers.
+	// Deprovisioning locks the principal before revoking credentials or
+	// releasing grants, then returns the closed blast radius needed for audit.
+	"CreateMachinePrincipal":        true,
+	"CreateServiceAccountAggregate": true,
+	"DeleteServiceAccountAggregate": true,
+	"CreateMachineCredential":       true,
+	"RevokeMachineCredential":       true,
+	"TouchMachineCredential":        true,
 	// The instance connection (#71, multi-instance ADR). Same circularity as
 	// the machine credentials above and named for the same reason: the
 	// directory credential resolves at the chokepoint that authorize() runs in,
@@ -299,14 +296,13 @@ var ResolutionSurfaceWriters = map[string]bool{
 	// is the conditional cursor's pin component. Both touch class=authn tables
 	// for the same reason the credential writers do: they change what a machine
 	// caller may present, which is resolution.
-	"CreateFederationIssuer":           true,
-	"UpdateFederationIssuer":           true,
-	"DeleteFederationIssuer":           true,
-	"ReactivateBinding":                true,
-	"SetPinGeneration":                 true,
-	"DeletePinGenerationsForPrincipal": true,
-	"ConsumeWebAuthnCeremony":          true,
-	"SetWebAuthnUserHandle":            true,
+	"CreateFederationIssuer":  true,
+	"UpdateFederationIssuer":  true,
+	"DeleteFederationIssuer":  true,
+	"ReactivateBinding":       true,
+	"SetPinGeneration":        true,
+	"ConsumeWebAuthnCeremony": true,
+	"SetWebAuthnUserHandle":   true,
 	// Reauth-window consumption at disclosure and the effective-window transition
 	// (#54): slide the sliding clock, claim a single-decision window once, and
 	// invalidate every window on an environment when its effective window is

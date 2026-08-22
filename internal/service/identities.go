@@ -224,20 +224,18 @@ func (s *Identities) CreateServiceAccount(ctx context.Context, actor Actor, scop
 		if err != nil {
 			return err
 		}
-		if err := az.CreateMachinePrincipal(ctx, domain.PrincipalID(principalID), kind, now); err != nil {
-			return err
-		}
 		sa := authz.NewServiceAccount{
 			ID: saID, PrincipalID: domain.PrincipalID(principalID),
 			Org: scope.Org, Project: scope.Project, Name: name, Kind: kind,
 			CreatedAt: now, CreatedBy: caller.Principal,
 		}
-		if err := az.CreateServiceAccount(ctx, sa); err != nil {
+		created, err := az.CreateServiceAccountAggregate(ctx, sa)
+		if err != nil {
 			return err
 		}
 		out = ServiceAccountView{
-			ID: saID, Principal: domain.PrincipalID(principalID), Name: name,
-			Kind: kind, CreatedAt: now, CreatedBy: caller.Principal,
+			ID: created.Account.ID, Principal: created.Account.PrincipalID, Name: created.Account.Name,
+			Kind: created.Account.Kind, CreatedAt: created.Account.CreatedAt, CreatedBy: created.Account.CreatedBy,
 		}
 		e, err := domainEvent(ctx, audit.EventServiceAccountCreated, caller.Principal,
 			audit.Object{Type: "service_account", ID: saID}, audit.Payload{
@@ -320,36 +318,18 @@ func (s *Identities) DeleteServiceAccount(ctx context.Context, actor Actor, scop
 		if err != nil {
 			return err
 		}
-		sa, err := az.ServiceAccountAt(ctx, scope, id)
+		deleted, err := az.DeleteServiceAccountAggregate(ctx, authz.DeleteServiceAccountAggregateInput{
+			Scope: scope, ID: id, RevokedAt: now,
+		})
 		if err != nil {
-			return err
-		}
-		// The revoke runs before the delete so the trail records the
-		// transition — and its blast radius — while the rows still exist.
-		revoked, err := az.RevokeAllMachineCredentials(ctx, sa.ID, now)
-		if err != nil {
-			return err
-		}
-		if err := az.DeleteMachineCredentials(ctx, sa.ID); err != nil {
-			return err
-		}
-		if err := az.DeletePinGenerationsForPrincipal(ctx, sa.PrincipalID); err != nil {
-			return err
-		}
-		if _, err := az.DeleteServiceAccount(ctx, scope, sa.ID); err != nil {
-			return err
-		}
-		// Grants and principal last: the grant release is what makes deletion
-		// deprovisioning rather than merely credential revocation.
-		if err := az.DeleteMachinePrincipal(ctx, sa.PrincipalID); err != nil {
 			return err
 		}
 		e, err := domainEvent(ctx, audit.EventServiceAccountDeleted, caller.Principal,
-			audit.Object{Type: "service_account", ID: sa.ID}, audit.Payload{
-				"service_account_id":  sa.ID,
-				"target_principal":    string(sa.PrincipalID),
-				"principal_class":     string(sa.Kind),
-				"credentials_revoked": int(revoked),
+			audit.Object{Type: "service_account", ID: deleted.Account.ID}, audit.Payload{
+				"service_account_id":  deleted.Account.ID,
+				"target_principal":    string(deleted.Account.PrincipalID),
+				"principal_class":     string(deleted.Account.Kind),
+				"credentials_revoked": int(deleted.CredentialsRevoked),
 			})
 		if err != nil {
 			return err

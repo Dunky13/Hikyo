@@ -381,15 +381,6 @@ func (r *Resolver) SetPinGeneration(ctx context.Context, p domain.PrincipalID, e
 	})
 }
 
-// DeletePinGenerationsForPrincipal removes cursor state that would otherwise
-// retain a foreign-key reference after a workload is deprovisioned.
-func (r *Resolver) DeletePinGenerationsForPrincipal(ctx context.Context, p domain.PrincipalID) error {
-	if r.sq != nil {
-		return r.sq.DeletePinGenerationsForPrincipal(ctx, string(p))
-	}
-	return r.pg.DeletePinGenerationsForPrincipal(ctx, string(p))
-}
-
 func issuerFromSQLite(row sqlitegen.FederationIssuer) (FederationIssuer, error) {
 	created, err := decodeTime(row.CreatedAt)
 	if err != nil {

@@ -515,8 +515,9 @@ func TestQueryObserverIsTestOnly(t *testing.T) {
 		// The declaration itself lives in the package that owns the seam;
 		// every other non-test mention is a production call site.
 		for seam, home := range map[string]string{
-			"SetQueryObserver":     filepath.Join("internal", "store", "authn", "authn.go"),
-			"SetSCIMPhaseObserver": filepath.Join("internal", "service", "scim.go"),
+			"SetQueryObserver":           filepath.Join("internal", "store", "authn", "authn.go"),
+			"SetMutationFailureObserver": filepath.Join("internal", "store", "authn", "authn.go"),
+			"SetSCIMPhaseObserver":       filepath.Join("internal", "service", "scim.go"),
 		} {
 			if bytes.Contains(body, []byte(seam)) && !strings.HasSuffix(path, home) {
 				t.Errorf("%s names %s outside a test — the seam is test-only", path, seam)

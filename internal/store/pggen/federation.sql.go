@@ -39,14 +39,17 @@ func (q *Queries) DeleteFederationIssuer(ctx context.Context, id string) (int64,
 	return result.RowsAffected(), nil
 }
 
-const deletePinGenerationsForPrincipal = `-- name: DeletePinGenerationsForPrincipal :exec
+const deletePinGenerationsForPrincipal = `-- name: DeletePinGenerationsForPrincipal :execrows
 DELETE FROM pin_generations WHERE principal_id = $1
 `
 
 // hikyo:authn-resolution
-func (q *Queries) DeletePinGenerationsForPrincipal(ctx context.Context, principalID string) error {
-	_, err := q.db.Exec(ctx, deletePinGenerationsForPrincipal, principalID)
-	return err
+func (q *Queries) DeletePinGenerationsForPrincipal(ctx context.Context, principalID string) (int64, error) {
+	result, err := q.db.Exec(ctx, deletePinGenerationsForPrincipal, principalID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const federatedBindingByIdentity = `-- name: FederatedBindingByIdentity :one

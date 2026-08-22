@@ -80,5 +80,5 @@ VALUES (sqlc.arg(principal_id), sqlc.arg(environment_id), sqlc.arg(generation))
 ON CONFLICT (principal_id, environment_id) DO UPDATE SET generation = excluded.generation;
 
 -- hikyo:authn-resolution
--- name: DeletePinGenerationsForPrincipal :exec
+-- name: DeletePinGenerationsForPrincipal :execrows
 DELETE FROM pin_generations WHERE principal_id = sqlc.arg(principal_id);

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/Hikyo-Org/hikyo/internal/domain"
 	"github.com/Hikyo-Org/hikyo/internal/service"
 	"github.com/Hikyo-Org/hikyo/internal/store"
+	"github.com/Hikyo-Org/hikyo/internal/store/authn"
 	"github.com/Hikyo-Org/hikyo/internal/store/tx"
 )
 
@@ -126,6 +128,282 @@ func TestMachineIdentityLifecycleSQLite(t *testing.T) {
 }
 func TestMachineIdentityLifecyclePostgres(t *testing.T) {
 	runMachineIdentityLifecycle(t, seededDB(t, openPostgres))
+}
+
+func TestServiceAccountCreateAggregateSQLite(t *testing.T) {
+	runServiceAccountCreateAggregate(t, seededDB(t, openSQLite))
+}
+
+func TestServiceAccountCreateAggregatePostgres(t *testing.T) {
+	runServiceAccountCreateAggregate(t, seededDB(t, openPostgres))
+}
+
+func runServiceAccountCreateAggregate(t *testing.T, db *store.DB) {
+	identityFixtures(t, db)
+	createdAt := time.Date(2026, time.August, 22, 8, 0, 0, 0, time.UTC)
+	input := authz.NewServiceAccount{
+		ID: "sa_aggregate", PrincipalID: "mch_aggregate", Org: orgA, Project: prjA1,
+		Name: "aggregate", Kind: domain.ClassWorkload, CreatedAt: createdAt, CreatedBy: identAdmin,
+	}
+	var got authz.ServiceAccountCreation
+	if err := tx.Write(t.Context(), db, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
+		var err error
+		got, err = az.CreateServiceAccountAggregate(ctx, input)
+		return err
+	}); err != nil {
+		t.Fatalf("create service-account aggregate: %v", err)
+	}
+	if got.Account.ID != input.ID || got.Account.PrincipalID != input.PrincipalID ||
+		got.Account.Name != input.Name || got.Account.Kind != input.Kind {
+		t.Fatalf("creation result = %+v, want facts from %+v", got, input)
+	}
+	if principals := queryInt(t, db, "SELECT COUNT(*) FROM principals WHERE id = 'mch_aggregate'"); principals != 1 {
+		t.Fatalf("aggregate created %d principal rows, want 1", principals)
+	}
+	if accounts := queryInt(t, db, "SELECT COUNT(*) FROM service_accounts WHERE id = 'sa_aggregate'"); accounts != 1 {
+		t.Fatalf("aggregate created %d service-account rows, want 1", accounts)
+	}
+}
+
+func TestServiceAccountDeleteAggregateSQLite(t *testing.T) {
+	runServiceAccountDeleteAggregate(t, seededDB(t, openSQLite))
+}
+
+func TestServiceAccountDeleteAggregatePostgres(t *testing.T) {
+	runServiceAccountDeleteAggregate(t, seededDB(t, openPostgres))
+}
+
+func runServiceAccountDeleteAggregate(t *testing.T, db *store.DB) {
+	identityFixtures(t, db)
+	ctx := t.Context()
+	svc := identitySvc(db)
+	actor := service.LocalPrincipal(identAdmin)
+	sa, err := svc.CreateServiceAccount(ctx, actor, prjScope(), "delete-aggregate", domain.ClassWorkload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := svc.MintCredential(ctx, actor, prjScope(), sa.ID, service.MintRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.MintCredential(ctx, actor, prjScope(), sa.ID, service.MintRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.RevokeCredential(ctx, actor, prjScope(), sa.ID, first.Credential.ID); err != nil {
+		t.Fatal(err)
+	}
+	execRaw(t, db, "INSERT INTO pin_generations (principal_id, environment_id, generation) VALUES ('"+
+		string(sa.Principal)+"', 'env_a1', 2)")
+	execRaw(t, db, "INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ("+
+		"'g_delete_aggregate', '"+string(sa.Principal)+"', 'read', 'org_a', 'prj_a1', NULL, "+ts+")")
+	seedOrigins(t, db)
+
+	var got authz.ServiceAccountDeletion
+	deletedAt := time.Date(2026, time.August, 22, 8, 30, 0, 0, time.UTC)
+	if err := tx.Write(ctx, db, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
+		var err error
+		got, err = az.DeleteServiceAccountAggregate(ctx, authz.DeleteServiceAccountAggregateInput{
+			Scope: prjScope(), ID: sa.ID, RevokedAt: deletedAt,
+		})
+		return err
+	}); err != nil {
+		t.Fatalf("delete service-account aggregate: %v", err)
+	}
+	if got.Account.ID != sa.ID || got.Account.PrincipalID != sa.Principal || got.Account.Kind != sa.Kind {
+		t.Fatalf("deletion account facts = %+v, want %+v", got.Account, sa)
+	}
+	if got.CredentialsRevoked != 1 || got.CredentialsDeleted != 2 || got.PinGenerationsDeleted != 1 ||
+		got.GrantOriginsDeleted != 1 || got.GrantsDeleted != 1 ||
+		got.ServiceAccountsDeleted != 1 || got.PrincipalsDeleted != 1 {
+		t.Fatalf("deletion blast radius = %+v", got)
+	}
+	for table, want := range map[string]int64{
+		"principals": 0, "service_accounts": 0, "machine_credentials": 0,
+		"pin_generations": 0, "grants": 0, "grant_origins": 0,
+	} {
+		column := "principal_id"
+		id := string(sa.Principal)
+		switch table {
+		case "service_accounts":
+			column, id = "id", sa.ID
+		case "machine_credentials":
+			column, id = "service_account_id", sa.ID
+		case "principals":
+			column = "id"
+		case "grant_origins":
+			column, id = "grant_id", "g_delete_aggregate"
+		}
+		if rows := queryInt(t, db, "SELECT COUNT(*) FROM "+table+" WHERE "+column+" = '"+id+"'"); rows != want {
+			t.Fatalf("%s retained %d owned rows, want %d", table, rows, want)
+		}
+	}
+}
+
+func TestServiceAccountAggregateRollbackSQLite(t *testing.T) {
+	runServiceAccountAggregateRollback(t, seededDB(t, openSQLite))
+}
+
+func TestServiceAccountAggregateRollbackPostgres(t *testing.T) {
+	runServiceAccountAggregateRollback(t, seededDB(t, openPostgres))
+}
+
+func runServiceAccountAggregateRollback(t *testing.T, db *store.DB) {
+	identityFixtures(t, db)
+	svc := identitySvc(db)
+	actor := service.LocalPrincipal(identAdmin)
+	induced := errors.New("induced aggregate mutation failure")
+
+	for _, query := range []string{"InsertMachinePrincipal", "InsertServiceAccount"} {
+		t.Run("create_"+query, func(t *testing.T) {
+			before := rowCounts(t, db)
+			restore := authn.SetMutationFailureObserver(failNamedMutation(query, induced))
+			_, err := svc.CreateServiceAccount(t.Context(), actor, prjScope(), "rollback-"+query, domain.ClassWorkload)
+			restore()
+			if !errors.Is(err, induced) {
+				t.Fatalf("create failure at %s = %v, want induced failure", query, err)
+			}
+			assertRowCountsEqual(t, db, before)
+		})
+	}
+
+	sa, err := svc.CreateServiceAccount(t.Context(), actor, prjScope(), "rollback-delete", domain.ClassWorkload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	minted, err := svc.MintCredential(t.Context(), actor, prjScope(), sa.ID, service.MintRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	execRaw(t, db, "INSERT INTO pin_generations (principal_id, environment_id, generation) VALUES ('"+
+		string(sa.Principal)+"', 'env_a1', 3)")
+	execRaw(t, db, "INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ("+
+		"'g_rollback_delete', '"+string(sa.Principal)+"', 'read', 'org_a', 'prj_a1', NULL, "+ts+")")
+	seedOrigins(t, db)
+
+	for _, query := range []string{
+		"RevokeAllMachineCredentials", "DeleteMachineCredentials", "DeletePinGenerationsForPrincipal",
+		"DeleteGrantOriginsForPrincipal", "DeleteGrantsForPrincipal", "DeleteServiceAccount", "DeletePrincipal",
+	} {
+		t.Run("delete_"+query, func(t *testing.T) {
+			before := rowCounts(t, db)
+			credentialBefore := queryStrings(t, db, "SELECT id || ':' || COALESCE(CAST(revoked_at AS TEXT), '') "+
+				"FROM machine_credentials WHERE service_account_id = '"+sa.ID+"' ORDER BY id")
+			restore := authn.SetMutationFailureObserver(failNamedMutation(query, induced))
+			err := svc.DeleteServiceAccount(t.Context(), actor, prjScope(), sa.ID)
+			restore()
+			if !errors.Is(err, induced) {
+				t.Fatalf("delete failure at %s = %v, want induced failure", query, err)
+			}
+			assertRowCountsEqual(t, db, before)
+			credentialAfter := queryStrings(t, db, "SELECT id || ':' || COALESCE(CAST(revoked_at AS TEXT), '') "+
+				"FROM machine_credentials WHERE service_account_id = '"+sa.ID+"' ORDER BY id")
+			if credentialAfter != credentialBefore {
+				t.Fatalf("credential state changed after rollback at %s: before %q, after %q", query, credentialBefore, credentialAfter)
+			}
+			if id := authenticate(t, db, minted.Value); id.Principal != sa.Principal {
+				t.Fatalf("credential stopped authenticating after rollback at %s", query)
+			}
+		})
+	}
+}
+
+func failNamedMutation(name string, induced error) func(string) error {
+	return func(query string) error {
+		if strings.Contains(query, "-- name: "+name+" ") {
+			return induced
+		}
+		return nil
+	}
+}
+
+func assertRowCountsEqual(t *testing.T, db *store.DB, want map[string]int64) {
+	t.Helper()
+	got := rowCounts(t, db)
+	for table, count := range want {
+		if got[table] != count {
+			t.Errorf("%s rows after rollback = %d, want %d", table, got[table], count)
+		}
+	}
+}
+
+func TestServiceAccountDeleteSerializesMintSQLite(t *testing.T) {
+	runServiceAccountDeleteSerializesMint(t, seededDB(t, openSQLite))
+}
+
+func TestServiceAccountDeleteSerializesMintPostgres(t *testing.T) {
+	runServiceAccountDeleteSerializesMint(t, seededDB(t, openPostgres))
+}
+
+func runServiceAccountDeleteSerializesMint(t *testing.T, db *store.DB) {
+	identityFixtures(t, db)
+	svc := identitySvc(db)
+	actor := service.LocalPrincipal(identAdmin)
+	sa, err := svc.CreateServiceAccount(t.Context(), actor, prjScope(), "delete-mint-race", domain.ClassWorkload)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	deleteAtMutation := make(chan struct{})
+	releaseDelete := make(chan struct{})
+	mintAtPrincipalLock := make(chan struct{})
+	var revokeOnce sync.Once
+	var lockMu sync.Mutex
+	principalLocks := 0
+	restore := authn.SetQueryObserver(func(query string) {
+		if strings.Contains(query, "-- name: RevokeAllMachineCredentials ") {
+			revokeOnce.Do(func() {
+				close(deleteAtMutation)
+				<-releaseDelete
+			})
+		}
+		if strings.Contains(query, "-- name: LockPrincipalRow ") {
+			lockMu.Lock()
+			principalLocks++
+			if principalLocks == 2 {
+				close(mintAtPrincipalLock)
+			}
+			lockMu.Unlock()
+		}
+	})
+	defer restore()
+
+	deleteResult := make(chan error, 1)
+	go func() {
+		deleteResult <- svc.DeleteServiceAccount(t.Context(), actor, prjScope(), sa.ID)
+	}()
+	select {
+	case <-deleteAtMutation:
+	case <-time.After(5 * time.Second):
+		t.Fatal("delete did not reach its first mutation while holding the principal lock")
+	}
+
+	mintStarted := make(chan struct{})
+	mintResult := make(chan error, 1)
+	go func() {
+		close(mintStarted)
+		_, err := svc.MintCredential(t.Context(), actor, prjScope(), sa.ID, service.MintRequest{})
+		mintResult <- err
+	}()
+	<-mintStarted
+	if db.Engine() == store.EnginePostgres {
+		select {
+		case <-mintAtPrincipalLock:
+		case <-time.After(5 * time.Second):
+			close(releaseDelete)
+			t.Fatal("concurrent mint did not serialize on the service-account principal lock")
+		}
+	}
+	close(releaseDelete)
+
+	if err := <-deleteResult; err != nil {
+		t.Fatalf("delete side of race: %v", err)
+	}
+	if err := <-mintResult; !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("mint side of race = %v, want ErrNotFound after deprovisioning", err)
+	}
+	if got := queryInt(t, db, "SELECT COUNT(*) FROM machine_credentials WHERE service_account_id = '"+sa.ID+"'"); got != 0 {
+		t.Fatalf("concurrent mint left %d credentials after delete", got)
+	}
 }
 
 // runMachineIdentityLifecycle is the mint / rotate / revoke arc, plus the
