@@ -1,0 +1,72 @@
+{
+  "targets": [
+    {
+      "name": "api",
+      "content": "REFUQUJBU0VfVVJMPXBvc3RncmVzOi8vZGIKUEFUSD0vc3J2L2Jpbgo=",
+      "snapshot_rows": [
+        {
+          "name": "DATABASE_URL",
+          "key_id": "key_url",
+          "classification": "config",
+          "value": "postgres://db"
+        },
+        {
+          "name": "PATH",
+          "key_id": "key_path",
+          "classification": "config",
+          "value": "/srv/bin"
+        }
+      ]
+    },
+    {
+      "name": "worker",
+      "content": null,
+      "snapshot_rows": [
+        {
+          "name": "BAD-NAME",
+          "key_id": "key_bad_name",
+          "classification": "config",
+          "value": "x"
+        },
+        {
+          "name": "MULTILINE",
+          "key_id": "key_multiline",
+          "classification": "config",
+          "value": "a\nb"
+        }
+      ]
+    }
+  ],
+  "omissions": [
+    {
+      "target": "api",
+      "key_id": "key_unset",
+      "name": "OPTIONAL",
+      "kind": "no-value"
+    },
+    {
+      "target": "api",
+      "key_id": "key_projected",
+      "kind": "absent"
+    }
+  ],
+  "refusals": [
+    {
+      "target": "api",
+      "key": "PATH",
+      "kind": "loader-control"
+    },
+    {
+      "target": "worker",
+      "key": "BAD-NAME",
+      "kind": "encoding",
+      "reason": "invalid name"
+    },
+    {
+      "target": "worker",
+      "key": "MULTILINE",
+      "kind": "encoding",
+      "reason": "embedded newline"
+    }
+  ]
+}
