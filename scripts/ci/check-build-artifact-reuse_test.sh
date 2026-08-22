@@ -119,4 +119,6 @@ if grep -Eq 'gh release|action-gh-release' "$workflow"; then
 	fail 'ordinary CI publishes a GitHub Release and bypasses the signing ceremony'
 fi
 
+"$repo_root/scripts/ci/check-no-egress-lifecycle_test.sh"
+
 printf 'build artifact reuse fixture: one app build feeds browser shards and no-egress while release downloads stay parallel\n'

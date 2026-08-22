@@ -1,7 +1,7 @@
 # #229 — Decode and index scan acknowledgement tokens once
 
 Status: implemented as a stacked change on PR #290 at
-`ebf6de5f19bc8c51eb1e7d75a884cc7fd64177ea`.
+`9a340d8dce43e6cc1adceaca2c0e70d7c25b42d9`.
 
 ## Contract
 

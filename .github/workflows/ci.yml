@@ -189,8 +189,6 @@ jobs:
         run: ./scripts/ci/check-trusted-ci-scripts_test.sh
       - name: Build artifact reuse fixture
         run: ./scripts/ci/check-build-artifact-reuse_test.sh
-      - name: No-egress lifecycle fixture
-        run: ./scripts/ci/check-no-egress-lifecycle_test.sh
       - name: Cache policy fixture
         run: ./scripts/ci/check-cache-policy_test.sh
       - name: Fuzz finding classifier fixture
