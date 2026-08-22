@@ -45,9 +45,10 @@ adversarial cross-model review that locked it, and recording the amendment in
 the ADR itself. Amendments to this governance document follow that procedure.
 
 Repository branch and tag protections are enforced and auditable. Organization-wide
-2FA enforcement remains pending until the repository is transferred from its current
-personal owner to a dedicated organization. Hikyo does not claim that control is
-active before the transfer is complete and verified.
+2FA enforcement and repository ownership are operational controls whose current
+verification lives under `OBL-REPOSITORY-TRANSFER` in the machine-checked
+[implementation-status ledger](./docs/status/README.md). The immutable transfer
+record remains in the [historical handoff](./docs/handoff/github-org-transfer.md).
 
 ## Fully-open pledge
 
