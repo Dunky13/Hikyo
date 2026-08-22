@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import type { RetentionConsequence } from '@hikyo/client';
 import { act, createRef } from 'react';
 import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -6,8 +7,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderForm, settle } from '../testkit/renderForm.tsx';
 import { HistoryDrawer, PinReleaseOutcome } from './HistoryDrawer.tsx';
 
-const mocks = vi.hoisted(() => ({
-  preview: 'retained' as 'retained' | 'collection_eligible' | 'already_collected',
+type HistoryDrawerMocks = {
+  preview: RetentionConsequence;
+  releaseMutate: ReturnType<typeof vi.fn>;
+};
+
+const mocks = vi.hoisted<HistoryDrawerMocks>(() => ({
+  preview: 'retained',
   releaseMutate: vi.fn(),
 }));
 
@@ -100,11 +106,13 @@ beforeEach(() => {
 });
 
 describe('PinReleaseOutcome', () => {
-  for (const [consequence, expected] of [
+  const cases: ReadonlyArray<readonly [RetentionConsequence, string]> = [
     ['retained', "r3's values remain retained"],
     ['collection_eligible', "r3's values became eligible for collection"],
     ['already_collected', "r3's values were already collected"],
-  ] as const) {
+  ];
+
+  for (const [consequence, expected] of cases) {
     it(`renders server consequence ${consequence}`, async () => {
       const { container } = await renderForm(
         <PinReleaseOutcome
