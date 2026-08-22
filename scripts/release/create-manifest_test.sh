@@ -9,6 +9,23 @@ mkdir -p "$dist"
 printf 'binary\n' >"$dist/hikyo_0.1.0_Linux_arm64.tar.gz"
 printf 'binary\n' >"$dist/hikyo_0.1.0_Windows_arm64.zip"
 printf 'checksums\n' >"$dist/checksums.txt"
+jq -n '{
+	schema: "hikyo.dev/release-binaries/v1",
+	source_commit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	version: "0.1.0",
+	producer: {
+		name: "goreleaser",
+		build_id: "hikyo",
+		config: ".goreleaser.yaml",
+		config_sha256: ("a" * 64)
+	},
+	packages: ["amd64", "arm64"] | map({
+		goos: "linux",
+		goarch: .,
+		archive_input: {build_id: "hikyo", sha256: ("b" * 64)},
+		oci_input: {path: ("image-root/" + . + "/hikyo"), sha256: ("b" * 64)}
+	})
+}' >"$dist/binary-provenance.json"
 printf '{"spdxVersion":"SPDX-2.3"}\n' >"$dist/hikyo-source.spdx.json"
 printf '{"spdxVersion":"SPDX-2.3"}\n' >"$dist/hikyo-image.spdx.json"
 printf 'installer\n' >"$dist/install.sh"
@@ -35,6 +52,7 @@ jq -e '
 	([.artifacts[] | select(.kind == "binary")] | length) == 2 and
 	([.artifacts[] | select(.kind == "sbom")] | length) == 2 and
 	([.artifacts[] | select(.kind == "checksum")] | length) == 1 and
+	([.artifacts[] | select(.kind == "binary-provenance")] | length) == 1 and
 	([.artifacts[] | select(.kind == "image")] | length) == 1 and
 	([.artifacts[] | select(.kind == "image")][0].tag == "0.1.0") and
 	([.artifacts[] | select(.kind == "chart")] | length) == 1 and
@@ -47,5 +65,20 @@ jq -e '
 		.image_repository == "ghcr.io/hikyo-org/hikyo" and
 		.image_digest == "sha256:1111111111111111111111111111111111111111111111111111111111111111")
 ' "$dist/release-manifest.json" >/dev/null
+
+jq '.source_commit = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"' \
+	"$dist/binary-provenance.json" >"$fixture_dir/wrong-commit.json"
+cp "$fixture_dir/wrong-commit.json" "$dist/binary-provenance.json"
+if "$(dirname "$0")/create-manifest.sh" \
+	"$dist/release-candidate.json" ghcr.io/hikyo-org/hikyo \
+	sha256:1111111111111111111111111111111111111111111111111111111111111111 \
+	ghcr.io/hikyo-org/charts/hikyo \
+	sha256:2222222222222222222222222222222222222222222222222222222222222222 \
+	"$dist" >"$fixture_dir/wrong-commit.out" 2>"$fixture_dir/wrong-commit.err"
+then
+	printf 'manifest fixture: mismatched binary candidate unexpectedly accepted\n' >&2
+	exit 1
+fi
+grep -F 'manifest: invalid binary provenance' "$fixture_dir/wrong-commit.err" >/dev/null
 
 printf 'manifest fixture: complete artifact set recorded\n'

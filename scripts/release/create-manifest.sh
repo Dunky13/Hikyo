@@ -29,6 +29,10 @@ validate_release_candidate_record "$candidate" || exit 2
 	printf 'manifest: dist release candidate differs from resolved record\n' >&2
 	exit 1
 }
+[ -f "$dist/binary-provenance.json" ] || {
+	printf 'manifest: missing binary provenance\n' >&2
+	exit 2
+}
 if find "$dist" -maxdepth 1 -type l | grep . >/dev/null; then
 	printf 'manifest: symlinked release artifacts are forbidden\n' >&2
 	exit 1
@@ -51,6 +55,13 @@ while IFS= read -r path; do
 	case "$name" in
 		release-manifest.json | *.sigstore.json) continue ;;
 		release-candidate.json) kind='release-candidate' ;;
+		binary-provenance.json)
+			kind='binary-provenance'
+			validate_binary_provenance "$path" "$commit" "$version" || {
+				printf 'manifest: invalid binary provenance\n' >&2
+				exit 1
+			}
+			;;
 		image-index.oci-payload.json) kind='oci-payload'; subject_kind=image ;;
 		chart-index.oci-payload.json) kind='oci-payload'; subject_kind=chart ;;
 		hikyo_*.tar.gz | hikyo_*.zip) kind=binary ;;

@@ -166,6 +166,24 @@ jq -n \
 	}' >"$trust_dir/metadata.json"
 
 printf 'fixture binary\n' >"$bundle_dir/hikyo_Linux_arm64.tar.gz"
+candidate_commit=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+jq -n --arg commit "$candidate_commit" '{
+	schema: "hikyo.dev/release-binaries/v1",
+	source_commit: $commit,
+	version: "0.1.0",
+	producer: {
+		name: "goreleaser",
+		build_id: "hikyo",
+		config: ".goreleaser.yaml",
+		config_sha256: ("a" * 64)
+	},
+	packages: ["amd64", "arm64"] | map({
+		goos: "linux",
+		goarch: .,
+		archive_input: {build_id: "hikyo", sha256: ("b" * 64)},
+		oci_input: {path: ("image-root/" + . + "/hikyo"), sha256: ("b" * 64)}
+	})
+}' >"$bundle_dir/binary-provenance.json"
 printf '{"spdxVersion":"SPDX-2.3"}\n' >"$bundle_dir/hikyo-source.spdx.json"
 printf 'sha256:%064d\n' 1 >"$bundle_dir/image-index.digest"
 printf 'sha256:%064d\n' 2 >"$bundle_dir/chart-index.digest"
@@ -179,6 +197,7 @@ printf 'image:\n  repository: ghcr.io/hikyo-org/hikyo\n  digest: sha256:%064d\n'
 tar -czf "$bundle_dir/hikyo-0.1.0.tgz" -C "$fixture_dir/chart" hikyo
 
 binary_sha=$(sha256_file "$bundle_dir/hikyo_Linux_arm64.tar.gz")
+binary_provenance_sha=$(sha256_file "$bundle_dir/binary-provenance.json")
 sbom_sha=$(sha256_file "$bundle_dir/hikyo-source.spdx.json")
 image_file_sha=$(sha256_file "$bundle_dir/image-index.digest")
 image_digest=$(tr -d '\n' <"$bundle_dir/image-index.digest")
@@ -196,6 +215,7 @@ chart_payload_sha=$(sha256_file "$bundle_dir/chart-index.oci-payload.json")
 
 jq -n \
 	--arg binary_sha "$binary_sha" \
+	--arg binary_provenance_sha "$binary_provenance_sha" \
 	--arg sbom_sha "$sbom_sha" \
 	--arg image_file_sha "$image_file_sha" \
 	--arg image_digest "$image_digest" \
@@ -216,6 +236,7 @@ jq -n \
 		artifacts: [
 			{name: "release-candidate.json", kind: "release-candidate", sha256: $candidate_sha},
 			{name: "hikyo_Linux_arm64.tar.gz", kind: "binary", sha256: $binary_sha},
+			{name: "binary-provenance.json", kind: "binary-provenance", sha256: $binary_provenance_sha},
 			{name: "hikyo-source.spdx.json", kind: "sbom", sha256: $sbom_sha},
 			{name: "image-index.digest", kind: "image", sha256: $image_file_sha, digest: $image_digest, image: "ghcr.io/hikyo-org/hikyo", tag: "0.1.0"},
 			{name: "hikyo-0.1.0.tgz", kind: "chart", sha256: $chart_file_sha, chart_version: "0.1.0", app_version: "0.1.0", image_repository: "ghcr.io/hikyo-org/hikyo", image_digest: $image_digest},
@@ -298,6 +319,30 @@ expect_reject 'tampered release candidate' 'release-candidate.json hash mismatch
 	--metadata-signature "$trust_dir/metadata.sigstore.json" \
 	--bundle "$bundle_dir" --state "$state" --latest
 restore_bundle_file release-candidate.json
+
+jq '.source_commit = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"' \
+	"$bundle_dir/binary-provenance.json" >"$fixture_dir/wrong-binary-provenance.json"
+mv "$fixture_dir/wrong-binary-provenance.json" "$bundle_dir/binary-provenance.json"
+sign_blob "$trust_dir/primary-1.key" "$bundle_dir/binary-provenance.json" \
+	"$bundle_dir/binary-provenance.json.sigstore.json"
+jq --arg sha "$(sha256_file "$bundle_dir/binary-provenance.json")" \
+	'(.artifacts[] | select(.kind == "binary-provenance")).sha256 = $sha' \
+	"$bundle_dir/release-manifest.json" >"$fixture_dir/manifest-wrong-binary-provenance.json"
+mv "$fixture_dir/manifest-wrong-binary-provenance.json" "$bundle_dir/release-manifest.json"
+sign_blob "$trust_dir/primary-1.key" "$bundle_dir/release-manifest.json" \
+	"$bundle_dir/release-manifest.sigstore.json"
+rebind_negative_metadata "$bundle_dir/release-manifest.json" "$trust_dir/metadata.json" \
+	"$fixture_dir/wrong-binary-provenance-metadata.json"
+expect_reject 'binary provenance for a different candidate' 'invalid binary provenance' \
+	"$(dirname "$0")/verify-bundle.sh" \
+	--root "$trust_dir/root.json" \
+	--metadata "$fixture_dir/wrong-binary-provenance-metadata.json" \
+	--metadata-signature "$fixture_dir/wrong-binary-provenance-metadata.json.sigstore.json" \
+	--bundle "$bundle_dir" --state "$state" --latest
+restore_bundle_file binary-provenance.json
+restore_bundle_file binary-provenance.json.sigstore.json
+restore_bundle_file release-manifest.json
+restore_bundle_file release-manifest.sigstore.json
 
 printf 'tampered\n' >>"$bundle_dir/hikyo_Linux_arm64.tar.gz"
 expect_reject 'tampered artifact' 'artifact hash mismatch' "$(dirname "$0")/verify-bundle.sh" \
@@ -426,15 +471,22 @@ rm "$fixture_dir/bundle-v2/hikyo-0.1.0.tgz" "$fixture_dir/bundle-v2/hikyo-0.1.0.
 printf '{"commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","key_id":"primary-2","public_key":"primary-2.pub","sequence":2,"version":"0.2.0"}\n' \
 	>"$fixture_dir/bundle-v2/release-candidate.json"
 candidate_v2_sha=$(sha256_file "$fixture_dir/bundle-v2/release-candidate.json")
+jq '.version = "0.2.0"' "$fixture_dir/bundle-v2/binary-provenance.json" \
+	>"$fixture_dir/binary-provenance-v2.json"
+mv "$fixture_dir/binary-provenance-v2.json" "$fixture_dir/bundle-v2/binary-provenance.json"
+binary_provenance_v2_sha=$(sha256_file "$fixture_dir/bundle-v2/binary-provenance.json")
 printf 'name: hikyo\nversion: 0.2.0\nappVersion: 0.2.0\n' >"$fixture_dir/chart/hikyo/Chart.yaml"
 tar -czf "$fixture_dir/bundle-v2/hikyo-0.2.0.tgz" -C "$fixture_dir/chart" hikyo
 chart_v2_sha=$(sha256_file "$fixture_dir/bundle-v2/hikyo-0.2.0.tgz")
-jq --arg chart_v2_sha "$chart_v2_sha" --arg candidate_v2_sha "$candidate_v2_sha" '
+jq --arg chart_v2_sha "$chart_v2_sha" \
+	--arg candidate_v2_sha "$candidate_v2_sha" \
+	--arg binary_provenance_v2_sha "$binary_provenance_v2_sha" '
 	.version = "0.2.0" |
 	.tag = "v0.2.0" |
 	.release_sequence = 2 |
 	.signing_key_id = "primary-2" |
 	(.artifacts[] | select(.kind == "release-candidate")).sha256 = $candidate_v2_sha |
+	(.artifacts[] | select(.kind == "binary-provenance")).sha256 = $binary_provenance_v2_sha |
 	(.artifacts[] | select(.kind == "image")).tag = "0.2.0" |
 	(.artifacts[] | select(.kind == "chart")) |= (
 		.name = "hikyo-0.2.0.tgz" |

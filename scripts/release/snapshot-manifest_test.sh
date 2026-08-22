@@ -13,6 +13,17 @@ fixture_dir=$(mktemp -d "${TMPDIR:-/tmp}/hikyo-snapshot-manifest.XXXXXX")
 trap 'rm -rf "$fixture_dir"' EXIT HUP INT TERM
 version=$(jq -r '.version' "$dist/metadata.json")
 commit=$(jq -r '.commit' "$dist/metadata.json")
+
+# pull_request_target executes the trusted workflow from the base branch. When
+# this fixture is first introduced alongside the prepare step, that older
+# workflow can invoke the new fixture before it knows how to create provenance.
+# Generate the same canonical inputs here so the PR validates the new contract;
+# the workflow regression fixture separately requires prepare-before-classify.
+if [ ! -f "$dist/binary-provenance.json" ]; then
+	"$script_dir/prepare-image-root.sh" \
+		"$dist" "$fixture_dir/image-root" "$commit" "$repo_root/.goreleaser.yaml" >/dev/null
+fi
+
 for expected in \
 	"hikyo_${version}_Darwin_x86_64.tar.gz" \
 	"hikyo_${version}_Darwin_arm64.tar.gz" \
@@ -70,6 +81,7 @@ jq -ncS --arg version "$version" --arg commit "$commit" '{
 jq -e '
 	([.artifacts[] | select(.kind == "binary")] | length) == 6 and
 	([.artifacts[] | select(.kind == "release-candidate")] | length) == 1 and
+	([.artifacts[] | select(.kind == "binary-provenance")] | length) == 1 and
 	([.artifacts[] | select(.kind == "chart")] | length) == 1 and
 	([.artifacts[] | select(.kind == "oci-payload")] | length) == 2
 ' "$fixture_dist/release-manifest.json" >/dev/null

@@ -80,7 +80,9 @@ an ADR amendment, not an implementation refactor.
    non-use, proves a changed-SHA update to the permanent non-release
    `v-ruleset-probe` tag is rejected, builds GoReleaser archives for
    Linux/macOS/Windows on amd64/arm64,
-   pushes the distroless amd64/arm64 image and digest-pinned Helm chart, emits
+   copies the same GoReleaser Linux binaries into the distroless amd64/arm64
+   image, pushes that image and the digest-pinned Helm chart, emits binary
+   provenance binding both package inputs to the candidate commit and hashes,
    source and image SPDX SBOMs, renders an installer containing the exact trust
    root and verifier hashes, and opens a draft GitHub release. CI also makes the
    cosign OCI payloads while it has registry access; it never signs them.
@@ -121,8 +123,11 @@ an ADR amendment, not an implementation refactor.
    GitHub immutable releases locks its assets at publication. Preserve that
    state file; deleting it discards locally remembered rollback protection.
 
-`checksums.txt` is GoReleaser's bare-binary checksum list. The signed release
-manifest is authoritative for the canonical release candidate, binaries,
+`checksums.txt` is GoReleaser's bare-binary checksum list.
+`binary-provenance.json` records the GoReleaser configuration hash and proves
+that each Linux archive input and OCI image input has the same binary hash. The
+signed release manifest is authoritative for the canonical release candidate,
+binaries, binary provenance,
 SBOMs, installer, chart, digest files, and OCI payloads.
 
 Hash agreement proves asset consistency, not an honest CI build. Reproducible

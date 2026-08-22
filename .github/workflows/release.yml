@@ -140,6 +140,16 @@ jobs:
             .commit == $candidate[0].commit
           ' dist/metadata.json >/dev/null
 
+      - name: Prepare canonical image inputs
+        env:
+          CANDIDATE: ${{ steps.candidate.outputs.path }}
+          CANDIDATE_SHA256: ${{ steps.candidate.outputs.sha256 }}
+        run: |
+          ./scripts/release/check-candidate.sh "$CANDIDATE" "$CANDIDATE_SHA256"
+          commit=$(jq -r '.commit' "$CANDIDATE")
+          ./scripts/release/prepare-image-root.sh \
+            dist image-root "$commit" .goreleaser.yaml
+
       - name: Remove GoReleaser internal metadata
         run: rm -f dist/artifacts.json dist/config.yaml dist/metadata.json
 
@@ -152,22 +162,6 @@ jobs:
           syft-version: v1.50.0
           upload-artifact: false
           upload-release-assets: false
-
-      - name: Build pinned image inputs
-        env:
-          CANDIDATE: ${{ steps.candidate.outputs.path }}
-          CANDIDATE_SHA256: ${{ steps.candidate.outputs.sha256 }}
-        run: |
-          ./scripts/release/check-candidate.sh "$CANDIDATE" "$CANDIDATE_SHA256"
-          version=$(jq -r '.version' "$CANDIDATE")
-          commit=$(jq -r '.commit' "$CANDIDATE")
-          commit_date=$(git show -s --format=%cI "$commit")
-          for arch in amd64 arm64; do
-            mkdir -p "image-root/$arch"
-            CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath \
-              -ldflags "-s -w -X main.version=$version -X main.commit=$commit -X main.buildDate=$commit_date" \
-              -o "image-root/$arch/hikyo" ./cmd/hikyo
-          done
 
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
         with:
