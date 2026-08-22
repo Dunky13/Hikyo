@@ -28,6 +28,7 @@ type MatrixKey = MatrixKeyList['items'][number];
 type Environment = EnvironmentList['items'][number];
 
 type EditorRow = {
+  readonly environmentId: string;
   readonly environment: Environment;
   readonly protected: boolean;
   readonly cell: ValueCell | undefined;
@@ -42,9 +43,7 @@ export type MatrixEditorChange = MatrixDraftChange;
 export function MatrixRowEditor({
   refData,
   keyRecord,
-  environment,
-  environments,
-  protectedEnvironmentIds,
+  environmentId,
   rows,
   busy,
   mutationError,
@@ -54,9 +53,7 @@ export function MatrixRowEditor({
 }: {
   refData: MatrixRef;
   keyRecord: MatrixKey;
-  environment: Environment;
-  environments: readonly Environment[];
-  protectedEnvironmentIds: readonly string[];
+  environmentId: string;
   rows: readonly EditorRow[];
   busy: boolean;
   mutationError: string | null;
@@ -69,7 +66,7 @@ export function MatrixRowEditor({
     () =>
       new Map(
         rows.map((row) => [
-          row.environment.id,
+          row.environmentId,
           draftValueForMatrixCell(
             keyRecord.classification,
             row.cell?.set === true ? row.cell.value : undefined,
@@ -90,39 +87,47 @@ export function MatrixRowEditor({
   const [destinations, setDestinations] = useState<readonly string[]>([]);
   const [protectedCopyConfirmed, setProtectedCopyConfirmed] = useState(false);
   const protectedGuard = useProtectedPublishCeremony(refData);
+  const sourceRow = rows.find((row) => row.environmentId === environmentId);
+  if (sourceRow === undefined) {
+    throw new Error(`matrix editor environment ${environmentId} is not in its keyed rows`);
+  }
+  const environment = sourceRow.environment;
+  const protectedEnvironmentIds = rows.flatMap((row) =>
+    row.protected ? [row.environmentId] : [],
+  );
 
   const valuesPath = generatePath(surfaceById('values').path, {
     org: refData.org,
     project: refData.project,
-    environment: environment.id,
+    environment: environmentId,
   });
-  const sourceRow = rows.find((row) => row.environment.id === environment.id);
-  const sourceSet = sourceRow?.cell?.set === true;
+  const sourceSet = sourceRow.cell?.set === true;
   const protectedConfirmationRequired = copyRequiresProtectedConfirmation(
     destinations,
     protectedEnvironmentIds,
   );
-  const protectedDestinationNames = environments
+  const protectedDestinationNames = rows
     .filter(
-      (candidate) =>
-        destinations.includes(candidate.id) && protectedEnvironmentIds.includes(candidate.id),
+      (row) =>
+        destinations.includes(row.environmentId) &&
+        protectedEnvironmentIds.includes(row.environmentId),
     )
-    .map((candidate) => candidate.name);
+    .map((row) => row.environment.name);
 
   const validationByEnvironment = new Map<string, ReturnType<typeof validateMatrixDraft>>();
   for (const row of rows) {
-    if (!dirty.has(row.environment.id) || clears.has(row.environment.id)) {
+    if (!dirty.has(row.environmentId) || clears.has(row.environmentId)) {
       continue;
     }
-    const value = drafts.get(row.environment.id) ?? '';
+    const value = drafts.get(row.environmentId) ?? '';
     const error = validateDeclaration(keyRecord, value);
     if (error !== null) {
-      validationByEnvironment.set(row.environment.id, error);
+      validationByEnvironment.set(row.environmentId, error);
     }
   }
 
   const changes = matrixDraftChanges(
-    rows.map((row) => row.environment.id),
+    rows.map((row) => row.environmentId),
     drafts,
     dirty,
     clears,
@@ -132,13 +137,13 @@ export function MatrixRowEditor({
     destinations
       .filter((environmentId) => protectedEnvironmentIds.includes(environmentId))
       .map((environmentId) => {
-        const destination = environments.find((candidate) => candidate.id === environmentId);
+        const destination = rows.find((row) => row.environmentId === environmentId);
         if (destination === undefined) {
           throw new Error(`protected copy destination ${environmentId} is not in the matrix`);
         }
         return {
           environmentId,
-          environmentName: destination.name,
+          environmentName: destination.environment.name,
           keys: [{ id: keyRecord.id, name: keyRecord.name }],
         };
       });
@@ -195,8 +200,8 @@ export function MatrixRowEditor({
                 className="btn"
                 disabled={fillAll === '' || busy || applying}
                 onClick={() => {
-                  setDrafts(new Map(rows.map((row) => [row.environment.id, fillAll])));
-                  setDirty(new Set(rows.map((row) => row.environment.id)));
+                  setDrafts(new Map(rows.map((row) => [row.environmentId, fillAll])));
+                  setDirty(new Set(rows.map((row) => row.environmentId)));
                   setClears(new Set());
                 }}
               >
@@ -207,18 +212,18 @@ export function MatrixRowEditor({
 
           <div className="matrix-row-editor__rows">
             {rows.map((row) => {
-              const environmentId = row.environment.id;
+              const rowEnvironmentId = row.environmentId;
               const publishedSet = row.cell?.set === true;
-              const clearing = clears.has(environmentId);
-              const liveValidation = validationByEnvironment.get(environmentId) ?? null;
+              const clearing = clears.has(rowEnvironmentId);
+              const liveValidation = validationByEnvironment.get(rowEnvironmentId) ?? null;
               return (
                 <section
                   className={`matrix-row-editor__row${row.protected ? ' matrix-row-editor__row--protected' : ''}`}
-                  key={environmentId}
-                  aria-labelledby={`matrix-row-${environmentId}`}
+                  key={rowEnvironmentId}
+                  aria-labelledby={`matrix-row-${rowEnvironmentId}`}
                 >
                   <div className="matrix-row-editor__row-head">
-                    <h3 id={`matrix-row-${environmentId}`}>{row.environment.name}</h3>
+                    <h3 id={`matrix-row-${rowEnvironmentId}`}>{row.environment.name}</h3>
                     {row.protected ? <span>PROTECTED</span> : null}
                     <span>{publishedSet ? 'explicit set' : 'explicit absent'}</span>
                     {row.signal?.pending_operation === undefined ? null : (
@@ -231,15 +236,15 @@ export function MatrixRowEditor({
                       <span>{problem.message}</span>
                     </p>
                   ))}
-                  <label htmlFor={`matrix-edit-${environmentId}`}>
+                  <label htmlFor={`matrix-edit-${rowEnvironmentId}`}>
                     {`${row.environment.name} value`}
                   </label>
                   <textarea
-                    id={`matrix-edit-${environmentId}`}
+                    id={`matrix-edit-${rowEnvironmentId}`}
                     className="mono matrix-editor__value"
                     rows={keyRecord.declaration.rule?.type === 'json' ? 6 : 2}
                     autoComplete="off"
-                    value={clearing ? '' : drafts.get(environmentId) ?? ''}
+                    value={clearing ? '' : drafts.get(rowEnvironmentId) ?? ''}
                     placeholder={
                       keyRecord.classification === 'secret'
                         ? publishedSet
@@ -250,15 +255,15 @@ export function MatrixRowEditor({
                           : 'Touch to stage an explicit value'
                     }
                     aria-invalid={liveValidation?.level === 'error' ? true : undefined}
-                    aria-describedby={liveValidation === null ? undefined : `matrix-error-${environmentId}`}
+                    aria-describedby={liveValidation === null ? undefined : `matrix-error-${rowEnvironmentId}`}
                     onChange={(event) => {
                       const next = new Map(drafts);
-                      next.set(environmentId, event.target.value);
+                      next.set(rowEnvironmentId, event.target.value);
                       setDrafts(next);
-                      setDirty((current) => new Set(current).add(environmentId));
+                      setDirty((current) => new Set(current).add(rowEnvironmentId));
                       setClears((current) => {
                         const nextClears = new Set(current);
-                        nextClears.delete(environmentId);
+                        nextClears.delete(rowEnvironmentId);
                         return nextClears;
                       });
                     }}
@@ -266,7 +271,7 @@ export function MatrixRowEditor({
                   {liveValidation === null ? null : (
                     <p
                       className={liveValidation.level === 'error' ? 'matrix-cell__error' : 'matrix-editor__hint'}
-                      id={`matrix-error-${environmentId}`}
+                      id={`matrix-error-${rowEnvironmentId}`}
                     >
                       {liveValidation.message}
                     </p>
@@ -289,13 +294,13 @@ export function MatrixRowEditor({
                     onClick={() => {
                       setClears((current) => {
                         const next = new Set(current);
-                        if (next.has(environmentId)) next.delete(environmentId);
-                        else next.add(environmentId);
+                        if (next.has(rowEnvironmentId)) next.delete(rowEnvironmentId);
+                        else next.add(rowEnvironmentId);
                         return next;
                       });
                       setDirty((current) => {
                         const next = new Set(current);
-                        next.delete(environmentId);
+                        next.delete(rowEnvironmentId);
                         return next;
                       });
                     }}
@@ -345,23 +350,23 @@ export function MatrixRowEditor({
           {copyOpen ? (
             <fieldset className="matrix-editor__copy">
               <legend>Copy independent published value to</legend>
-              {environments
-                .filter((candidate) => candidate.id !== environment.id)
-                .map((candidate) => (
-                  <label key={candidate.id}>
+              {rows
+                .filter((row) => row.environmentId !== environmentId)
+                .map((row) => (
+                  <label key={row.environmentId}>
                     <input
                       type="checkbox"
-                      checked={destinations.includes(candidate.id)}
+                      checked={destinations.includes(row.environmentId)}
                       onChange={() => {
                         setDestinations((current) =>
-                          current.includes(candidate.id)
-                            ? current.filter((id) => id !== candidate.id)
-                            : [...current, candidate.id],
+                          current.includes(row.environmentId)
+                            ? current.filter((id) => id !== row.environmentId)
+                            : [...current, row.environmentId],
                         );
                         setProtectedCopyConfirmed(false);
                       }}
                     />
-                    <span>{candidate.name}{protectedEnvironmentIds.includes(candidate.id) ? ' · protected' : ''}</span>
+                    <span>{row.environment.name}{row.protected ? ' · protected' : ''}</span>
                   </label>
                 ))}
               {protectedConfirmationRequired ? (

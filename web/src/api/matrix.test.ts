@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it } from 'vitest';
 
 import { ApiError } from './client.ts';
 import {
+  assembleMatrixEnvironmentRows,
+  bindMatrixEnvironmentQueries,
   matrixPublishValidation,
   matrixMutationError,
   forgetRestorePreviews,
@@ -19,6 +21,30 @@ const keyLog = 'key_01989abc-def0-7123-8123-123456789abc';
 const keyOther = 'key_01989abc-def0-7123-8123-123456789abd';
 const version = 'ver_01989abc-def0-7123-8123-123456789abc';
 const ref = { org: 'org', project: 'project' };
+
+const environmentDev = {
+  id: envDev,
+  org_id: 'org_01989abc-def0-7123-8123-123456789abc',
+  project_id: 'prj_01989abc-def0-7123-8123-123456789abc',
+  name: 'development',
+  display_order: 0,
+  created_at: '2026-08-22T08:00:00Z',
+};
+const envProd = 'env_01989abc-def0-7123-8123-123456789abd';
+const environmentProd = {
+  ...environmentDev,
+  id: envProd,
+  name: 'production',
+  display_order: 1,
+};
+
+function query<T>(data: T | undefined, isPending = false) {
+  return { data, isPending, isError: false };
+}
+
+function environmentQuery<T>(environmentId: string, data: T | undefined, isPending = false) {
+  return { environmentId, query: query(data, isPending) };
+}
 
 beforeEach(() => {
   forgetRestorePreviews(ref, [version, 'ver_second', 'ver_other']);
@@ -114,6 +140,95 @@ describe('matrix cache coherence', () => {
     expect(signalsRequireValuesRefresh(undefined, 2n)).toBe(true);
     expect(signalsRequireValuesRefresh(2n, 2n)).toBe(false);
     expect(signalsRequireValuesRefresh(2n, 3n)).toBe(true);
+  });
+});
+
+describe('environment-keyed matrix rows', () => {
+  const configClassification: 'config' = 'config';
+  const valueCell = {
+    key_id: keyLog,
+    name: 'LOG_LEVEL',
+    classification: configClassification,
+    set: true,
+    revealed: true,
+  };
+  const devValues = {
+    items: [{ ...valueCell, value: 'debug' }],
+    count: 1,
+  };
+  const prodValues = {
+    items: [{ ...valueCell, value: 'warn' }],
+    count: 1,
+  };
+  const devSignals = { environment_id: envDev, revision: 2n, cells: [] };
+  const prodSignals = { environment_id: envProd, revision: 7n, cells: [] };
+  const devSettings = { protected: false, reauth_window_seconds: null };
+  const prodSettings = { protected: true, reauth_window_seconds: 300 };
+  const drafts = { items: [], count: 0 };
+
+  const inputs = {
+    values: [environmentQuery(envDev, devValues), environmentQuery(envProd, prodValues)],
+    signals: [environmentQuery(envProd, prodSignals), environmentQuery(envDev, devSignals)],
+    settings: [environmentQuery(envDev, devSettings), environmentQuery(envProd, prodSettings)],
+    pendingDrafts: [environmentQuery(envProd, drafts), environmentQuery(envDev, drafts)],
+  };
+
+  it('keeps query state attached by environment id while display order changes', () => {
+    const rows = assembleMatrixEnvironmentRows(
+      [environmentProd, environmentDev],
+      inputs,
+    );
+
+    expect(rows.map((row) => row.environmentId)).toEqual([envProd, envDev]);
+    expect(rows.map((row) => row.values.data?.items[0]?.value)).toEqual(['warn', 'debug']);
+    expect(rows.map((row) => row.signals.data?.revision)).toEqual([7n, 2n]);
+    expect(rows.map((row) => row.settings.data?.protected)).toEqual([true, false]);
+  });
+
+  it('removes a row without shifting another environment query into its place', () => {
+    const rows = assembleMatrixEnvironmentRows([environmentProd], inputs);
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.environmentId).toBe(envProd);
+    expect(rows[0]?.values.data?.items[0]?.value).toBe('warn');
+  });
+
+  it('keeps one pending query on its own row while other rows render ready data', () => {
+    const rows = assembleMatrixEnvironmentRows([environmentDev, environmentProd], {
+      ...inputs,
+      signals: [environmentQuery(envProd, undefined, true), environmentQuery(envDev, devSignals)],
+    });
+
+    expect(rows[0]?.signals.data?.revision).toBe(2n);
+    expect(rows[0]?.signals.isPending).toBe(false);
+    expect(rows[1]?.environmentId).toBe(envProd);
+    expect(rows[1]?.signals.data).toBeUndefined();
+    expect(rows[1]?.signals.isPending).toBe(true);
+  });
+
+  it('rejects duplicate or missing query identities instead of guessing by position', () => {
+    expect(() =>
+      assembleMatrixEnvironmentRows([environmentDev, environmentProd], {
+        ...inputs,
+        values: [environmentQuery(envDev, devValues), environmentQuery(envDev, prodValues)],
+      }),
+    ).toThrow(`matrix values queries contain duplicate environment ${envDev}`);
+
+    expect(() =>
+      assembleMatrixEnvironmentRows([environmentDev, environmentProd], {
+        ...inputs,
+        values: [environmentQuery(envDev, devValues)],
+      }),
+    ).toThrow(`matrix values query is missing environment ${envProd}`);
+  });
+
+  it('refuses to assign returned data to a different positional environment', () => {
+    expect(() =>
+      bindMatrixEnvironmentQueries('values', [environmentProd, environmentDev], [
+        query({ environmentId: envDev, value: devValues }),
+        query({ environmentId: envProd, value: prodValues }),
+      ]),
+    ).toThrow(`matrix values query for ${envProd} returned data for ${envDev}`);
   });
 });
 
