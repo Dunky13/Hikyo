@@ -43,20 +43,22 @@ type scanClause struct {
 	Blocked string
 }
 
+const scanningModulePath = "github.com/Hikyo-Org/hikyo/"
+
 func goTestFixture(packagePath, name string) fixtureref.FixtureRef {
-	return fixtureref.FixtureRef{Package: packagePath, TestName: name, Kind: fixtureref.GoTest}
+	return fixtureref.FixtureRef{Package: scanningModulePath + packagePath, TestName: name, Kind: fixtureref.KindTest}
 }
 
 func goBenchmarkFixture(packagePath, name string) fixtureref.FixtureRef {
-	return fixtureref.FixtureRef{Package: packagePath, TestName: name, Kind: fixtureref.GoBenchmark}
+	return fixtureref.FixtureRef{Package: scanningModulePath + packagePath, TestName: name, Kind: fixtureref.KindBenchmark}
 }
 
 func goHelperFixture(packagePath, name string) fixtureref.FixtureRef {
-	return fixtureref.FixtureRef{Package: packagePath, TestName: name, Kind: fixtureref.GoHelper}
+	return fixtureref.FixtureRef{Package: scanningModulePath + packagePath, TestName: name, Kind: fixtureref.KindHelper}
 }
 
 func playwrightFixture(file, title string) fixtureref.FixtureRef {
-	return fixtureref.FixtureRef{Package: "web", File: file, TestName: title, Kind: fixtureref.PlaywrightTest}
+	return fixtureref.FixtureRef{Package: "web", File: file, TestName: title, Kind: fixtureref.KindPlaywrightTest}
 }
 
 // scanningCriteria is the closed matrix. IDs are stable: SS<row>.<letter>.
@@ -173,6 +175,8 @@ func TestScanningCriteriaMatrixIsComplete(t *testing.T) {
 	repoRoot := filepath.Join("..", "..")
 
 	blocked := 0
+	refs := make([]fixtureref.FixtureRef, 0, len(scanningCriteria))
+	seen := map[fixtureref.FixtureRef]bool{}
 	for id, clause := range scanningCriteria {
 		if clause.Blocked != "" {
 			blocked++
@@ -182,10 +186,14 @@ func TestScanningCriteriaMatrixIsComplete(t *testing.T) {
 			t.Errorf("acceptance clause %s (%s) has neither a qualified executable fixture nor a Blocked reason", id, clause.Text)
 		}
 		for _, ref := range clause.Fixtures {
-			if err := fixtureref.Validate(repoRoot, ref); err != nil {
-				t.Errorf("%s names invalid fixture %+v: %v", id, ref, err)
+			if !seen[ref] {
+				seen[ref] = true
+				refs = append(refs, ref)
 			}
 		}
+	}
+	if err := fixtureref.Validate(repoRoot, refs); err != nil {
+		t.Errorf("scanning criteria name invalid fixtures: %v", err)
 	}
 
 	// The blocked set is pinned: the residual leg named in the ADR §9 table that

@@ -7,216 +7,182 @@ import (
 	"testing"
 )
 
-func TestValidateAcceptsQualifiedExecutableFixtures(t *testing.T) {
-	root := fixtureRepository(t, map[string]string{
-		"internal/example/example.go": `package example
-`,
-		"internal/example/example_test.go": `package example
+func TestValidateAcceptsQualifiedExecutableReferences(t *testing.T) {
+	root := fixtureModule(t)
 
-import "testing"
-
-func TestTopLevel(t *testing.T) {
-	t.Run("child", func(t *testing.T) {
-		t.Run("grandchild", func(t *testing.T) {})
+	err := Validate(root, []FixtureRef{
+		{Package: "example.test/fixtures/alpha", TestName: "BenchmarkTop", Kind: KindBenchmark},
+		{Package: "example.test/fixtures/alpha", TestName: "fixtureHelper", Kind: KindHelper},
+		{Package: "example.test/fixtures/alpha", TestName: "TestTop/nested/leaf", Kind: KindSubtest},
+		{Package: "example.test/fixtures/alpha", TestName: "TestTagged", Kind: KindTest},
+		{Package: "example.test/fixtures/alpha", File: "alpha_test.go", TestName: "TestTop", Kind: KindTest},
 	})
-	name := "dynamic"
-	t.Run(name, func(t *testing.T) {})
-}
-
-func BenchmarkExample(b *testing.B) {}
-func runExample(t *testing.T, value string) {}
-`,
-		"web/e2e/flows/example.spec.ts": `import { test } from '@playwright/test';
-
-test.describe('example', () => {
-  test('exact static title', async ({ page }) => {});
-});
-`,
-	})
-
-	refs := []FixtureRef{
-		{Package: "internal/example", TestName: "TestTopLevel", Kind: GoTest},
-		{Package: "internal/example", TestName: "BenchmarkExample", Kind: GoBenchmark},
-		{Package: "internal/example", TestName: "runExample", Kind: GoHelper},
-		{Package: "internal/example", TestName: "TestTopLevel/child/grandchild", Kind: GoSubtest},
-		{Package: "web", File: "e2e/flows/example.spec.ts", TestName: "exact static title", Kind: PlaywrightTest},
-	}
-
-	for _, ref := range refs {
-		if err := Validate(root, ref); err != nil {
-			t.Errorf("Validate(%+v) returned %v", ref, err)
-		}
+	if err != nil {
+		t.Fatalf("Validate() error = %v", err)
 	}
 }
 
-func TestValidateRejectsStaleOrMisqualifiedReferences(t *testing.T) {
-	root := fixtureRepository(t, map[string]string{
-		"internal/expected/expected.go": `package expected
-`,
-		"internal/expected/actual_test.go": `package expected
-
-import "testing"
-
-func TestRenamed(t *testing.T) {
-	name := "dynamic"
-	t.Run(name, func(t *testing.T) {})
-}
-func helperOnly(t *testing.T) {}
-`,
-		"internal/expected/external_test.go": `package expected_test
-
-import "testing"
-
-func TestExternalOnly(t *testing.T) {}
-`,
-		"internal/elsewhere/elsewhere.go": `package elsewhere
-`,
-		"internal/elsewhere/same_test.go": `package elsewhere
-
-import "testing"
-
-func TestMissing(t *testing.T) {}
-`,
-		"web/e2e/flows/actual.spec.ts": `import { test } from '@playwright/test';
-test('same title', async () => {});
-`,
-		"web/e2e/flows/expected.spec.ts": `import { test } from '@playwright/test';
-test('different title', async () => {});
-`,
-	})
-
+func TestValidateRejectsInvalidReferences(t *testing.T) {
+	root := fixtureModule(t)
 	tests := []struct {
 		name string
-		ref  FixtureRef
+		refs []FixtureRef
 		want string
 	}{
 		{
-			name: "renamed function",
-			ref:  FixtureRef{Package: "internal/expected", TestName: "TestOldName", Kind: GoTest},
+			name: "missing or renamed",
+			refs: []FixtureRef{{Package: "example.test/fixtures/alpha", TestName: "TestRenamed", Kind: KindTest}},
 			want: "not found",
 		},
 		{
 			name: "same name in wrong package",
-			ref:  FixtureRef{Package: "internal/expected", TestName: "TestMissing", Kind: GoTest},
-			want: "internal/expected",
-		},
-		{
-			name: "same directory external test package",
-			ref:  FixtureRef{Package: "internal/expected", TestName: "TestExternalOnly", Kind: GoTest},
+			refs: []FixtureRef{{Package: "example.test/fixtures/beta", TestName: "TestTop", Kind: KindTest}},
 			want: "not found",
 		},
 		{
-			name: "same function in wrong file",
-			ref:  FixtureRef{Package: "internal/expected", File: "expected_test.go", TestName: "TestRenamed", Kind: GoTest},
-			want: "expected_test.go",
-		},
-		{
-			name: "helper referenced as test",
-			ref:  FixtureRef{Package: "internal/expected", TestName: "helperOnly", Kind: GoTest},
-			want: "wrong kind",
-		},
-		{
-			name: "dynamic Go subtest title",
-			ref:  FixtureRef{Package: "internal/expected", TestName: "TestRenamed/dynamic", Kind: GoSubtest},
+			name: "same name in wrong file",
+			refs: []FixtureRef{{Package: "example.test/fixtures/alpha", File: "tagged_test.go", TestName: "TestTop", Kind: KindTest}},
 			want: "not found",
 		},
 		{
-			name: "same title in wrong Playwright file",
-			ref:  FixtureRef{Package: "web", File: "e2e/flows/expected.spec.ts", TestName: "same title", Kind: PlaywrightTest},
+			name: "wrong kind",
+			refs: []FixtureRef{{Package: "example.test/fixtures/alpha", TestName: "fixtureHelper", Kind: KindTest}},
+			want: "exists as helper",
+		},
+		{
+			name: "benchmark requested as test",
+			refs: []FixtureRef{{Package: "example.test/fixtures/alpha", TestName: "BenchmarkTop", Kind: KindTest}},
+			want: "exists as benchmark",
+		},
+		{
+			name: "test-shaped helper with wrong signature",
+			refs: []FixtureRef{{Package: "example.test/fixtures/alpha", TestName: "TestWrongSignature", Kind: KindTest}},
+			want: "exists as helper",
+		},
+		{
+			name: "duplicate reference",
+			refs: []FixtureRef{
+				{Package: "example.test/fixtures/alpha", TestName: "TestTop", Kind: KindTest},
+				{Package: "example.test/fixtures/alpha", TestName: "TestTop", Kind: KindTest},
+			},
+			want: "duplicate fixture reference",
+		},
+		{
+			name: "qualified and unqualified duplicate",
+			refs: []FixtureRef{
+				{Package: "example.test/fixtures/alpha", TestName: "TestTop", Kind: KindTest},
+				{Package: "example.test/fixtures/alpha", File: "alpha_test.go", TestName: "TestTop", Kind: KindTest},
+			},
+			want: "duplicate fixture reference",
+		},
+		{
+			name: "dynamic subtest",
+			refs: []FixtureRef{{Package: "example.test/fixtures/alpha", TestName: "TestTop/dynamic", Kind: KindSubtest}},
 			want: "not found",
 		},
 		{
-			name: "missing Playwright file qualification",
-			ref:  FixtureRef{Package: "web", TestName: "same title", Kind: PlaywrightTest},
-			want: "requires File",
+			name: "unrelated run method",
+			refs: []FixtureRef{{Package: "example.test/fixtures/alpha", TestName: "TestTop/not-a-subtest", Kind: KindSubtest}},
+			want: "not found",
+		},
+		{
+			name: "shadowed testing receiver",
+			refs: []FixtureRef{{Package: "example.test/fixtures/alpha", TestName: "TestTop/shadowed", Kind: KindSubtest}},
+			want: "not found",
+		},
+		{
+			name: "invalid lowercase test name",
+			refs: []FixtureRef{{Package: "example.test/fixtures/alpha", TestName: "Testlowercase", Kind: KindTest}},
+			want: "exists as helper",
+		},
+		{
+			name: "test with results",
+			refs: []FixtureRef{{Package: "example.test/fixtures/alpha", TestName: "TestWithResult", Kind: KindTest}},
+			want: "exists as helper",
+		},
+		{
+			name: "test with grouped parameters",
+			refs: []FixtureRef{{Package: "example.test/fixtures/alpha", TestName: "TestGroupedParameters", Kind: KindTest}},
+			want: "exists as helper",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := Validate(root, tt.ref)
+			err := Validate(root, tt.refs)
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
-				t.Fatalf("Validate(%+v) error = %v, want substring %q", tt.ref, err, tt.want)
+				t.Fatalf("Validate() error = %v, want containing %q", err, tt.want)
 			}
 		})
 	}
 }
 
-func TestValidateRejectsDynamicPlaywrightTitles(t *testing.T) {
-	root := fixtureRepository(t, map[string]string{
-		"web/e2e/flows/dynamic.spec.ts": "import { test } from '@playwright/test';\ntest(`case ${variant}`, async () => {});\n",
-	})
-
-	err := Validate(root, FixtureRef{
-		Package:  "web",
-		File:     "e2e/flows/dynamic.spec.ts",
-		TestName: "case dark",
-		Kind:     PlaywrightTest,
-	})
-	if err == nil || !strings.Contains(err.Error(), "not found") {
-		t.Fatalf("Validate(dynamic title) error = %v, want not found", err)
-	}
-}
-
-func TestValidateRejectsNonPlaywrightAndNonExecutableTitleLookalikes(t *testing.T) {
-	root := fixtureRepository(t, map[string]string{
-		"web/e2e/flows/lookalikes.spec.ts": `import { test } from '@playwright/test';
-
-const pattern = /test('regex ghost')/;
-if (ready) /test('control regex ghost')/.test(value);
-const text = "test('string ghost')";
-// test('comment ghost', async () => {});
-test.skip('skipped ghost', async () => {});
-`,
-		"web/e2e/flows/local.spec.ts": `function test(title: string, body: () => void) {
-  body();
-}
-test('local ghost', () => {});
-`,
-		"web/e2e/flows/shadowed.spec.ts": `import { test } from '@playwright/test';
-
-function helper() {
-  const test = localTest;
-  test('shadowed ghost', () => {});
-}
-`,
-	})
-
-	tests := []struct {
-		file  string
-		title string
-		want  string
-	}{
-		{file: "e2e/flows/lookalikes.spec.ts", title: "regex ghost", want: "not found"},
-		{file: "e2e/flows/lookalikes.spec.ts", title: "control regex ghost", want: "not found"},
-		{file: "e2e/flows/lookalikes.spec.ts", title: "string ghost", want: "not found"},
-		{file: "e2e/flows/lookalikes.spec.ts", title: "comment ghost", want: "not found"},
-		{file: "e2e/flows/lookalikes.spec.ts", title: "skipped ghost", want: "not found"},
-		{file: "e2e/flows/local.spec.ts", title: "local ghost", want: "does not import"},
-		{file: "e2e/flows/shadowed.spec.ts", title: "shadowed ghost", want: "shadowed"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.title, func(t *testing.T) {
-			err := Validate(root, FixtureRef{Package: "web", File: tt.file, TestName: tt.title, Kind: PlaywrightTest})
-			if err == nil || !strings.Contains(err.Error(), tt.want) {
-				t.Fatalf("Validate(%q) error = %v, want substring %q", tt.title, err, tt.want)
-			}
-		})
-	}
-}
-
-func fixtureRepository(t *testing.T, files map[string]string) string {
+func fixtureModule(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
-	for name, contents := range files {
-		path := filepath.Join(root, filepath.FromSlash(name))
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatalf("creating fixture directory: %v", err)
-		}
-		if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
-			t.Fatalf("writing fixture %s: %v", name, err)
-		}
+	writeFixtureFile(t, root, "go.mod", "module example.test/fixtures\n\ngo 1.25\n")
+	writeFixtureFile(t, root, "alpha/alpha.go", "package alpha\n")
+	writeFixtureFile(t, root, "alpha/alpha_test.go", `package alpha
+
+import (
+	"fmt"
+	"testing"
+)
+
+func TestTop(t *testing.T) {
+	t.Run("nested", func(t *testing.T) {
+		t.Run("leaf", func(t *testing.T) {})
+	})
+	var runner customRunner
+	runner.Run("not-a-subtest", func(t *testing.T) {})
+	{
+		t := customRunner{}
+		t.Run("shadowed", func(t *testing.T) {})
 	}
+	for i := range 1 {
+		t.Run(fmt.Sprintf("dynamic-%d", i), func(t *testing.T) {})
+	}
+}
+
+func BenchmarkTop(b *testing.B) {}
+func fixtureHelper(t *testing.T) { t.Helper() }
+
+type customRunner struct{}
+
+func (customRunner) Run(string, func(*testing.T)) {}
+`)
+	writeFixtureFile(t, root, "alpha/tagged_test.go", `//go:build fixturetag
+
+package alpha
+
+import "testing"
+
+func TestTagged(t *testing.T) {}
+
+type T struct{}
+
+func TestWrongSignature(t *T) {}
+func Testlowercase(t *testing.T) {}
+func TestWithResult(t *testing.T) bool { return true }
+func TestGroupedParameters(a, b *testing.T) {}
+`)
+	writeFixtureFile(t, root, "beta/beta.go", "package beta\n")
+	writeFixtureFile(t, root, "beta/beta_test.go", `package beta
+
+import "testing"
+
+func TestTopElsewhere(t *testing.T) {}
+`)
 	return root
+}
+
+func writeFixtureFile(t *testing.T, root, name, contents string) {
+	t.Helper()
+	path := filepath.Join(root, name)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q): %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		t.Fatalf("WriteFile(%q): %v", path, err)
+	}
 }
