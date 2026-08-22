@@ -25,10 +25,9 @@ type Adapters struct {
 	// Budget applies the § 179 adapter sync/trigger concurrency bound (4 per
 	// org). Nil disables it. The per-principal 10/min rate is deferred (see
 	// budget.go).
-	Budget         *Budget
-	Now            func() time.Time
-	PlanModule     func(origin, credential string) (adapter.Module, func(), error)
-	ProviderModule func(provider, origin, credential string) (adapter.Module, func(), error)
+	Budget        *Budget
+	Now           func() time.Time
+	ModuleFactory adapter.ModuleFactory
 }
 
 func (s *Adapters) now() time.Time {
@@ -257,7 +256,11 @@ func (s *Adapters) consumeAdapterCeremony(ctx context.Context, actor Actor, scop
 
 func (s *Adapters) Create(ctx context.Context, actor Actor, scope domain.Scope, request CreateAdapterRequest) (AdapterView, error) {
 	if request.Provider == "" {
-		request.Provider = "forgejo"
+		request.Provider = string(adapter.ForgejoProvider)
+	}
+	provider, err := adapter.ParseProvider(request.Provider)
+	if err != nil {
+		return AdapterView{}, err
 	}
 	if scope.Project == "" || scope.Env != "" || request.Origin == "" || len(request.Credential) == 0 || request.Target.EnvironmentID == "" || len(request.Target.KeyIDs) == 0 {
 		return AdapterView{}, fmt.Errorf("%w: adapter create requires project scope, credential, and first target", domain.ErrInvalid)
@@ -284,14 +287,12 @@ func (s *Adapters) Create(ctx context.Context, actor Actor, scope domain.Scope, 
 	if err != nil {
 		return AdapterView{}, err
 	}
-	module, release, err := s.planModule(request.Provider, request.Origin, string(plain))
+	lease, err := s.buildModule(provider, request.Origin, string(plain))
 	if err != nil {
 		return AdapterView{}, err
 	}
-	if release != nil {
-		defer release()
-	}
-	if err := module.ValidateConfig(adapter.Config{Origin: request.Origin}); err != nil {
+	defer lease.Release()
+	if err := lease.Module.ValidateConfig(adapter.Config{Origin: request.Origin}); err != nil {
 		return AdapterView{}, err
 	}
 	configureEventID, err := audit.NewEventID()
@@ -300,7 +301,7 @@ func (s *Adapters) Create(ctx context.Context, actor Actor, scope domain.Scope, 
 	}
 	beforeCreate, afterCreate := s.environmentCreateAudit(actor, scope, targetID, request.Target, configureEventID)
 	destination := adapterDestination(request.Target)
-	connection, err := module.TestConnection(ctx, adapter.ConnectionRequest{Config: adapter.Config{Origin: request.Origin}, Destination: destination, Access: adapter.Access{Credential: string(plain)}, Gate: s.providerGate(actor, authz.OpAdapterConfigure, scope, request.Target.EnvironmentID), AllowEnvironmentCreate: true, BeforeEnvironmentCreate: beforeCreate, AfterEnvironmentCreate: afterCreate})
+	connection, err := lease.Module.TestConnection(ctx, adapter.ConnectionRequest{Config: adapter.Config{Origin: request.Origin}, Destination: destination, Access: adapter.Access{Credential: string(plain)}, Gate: s.providerGate(actor, authz.OpAdapterConfigure, scope, request.Target.EnvironmentID), AllowEnvironmentCreate: true, BeforeEnvironmentCreate: beforeCreate, AfterEnvironmentCreate: afterCreate})
 	if err != nil {
 		return AdapterView{}, err
 	}
@@ -462,6 +463,10 @@ func (s *Adapters) AddTarget(ctx context.Context, actor Actor, scope domain.Scop
 	if err != nil {
 		return store.AdapterTarget{}, err
 	}
+	provider, err := adapter.ParseProvider(record.Provider)
+	if err != nil {
+		return store.AdapterTarget{}, err
+	}
 	if len(ciphertext) == 0 {
 		return store.AdapterTarget{}, adapter.ErrProviderAuth
 	}
@@ -470,13 +475,11 @@ func (s *Adapters) AddTarget(ctx context.Context, actor Actor, scope domain.Scop
 		return store.AdapterTarget{}, err
 	}
 	defer crypto.Zero(plain)
-	module, release, err := s.planModule(record.Provider, record.Origin, string(plain))
+	lease, err := s.buildModule(provider, record.Origin, string(plain))
 	if err != nil {
 		return store.AdapterTarget{}, err
 	}
-	if release != nil {
-		defer release()
-	}
+	defer lease.Release()
 	targetID, err := newID("tgt")
 	if err != nil {
 		return store.AdapterTarget{}, err
@@ -487,7 +490,7 @@ func (s *Adapters) AddTarget(ctx context.Context, actor Actor, scope domain.Scop
 	}
 	beforeCreate, afterCreate := s.environmentCreateAudit(actor, scope, targetID, input, configureEventID)
 	destination := adapterDestination(input)
-	connection, err := module.TestConnection(ctx, adapter.ConnectionRequest{Config: adapter.Config{Origin: record.Origin}, Destination: destination, Access: adapter.Access{Credential: string(plain)}, Gate: s.providerGate(actor, authz.OpAdapterConfigure, scope, input.EnvironmentID), AllowEnvironmentCreate: true, BeforeEnvironmentCreate: beforeCreate, AfterEnvironmentCreate: afterCreate})
+	connection, err := lease.Module.TestConnection(ctx, adapter.ConnectionRequest{Config: adapter.Config{Origin: record.Origin}, Destination: destination, Access: adapter.Access{Credential: string(plain)}, Gate: s.providerGate(actor, authz.OpAdapterConfigure, scope, input.EnvironmentID), AllowEnvironmentCreate: true, BeforeEnvironmentCreate: beforeCreate, AfterEnvironmentCreate: afterCreate})
 	if err != nil {
 		return store.AdapterTarget{}, err
 	}
@@ -673,6 +676,10 @@ func (s *Adapters) preflightTargetRouting(ctx context.Context, actor Actor, scop
 	if err != nil || record.ID == "" {
 		return err
 	}
+	provider, err := adapter.ParseProvider(record.Provider)
+	if err != nil {
+		return err
+	}
 	if len(ciphertext) == 0 {
 		return adapter.ErrProviderAuth
 	}
@@ -685,17 +692,15 @@ func (s *Adapters) preflightTargetRouting(ctx context.Context, actor Actor, scop
 		return err
 	}
 	defer crypto.Zero(plain)
-	module, release, err := s.planModule(record.Provider, record.Origin, string(plain))
+	lease, err := s.buildModule(provider, record.Origin, string(plain))
 	if err != nil {
 		return err
 	}
-	if release != nil {
-		defer release()
-	}
+	defer lease.Release()
 	destination := adapterDestination(request.Target)
 	destination.NumericID = current.DestinationID
 	destination.RepositoryID = current.RepositoryID
-	_, err = module.TestConnection(ctx, adapter.ConnectionRequest{
+	_, err = lease.Module.TestConnection(ctx, adapter.ConnectionRequest{
 		Config: adapter.Config{Origin: record.Origin}, Destination: destination, Access: adapter.Access{Credential: string(plain)},
 		Gate: s.providerGate(actor, authz.OpAdapterConfigure, scope, current.EnvironmentID),
 	})
@@ -797,20 +802,22 @@ func (s *Adapters) MoveOrigin(ctx context.Context, actor Actor, scope domain.Sco
 	if scope.Project == "" || scope.Env != "" || adapterID == "" || origin == "" || len(credential) == 0 {
 		return store.AdapterRouteMoveBatch{}, fmt.Errorf("%w: origin move requires adapter, new origin, and new credential", domain.ErrInvalid)
 	}
+	providerName, err := s.providerForAdapter(ctx, actor, scope, adapterID)
+	if err != nil {
+		return store.AdapterRouteMoveBatch{}, err
+	}
+	provider, err := adapter.ParseProvider(providerName)
+	if err != nil {
+		return store.AdapterRouteMoveBatch{}, err
+	}
 	plain := append([]byte(nil), credential...)
 	defer crypto.Zero(plain)
-	provider, err := s.providerForAdapter(ctx, actor, scope, adapterID)
+	lease, err := s.buildModule(provider, origin, string(plain))
 	if err != nil {
 		return store.AdapterRouteMoveBatch{}, err
 	}
-	module, release, err := s.planModule(provider, origin, string(plain))
-	if err != nil {
-		return store.AdapterRouteMoveBatch{}, err
-	}
-	if release != nil {
-		defer release()
-	}
-	if err := module.ValidateConfig(adapter.Config{Origin: origin}); err != nil {
+	defer lease.Release()
+	if err := lease.Module.ValidateConfig(adapter.Config{Origin: origin}); err != nil {
 		return store.AdapterRouteMoveBatch{}, err
 	}
 	sealer, err := sealerFor(ctx, s.DB, s.Keyring, actor, authz.OpAdapterConfigure, scope)
@@ -1021,20 +1028,22 @@ func (s *Adapters) ResumeOriginMove(ctx context.Context, actor Actor, scope doma
 	if scope.Project == "" || scope.Env != "" || moveID == "" || origin == "" || len(credential) == 0 {
 		return store.AdapterMove{}, fmt.Errorf("%w: pending origin replacement requires project, move, origin, and credential", domain.ErrInvalid)
 	}
+	providerName, err := s.providerForMove(ctx, actor, scope, moveID)
+	if err != nil {
+		return store.AdapterMove{}, err
+	}
+	provider, err := adapter.ParseProvider(providerName)
+	if err != nil {
+		return store.AdapterMove{}, err
+	}
 	plain := append([]byte(nil), credential...)
 	defer crypto.Zero(plain)
-	provider, err := s.providerForMove(ctx, actor, scope, moveID)
+	lease, err := s.buildModule(provider, origin, string(plain))
 	if err != nil {
 		return store.AdapterMove{}, err
 	}
-	module, release, err := s.planModule(provider, origin, string(plain))
-	if err != nil {
-		return store.AdapterMove{}, err
-	}
-	if release != nil {
-		defer release()
-	}
-	if err := module.ValidateConfig(adapter.Config{Origin: origin}); err != nil {
+	defer lease.Release()
+	if err := lease.Module.ValidateConfig(adapter.Config{Origin: origin}); err != nil {
 		return store.AdapterMove{}, err
 	}
 	now := store.CanonTime(s.now())
@@ -1200,6 +1209,10 @@ func (s *Adapters) TestTarget(ctx context.Context, actor Actor, scope domain.Sco
 	if err != nil {
 		return adapter.Connection{}, err
 	}
+	provider, err := adapter.ParseProvider(material.Target.Provider)
+	if err != nil {
+		return adapter.Connection{}, err
+	}
 	if len(material.CredentialCiphertext) == 0 {
 		return adapter.Connection{}, adapter.ErrProviderAuth
 	}
@@ -1210,13 +1223,11 @@ func (s *Adapters) TestTarget(ctx context.Context, actor Actor, scope domain.Sco
 		return adapter.Connection{}, err
 	}
 	defer crypto.Zero(credential)
-	module, release, err := s.planModule(material.Target.Provider, material.Target.Origin, string(credential))
+	lease, err := s.buildModule(provider, material.Target.Origin, string(credential))
 	if err != nil {
 		return adapter.Connection{}, err
 	}
-	if release != nil {
-		defer release()
-	}
+	defer lease.Release()
 	providerGate := func(gateCtx context.Context) error {
 		return tx.Read(gateCtx, s.DB, func(gateCtx context.Context, _ store.ReadRepos, az *authz.TxAuthorizer) error {
 			caller, err := actor.resolve(gateCtx, az, s.now())
@@ -1227,7 +1238,7 @@ func (s *Adapters) TestTarget(ctx context.Context, actor Actor, scope domain.Sco
 			return err
 		})
 	}
-	connection, err := module.TestConnection(ctx, adapter.ConnectionRequest{
+	connection, err := lease.Module.TestConnection(ctx, adapter.ConnectionRequest{
 		Config: adapter.Config{Origin: material.Target.Origin}, Destination: adapterTarget(material.Target).Destination,
 		Access: adapter.Access{Credential: string(credential)}, Gate: providerGate,
 	})
@@ -1390,14 +1401,11 @@ func (s *Adapters) RevokeCredential(ctx context.Context, actor Actor, scope doma
 	})
 }
 
-func (s *Adapters) planModule(provider, origin, credential string) (adapter.Module, func(), error) {
-	if s.ProviderModule != nil {
-		return s.ProviderModule(provider, origin, credential)
+func (s *Adapters) buildModule(provider adapter.Provider, origin, credential string) (*adapter.ModuleLease, error) {
+	if s.ModuleFactory == nil {
+		return nil, errors.New("service: adapter module factory is not configured")
 	}
-	if s.PlanModule == nil {
-		return nil, nil, errors.New("service: adapter plan module is not configured")
-	}
-	return s.PlanModule(origin, credential)
+	return s.ModuleFactory(provider, adapter.Config{Origin: origin}, credential)
 }
 
 func (s *Adapters) providerForAdapter(ctx context.Context, actor Actor, scope domain.Scope, adapterID string) (string, error) {
@@ -1477,6 +1485,10 @@ func (s *Adapters) Plan(ctx context.Context, actor Actor, scope domain.Scope, ta
 	if err != nil {
 		return AdapterPlanResult{}, err
 	}
+	provider, err := adapter.ParseProvider(material.Target.Provider)
+	if err != nil {
+		return AdapterPlanResult{}, err
+	}
 	if len(material.CredentialCiphertext) == 0 {
 		return AdapterPlanResult{}, adapter.ErrProviderAuth
 	}
@@ -1485,13 +1497,11 @@ func (s *Adapters) Plan(ctx context.Context, actor Actor, scope domain.Scope, ta
 		return AdapterPlanResult{}, err
 	}
 	defer crypto.Zero(credential)
-	module, release, err := s.planModule(material.Target.Provider, material.Target.Origin, string(credential))
+	lease, err := s.buildModule(provider, material.Target.Origin, string(credential))
 	if err != nil {
 		return AdapterPlanResult{}, err
 	}
-	if release != nil {
-		defer release()
-	}
+	defer lease.Release()
 	providerGate := func(gateCtx context.Context) error {
 		return tx.Read(gateCtx, s.DB, func(gateCtx context.Context, _ store.ReadRepos, az *authz.TxAuthorizer) error {
 			caller, err := actor.resolve(gateCtx, az, s.now())
@@ -1502,7 +1512,7 @@ func (s *Adapters) Plan(ctx context.Context, actor Actor, scope domain.Scope, ta
 			return err
 		})
 	}
-	plan, err := module.Plan(ctx, adapter.PlanRequest{Config: adapter.Config{Origin: material.Target.Origin}, Target: adapterTarget(material.Target), Manifest: material.Manifest, Ledger: material.Ledger, Gate: providerGate})
+	plan, err := lease.Module.Plan(ctx, adapter.PlanRequest{Config: adapter.Config{Origin: material.Target.Origin}, Target: adapterTarget(material.Target), Manifest: material.Manifest, Ledger: material.Ledger, Gate: providerGate})
 	if err != nil {
 		return AdapterPlanResult{}, err
 	}

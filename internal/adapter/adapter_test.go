@@ -82,6 +82,24 @@ func TestGitHubManifestRefusesUnrepresentableNonUTF8ByName(t *testing.T) {
 	}
 }
 
+func TestProviderKindsAreClosedAndRejectUnknownValues(t *testing.T) {
+	want := []Provider{ForgejoProvider, GitHubActionsProvider}
+	if got := SupportedProviders(); !slices.Equal(got, want) {
+		t.Fatalf("SupportedProviders() = %v, want %v", got, want)
+	}
+	for _, provider := range want {
+		got, err := ParseProvider(string(provider))
+		if err != nil || got != provider {
+			t.Fatalf("ParseProvider(%q) = %q, %v", provider, got, err)
+		}
+	}
+	for _, raw := range []string{"", "gitlab", "FORGEJO"} {
+		if _, err := ParseProvider(raw); err == nil {
+			t.Fatalf("ParseProvider(%q) accepted unknown provider", raw)
+		}
+	}
+}
+
 func TestModuleSeamHasExactlyFourOperations(t *testing.T) {
 	typeOf := reflect.TypeOf((*Module)(nil)).Elem()
 	got := make([]string, 0, typeOf.NumMethod())

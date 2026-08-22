@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/netip"
+	"strings"
 	"testing"
 
 	"github.com/Hikyo-Org/hikyo/internal/adapter"
@@ -11,14 +12,25 @@ import (
 	"github.com/Hikyo-Org/hikyo/internal/store"
 )
 
-func TestAdapterLoaderSelectsPrivateEgressByExactOrigin(t *testing.T) {
+func TestAdapterModuleFactorySelectsPrivateEgressByExactOrigin(t *testing.T) {
 	want := netip.MustParsePrefix("10.42.0.0/16")
-	loader := &adapterLoader{egressPolicy: map[string][]netip.Prefix{"https://git.internal.example": {want}}}
-	if got := loader.allowedCIDRs("https://git.internal.example"); len(got) != 1 || got[0] != want {
-		t.Fatalf("exact origin policy = %v", got)
+	seen := []netip.Prefix(nil)
+	factory := &adapterModuleFactory{
+		egressPolicy: map[string][]netip.Prefix{"https://git.internal.example": {want}},
+		providers: map[adapter.Provider]providerConstructor{
+			adapter.ForgejoProvider: func(_ adapter.Config, _ string, allowed []netip.Prefix) (adapter.Module, func(), error) {
+				seen = append([]netip.Prefix(nil), allowed...)
+				return stubProviderModule{}, nil, nil
+			},
+		},
 	}
-	if got := loader.allowedCIDRs("https://other.internal.example"); len(got) != 0 {
-		t.Fatalf("other origin inherited policy: %v", got)
+	lease, err := factory.Build(adapter.ForgejoProvider, adapter.Config{Origin: "https://git.internal.example"}, "token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease.Release()
+	if len(seen) != 1 || seen[0] != want {
+		t.Fatalf("exact origin policy = %v", seen)
 	}
 }
 
@@ -27,8 +39,12 @@ func TestAdapterLoaderGatesBeforeLoadAndEveryPlaintextOpen(t *testing.T) {
 	firstValue := []byte("first-value")
 	secondOpened := false
 	loadCalled := false
+	releases := 0
 	journal := &orderedLoaderJournal{failAt: 4}
 	loader := &adapterLoader{
+		moduleFactory: func(adapter.Provider, adapter.Config, string) (*adapter.ModuleLease, error) {
+			return adapter.NewModuleLease(stubProviderModule{}, func() { releases++ })
+		},
 		loadExecution: func(context.Context, adapter.Job) (store.AdapterExecution, error) {
 			loadCalled = true
 			if journal.calls != 1 {
@@ -67,8 +83,8 @@ func TestAdapterLoaderGatesBeforeLoadAndEveryPlaintextOpen(t *testing.T) {
 	if !errors.Is(err, adapter.ErrUnauthorized) {
 		t.Fatalf("Load() = %v, want gate refusal", err)
 	}
-	if !loadCalled || journal.calls != 4 || secondOpened {
-		t.Fatalf("load=%v gates=%d second_opened=%v", loadCalled, journal.calls, secondOpened)
+	if !loadCalled || journal.calls != 4 || secondOpened || releases != 1 {
+		t.Fatalf("load=%v gates=%d second_opened=%v releases=%d", loadCalled, journal.calls, secondOpened, releases)
 	}
 	for _, buffer := range [][]byte{credential, firstValue} {
 		for _, value := range buffer {
@@ -84,6 +100,7 @@ func TestAdapterActivationLoaderRefusesBeforePendingCredentialOpen(t *testing.T)
 	openCalled := false
 	journal := &orderedLoaderJournal{failAt: 2}
 	loader := &adapterLoader{
+		moduleFactory: newAdapterModuleFactory(nil).Build,
 		loadActivation: func(context.Context, adapter.Job) (store.AdapterActivation, error) {
 			loadCalled = true
 			if journal.calls != 1 {
@@ -105,6 +122,31 @@ func TestAdapterActivationLoaderRefusesBeforePendingCredentialOpen(t *testing.T)
 	}
 	if !loadCalled || openCalled || journal.calls != 2 {
 		t.Fatalf("load=%v open=%v gates=%d", loadCalled, openCalled, journal.calls)
+	}
+}
+
+func TestAdapterLoaderRejectsUnknownProviderBeforeCredentialOpen(t *testing.T) {
+	openCalled := false
+	factoryCalled := false
+	loader := &adapterLoader{
+		loadExecution: func(context.Context, adapter.Job) (store.AdapterExecution, error) {
+			return store.AdapterExecution{Provider: "gitlab", CredentialCiphertext: []byte("sealed")}, nil
+		},
+		openField: func(crypto.ProjectFieldAAD, []byte) ([]byte, error) {
+			openCalled = true
+			return []byte("credential"), nil
+		},
+		moduleFactory: func(adapter.Provider, adapter.Config, string) (*adapter.ModuleLease, error) {
+			factoryCalled = true
+			return adapter.NewModuleLease(stubProviderModule{}, nil)
+		},
+	}
+	_, err := loader.Load(t.Context(), adapter.Job{}, &orderedLoaderJournal{})
+	if err == nil || !strings.Contains(err.Error(), "unknown provider") {
+		t.Fatalf("Load() = %v, want unknown provider refusal", err)
+	}
+	if openCalled || factoryCalled {
+		t.Fatalf("unknown provider opened credential=%v called factory=%v", openCalled, factoryCalled)
 	}
 }
 
