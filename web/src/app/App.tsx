@@ -19,7 +19,12 @@ import { Values } from '../routes/Values.tsx';
 import { WorkspaceApprove } from '../routes/WorkspaceApprove.tsx';
 import { WorkspaceCallback } from '../routes/WorkspaceCallback.tsx';
 import { WorkspaceScope } from '../routes/WorkspaceScope.tsx';
-import { CHROMELESS, SURFACES, surfaceById, type Surface, type SurfaceId } from './navigation.ts';
+import {
+  allowsAnonymousSession,
+  SURFACES,
+  surfaceById,
+  type SurfaceId,
+} from './navigation.ts';
 import { ToastViewport } from './notifications.tsx';
 
 /**
@@ -70,15 +75,16 @@ const ELEMENTS: Record<SurfaceId, ReactElement> = {
 };
 
 /**
- * The surfaces that render inside the chrome and behind a session: everything
- * that is not chromeless. Complement of CHROMELESS rather than
- * `section !== null`, because `values` has no section and is still a chromed,
- * signed-in surface — see the note on CHROMELESS.
+ * Chrome and session access both come from the route registry. `section`
+ * remains navigation placement only: `values` has no sidebar section but is
+ * still an authenticated shell route.
  */
-const shellSurfaces: readonly Surface[] = SURFACES.filter((s) => !CHROMELESS.includes(s));
+const shellSurfaces = SURFACES.filter((surface) => surface.chrome === 'shell');
 
 /**
- * The chromeless surfaces reachable WITHOUT a session.
+ * Routes reachable WITHOUT a session. Public routes need no session;
+ * establishing ceremonies render Login in place so their state-bearing URL
+ * survives authentication.
  *
  * The approve page is here deliberately and it is the non-obvious one: a first
  * establishment lands in a popup carrying no cookies for this instance at all,
@@ -90,7 +96,12 @@ const shellSurfaces: readonly Surface[] = SURFACES.filter((s) => !CHROMELESS.inc
  * parameters and shouts them down a channel, and making that depend on a
  * session would break the one arc where the human has no session yet.
  */
-const publicSurfaces: readonly Surface[] = CHROMELESS;
+const anonymousSurfaces = SURFACES.filter(allowsAnonymousSession);
+
+/** Every non-login route that renders without shell chrome after sign-in. */
+const sessionChromelessSurfaces = SURFACES.filter(
+  (surface) => surface.chrome === 'none' && surface.id !== 'login',
+);
 
 /**
  * The application root.
@@ -129,7 +140,7 @@ export function App() {
     <BrowserRouter>
       {live === null ? (
         <Routes>
-          {publicSurfaces.map((surface) => (
+          {anonymousSurfaces.map((surface) => (
             <Route key={surface.id} path={surface.path} element={ELEMENTS[surface.id]} />
           ))}
           <Route path="*" element={<Navigate to={surfaceById('login').path} replace />} />
@@ -140,11 +151,9 @@ export function App() {
             path={surfaceById('login').path}
             element={<Navigate to={surfaceById('overview').path} replace />}
           />
-          {publicSurfaces
-            .filter((surface) => surface.id !== 'login')
-            .map((surface) => (
-              <Route key={surface.id} path={surface.path} element={ELEMENTS[surface.id]} />
-            ))}
+          {sessionChromelessSurfaces.map((surface) => (
+            <Route key={surface.id} path={surface.path} element={ELEMENTS[surface.id]} />
+          ))}
           <Route element={<Shell session={live} />}>
             {shellSurfaces.map((surface) => (
               <Route key={surface.id} path={surface.path} element={ELEMENTS[surface.id]} />

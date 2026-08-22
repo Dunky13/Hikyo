@@ -77,6 +77,14 @@ test.describe('login', () => {
     expect(await page.context().cookies()).toEqual([]);
   });
 
+  test('redirects an anonymous authenticated-route deep link to login', async ({ page }) => {
+    await page.goto('/projects');
+
+    await expect(page).toHaveURL(/\/login$/);
+    await expect(page.getByRole('heading', { name: 'Sign in to Hikyo' })).toBeVisible();
+    await expect(page.getByRole('navigation', { name: 'Organisations' })).toHaveCount(0);
+  });
+
   test('signs in and establishes a browser session on cookies alone', async ({ page }) => {
     await page.goto('/login');
     await page.getByLabel('Username').fill(ADMIN.username);
