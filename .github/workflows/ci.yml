@@ -260,6 +260,32 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  # Probe the exact release-shaped binary already built for browser validation.
+  # Keeping this in the same run removes the standalone workflow's duplicate
+  # cold compile while preserving exact-head, read-only pull-request execution.
+  no-egress:
+    needs: [changes, app-build]
+    if: ${{ fromJSON(needs.changes.outputs.plan).web }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Download the exact app build
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: hikyo-app-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Prepare the prebuilt app
+        run: chmod +x ci-artifacts/hikyo-ui
+      - name: Install strace
+        run: sudo apt-get update && sudo apt-get install -y strace
+      - name: Boot+idle originates zero outbound connections
+        env:
+          HIKYO_NO_EGRESS_BIN: ${{ github.workspace }}/ci-artifacts/hikyo-ui
+        run: ./scripts/ci/no-egress.sh
+
   release-snapshot:
     needs: changes
     if: ${{ fromJSON(needs.changes.outputs.plan).release_snapshot }}
@@ -1218,6 +1244,7 @@ jobs:
       - headline-guarantee
       - k8s-e2e
       - lint
+      - no-egress
       - race
       - release-snapshot
       - supply-chain-checks

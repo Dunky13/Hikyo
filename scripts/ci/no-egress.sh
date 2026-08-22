@@ -15,8 +15,16 @@ work="$(mktemp -d)"
 pgid=""
 trap 'rm -rf "$work"; [ -n "$pgid" ] && kill -TERM "-${pgid}" 2>/dev/null || true' EXIT
 
-bin="$work/hikyo"
-go build -o "$bin" ./cmd/hikyo
+if [ -n "${HIKYO_NO_EGRESS_BIN:-}" ]; then
+	bin="$HIKYO_NO_EGRESS_BIN"
+	if [ ! -x "$bin" ]; then
+		echo "no-egress: prebuilt binary is not executable: $bin"
+		exit 2
+	fi
+else
+	bin="$work/hikyo"
+	go build -o "$bin" ./cmd/hikyo
+fi
 
 port=47811
 origin="http://127.0.0.1:${port}"

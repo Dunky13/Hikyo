@@ -16,6 +16,11 @@ binary once in `app-build`. Both browser shards consume that exact run-scoped
 artifact. The six-target GoReleaser snapshot stays parallel: serializing it
 behind the native browser build would lengthen the critical path.
 
+The no-egress boot-and-idle probe now consumes that same exact run-scoped UI
+binary. Its standalone workflow was removed, eliminating a second cold module
+download and Go compile. The probe remains a named, fail-closed job in the
+base-controlled validation graph and is explicitly included in `ci-required`.
+
 ## Coverage and trust model
 
 - Race assigns all 56 Go packages except `internal/isolation` exactly once.
@@ -60,6 +65,13 @@ shards. Release snapshot keeps its small SPA build so its six cross-platform
 builds can run concurrently. Hosted timing remains pending until this exact
 head runs on GitHub.
 
+Before no-egress artifact reuse, the standalone job downloaded 216 Go modules
+and compiled the application from scratch. Six of its first eight red runs ended
+with hosted-runner shutdown or exit 143 before the probe began. Exact failed SHA
+`5df66fe5eb00f58fda2fbcf5e279d99cc304c0cd` passed unchanged on rerun
+`32531439791` attempt 2, confirming that failure as runner infrastructure rather
+than an egress regression.
+
 The flow harness disables authenticated service budgets through an explicit
 development-only setting. The matrix deliberately reuses one principal across
 enough publish scenarios to exceed the production ten-per-minute ceiling; the
@@ -87,4 +99,7 @@ and publish sequence in `docs/release/signing.md` remains unchanged.
   reporting fixtures passed.
 - Build-artifact reuse fixture, web typecheck/unit/build, and docs verification
   passed.
+- The artifact-reuse fixture proves no-egress downloads the exact app-build
+  artifact, restores its executable bit, passes it to the probe, and performs no
+  Go setup or build of its own.
 - Actionlint, ShellCheck, Go build, Go vet, formatting, and diff checks passed.

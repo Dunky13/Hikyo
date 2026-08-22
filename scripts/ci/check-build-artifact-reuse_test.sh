@@ -6,6 +6,7 @@ set -eu
 script_dir=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 repo_root=$(CDPATH='' cd -- "$script_dir/../.." && pwd)
 workflow="$repo_root/.github/workflows/ci.yml"
+standalone_no_egress="$repo_root/.github/workflows/no-egress.yml"
 fixture="$repo_root/web/e2e/fixtures/instance.ts"
 spa_builder="$repo_root/scripts/ci/build-spa.sh"
 
@@ -21,7 +22,8 @@ require_line() {
 		fail "missing $expected in $(basename "$file")"
 }
 
-app_block=$(sed -n '/^  app-build:/,/^  release-snapshot:/p' "$workflow")
+app_block=$(sed -n '/^  app-build:/,/^  no-egress:/p' "$workflow")
+no_egress_block=$(sed -n '/^  no-egress:/,/^  release-snapshot:/p' "$workflow")
 release_block=$(sed -n '/^  release-snapshot:/,/^  generated:/p' "$workflow")
 web_block=$(sed -n '/^  web:/,/^  test:/p' "$workflow")
 
@@ -32,6 +34,22 @@ printf '%s\n' "$app_block" | grep -F 'go build -tags ui -o ci-artifacts/hikyo-ui
 	fail 'app-build does not produce the release-shaped CI binary'
 printf '%s\n' "$app_block" | grep -F 'name: hikyo-app-${{ github.run_id }}-${{ github.run_attempt }}' >/dev/null ||
 	fail 'app-build artifact is not scoped to this run attempt'
+
+[ -n "$no_egress_block" ] || fail 'no-egress job is missing'
+printf '%s\n' "$no_egress_block" | grep -F 'needs: [changes, app-build]' >/dev/null ||
+	fail 'no-egress does not depend on app-build'
+printf '%s\n' "$no_egress_block" | grep -F 'name: hikyo-app-${{ github.run_id }}-${{ github.run_attempt }}' >/dev/null ||
+	fail 'no-egress does not consume the exact app-build artifact'
+printf '%s\n' "$no_egress_block" | grep -F 'actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1' >/dev/null ||
+	fail 'no-egress does not use the repository-pinned download-artifact action'
+printf '%s\n' "$no_egress_block" | grep -F 'run: chmod +x ci-artifacts/hikyo-ui' >/dev/null ||
+	fail 'no-egress does not restore execute permission after artifact download'
+printf '%s\n' "$no_egress_block" | grep -F 'HIKYO_NO_EGRESS_BIN: ${{ github.workspace }}/ci-artifacts/hikyo-ui' >/dev/null ||
+	fail 'no-egress does not pass the downloaded binary to the probe'
+if printf '%s\n' "$no_egress_block" | grep -E 'actions/setup-go|go build' >/dev/null; then
+	fail 'no-egress repeats app-build compilation'
+fi
+[ ! -e "$standalone_no_egress" ] || fail 'standalone no-egress workflow still duplicates app-build'
 
 printf '%s\n' "$web_block" | grep -F 'needs: [changes, app-build]' >/dev/null ||
 	fail 'web does not depend on app-build'
@@ -86,4 +104,4 @@ if grep -Eq 'gh release|action-gh-release' "$workflow"; then
 	fail 'ordinary CI publishes a GitHub Release and bypasses the signing ceremony'
 fi
 
-printf 'build artifact reuse fixture: one app build feeds browser shards while release downloads stay parallel\n'
+printf 'build artifact reuse fixture: one app build feeds browser shards and no-egress while release downloads stay parallel\n'
