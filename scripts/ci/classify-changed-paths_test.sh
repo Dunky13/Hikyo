@@ -3,171 +3,80 @@ set -eu
 
 script_dir=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 classifier="$script_dir/classify-changed-paths.sh"
+registry="$script_dir/ci-job-registry.json"
+all_jobs=$(jq -c '.path_classes.full | sort' "$registry")
 
-actual=$(printf '%s\n' \
-	'docs/site/src/content/docs/docs/getting-started.mdx' \
-	'README.md' |
-	"$classifier" --files)
+expect_plan() {
+	label=$1
+	selected=$2
+	shift 2
+	actual=$(printf '%s\n' "$@" | "$classifier" --files)
+	expected=$(jq -cn --argjson all "$all_jobs" --argjson selected "$selected" '
+		$all | map(. as $job |
+			{key: $job, value: ($selected | index($job) != null)}) | from_entries
+	')
+	if ! jq -en --argjson actual "$actual" --argjson expected "$expected" \
+		'$actual == $expected' >/dev/null; then
+		printf 'changed-path classifier fixture failed: %s plan was wrong\n' "$label" >&2
+		printf 'actual: %s\nexpected: %s\n' "$actual" "$expected" >&2
+		exit 1
+	fi
+}
 
-expected='{
-	"client": false,
-	"compose_demo": false,
-	"docs": true,
-	"fuzz": false,
-	"generated": false,
-	"headline_guarantee": false,
-	"k8s_e2e": false,
-	"lint": false,
-	"race": false,
-	"release_snapshot": false,
-	"supply_chain_checks": false,
-	"test": false,
-	"web": false
-}'
-
-if ! jq -e --argjson expected "$expected" '. == $expected' <<EOF >/dev/null
+expect_selected() {
+	label=$1
+	job=$2
+	path=$3
+	actual=$(printf '%s\n' "$path" | "$classifier" --files)
+	if ! jq -e --arg job "$job" '.[$job] == true' <<EOF >/dev/null
 $actual
 EOF
-then
-	printf 'changed-path classifier fixture failed: docs-only plan was wrong\n' >&2
-	printf 'actual: %s\n' "$actual" >&2
-	exit 1
-fi
+	then
+		printf 'changed-path classifier fixture failed: %s did not select %s\n' \
+			"$label" "$job" >&2
+		exit 1
+	fi
+}
 
-web_actual=$(printf '%s\n' 'web/src/routes/Values.tsx' | "$classifier" --files)
-if ! printf '%s\n' "$web_actual" | jq -e '
-	.web == true and
-	.release_snapshot == true and
-	([.client, .compose_demo, .docs, .fuzz, .generated, .headline_guarantee, .k8s_e2e, .lint, .race, .supply_chain_checks, .test] |
-		all(. == false))
-' >/dev/null; then
-	printf 'changed-path classifier fixture failed: web-only plan was wrong\n' >&2
-	printf 'actual: %s\n' "$web_actual" >&2
-	exit 1
-fi
-
-core_actual=$(printf '%s\n' 'internal/service/values.go' | "$classifier" --files)
-if ! printf '%s\n' "$core_actual" | jq -e '
-	.fuzz == true and
-	.generated == true and
-	.headline_guarantee == true and
-	.race == true and
-	.release_snapshot == true and
-	.test == true and
-	.web == true and
-	([.client, .compose_demo, .docs, .k8s_e2e, .lint, .supply_chain_checks] | all(. == false))
-' >/dev/null; then
-	printf 'changed-path classifier fixture failed: core plan was wrong\n' >&2
-	printf 'actual: %s\n' "$core_actual" >&2
-	exit 1
-fi
-
-api_actual=$(printf '%s\n' 'api/openapi.yaml' | "$classifier" --files)
-if ! printf '%s\n' "$api_actual" | jq -e '
-	.client == true and
-	.compose_demo == true and
-	.generated == true and
-	.headline_guarantee == true and
-	.release_snapshot == true and
-	.test == true and
-	.web == true and
-	([.docs, .fuzz, .k8s_e2e, .lint, .race, .supply_chain_checks] | all(. == false))
-' >/dev/null; then
-	printf 'changed-path classifier fixture failed: API plan was wrong\n' >&2
-	printf 'actual: %s\n' "$api_actual" >&2
-	exit 1
-fi
-
-client_actual=$(printf '%s\n' 'clients/ts/src/generated/types.gen.ts' | "$classifier" --files)
-if ! printf '%s\n' "$client_actual" | jq -e '
-	.client == true and
-	.release_snapshot == true and
-	.web == true and
-	([.compose_demo, .docs, .fuzz, .generated, .headline_guarantee, .k8s_e2e, .lint, .race, .supply_chain_checks, .test] |
-		all(. == false))
-' >/dev/null; then
-	printf 'changed-path classifier fixture failed: client plan was wrong\n' >&2
-	printf 'actual: %s\n' "$client_actual" >&2
-	exit 1
-fi
-
-release_actual=$(printf '%s\n' 'scripts/release/check-tag.sh' | "$classifier" --files)
-if ! printf '%s\n' "$release_actual" | jq -e '
-	.lint == true and
-	.release_snapshot == true and
-	.supply_chain_checks == true and
-	([.client, .compose_demo, .docs, .fuzz, .generated, .headline_guarantee, .k8s_e2e, .race, .test, .web] | all(. == false))
-' >/dev/null; then
-	printf 'changed-path classifier fixture failed: release plan was wrong\n' >&2
-	printf 'actual: %s\n' "$release_actual" >&2
-	exit 1
-fi
-
-license_actual=$(printf '%s\n' 'LICENSE' | "$classifier" --files)
-if ! printf '%s\n' "$license_actual" | jq -e '
-	.docs == true and
-	.release_snapshot == true and
-	([.client, .compose_demo, .fuzz, .generated, .headline_guarantee, .k8s_e2e, .lint, .race, .supply_chain_checks, .test, .web] |
-		all(. == false))
-' >/dev/null; then
-	printf 'changed-path classifier fixture failed: LICENSE plan was wrong\n' >&2
-	printf 'actual: %s\n' "$license_actual" >&2
-	exit 1
-fi
-
-main_gate_actual=$(printf '%s\n' 'release/repository/main-ci-gate.json' |
-	"$classifier" --files)
-if ! printf '%s\n' "$main_gate_actual" | jq -e '
-	.docs == true and
-	.lint == true and
-	.release_snapshot == true and
-	.supply_chain_checks == true and
-	([.client, .compose_demo, .fuzz, .generated, .headline_guarantee, .k8s_e2e, .race, .test, .web] | all(. == false))
-' >/dev/null; then
-	printf 'changed-path classifier fixture failed: main CI gate plan was wrong\n' >&2
-	printf 'actual: %s\n' "$main_gate_actual" >&2
-	exit 1
-fi
+expect_plan 'docs-only' '["docs"]' \
+	'docs/site/src/content/docs/docs/getting-started.mdx' 'README.md'
+expect_plan 'web-only' '["release-snapshot","web"]' 'web/src/routes/Values.tsx'
+expect_plan 'core' \
+	'["fuzz","generated","headline-guarantee","race","release-snapshot","test","web"]' \
+	'internal/service/values.go'
+expect_plan 'API' \
+	'["client","compose-demo","generated","headline-guarantee","release-snapshot","test","web"]' \
+	'api/openapi.yaml'
+expect_plan 'client' '["client","release-snapshot","web"]' \
+	'clients/ts/src/generated/types.gen.ts'
+expect_plan 'release' '["lint","release-snapshot","supply-chain-checks"]' \
+	'scripts/release/check-tag.sh'
+expect_plan 'LICENSE' '["docs","release-snapshot"]' 'LICENSE'
+expect_plan 'main CI gate' \
+	'["docs","lint","release-snapshot","supply-chain-checks"]' \
+	'release/repository/main-ci-gate.json'
 
 for docs_script in \
 	'scripts/ci/check-docs-live.sh' \
 	'scripts/ci/check-docs-pwa.sh'; do
-	docs_script_actual=$(printf '%s\n' "$docs_script" | "$classifier" --files)
-	if ! printf '%s\n' "$docs_script_actual" | jq -e '
-		.docs == true and
-		.lint == true and
-		([.client, .compose_demo, .fuzz, .generated, .headline_guarantee, .k8s_e2e, .race, .release_snapshot, .supply_chain_checks, .test, .web] |
-			all(. == false))
-	' >/dev/null; then
-		printf 'changed-path classifier fixture failed: %s plan was wrong\n' \
-			"$docs_script" >&2
-		printf 'actual: %s\n' "$docs_script_actual" >&2
-		exit 1
-	fi
+	expect_plan "$docs_script" '["docs","lint"]' "$docs_script"
 done
 
 all_actual=$("$classifier" --all)
-if ! printf '%s\n' "$all_actual" | jq -e 'all(.[]; . == true)' >/dev/null; then
+if ! jq -en --argjson actual "$all_actual" --argjson jobs "$all_jobs" '
+	($actual | keys | sort) == $jobs and all($actual[]; . == true)
+' >/dev/null; then
 	printf 'changed-path classifier fixture failed: full plan was wrong\n' >&2
-	printf 'actual: %s\n' "$all_actual" >&2
 	exit 1
 fi
 
-# Race and fuzz are blocking for code and schema changes. Their sharded jobs keep
-# complete package/target coverage without putting their old serial runtimes back
-# on the pull-request critical path.
 for code_path in \
 	'internal/service/values.go' \
 	'internal/store/query.sql' \
 	'internal/operator/reconciler.go' \
 	'internal/isolation/k8s_operator_e2e_test.go'; do
-	code_actual=$(printf '%s\n' "$code_path" | "$classifier" --files)
-	if ! printf '%s\n' "$code_actual" | jq -e '.fuzz == true and .race == true' >/dev/null; then
-		printf 'changed-path classifier fixture failed: %s did not select race/fuzz\n' \
-			"$code_path" >&2
-		printf 'actual: %s\n' "$code_actual" >&2
-		exit 1
-	fi
+	expect_selected "$code_path" fuzz "$code_path"
+	expect_selected "$code_path" race "$code_path"
 done
 
 for scoped_path in \
@@ -175,10 +84,12 @@ for scoped_path in \
 	'web/src/routes/Values.tsx' \
 	'docs/site/src/content/docs/docs/index.mdx'; do
 	scoped_actual=$(printf '%s\n' "$scoped_path" | "$classifier" --files)
-	if ! printf '%s\n' "$scoped_actual" | jq -e '.fuzz == false and .race == false' >/dev/null; then
+	if ! jq -e '.fuzz == false and .race == false' <<EOF >/dev/null
+$scoped_actual
+EOF
+	then
 		printf 'changed-path classifier fixture failed: %s unexpectedly selected race/fuzz\n' \
 			"$scoped_path" >&2
-		printf 'actual: %s\n' "$scoped_actual" >&2
 		exit 1
 	fi
 done
@@ -190,91 +101,27 @@ for dependency_or_config in \
 	'clients/ts/pnpm-workspace.yaml' \
 	'docs/site/package.json' \
 	'.goreleaser.yaml'; do
-	dependency_actual=$(printf '%s\n' "$dependency_or_config" | "$classifier" --files)
-	if ! printf '%s\n' "$dependency_actual" | jq -e 'all(.[]; . == true)' >/dev/null; then
-		printf 'changed-path classifier fixture failed: %s did not select the full suite\n' \
-			"$dependency_or_config" >&2
-		exit 1
-	fi
+	expect_plan "$dependency_or_config" "$all_jobs" "$dependency_or_config"
 done
 
-fallback_actual=$(printf '%s\n' 'release/repository/fallback-channel-test.json' |
-	"$classifier" --files)
-if ! printf '%s\n' "$fallback_actual" | jq -e '
-	.docs == true and
-	.lint == true and
-	.release_snapshot == true and
-	.supply_chain_checks == true and
-	([.client, .compose_demo, .fuzz, .generated, .headline_guarantee, .k8s_e2e, .race, .test, .web] | all(. == false))
-' >/dev/null; then
-	printf 'changed-path classifier fixture failed: fallback-channel plan was wrong\n' >&2
-	printf 'actual: %s\n' "$fallback_actual" >&2
-	exit 1
-fi
-
-mixed_actual=$(printf '%s\n' \
-	'docs/site/src/content/docs/docs/index.mdx' \
-	'web/src/routes/Login.tsx' |
-	"$classifier" --files)
-if ! printf '%s\n' "$mixed_actual" | jq -e '
-	.docs == true and
-	.release_snapshot == true and
-	.web == true and
-	([.client, .compose_demo, .fuzz, .generated, .headline_guarantee, .k8s_e2e, .lint, .race, .supply_chain_checks, .test] |
-		all(. == false))
-' >/dev/null; then
-	printf 'changed-path classifier fixture failed: mixed plan was not a union\n' >&2
-	printf 'actual: %s\n' "$mixed_actual" >&2
-	exit 1
-fi
+expect_plan 'fallback channel' \
+	'["docs","lint","release-snapshot","supply-chain-checks"]' \
+	'release/repository/fallback-channel-test.json'
+expect_plan 'mixed docs and web' '["docs","release-snapshot","web"]' \
+	'docs/site/src/content/docs/docs/index.mdx' 'web/src/routes/Login.tsx'
 
 for operator_path in \
 	'internal/operator/reconciler.go' \
 	'internal/isolation/k8s_operator_e2e_test.go'; do
-	operator_actual=$(printf '%s\n' "$operator_path" | "$classifier" --files)
-	if ! printf '%s\n' "$operator_actual" | jq -e '
-		.fuzz == true and
-		.k8s_e2e == true and
-		.generated == true and
-		.headline_guarantee == true and
-		.race == true and
-		.release_snapshot == true and
-		.test == true and
-		.web == true and
-		([.client, .docs, .lint, .supply_chain_checks] | all(. == false))
-	' >/dev/null; then
-		printf 'changed-path classifier fixture failed: %s did not select k8s_e2e\n' \
-			"$operator_path" >&2
-		printf 'actual: %s\n' "$operator_actual" >&2
-		exit 1
-	fi
+	expect_plan "$operator_path" \
+		'["fuzz","generated","headline-guarantee","k8s-e2e","race","release-snapshot","test","web"]' \
+		"$operator_path"
 done
 
-crds_actual=$(printf '%s\n' 'chart/hikyo/crds/hikyo.dev_hikyosecrets.yaml' | "$classifier" --files)
-if ! printf '%s\n' "$crds_actual" | jq -e '
-	.k8s_e2e == true and
-	.generated == true and
-	.lint == true and
-	.release_snapshot == true and
-	.supply_chain_checks == true and
-	([.client, .docs, .fuzz, .headline_guarantee, .race, .test, .web] | all(. == false))
-' >/dev/null; then
-	printf 'changed-path classifier fixture failed: generated CRDs plan was wrong\n' >&2
-	printf 'actual: %s\n' "$crds_actual" >&2
-	exit 1
-fi
-
-k8s_runner_actual=$(printf '%s\n' 'scripts/ci/k8s-e2e.sh' | "$classifier" --files)
-if ! printf '%s\n' "$k8s_runner_actual" | jq -e '
-	.k8s_e2e == true and
-	.lint == true and
-	([.client, .docs, .fuzz, .generated, .headline_guarantee, .race, .release_snapshot, .supply_chain_checks, .test, .web] |
-		all(. == false))
-' >/dev/null; then
-	printf 'changed-path classifier fixture failed: k8s-e2e runner plan was wrong\n' >&2
-	printf 'actual: %s\n' "$k8s_runner_actual" >&2
-	exit 1
-fi
+expect_plan 'generated CRD' \
+	'["generated","k8s-e2e","lint","release-snapshot","supply-chain-checks"]' \
+	'chart/hikyo/crds/hikyo.dev_hikyosecrets.yaml'
+expect_plan 'k8s e2e runner' '["k8s-e2e","lint"]' 'scripts/ci/k8s-e2e.sh'
 
 for fail_closed_input in \
 	'' \
@@ -283,14 +130,10 @@ for fail_closed_input in \
 	'.github/workflows/ci-control.yml' \
 	'.github/workflows/docs.yml' \
 	'.github/workflows/release.yml' \
+	'scripts/ci/ci-job-registry.json' \
 	'scripts/ci/classify-changed-paths.sh' \
 	'scripts/ci/check-required-jobs.sh'; do
-	fail_closed_actual=$(printf '%s\n' "$fail_closed_input" | "$classifier" --files)
-	if ! printf '%s\n' "$fail_closed_actual" | jq -e 'all(.[]; . == true)' >/dev/null; then
-		printf 'changed-path classifier fixture failed: %s did not fail closed\n' \
-			"${fail_closed_input:-empty input}" >&2
-		exit 1
-	fi
+	expect_plan "${fail_closed_input:-empty input}" "$all_jobs" "$fail_closed_input"
 done
 
 for compose_path in \
@@ -300,11 +143,7 @@ for compose_path in \
 	'internal/cli/run.go' \
 	'internal/compose/doctor.go' \
 	'internal/service/delivery.go'; do
-	compose_actual=$(printf '%s\n' "$compose_path" | "$classifier" --files)
-	if ! printf '%s\n' "$compose_actual" | jq -e '.compose_demo == true' >/dev/null; then
-		printf 'changed-path classifier fixture failed: %s did not select compose-demo\n' "$compose_path" >&2
-		exit 1
-	fi
+	expect_selected "$compose_path" compose-demo "$compose_path"
 done
 
 if "$classifier" --unsupported >/dev/null 2>&1; then
@@ -312,4 +151,4 @@ if "$classifier" --unsupported >/dev/null 2>&1; then
 	exit 1
 fi
 
-printf 'changed-path classifier fixture: scoped and full plans passed\n'
+printf 'changed-path classifier fixture: exact workflow job IDs and fail-closed plans passed\n'

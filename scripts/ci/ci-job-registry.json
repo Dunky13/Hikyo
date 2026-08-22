@@ -1,0 +1,117 @@
+{
+  "version": 2,
+  "workflow": ".github/workflows/ci.yml",
+  "path_classes": {
+    "full": [
+      "client",
+      "compose-demo",
+      "docs",
+      "fuzz",
+      "generated",
+      "headline-guarantee",
+      "k8s-e2e",
+      "lint",
+      "race",
+      "release-snapshot",
+      "supply-chain-checks",
+      "test",
+      "web"
+    ],
+    "api": [
+      "client",
+      "compose-demo",
+      "generated",
+      "headline-guarantee",
+      "release-snapshot",
+      "test",
+      "web"
+    ],
+    "client": ["client", "release-snapshot", "web"],
+    "compose": ["compose-demo"],
+    "core": [
+      "fuzz",
+      "generated",
+      "headline-guarantee",
+      "race",
+      "release-snapshot",
+      "test",
+      "web"
+    ],
+    "crds": [
+      "generated",
+      "k8s-e2e",
+      "lint",
+      "release-snapshot",
+      "supply-chain-checks"
+    ],
+    "docs": ["docs"],
+    "docs-ci": ["docs", "lint"],
+    "k8s-e2e-script": ["k8s-e2e", "lint"],
+    "license": ["docs", "release-snapshot"],
+    "operator": [
+      "fuzz",
+      "generated",
+      "headline-guarantee",
+      "k8s-e2e",
+      "race",
+      "release-snapshot",
+      "test",
+      "web"
+    ],
+    "release": ["lint", "release-snapshot", "supply-chain-checks"],
+    "release-policy": [
+      "docs",
+      "lint",
+      "release-snapshot",
+      "supply-chain-checks"
+    ],
+    "web": ["release-snapshot", "web"]
+  },
+  "jobs": {
+    "changes": {"required_gate": "always"},
+    "lint": {"required_gate": "planned", "plan_jobs": ["lint"]},
+    "dco": {"required_gate": "pull-request"},
+    "supply-chain-checks": {
+      "required_gate": "planned",
+      "plan_jobs": ["supply-chain-checks"]
+    },
+    "app-build": {
+      "required_gate": "indirect",
+      "plan_jobs": ["web"]
+    },
+    "no-egress": {"required_gate": "planned", "plan_jobs": ["web"]},
+    "release-snapshot": {
+      "required_gate": "planned",
+      "plan_jobs": ["release-snapshot"]
+    },
+    "generated": {
+      "required_gate": "planned",
+      "plan_jobs": ["generated"]
+    },
+    "client": {"required_gate": "planned", "plan_jobs": ["client"]},
+    "docs": {"required_gate": "planned", "plan_jobs": ["docs"]},
+    "compose-demo": {
+      "required_gate": "planned",
+      "plan_jobs": ["compose-demo"]
+    },
+    "web": {"required_gate": "planned", "plan_jobs": ["web"]},
+    "test": {"required_gate": "planned", "plan_jobs": ["test"]},
+    "k8s-e2e": {
+      "required_gate": "planned",
+      "plan_jobs": ["k8s-e2e"]
+    },
+    "analysis_shards": {
+      "required_gate": "indirect",
+      "plan_jobs": ["race", "fuzz"]
+    },
+    "race_shard": {"required_gate": "indirect", "plan_jobs": ["race"]},
+    "race": {"required_gate": "planned", "plan_jobs": ["race"]},
+    "fuzz_shard": {"required_gate": "indirect", "plan_jobs": ["fuzz"]},
+    "fuzz": {"required_gate": "planned", "plan_jobs": ["fuzz"]},
+    "headline-guarantee": {
+      "required_gate": "planned",
+      "plan_jobs": ["headline-guarantee"]
+    },
+    "ci-required": {"required_gate": "aggregate"}
+  }
+}
