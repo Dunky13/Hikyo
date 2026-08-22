@@ -23,9 +23,11 @@ require_line() {
 # trusted scripts (fetched at BASE_SHA) and uploads the fuzz reproducers as an
 # artifact the trusted reporter re-validates.
 require_line "$workflow" "git show \"\$BASE_SHA:scripts/ci/classify-changed-paths.sh\" >\"\$trusted_classifier\""
-require_line "$workflow" "\"\$trusted_classifier\" --files"
+require_line "$workflow" "git show \"\$BASE_SHA:scripts/ci/ci-job-registry.json\" >\"\$trusted_registry\""
+require_line "$workflow" "CI_JOB_REGISTRY=\"\$trusted_registry\" \"\$trusted_classifier\" --files"
 require_line "$workflow" "git show \"\$BASE_SHA:scripts/ci/check-required-jobs.sh\" >\"\$trusted_checker\""
-require_line "$workflow" "\"\$trusted_checker\" \"\$GITHUB_EVENT_NAME\" \"\$NEEDS_JSON\" \"\$PLAN_JSON\""
+require_line "$workflow" "CI_JOB_REGISTRY=\"\$trusted_registry\" \"\$trusted_checker\" --supports-plan-v2"
+require_line "$workflow" "CI_JOB_REGISTRY=\"\$trusted_registry\" \"\$trusted_checker\" \"\$GITHUB_EVENT_NAME\" \"\$NEEDS_JSON\" \"\$PLAN_JSON\""
 require_line "$workflow" "git show \"\$BASE_SHA:scripts/ci/analysis-shards-go/main.go\" >\"\$trusted_planner\""
 require_line "$workflow" 'name: Upload shard fuzz reproducers'
 require_line "$workflow" 'name: Download shard fuzz reproducers'
