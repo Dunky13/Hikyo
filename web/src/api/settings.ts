@@ -39,6 +39,7 @@ import {
 import type { Client } from '@hikyo/runtime-core';
 import type { z } from 'zod';
 
+import { useAuth } from '../app/AuthProvider.tsx';
 import { ApiError, ok, parsed } from './client.ts';
 import type { EnvironmentNode, ProjectNode } from './access.ts';
 import { useTransport } from './transport.tsx';
@@ -390,7 +391,7 @@ export function useInstanceOrgs(): UseQueryResult<OrgList> {
 }
 
 export function useCreateOrg(onCreated?: (org: Org) => void) {
-  const queries = useQueryClient();
+  const auth = useAuth();
 	return useMutation({
 		mutationFn: (input: { name: string }) =>
 			parsed(createOrgOp, { body: { name: input.name } }),
@@ -398,43 +399,43 @@ export function useCreateOrg(onCreated?: (org: Org) => void) {
 		// success runs before query invalidation unmounts the caller; a per-call
 		// mutate callback is not guaranteed to run after that unmount.
 		onSuccess: onCreated,
-		onSettled: () => queries.invalidateQueries(),
+		onSettled: () => auth.refreshSession(),
   });
 }
 
 export function useDeleteOrg(onDeleted?: () => void) {
-  const queries = useQueryClient();
+  const auth = useAuth();
   return useMutation({
     mutationFn: (input: { org: string }) => ok(deleteOrgOp, { path: { org: input.org } }),
     onSuccess: onDeleted,
-    onSettled: () => queries.invalidateQueries(),
+    onSettled: () => auth.refreshSession(),
   });
 }
 
 export function useRenameOrg() {
-  const queries = useQueryClient();
+  const auth = useAuth();
   return useMutation({
     mutationFn: (input: { org: string; name: string }) =>
       parsed(renameOrgOp, { path: { org: input.org }, body: { name: input.name } }),
-    onSettled: () => queries.invalidateQueries(),
+    onSettled: () => auth.refreshSession(),
   });
 }
 
 export function useRenameProject(org: string) {
-  const queries = useQueryClient();
+  const auth = useAuth();
   return useMutation({
     mutationFn: (input: { project: string; name: string }) =>
       parsed(renameProjectOp, { path: { org, project: input.project }, body: { name: input.name } }),
-    onSettled: () => queries.invalidateQueries(),
+    onSettled: () => auth.refreshSession(),
   });
 }
 
 export function useDeleteProject(org: string) {
-  const queries = useQueryClient();
+  const auth = useAuth();
   return useMutation({
     mutationFn: (input: { project: string }) =>
       ok(deleteProjectOp, { path: { org, project: input.project } }),
-    onSettled: () => queries.invalidateQueries(),
+    onSettled: () => auth.refreshSession(),
   });
 }
 
@@ -541,7 +542,7 @@ export function useRotateTokenKey() {
 // --- environment policy -----------------------------------------------------
 
 export function useSetEnvironmentSettings(org: string, project: string) {
-  const queries = useQueryClient();
+  const auth = useAuth();
   return useMutation({
     mutationFn: (input: {
       environment: string;
@@ -555,23 +556,23 @@ export function useSetEnvironmentSettings(org: string, project: string) {
             reauth_window_seconds: input.reauthWindowSeconds,
           },
         }),
-    onSettled: () => queries.invalidateQueries(),
+    onSettled: () => auth.refreshSession(),
   });
 }
 
 // --- retention --------------------------------------------------------------
 
 export function useSetOrgRetention(org: string) {
-  const queries = useQueryClient();
+  const auth = useAuth();
   return useMutation({
     mutationFn: (policy: RetentionPolicy) =>
       parsed(setOrgRetentionOp, { path: { org }, body: policy }),
-    onSettled: () => queries.invalidateQueries(),
+    onSettled: () => auth.refreshSession(),
   });
 }
 
 export function useSetProjectRetention(org: string, project: string) {
-  const queries = useQueryClient();
+  const auth = useAuth();
   return useMutation({
     mutationFn: (input: {
       inherited: boolean;
@@ -586,7 +587,7 @@ export function useSetProjectRetention(org: string, project: string) {
             last_revisions: input.lastRevisions,
           },
         }),
-    onSettled: () => queries.invalidateQueries(),
+    onSettled: () => auth.refreshSession(),
   });
 }
 

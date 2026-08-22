@@ -4,12 +4,11 @@ import '@fontsource/ibm-plex-mono/500.css';
 import './styles/tokens.css';
 import './styles/app.css';
 
-import { QueryClientProvider } from '@tanstack/react-query';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import { App } from './app/App.tsx';
-import { makeQueryClient } from './app/queryClient.ts';
+import { AuthProvider } from './app/AuthProvider.tsx';
 import { initTheme } from './app/theme.ts';
 
 // Paint the stored theme choice before first render, so a reload lands on it
@@ -21,8 +20,6 @@ initTheme();
 // relaxation and unsolicited egress the threat model's telemetry stance
 // forbids by default.
 
-const queries = makeQueryClient();
-
 const host = document.getElementById('root');
 if (host === null) {
   // Fail loud: a missing mount point means the document the server served is
@@ -32,8 +29,8 @@ if (host === null) {
 
 createRoot(host).render(
   <StrictMode>
-    <QueryClientProvider client={queries}>
+    <AuthProvider>
       <App />
-    </QueryClientProvider>
+    </AuthProvider>
   </StrictMode>,
 );

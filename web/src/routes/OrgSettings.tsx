@@ -124,7 +124,12 @@ export function OrgSettings() {
         </dl>
         <div className="field">
           <label htmlFor={nameId}>Name</label>
-          <input id={nameId} value={name} onChange={(event) => setName(event.target.value)} />
+          <input
+            id={nameId}
+            value={name}
+            disabled={current === undefined}
+            onChange={(event) => setName(event.target.value)}
+          />
           <p className="field__hint">
             Renaming an organisation is instance-operator work: the permission model has no
             org-lifecycle capability, so an organisation administrator is refused here with the same

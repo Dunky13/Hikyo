@@ -17,7 +17,7 @@ import {
   useUnlinkIdentity,
 } from '../api/account.ts';
 import { useRevokeSession, useSessions, type ActiveSession } from '../api/remotes.ts';
-import { useSession } from '../api/session.ts';
+import { useAuth } from '../app/AuthProvider.tsx';
 import { themeLabel, useThemeChoice, type ThemeChoice } from '../app/theme.ts';
 import { clearNotification, notifyFailure } from '../app/notifications.tsx';
 import { Alert, Done, JumpIndex, Panel } from './Sections.tsx';
@@ -51,7 +51,7 @@ import { useFeedback, useModalDialog } from './useModalDialog.ts';
  *    that security alerts are not disableable — so there is nothing to offer.
  */
 export function AccountSecurity() {
-  const session = useSession();
+  const auth = useAuth();
   const passkeys = usePasskeys();
   const totpStatus = useTotpStatus();
   const identities = useIdentities();
@@ -168,8 +168,8 @@ export function AccountSecurity() {
     }
   };
 
-  const principal = session.data?.principal;
-  const assurance = session.data?.session.assurance;
+  const principal = auth.identity?.principal;
+  const assurance = auth.identity?.session.assurance;
 
   return (
     <div className="page">
