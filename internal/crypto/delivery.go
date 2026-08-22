@@ -1,11 +1,9 @@
 package crypto
 
 import (
-	"crypto/hkdf"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
-	"fmt"
 )
 
 // The two keyed values the machine delivery path publishes (#62; revision-model ADR
@@ -52,7 +50,7 @@ const TokenVersion = "v1"
 // own project constructs a candidate payload, reads its token, and compares it
 // against a target environment's pod annotation.
 func (k *Keyring) ChangeToken(orgID, projectID, envID string, manifest []byte) (string, error) {
-	key, err := k.ScopedTokenKey(orgID, projectID, envID)
+	key, err := k.deriveScopedTokenKey(tokenInfoLabel, orgID, projectID, envID)
 	if err != nil {
 		return "", err
 	}
@@ -60,7 +58,7 @@ func (k *Keyring) ChangeToken(orgID, projectID, envID string, manifest []byte) (
 	return tag(key, manifest), nil
 }
 
-// DeliveryCursor is HMAC-SHA256(scopedCursorKey, tuple), base64url, prefixed.
+// DeliveryCursor is HMAC-SHA256(scoped cursor key, tuple), base64url, prefixed.
 //
 // The caller passes the whole four-tuple encoding — change token, authorized
 // delivery projection, authorization revision, pin generation — and the server
@@ -75,27 +73,12 @@ func (k *Keyring) ChangeToken(orgID, projectID, envID string, manifest []byte) (
 // behind this seam, every outstanding cursor mismatches once and every caller
 // re-syncs.
 func (k *Keyring) DeliveryCursor(orgID, projectID, envID string, tuple []byte) (string, error) {
-	key, err := k.scopedCursorKey(orgID, projectID, envID)
+	key, err := k.deriveScopedTokenKey(cursorInfoLabel, orgID, projectID, envID)
 	if err != nil {
 		return "", err
 	}
 	defer Zero(key)
 	return tag(key, tuple), nil
-}
-
-// scopedCursorKey mirrors ScopedTokenKey under its own label, with the same
-// length-prefixed info encoding — load-bearing for the same reason: raw
-// concatenation would let ("a","bc") and ("ab","c") derive the identical key.
-func (k *Keyring) scopedCursorKey(orgID, projectID, envID string) ([]byte, error) {
-	info := appendLP(nil, []byte(cursorInfoLabel))
-	info = appendLP(info, []byte(orgID))
-	info = appendLP(info, []byte(projectID))
-	info = appendLP(info, []byte(envID))
-	key, err := hkdf.Key(sha256.New, k.rootTokenKey(), nil, string(info), KeySize)
-	if err != nil {
-		return nil, fmt.Errorf("crypto: derive scoped cursor key: %w", err)
-	}
-	return key, nil
 }
 
 // tag renders one keyed value. base64url without padding, because both values

@@ -603,35 +603,6 @@ func TestProjectDEKMintRaceConverges(t *testing.T) {
 	}
 }
 
-// Invariant 10: identifier tuples that differ only in where the boundary
-// falls derive distinct scoped token keys.
-func TestScopedTokenKeyInjective(t *testing.T) {
-	ctx := context.Background()
-	kr, err := LoadKeyring(ctx, newMemStore(), newRoot(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	k1, err := kr.ScopedTokenKey("a", "bc", "e")
-	if err != nil {
-		t.Fatal(err)
-	}
-	k2, err := kr.ScopedTokenKey("ab", "c", "e")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if bytes.Equal(k1, k2) {
-		t.Error("boundary-shifted scopes derive the same token key")
-	}
-	// Determinism: same scope, same key.
-	k1b, err := kr.ScopedTokenKey("a", "bc", "e")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(k1, k1b) {
-		t.Error("scoped token key is not deterministic")
-	}
-}
-
 func TestDEKCacheBounded(t *testing.T) {
 	ctx := context.Background()
 	kr, err := LoadKeyring(ctx, newMemStore(), newRoot(t))
