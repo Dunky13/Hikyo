@@ -65,10 +65,12 @@ func runImport(ctx context.Context, ios IO, args []string) error {
 	fs := flag.NewFlagSet("import", flag.ContinueOnError)
 	fs.SetOutput(ios.Stderr)
 	var c commonFlags
+	c.operation = "import"
 	fs.StringVar(&c.Context, "context", "", "named context to select for this invocation")
 	fs.StringVar(&c.Instance, "instance", "", "instance reference")
 	fs.StringVar(&c.Org, "org", "", "organisation")
 	fs.StringVar(&c.Project, "project", "", "project")
+	fs.StringVar(&c.Auth, "auth", "", "select human authentication")
 	// NOT --env: see the file comment. --env is the SOURCE slice.
 	environment := fs.String("environment", "", "the target environment (exactly one per invocation)")
 	from := fs.String("from", "", "the source connector: "+importSourceList)
@@ -89,6 +91,9 @@ func runImport(ctx context.Context, ios IO, args []string) error {
 	}
 	if len(positional) > 0 {
 		return failf(ExitUsage, "hikyo import takes no positional arguments, got: %s", strings.Join(positional, " "))
+	}
+	if c.Auth != "" && c.Auth != "human" && c.Auth != "machine" {
+		return failf(ExitUsage, "--auth must be human or machine, got %q", c.Auth)
 	}
 	c.Env = *environment
 	explicitLive := *live
