@@ -1510,6 +1510,13 @@ func authenticatedTarget(st *State, ios IO, flags commonFlags) (*Client, AuthArt
 	if err != nil {
 		return nil, nil, Resolved{}, err
 	}
+	return authenticatedResolvedTarget(st, ios, flags, resolved)
+}
+
+// authenticatedResolvedTarget authenticates against a target whose dimensions
+// the caller already resolved and validated. It lets safety-sensitive verbs
+// reject malformed scope before trust or session state can change the answer.
+func authenticatedResolvedTarget(st *State, ios IO, flags commonFlags, resolved Resolved) (*Client, SessionArtifact, Resolved, error) {
 	instance, err := resolved.Require(DimInstance)
 	if err != nil {
 		// Exactly one established instance is not an ambiguity, so falling
