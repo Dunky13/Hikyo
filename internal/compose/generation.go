@@ -3,6 +3,7 @@ package compose
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -64,8 +65,8 @@ const (
 	// two distinct (target, content) pairs cannot collide into the same bytes.
 	targetSep = "\x00"
 
-	// DefaultGenerationsKept is the retention beyond the current stamp
-	// (ops-spec § 6: current + previous 3).
+	// DefaultGenerationsKept is the retention per target beyond the current
+	// stamp (ops-spec § 6: current + previous 3).
 	DefaultGenerationsKept = 3
 )
 
@@ -103,6 +104,10 @@ type Probe interface {
 	AfterGenerationDirCreated(stamp string) error
 	BeforeGenerationComplete(stamp string) error
 	BeforeStampRename() error
+	AfterGenerationMaterialized(target, stamp string) error
+	AfterStampCommit() error
+	BeforeGarbageCollection() error
+	BeforeGenerationRemoval(stamp string) error
 }
 
 // Writer owns a per-project state directory and mints RenderLocks.
@@ -123,6 +128,58 @@ type RenderLock struct {
 	projectDir string
 	fl         *flock.Flock
 	closed     bool
+}
+
+// PublishPlan is the complete filesystem input for one Compose publication.
+// Targets contains final rendered bytes only; snapshot rows, cursors, offline
+// records, and other persistent bookkeeping deliberately remain outside this
+// filesystem publication because they do not share its commit point.
+type PublishPlan struct {
+	RuntimeDir string
+	Keys       *crypto.LocalKeys
+	Targets    map[string][]byte
+}
+
+// PublishRecovery names the durable facts a caller can use after Publish
+// returns, including on error. ActiveStamps are the generations selected by the
+// stamp file. CandidateStamps are the deterministic generations the plan was
+// attempting to publish. NeedsCleanup means the next lock holder must run the
+// normal Recover/GC path before relying on unreferenced candidates being gone.
+type PublishRecovery struct {
+	ActiveStamps    map[string]string
+	CandidateStamps map[string]string
+	ActiveKnown     bool
+	NeedsCleanup    bool
+}
+
+// PublishPhase is the latest durable stage reached by a publication.
+type PublishPhase string
+
+const (
+	PublishPhaseMaterializing PublishPhase = "materializing"
+	PublishPhaseSwitching     PublishPhase = "switching"
+	PublishPhaseCollecting    PublishPhase = "collecting"
+	PublishPhaseComplete      PublishPhase = "complete"
+)
+
+// PublishResult records how far one recoverable filesystem publication got.
+// Stamps are the plan's candidate stamps and Materialized reports whether each
+// immutable generation was newly written.
+type PublishResult struct {
+	Stamps       map[string]string
+	Materialized map[string]bool
+	Phase        PublishPhase
+	Recover      PublishRecovery
+}
+
+// CandidateActive reports whether the candidate stamp selection is active.
+func (r PublishResult) CandidateActive() bool {
+	return r.Phase == PublishPhaseCollecting || r.Phase == PublishPhaseComplete
+}
+
+// GCComplete reports whether bounded retention completed.
+func (r PublishResult) GCComplete() bool {
+	return r.Phase == PublishPhaseComplete
 }
 
 // errLockReleased is returned by every RenderLock verb — including a second
@@ -161,6 +218,109 @@ func (rl *RenderLock) Close() error {
 	}
 	rl.closed = true
 	return rl.fl.Unlock()
+}
+
+// Publish owns the complete recoverable filesystem sequence for one render:
+// materialize every immutable target generation, atomically switch the stamp
+// file once, then collect superseded generations. It does not claim atomicity
+// with snapshot, cursor, or offline-record persistence performed by callers.
+//
+// On error, result.Recover states which stamps remain active and which
+// deterministic candidates a retry will reuse. Before Committed, the previous
+// stamp selection remains active. After Committed, the candidate selection is
+// active even if GC fails.
+func (rl *RenderLock) Publish(plan PublishPlan) (PublishResult, error) {
+	var result PublishResult
+	if rl.closed {
+		return result, errLockReleased
+	}
+	if plan.RuntimeDir == "" {
+		return result, errors.New("compose: publish runtime dir is required")
+	}
+	if plan.Keys == nil {
+		return result, errors.New("compose: publish local keys are required")
+	}
+	if len(plan.Targets) == 0 {
+		return result, errors.New("compose: publish target set is required")
+	}
+
+	targets := make([]string, 0, len(plan.Targets))
+	stamps := make(map[string]string, len(plan.Targets))
+	for target, content := range plan.Targets {
+		if !targetNameGrammar.MatchString(target) {
+			return result, fmt.Errorf("compose: refusing to publish generation: invalid target name %q", target)
+		}
+		targets = append(targets, target)
+		stamps[target] = TargetStamp(plan.Keys, target, content)
+	}
+	sort.Strings(targets)
+
+	active, err := CurrentStamps(rl.projectDir)
+	if err != nil {
+		return result, err
+	}
+	result = PublishResult{
+		Stamps:       maps.Clone(stamps),
+		Materialized: make(map[string]bool, len(stamps)),
+		Phase:        PublishPhaseMaterializing,
+		Recover: PublishRecovery{
+			ActiveStamps:    maps.Clone(active),
+			CandidateStamps: maps.Clone(stamps),
+			ActiveKnown:     true,
+		},
+	}
+
+	for _, target := range targets {
+		stamp, materialized, err := rl.WriteGeneration(plan.RuntimeDir, plan.Keys, target, plan.Targets[target])
+		if err != nil {
+			result.Recover.NeedsCleanup = true
+			return result, fmt.Errorf("compose: publish materialize %s: %w", target, err)
+		}
+		if stamp != stamps[target] {
+			result.Recover.NeedsCleanup = true
+			return result, fmt.Errorf("compose: publish target %s stamp changed between plan and materialization", target)
+		}
+		result.Materialized[target] = materialized
+		if rl.w.probe != nil {
+			if err := rl.w.probe.AfterGenerationMaterialized(target, stamp); err != nil {
+				result.Recover.NeedsCleanup = true
+				return result, fmt.Errorf("compose: publish after materialize %s: %w", target, err)
+			}
+		}
+	}
+	result.Phase = PublishPhaseSwitching
+	result.Recover.NeedsCleanup = true
+	if err := rl.CommitStamps(stamps); err != nil {
+		active, inspectErr := CurrentStamps(rl.projectDir)
+		if inspectErr != nil {
+			result.Recover.ActiveStamps = nil
+			result.Recover.ActiveKnown = false
+			return result, errors.Join(fmt.Errorf("compose: publish commit stamps: %w", err), fmt.Errorf("compose: inspect active stamps after commit failure: %w", inspectErr))
+		}
+		result.Recover.ActiveStamps = maps.Clone(active)
+		if maps.Equal(active, stamps) {
+			result.Phase = PublishPhaseCollecting
+		}
+		return result, fmt.Errorf("compose: publish commit stamps: %w", err)
+	}
+	result.Phase = PublishPhaseCollecting
+	result.Recover.ActiveStamps = maps.Clone(stamps)
+	if rl.w.probe != nil {
+		if err := rl.w.probe.AfterStampCommit(); err != nil {
+			return result, fmt.Errorf("compose: publish after stamp commit: %w", err)
+		}
+	}
+	if rl.w.probe != nil {
+		if err := rl.w.probe.BeforeGarbageCollection(); err != nil {
+			return result, fmt.Errorf("compose: publish before gc: %w", err)
+		}
+	}
+	if err := rl.GC(plan.RuntimeDir, DefaultGenerationsKept); err != nil {
+		return result, fmt.Errorf("compose: publish gc: %w", err)
+	}
+	result.Phase = PublishPhaseComplete
+	result.Recover.NeedsCleanup = false
+	return result, nil
 }
 
 // WriteGeneration writes an immutable generation directory
@@ -562,6 +722,11 @@ func (rl *RenderLock) Recover(runtimeDir string) error {
 			return fmt.Errorf("compose: refusing to recover: stamp-named entry %q under runtime dir %s is not a directory", name, runtimeDir)
 		}
 		if _, complete := generationStateRoot(root, name); !complete {
+			if rl.w.probe != nil {
+				if err := rl.w.probe.BeforeGenerationRemoval(name); err != nil {
+					return fmt.Errorf("compose: gc before removing incomplete %s: %w", name, err)
+				}
+			}
 			if err := root.RemoveAll(name); err != nil {
 				return fmt.Errorf("compose: recover remove %s: %w", name, err)
 			}
@@ -571,7 +736,7 @@ func (rl *RenderLock) Recover(runtimeDir string) error {
 }
 
 // GC removes generation directories not named by any current stamp beyond the
-// `keep` most recent (by mtime). Current stamps are derived by reading the
+// `keep` most recent PER TARGET (by mtime). Current stamps are derived by reading the
 // managed block itself, not trusted from a caller. It NEVER removes a current
 // generation, removes INCOMPLETE directories regardless of age, and errors on a
 // foreign entry. It is a method on the held lock.
@@ -598,7 +763,7 @@ func (rl *RenderLock) GC(runtimeDir string, keep int) error {
 		name  string
 		mtime int64
 	}
-	var superseded []gen
+	superseded := map[string][]gen{}
 	for _, e := range entries {
 		name := e.Name()
 		if err := crypto.ParseStamp(name); err != nil {
@@ -620,18 +785,72 @@ func (rl *RenderLock) GC(runtimeDir string, keep int) error {
 		if err != nil {
 			return fmt.Errorf("compose: gc stat %s: %w", name, err)
 		}
-		superseded = append(superseded, gen{name: name, mtime: info.ModTime().UnixNano()})
-	}
-	sort.Slice(superseded, func(i, j int) bool { return superseded[i].mtime > superseded[j].mtime })
-	for i, g := range superseded {
-		if i < keep {
-			continue
+		target, err := generationTargetRoot(root, name)
+		if err != nil {
+			return fmt.Errorf("compose: gc inspect %s: %w", name, err)
 		}
-		if err := root.RemoveAll(g.name); err != nil {
-			return fmt.Errorf("compose: gc remove %s: %w", g.name, err)
+		superseded[target] = append(superseded[target], gen{name: name, mtime: info.ModTime().UnixNano()})
+	}
+	for _, generations := range superseded {
+		sort.Slice(generations, func(i, j int) bool { return generations[i].mtime > generations[j].mtime })
+		for i, g := range generations {
+			if i < keep {
+				continue
+			}
+			if rl.w.probe != nil {
+				if err := rl.w.probe.BeforeGenerationRemoval(g.name); err != nil {
+					return fmt.Errorf("compose: gc before removing %s: %w", g.name, err)
+				}
+			}
+			if err := root.RemoveAll(g.name); err != nil {
+				return fmt.Errorf("compose: gc remove %s: %w", g.name, err)
+			}
 		}
 	}
 	return nil
+}
+
+// generationTargetRoot returns the sole target represented by one complete
+// immutable generation. A malformed directory is refused rather than grouped
+// under guessed retention state.
+func generationTargetRoot(root *os.Root, stamp string) (string, error) {
+	d, err := root.Open(stamp)
+	if err != nil {
+		return "", err
+	}
+	entries, err := d.ReadDir(-1)
+	d.Close()
+	if err != nil {
+		return "", err
+	}
+	var target string
+	for _, entry := range entries {
+		if entry.Name() == completeMarker {
+			continue
+		}
+		if !strings.HasSuffix(entry.Name(), ".env") {
+			return "", fmt.Errorf("unexpected entry %q", entry.Name())
+		}
+		candidate := strings.TrimSuffix(entry.Name(), ".env")
+		if !targetNameGrammar.MatchString(candidate) {
+			return "", fmt.Errorf("invalid target file %q", entry.Name())
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return "", err
+		}
+		if !info.Mode().IsRegular() {
+			return "", fmt.Errorf("target file %q is not regular", entry.Name())
+		}
+		if target != "" {
+			return "", fmt.Errorf("multiple target files %q and %q", target+".env", entry.Name())
+		}
+		target = candidate
+	}
+	if target == "" {
+		return "", errors.New("target file is missing")
+	}
+	return target, nil
 }
 
 // openRuntimeEntries opens runtimeDir as an os.Root and lists its top-level

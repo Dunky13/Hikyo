@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -587,36 +588,24 @@ func composeRenderApply(ios IO, lock *compose.RenderLock, cfg *compose.Config, s
 		return false, failf(ExitRefused, "hikyo compose render refused; no generation written, cursor not advanced:\n  %s", strings.Join(refusals, "\n  "))
 	}
 
-	// Write generations (idempotent — a no-op when present+complete, a rewrite
-	// when a reboot lost the tmpfs copy). WriteGeneration computes each target's
-	// stamp with the target bound into the domain (finding 5: two targets with
-	// identical content get distinct stamps and distinct dirs). Then the single
-	// stamp commit, then GC, then snapshot + cursor.
-	finalStamps := map[string]string{}
+	// Publish owns generation materialization, the single stamp commit, and GC.
+	// Snapshot + cursor remain post-publish bookkeeping: they are deliberately
+	// not claimed atomic with the filesystem publication.
 	var allRows []compose.SnapshotRow
-	var lines []string
-	moved := false
 	for _, target := range plan.Targets {
 		allRows = append(allRows, target.SnapshotRows...)
-		stamp, materialized, err := lock.WriteGeneration(runtimeDir, keys, target.Name, target.Content)
-		if err != nil {
-			return false, failf(ExitInternal, "compose render: write generation %s: %v", target.Name, err)
-		}
-		finalStamps[target.Name] = stamp
-		// moved when the stamp changed OR the generation had to be re-materialised
-		// (the tmpfs copy was lost): either way sync must re-apply (R1-10).
-		if currentStamps[target.Name] != stamp || materialized {
-			moved = true
-			lines = append(lines, fmt.Sprintf("rendered %s generation %s → %s", target.Name, stamp, filepath.Join(runtimeDir, stamp, target.Name+".env")))
-		} else {
-			lines = append(lines, fmt.Sprintf("unchanged %s generation %s", target.Name, stamp))
-		}
 	}
-	if err := lock.CommitStamps(finalStamps); err != nil {
-		return false, failf(ExitInternal, "compose render: commit stamps: %v", err)
+	published, err := publishRenderPlan(lock, runtimeDir, keys, plan)
+	if err != nil {
+		if pendingErr := persistCommittedPublish(stateDir, runtimeDir, plan, currentStamps, published); pendingErr != nil {
+			return false, failf(ExitInternal, "compose render: publish: %v", errors.Join(err, fmt.Errorf("persist apply-pending: %w", pendingErr)))
+		}
+		return false, failf(ExitInternal, "compose render: publish: %v", err)
 	}
-	if err := lock.GC(runtimeDir, compose.DefaultGenerationsKept); err != nil {
-		return false, failf(ExitInternal, "compose render: gc: %v", err)
+	finalStamps := published.Stamps
+	moved, lines := publishOutcome(runtimeDir, plan, currentStamps, published)
+	if err := persistCommittedPublish(stateDir, runtimeDir, plan, currentStamps, published); err != nil {
+		return false, failf(ExitInternal, "compose render: persist apply-pending: %v", err)
 	}
 
 	// Snapshot BEFORE cursor: a snapshot is a harmless cache, but a cursor saved
@@ -664,8 +653,8 @@ func composeRenderOffline(ctx context.Context, ios IO, lock *compose.RenderLock,
 		return false, failf(ExitRefused, "hikyo compose render (offline) refused; no generation written:\n  %s", strings.Join(refusals, "\n  "))
 	}
 
-	// One offline record per served key, fsynced BEFORE any generation is
-	// written, then the generations, then the stamp commit and GC.
+	// One offline record per served key, fsynced BEFORE Publish can materialize
+	// any generation. This audit ordering remains outside filesystem publication.
 	var records []compose.OfflineRecord
 	stamps := make(map[string]string, len(plan.Targets))
 	for _, target := range plan.Targets {
@@ -693,38 +682,69 @@ func composeRenderOffline(ctx context.Context, ios IO, lock *compose.RenderLock,
 	if err != nil {
 		return false, failf(ExitRefused, "compose render: %v", err)
 	}
-	finalStamps := map[string]string{}
+	published, err := publishRenderPlan(lock, runtimeDir, keys, plan)
+	if err != nil {
+		if pendingErr := persistCommittedPublish(stateDir, runtimeDir, plan, currentStamps, published); pendingErr != nil {
+			return false, failf(ExitInternal, "compose render: publish: %v", errors.Join(err, fmt.Errorf("persist apply-pending: %w", pendingErr)))
+		}
+		return false, failf(ExitInternal, "compose render: publish: %v", err)
+	}
+	for _, target := range plan.Targets {
+		stamp := published.Stamps[target.Name]
+		if stamp != stamps[target.Name] {
+			return false, failf(ExitInternal, "compose render: target %s stamp changed between offline record and publish", target.Name)
+		}
+		fmt.Fprintf(ios.Stderr, "serving stale from %s, generation %s\n", aad.IssuedAt, stamp)
+	}
+	moved, lines := publishOutcome(runtimeDir, plan, currentStamps, published)
+	if err := persistCommittedPublish(stateDir, runtimeDir, plan, currentStamps, published); err != nil {
+		return false, failf(ExitInternal, "compose render: persist apply-pending: %v", err)
+	}
+	for _, l := range lines {
+		fmt.Fprintln(ios.Stderr, l)
+	}
+	return moved, nil
+}
+
+// publishRenderPlan adapts the pure render plan to the one filesystem-owner
+// operation shared by live and offline flows.
+func publishRenderPlan(lock *compose.RenderLock, runtimeDir string, keys *crypto.LocalKeys, plan compose.RenderPlan) (compose.PublishResult, error) {
+	targets := make(map[string][]byte, len(plan.Targets))
+	for _, target := range plan.Targets {
+		targets[target.Name] = target.Content
+	}
+	return lock.Publish(compose.PublishPlan{RuntimeDir: runtimeDir, Keys: keys, Targets: targets})
+}
+
+func publishOutcome(runtimeDir string, plan compose.RenderPlan, currentStamps map[string]string, published compose.PublishResult) (bool, []string) {
 	var lines []string
 	moved := false
 	for _, target := range plan.Targets {
-		stamp, materialized, err := lock.WriteGeneration(runtimeDir, keys, target.Name, target.Content)
-		if err != nil {
-			return false, failf(ExitInternal, "compose render: write generation %s: %v", target.Name, err)
-		}
-		if stamp != stamps[target.Name] {
-			return false, failf(ExitInternal, "compose render: target %s stamp changed between planning and write", target.Name)
-		}
-		finalStamps[target.Name] = stamp
-		fmt.Fprintf(ios.Stderr, "serving stale from %s, generation %s\n", aad.IssuedAt, stamp)
-		// moved when the stamp changed OR the generation had to be re-materialised
-		// (the tmpfs copy was lost): either way sync must re-apply (R1-10).
-		if currentStamps[target.Name] != stamp || materialized {
+		stamp := published.Stamps[target.Name]
+		// A changed stamp or re-materialized tmpfs generation both require sync to
+		// re-apply the target (R1-10).
+		if currentStamps[target.Name] != stamp || published.Materialized[target.Name] {
 			moved = true
 			lines = append(lines, fmt.Sprintf("rendered %s generation %s → %s", target.Name, stamp, filepath.Join(runtimeDir, stamp, target.Name+".env")))
 		} else {
 			lines = append(lines, fmt.Sprintf("unchanged %s generation %s", target.Name, stamp))
 		}
 	}
-	if err := lock.CommitStamps(finalStamps); err != nil {
-		return false, failf(ExitInternal, "compose render: commit stamps: %v", err)
+	return moved, lines
+}
+
+// persistCommittedPublish closes the crash/error window between a stamp switch
+// and sync's Docker apply. Render writes the marker too: a successful render is
+// filesystem-visible but remains unapplied until a later sync clears it.
+func persistCommittedPublish(stateDir, runtimeDir string, plan compose.RenderPlan, currentStamps map[string]string, published compose.PublishResult) error {
+	if !published.CandidateActive() {
+		return nil
 	}
-	if err := lock.GC(runtimeDir, compose.DefaultGenerationsKept); err != nil {
-		return false, failf(ExitInternal, "compose render: gc: %v", err)
+	moved, _ := publishOutcome(runtimeDir, plan, currentStamps, published)
+	if !moved {
+		return nil
 	}
-	for _, l := range lines {
-		fmt.Fprintln(ios.Stderr, l)
-	}
-	return moved, nil
+	return writeApplyPending(stateDir, published.Stamps)
 }
 
 // ---------------------------------------------------------------------------
@@ -771,25 +791,31 @@ func runComposeSync(ctx context.Context, ios IO, args []string) error {
 		return err
 	}
 
-	// (3) Apply through `docker compose up -d` when a stamp moved, OR when a prior
-	// sync left an apply-pending marker (its docker call failed, or a reboot lost
-	// the tmpfs generation and it was re-materialized): the marker forces a retry
-	// even when nothing moved this time (finding 10). The marker is written BEFORE
-	// docker and removed only after docker succeeds, so a failed apply is retried
-	// on the next sync rather than left permanently stale.
+	// (3) Apply through `docker compose up -d` when a stamp moved, a prior sync
+	// left an apply-pending marker, OR active stamps differ from the durable
+	// last-applied record. The last comparison closes the crash window after the
+	// stamp rename but before a marker write: no active generation can become
+	// permanently unapplied merely because the process died at that boundary.
 	pending := applyPendingExists(rp.stateDir)
-	if !moved && !pending {
-		return nil
-	}
 	stamps, err := compose.CurrentStamps(rp.cfgDir)
 	if err != nil {
 		return failf(ExitRefused, "hikyo compose sync: %v", err)
+	}
+	applied, err := loadAppliedStamps(rp.stateDir)
+	if err != nil {
+		return failf(ExitRefused, "hikyo compose sync: %v", err)
+	}
+	if !moved && !pending && !stampsNeedApply(stamps, applied) {
+		return nil
 	}
 	if err := writeApplyPending(rp.stateDir, stamps); err != nil {
 		return failf(ExitInternal, "hikyo compose sync: writing apply-pending marker: %v", err)
 	}
 	if err := dockerComposeUp(ctx, ios, rp.cfgDir); err != nil {
 		return err // marker stays: the next sync retries the apply
+	}
+	if err := writeAppliedStamps(rp.stateDir, stamps); err != nil {
+		return failf(ExitInternal, "hikyo compose sync: recording applied stamps: %v", err)
 	}
 	if err := removeApplyPending(rp.stateDir); err != nil {
 		return failf(ExitInternal, "hikyo compose sync: clearing apply-pending marker: %v", err)
@@ -822,7 +848,10 @@ func dockerComposeUp(ctx context.Context, ios IO, projectDir string) error {
 	return nil
 }
 
-const applyPendingFile = "apply-pending"
+const (
+	applyPendingFile  = "apply-pending"
+	appliedStampsFile = "applied-stamps.json"
+)
 
 // applyPendingExists reports whether a prior sync left an unfinished apply.
 func applyPendingExists(stateDir string) bool {
@@ -837,6 +866,56 @@ func writeApplyPending(stateDir string, stamps map[string]string) error {
 		return err
 	}
 	return writeFileAtomic0600(filepath.Join(stateDir, applyPendingFile), data)
+}
+
+// loadAppliedStamps returns the last stamp selection successfully handed to
+// Docker. A missing file is an unapplied state, including upgrades from clients
+// predating this record. Malformed state fails loudly rather than skipping an
+// apply on guessed data.
+func loadAppliedStamps(stateDir string) (map[string]string, error) {
+	b, err := os.ReadFile(filepath.Join(stateDir, appliedStampsFile))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("reading applied stamps: %w", err)
+	}
+	var stamps map[string]string
+	if err := json.Unmarshal(b, &stamps); err != nil {
+		return nil, fmt.Errorf("parsing applied stamps: %w", err)
+	}
+	if stamps == nil {
+		return nil, errors.New("parsing applied stamps: expected a target-to-stamp object")
+	}
+	for target, stamp := range stamps {
+		if strings.TrimSpace(target) == "" {
+			return nil, errors.New("parsing applied stamps: target name is empty")
+		}
+		if err := crypto.ParseStamp(stamp); err != nil {
+			return nil, fmt.Errorf("parsing applied stamps for %q: %w", target, err)
+		}
+	}
+	return stamps, nil
+}
+
+func writeAppliedStamps(stateDir string, stamps map[string]string) error {
+	for target, stamp := range stamps {
+		if strings.TrimSpace(target) == "" {
+			return errors.New("writing applied stamps: target name is empty")
+		}
+		if err := crypto.ParseStamp(stamp); err != nil {
+			return fmt.Errorf("writing applied stamps for %q: %w", target, err)
+		}
+	}
+	data, err := json.Marshal(stamps)
+	if err != nil {
+		return err
+	}
+	return writeFileAtomic0600(filepath.Join(stateDir, appliedStampsFile), data)
+}
+
+func stampsNeedApply(current, applied map[string]string) bool {
+	return !maps.Equal(current, applied)
 }
 
 // removeApplyPending clears the marker after a successful docker apply.
