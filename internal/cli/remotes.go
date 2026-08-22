@@ -226,7 +226,7 @@ func addRemote(ctx context.Context, ios IO, st *State, flags commonFlags, f Form
 	return Render(ios.Stdout, f, remoteTable(apigen.RemoteList{Items: []apigen.Remote{out}, Count: 1}))
 }
 
-func runRemoteCredential(ctx context.Context, ios IO, args []string) error {
+func runRemoteCredential(ctx context.Context, ios IO, args []string) (returnErr error) {
 	sub, rest, err := subverb("remote-credential", args, "create", "list", "show", "revoke")
 	if err != nil {
 		return err
@@ -293,18 +293,19 @@ func runRemoteCredential(ctx context.Context, ios IO, args []string) error {
 		}
 	}
 
-	// Preflight BEFORE the mint, for the reason every display-once path
-	// preflights: a credential minted with nowhere to put it has been
-	// destroyed and the side effect performed, because the server will never
-	// hand it back.
+	// Reserve the destination BEFORE the mint. The server will never return
+	// this display-once value again.
 	deliver := disclose.Options{
 		OutputFile: outputFile, DangerouslyPrint: dangerous,
 		Stdout: ios.Stdout, OpenTerminal: ios.OpenTerminal,
 	}
+	var sink *disclose.PreparedSink
 	if sub == "create" {
-		if err := disclose.Preflight(deliver); err != nil {
+		sink, err = disclose.Prepare(deliver)
+		if err != nil {
 			return failf(ExitRefused, "the credential has nowhere to go: %v", err)
 		}
+		defer sink.AbortOnReturn(&returnErr)
 	}
 
 	client, _, _, err := authenticatedTarget(st, ios, flags)
@@ -335,7 +336,7 @@ func runRemoteCredential(ctx context.Context, ios IO, args []string) error {
 	if err := client.Do(ctx, http.MethodPost, connectionsPath, want, &out); err != nil {
 		return err
 	}
-	if _, err := disclose.Emit("hikyo directory credential (shown once)", out.Value, deliver); err != nil {
+	if _, err := sink.WriteOnce("hikyo directory credential (shown once)", out.Value); err != nil {
 		return failf(ExitRefused, "disclosing the credential: %v", err)
 	}
 	if out.Clamped {

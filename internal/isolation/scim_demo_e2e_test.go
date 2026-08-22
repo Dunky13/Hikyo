@@ -83,7 +83,7 @@ func runSCIMDemo(t *testing.T, db *store.DB, ios func() cli.IO, baseURL, orgID s
 	}
 
 	// 2. Mint the display-once credential through the print triad. The
-	//    preflight runs BEFORE the mint, so a credential is never created and
+	//    destination preparation runs BEFORE the mint, so a credential is never created and
 	//    then dropped for want of somewhere to put it (the refusal leg itself
 	//    is #54's fixture; this demo has a terminal available, which is the
 	//    triad's third leg).

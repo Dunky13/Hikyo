@@ -145,7 +145,7 @@ members keep absent / null / value distinct.
 | [E2E] bootstrap first-admin end to end | `isolation.TestDemoFlow{SQLite,Postgres}`, `human_authentication_flow` |
 | [E2E] local login | same |
 | [E2E] boot refused below the Argon2id floor | `crypto.TestBootFloorRefusesEachShortParameter`, `app.AuthComponents` |
-| [E2E] non-TTY stdout refused | `disclose.TestNonTTYWithNoFlagIsRefused`, `TestPreflightRefusesBeforeAnythingIsMinted`, verified with the real binary |
+| [E2E] non-TTY stdout refused | `disclose.TestNonTTYWithNoFlagIsRefused`, `TestPrepareReservesBeforeAnythingIsMinted`, verified with the real binary |
 | Demo on both engines | `isolation.TestDemoFlow{SQLite,Postgres}` |
 
 ## Verified empirically (real binary, sqlite)
@@ -266,7 +266,8 @@ Recorded because each was found by a check rather than by reading:
   before every authentication.
 - **`admin create` created the administrator before checking it could deliver
   the authority** — leaving an instance bootstrapped with a value nobody saw
-  and a command that refuses to run again. `disclose.Preflight` now runs first.
+  and a command that refuses to run again. Superseded by #238: `disclose.Prepare`
+  now reserves the exact sink before the administrator is created.
 
 ## Cross-model review (Codex `gpt-5.6-sol`, high effort)
 

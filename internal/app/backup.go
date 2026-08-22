@@ -211,7 +211,7 @@ func readSecretFile(path string) (string, error) {
 	return v, nil
 }
 
-func runBackupKeygen(args []string, stderr io.Writer) error {
+func runBackupKeygen(args []string, stderr io.Writer) (returnErr error) {
 	fs := flag.NewFlagSet("backup keygen", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	outputFile := fs.String("output-file", "", "write the identity to a file this command creates (0600)")
@@ -223,16 +223,18 @@ func runBackupKeygen(args []string, stderr io.Writer) error {
 		return errors.New("--output-file and --dangerously-print name two destinations; choose one")
 	}
 	opts := disclose.Options{OutputFile: *outputFile, DangerouslyPrint: *dangerous}
-	// Check the destination BEFORE the identity exists: minting a key that
+	// Reserve the destination BEFORE the identity exists: minting a key that
 	// has nowhere to go is minting a key nobody has.
-	if err := disclose.Preflight(opts); err != nil {
+	sink, err := disclose.Prepare(opts)
+	if err != nil {
 		return err
 	}
+	defer sink.AbortOnReturn(&returnErr)
 	identity, recipient, err := backup.GenerateIdentity()
 	if err != nil {
 		return err
 	}
-	dest, err := disclose.Emit("Backup identity (PRIVATE - escrow separately from the root key)", identity, opts)
+	dest, err := sink.WriteOnce("Backup identity (PRIVATE - escrow separately from the root key)", identity)
 	if err != nil {
 		return fmt.Errorf("the identity was generated but delivery failed and the value is now unrecoverable; run this again: %w", err)
 	}

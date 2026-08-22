@@ -53,7 +53,7 @@ func asSilentExit(err error, out **silentExit) bool {
 	return errors.As(err, out)
 }
 
-func runDefinitionsVerb(ctx context.Context, ios IO, sub string, args []string) error {
+func runDefinitionsVerb(ctx context.Context, ios IO, sub string, args []string) (returnErr error) {
 	var format, file, outputFile, planID, commit, ref, actor, acknowledge string
 	var portable, allowDelete bool
 	st, flags, err := parseCommon("definitions "+sub, ios, args, func(fs *flag.FlagSet) {
@@ -108,10 +108,13 @@ func runDefinitionsVerb(ctx context.Context, ios IO, sub string, args []string) 
 			return err
 		}
 	}
+	var sink *disclose.PreparedSink
 	if sub == "export" && outputFile != "" {
-		if err := disclose.Preflight(disclose.Options{OutputFile: outputFile}); err != nil {
+		sink, err = disclose.Prepare(disclose.Options{OutputFile: outputFile})
+		if err != nil {
 			return failf(ExitRefused, "writing the definitions bundle: %v", err)
 		}
+		defer sink.AbortOnReturn(&returnErr)
 	}
 
 	client, _, resolved, err := authenticatedTarget(st, ios, flags)
@@ -142,7 +145,7 @@ func runDefinitionsVerb(ctx context.Context, ios IO, sub string, args []string) 
 			_, err = ios.Stdout.Write(raw)
 			return err
 		}
-		if _, err := disclose.Emit("definitions bundle", strings.TrimSuffix(string(raw), "\n"), disclose.Options{OutputFile: outputFile}); err != nil {
+		if _, err := sink.WriteOnce("definitions bundle", strings.TrimSuffix(string(raw), "\n")); err != nil {
 			return failf(ExitRefused, "writing the definitions bundle: %v", err)
 		}
 		if pathInsideGitWorktree(outputFile) {

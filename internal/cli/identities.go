@@ -111,7 +111,7 @@ func runServiceAccount(ctx context.Context, ios IO, args []string) error {
 	}
 }
 
-func runServiceAccountCredential(ctx context.Context, ios IO, args []string) error {
+func runServiceAccountCredential(ctx context.Context, ios IO, args []string) (returnErr error) {
 	sub, rest, err := subverb("sa credential", args, "list", "mint", "rotate", "revoke")
 	if err != nil {
 		return err
@@ -182,19 +182,19 @@ func runServiceAccountCredential(ctx context.Context, ios IO, args []string) err
 	// of the predecessor, which is the ADR's overlap-based rotation rather
 	// than a distinct authorization act.
 	//
-	// Preflight runs HERE — before the target is resolved, before any network
-	// call, before the mint. The ordering is the security property: a
-	// credential minted with nowhere to put it has been destroyed and the
-	// side effect performed, because the value is display-once and the server
-	// will never hand it back.
+	// Prepare runs HERE — before target resolution, any network call, or mint.
+	// The reserved destination is the exact destination later written.
 	deliver := disclose.Options{
 		OutputFile: outputFile, DangerouslyPrint: dangerous,
 		Stdout: ios.Stdout, OpenTerminal: ios.OpenTerminal,
 	}
+	var sink *disclose.PreparedSink
 	if sub == "mint" || sub == "rotate" {
-		if err := disclose.Preflight(deliver); err != nil {
+		sink, err = disclose.Prepare(deliver)
+		if err != nil {
 			return failf(ExitRefused, "the credential has nowhere to go: %v", err)
 		}
+		defer sink.AbortOnReturn(&returnErr)
 	}
 
 	client, _, resolved, err := authenticatedTarget(st, ios, flags)
@@ -222,7 +222,7 @@ func runServiceAccountCredential(ctx context.Context, ios IO, args []string) err
 	if err := client.Do(ctx, http.MethodPost, credentials, want, &out); err != nil {
 		return err
 	}
-	if _, err := disclose.Emit("hikyo machine credential (shown once)", out.Value, deliver); err != nil {
+	if _, err := sink.WriteOnce("hikyo machine credential (shown once)", out.Value); err != nil {
 		return failf(ExitRefused, "disclosing the credential: %v", err)
 	}
 	if out.Clamped {

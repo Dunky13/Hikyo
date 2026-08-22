@@ -316,8 +316,8 @@ completion of #4 and the clone-preflight gap — dispositioned below:
 5. **MAJOR — CLI reveal bypassed the print triad.** `values list --reveal` and
    `values diff --reveal` rendered secret plaintext straight to `Render(Stdout)`.
    They now carry the same triad flags `get` has (`--output-file`,
-   `--dangerously-print`); `--reveal` runs `disclose.Preflight` BEFORE the request,
-   renders to a buffer, and delivers via `disclose.Emit` (`emitRendered`).
+   `--dangerously-print`); `--reveal` reserves a `disclose.PreparedSink` BEFORE
+   the request, renders to a buffer, and delivers via `WriteOnce` (`emitRendered`).
    Tests: `cli/TestRevealingDiffIsRefusedBeforeAnyRequestWithoutASink` (pre-request
    refusal on non-TTY, no sink) + `help.txt` golden updated.
 6. **MINOR — spurious `value.cleared` on a no-op.** Clearing an already-absent cell
