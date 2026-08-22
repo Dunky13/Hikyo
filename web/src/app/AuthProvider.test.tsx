@@ -9,7 +9,7 @@ import {
   workspaceBearer,
   type WorkspaceBearer,
 } from '../api/workspace.ts';
-import { renderForm, settle } from '../testkit/renderForm.tsx';
+import { renderForm, settle, settleTask } from '../testkit/renderForm.tsx';
 import { AuthProvider, useAuth, type WhoAmI } from './AuthProvider.tsx';
 
 type Deferred<T> = {
@@ -173,7 +173,7 @@ describe('AuthProvider', () => {
     expect(text(container, 'private')).toBe('');
 
     await act(async () => replacement.resolve(json(identity('01', '11'))));
-    await settle(30);
+    await settleTask();
     expect(text(container, 'state')).toContain(`authenticated:${id('ses', '01')}`);
     expect(text(container, 'marker')).toBe('');
     expect(workspaceBearer(workspace.origin)).toBeUndefined();
@@ -249,7 +249,7 @@ describe('AuthProvider', () => {
         <Probe />
       </AuthProvider>,
     );
-    await settle(30);
+    await settleTask();
     expect(text(container, 'private')).toContain(id('ses', '00'));
 
     await act(async () => globalThis.dispatchEvent(new Event('focus')));
