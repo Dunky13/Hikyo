@@ -8,18 +8,19 @@ import (
 	"fmt"
 )
 
-// Encode renders a normalized bundle canonically: sorted object keys at every
+// Encode renders a validated canonical bundle: sorted object keys at every
 // depth (including any JSON Schema document embedded in a declaration),
 // two-space indentation, HTML escaping off, and exactly one trailing newline.
 // Byte-stability is what makes the digest a meaningful apply pin and a PR diff
 // legible.
 //
-// Encode assumes its input is normalized — Parse is the sole producer of a
-// normalized bundle, so `Encode(Parse(bytes)) == canonical(bytes)` and
-// `Parse(Encode(b)) == b`. A bundle built by hand (the importer, a test) must
-// pass through Normalize first.
-func Encode(b Bundle) ([]byte, error) {
-	return canonicalize(b)
+// Parse and Canonicalize are the only producers of an encodable bundle, so
+// every successful result parses back to the same canonical model.
+func Encode(b CanonicalBundle) ([]byte, error) {
+	if !b.valid {
+		return nil, invalidDetail("canonical bundle was not produced by Parse or Canonicalize")
+	}
+	return bytes.Clone(b.encoded), nil
 }
 
 // canonicalize serializes any value with sorted keys and stable integers. The
@@ -67,7 +68,7 @@ func marshalNoEscape(v any) ([]byte, error) {
 // whitespace-only edit does not move the apply pin while any content change
 // does. (This deliberately differs from internal/importer.Digest, whose
 // "sha256:"-prefixed form is a template-reference spelling.)
-func Digest(b Bundle) (string, error) {
+func Digest(b CanonicalBundle) (string, error) {
 	canonical, err := Encode(b)
 	if err != nil {
 		return "", err

@@ -14,21 +14,28 @@ import (
 // before it can drive any work. A parsed bundle is normalized (entries sorted by
 // name, declarations in schema-canonical form, presence lists sorted), so it is
 // the sole producer of the canonical form Encode assumes.
-func Parse(raw []byte) (Bundle, error) {
+func Parse(raw []byte) (CanonicalBundle, error) {
 	parsed, err := ParseCompiled(raw)
 	if err != nil {
-		return Bundle{}, err
+		return CanonicalBundle{}, err
 	}
-	return parsed.Bundle, nil
+	return parsed.Canonical(), nil
 }
 
 // CompiledBundle keeps parsed wire data separate from the classified
 // declaration artifacts built from it. Apply paths consume both so a
 // declaration is not compiled again after parsing.
 type CompiledBundle struct {
-	Bundle       Bundle
+	canonical    CanonicalBundle
 	declarations map[string]*schema.Compiled
 }
+
+// Canonical returns the validated canonical bundle retained with the compiled
+// declaration artifacts.
+func (b CompiledBundle) Canonical() CanonicalBundle { return b.canonical }
+
+// WireBundle returns a detached wire-model copy of the canonical bundle.
+func (b CompiledBundle) WireBundle() Bundle { return b.canonical.WireBundle() }
 
 // CompiledDeclaration returns the artifact for a normalized key name.
 func (b CompiledBundle) CompiledDeclaration(keyName string) (*schema.Compiled, bool) {
@@ -48,21 +55,11 @@ func ParseCompiled(raw []byte) (CompiledBundle, error) {
 		return CompiledBundle{}, mapDecodeError(err)
 	}
 
-	if b.FormatVersion != FormatVersion {
-		return CompiledBundle{}, invalidDetail(
-			"bundle format_version %d is not this build's %d: version mismatch", b.FormatVersion, FormatVersion)
+	if err := validateBundle(b); err != nil {
+		return CompiledBundle{}, err
 	}
 
-	entries := len(b.Keys) + len(b.Environments) + len(b.KeyGroups)
-	if entries > MaxBundleEntries {
-		return CompiledBundle{}, limitDetail("bundle holds %d entries, over the %d entry limit", entries, MaxBundleEntries)
-	}
-
-	if b.Additive() && hasIDs(b) {
-		return CompiledBundle{}, invalidDetail("malformed template: ids without base revision")
-	}
-
-	return normalizeCompiled(b)
+	return compileCanonical(b)
 }
 
 // mapDecodeError translates the neutral strict-decode errors into caller-safe
@@ -108,17 +105,35 @@ func hasIDs(b Bundle) bool {
 	return false
 }
 
-// Normalize sorts and canonicalizes a bundle. Import and tests that build a
-// bundle by hand call it before Encode; Parse calls it on decode.
-func Normalize(b Bundle) (Bundle, error) {
-	compiled, err := normalizeCompiled(b)
-	if err != nil {
-		return Bundle{}, err
+// Canonicalize validates, sorts, and canonicalizes a raw wire-model bundle.
+// Import and test boundaries use it immediately after constructing Bundle.
+func Canonicalize(b Bundle) (CanonicalBundle, error) {
+	if err := validateBundle(b); err != nil {
+		return CanonicalBundle{}, err
 	}
-	return compiled.Bundle, nil
+	compiled, err := compileCanonical(b)
+	if err != nil {
+		return CanonicalBundle{}, err
+	}
+	return compiled.Canonical(), nil
 }
 
-func normalizeCompiled(b Bundle) (CompiledBundle, error) {
+func validateBundle(b Bundle) error {
+	if b.FormatVersion != FormatVersion {
+		return invalidDetail(
+			"bundle format_version %d is not this build's %d: version mismatch", b.FormatVersion, FormatVersion)
+	}
+	entries := len(b.Keys) + len(b.Environments) + len(b.KeyGroups)
+	if entries > MaxBundleEntries {
+		return limitDetail("bundle holds %d entries, over the %d entry limit", entries, MaxBundleEntries)
+	}
+	if b.Additive() && hasIDs(b) {
+		return invalidDetail("malformed template: ids without base revision")
+	}
+	return nil
+}
+
+func compileCanonical(b Bundle) (CompiledBundle, error) {
 	out := Bundle{
 		FormatVersion: FormatVersion,
 		BaseRevision:  b.BaseRevision,
@@ -163,7 +178,15 @@ func normalizeCompiled(b Bundle) (CompiledBundle, error) {
 		out.Keys[i] = k
 		declarations[k.Name] = compiled
 	}
-	return CompiledBundle{Bundle: out, declarations: declarations}, nil
+	encoded, err := canonicalize(out)
+	if err != nil {
+		return CompiledBundle{}, err
+	}
+	if len(encoded) > MaxBundleBytes {
+		return CompiledBundle{}, limitDetail("bundle is %d bytes, over the %d byte limit", len(encoded), MaxBundleBytes)
+	}
+	canonical := CanonicalBundle{encoded: encoded, additive: out.Additive(), valid: true}
+	return CompiledBundle{canonical: canonical, declarations: declarations}, nil
 }
 
 // normalizePresence validates a bundle presence rule's mode/shape and returns

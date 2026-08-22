@@ -171,8 +171,8 @@ func TestProjectPlanFansOutAcrossEnvironments(t *testing.T) {
 
 	// One project-wide bundle: the three undeclared keys declared once each;
 	// DB_PASSWORD is already declared in both environments and not re-declared.
-	if len(plan.Bundle.Keys) != 3 {
-		t.Fatalf("bundle keys = %d, want one project-wide declaration per undeclared key", len(plan.Bundle.Keys))
+	if len(plan.Bundle.WireBundle().Keys) != 3 {
+		t.Fatalf("bundle keys = %d, want one project-wide declaration per undeclared key", len(plan.Bundle.WireBundle().Keys))
 	}
 	if strings.Join(plan.AlreadyDeclared, ",") != "DB_PASSWORD" {
 		t.Errorf("already declared = %v, want DB_PASSWORD once project-wide", plan.AlreadyDeclared)
@@ -360,7 +360,7 @@ func TestEveryImportedKeyDefaultsSecret(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, k := range plan.Bundle.Keys {
+	for _, k := range plan.Bundle.WireBundle().Keys {
 		if k.Classification != string(schema.Secret) {
 			t.Errorf("%s declared %s; every imported key defaults secret", k.Name, k.Classification)
 		}
@@ -388,10 +388,11 @@ func TestBundleIsCanonicalAdditiveAndApplicable(t *testing.T) {
 		t.Fatalf("canonical definitions bundle carries importer project field:\n%s", raw)
 	}
 
-	bundle, err := definitions.Parse(raw)
+	canonical, err := definitions.Parse(raw)
 	if err != nil {
 		t.Fatalf("importer bundle does not parse through definitions.Parse: %v\n%s", err, raw)
 	}
+	bundle := canonical.WireBundle()
 	if !bundle.Additive() || len(bundle.Environments) != 0 || len(bundle.KeyGroups) != 0 {
 		t.Fatalf("bundle is not project-wide additive: %+v", bundle)
 	}
@@ -426,7 +427,7 @@ func TestTemplateDowngradeAndTypesAreRecorded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, k := range plan.Bundle.Keys {
+	for _, k := range plan.Bundle.WireBundle().Keys {
 		if k.Name != "DB_PORT" {
 			continue
 		}
@@ -530,7 +531,7 @@ func TestIncompatibleExistingDeclarationIsRefusedByName(t *testing.T) {
 	if strings.Join(plan.AlreadyDeclared, ",") != "ALPHA" {
 		t.Errorf("already-declared = %v", plan.AlreadyDeclared)
 	}
-	for _, k := range plan.Bundle.Keys {
+	for _, k := range plan.Bundle.WireBundle().Keys {
 		if k.Name == "ALPHA" {
 			t.Error("an already-declared key was re-declared")
 		}
@@ -605,7 +606,7 @@ func TestRootCollapseIsTheK8sProvisionOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, k := range plan.Bundle.Keys {
+	for _, k := range plan.Bundle.WireBundle().Keys {
 		if k.FolderPath != "only" {
 			t.Errorf("%s landed at %q; a SOPS map level is folder structure the source stated", k.Name, k.FolderPath)
 		}
@@ -625,7 +626,7 @@ func TestTemplateFolderChoicesAreHonouredOnReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := map[string]string{}
-	for _, k := range plan.Bundle.Keys {
+	for _, k := range plan.Bundle.WireBundle().Keys {
 		got[k.Name] = k.FolderPath
 	}
 	if got["DB_HOST"] != "databases/primary" || got["API_KEY"] != "services/api" {
@@ -746,7 +747,7 @@ func TestSingleSecretMayTargetTheEnvironmentRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, k := range plan.Bundle.Keys {
+	for _, k := range plan.Bundle.WireBundle().Keys {
 		if k.FolderPath != "" {
 			t.Errorf("%s landed in folder %q; a single-Secret import targets the root", k.Name, k.FolderPath)
 		}
@@ -756,7 +757,7 @@ func TestSingleSecretMayTargetTheEnvironmentRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	seen := map[string]string{}
-	for _, k := range plan.Bundle.Keys {
+	for _, k := range plan.Bundle.WireBundle().Keys {
 		seen[k.Name] = k.FolderPath
 	}
 	if seen["API_KEY"] != "app-api" || seen["DB_HOST"] != "app-db" {
@@ -771,7 +772,7 @@ func TestExistingDeclarationIsNotRedeclared(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, k := range plan.Bundle.Keys {
+	for _, k := range plan.Bundle.WireBundle().Keys {
 		if k.Name == "ALPHA" {
 			t.Error("an already-declared key was re-declared; an additive bundle may not modify one")
 		}
