@@ -69,14 +69,18 @@ mkdir -p "$fixture_dir/hikyo"
 printf 'name: hikyo\nversion: %s\nappVersion: %s\n' "$version" "$version" >"$fixture_dir/hikyo/Chart.yaml"
 printf 'image:\n  digest: %s\n' "$image_digest" >"$fixture_dir/hikyo/values.yaml"
 tar -czf "$fixture_dist/hikyo-$version.tgz" -C "$fixture_dir" hikyo
-printf '{"releases":[{"version":"%s","sequence":1}]}\n' "$version" >"$fixture_dir/trust-metadata.json"
+jq -ncS --arg version "$version" --arg commit "$commit" '{
+	version: $version, sequence: 1, commit: $commit,
+	key_id: "primary-1", public_key: "primary-1.pub"
+}' >"$fixture_dist/release-candidate.json"
 
-"$script_dir/create-manifest.sh" "$version" "$commit" primary-1 \
+"$script_dir/create-manifest.sh" "$fixture_dist/release-candidate.json" \
 	ghcr.io/hikyo-org/hikyo "$image_digest" ghcr.io/hikyo-org/charts/hikyo "$chart_digest" \
-	"$fixture_dist" "$fixture_dir/trust-metadata.json" >/dev/null
+	"$fixture_dist" >/dev/null
 
 jq -e '
 	([.artifacts[] | select(.kind == "binary")] | length) == 6 and
+	([.artifacts[] | select(.kind == "release-candidate")] | length) == 1 and
 	([.artifacts[] | select(.kind == "binary-provenance")] | length) == 1 and
 	([.artifacts[] | select(.kind == "chart")] | length) == 1 and
 	([.artifacts[] | select(.kind == "oci-payload")] | length) == 2

@@ -27,7 +27,9 @@ snapshot_block=$(sed -n '/^  release-snapshot:/,/^  generated:/p' "$ci_workflow"
 
 require_text "$release_block" 'args: release --clean --skip=publish'
 require_text "$release_block" './scripts/release/prepare-image-root.sh'
-require_text "$release_block" 'dist image-root "$(git rev-parse HEAD)" .goreleaser.yaml'
+require_text "$release_block" './scripts/release/check-candidate.sh "$CANDIDATE" "$CANDIDATE_SHA256"'
+require_text "$release_block" 'commit=$(jq -r '\''.commit'\'' "$CANDIDATE")'
+require_text "$release_block" 'dist image-root "$commit" .goreleaser.yaml'
 if printf '%s\n' "$release_block" | grep -E 'go build|CGO_ENABLED=|GOARCH=' >/dev/null; then
 	fail 'release workflow still has a second Go build path'
 fi

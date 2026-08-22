@@ -18,8 +18,13 @@ output=$3
 output_dir=$(dirname "$output")
 [ -d "$output_dir" ] || { printf 'bind manifest: output directory is absent\n' >&2; exit 2; }
 
-version=$(jq -r '.version' "$manifest")
-release_sequence=$(jq -r '.release_sequence' "$manifest")
+bundle_dir=$(CDPATH='' cd -- "$(dirname "$manifest")" && pwd)
+candidate="$bundle_dir/release-candidate.json"
+verify_release_candidate_artifact "$manifest" "$bundle_dir" || exit 1
+release_manifest_matches_candidate "$manifest" "$candidate" || exit 1
+authorize_release_candidate "$input" "$candidate" || exit 1
+version=$(jq -r '.version' "$candidate")
+release_sequence=$(jq -r '.sequence' "$candidate")
 manifest_sha256=$(sha256_file "$manifest")
 matches=$(jq -r --arg version "$version" --argjson sequence "$release_sequence" \
 	'[.pending_release | select(.version == $version and .sequence == $sequence)] | length' "$input")

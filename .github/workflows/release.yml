@@ -60,13 +60,14 @@ jobs:
           ./scripts/release/check-tag.sh "$REPOSITORY" "$TAG" "$TAG_SHA"
           HIKYO_ALLOW_IMMUTABLE_TAG_PROBE=YES \
             ./scripts/release/probe-tag-move.sh "$REPOSITORY" v-ruleset-probe "$TAG_SHA"
-          version=${TAG#v}
           image=$(printf 'ghcr.io/%s' "$REPOSITORY" | tr '[:upper:]' '[:lower:]')
-          printf 'version=%s\nimage=%s\n' "$version" "$image" >>"$GITHUB_OUTPUT"
+          printf 'image=%s\n' "$image" >>"$GITHUB_OUTPUT"
 
       - name: Verify production trust bootstrap
+        id: candidate
         env:
-          VERSION: ${{ steps.identity.outputs.version }}
+          TAG: ${{ github.ref_name }}
+          COMMIT: ${{ github.sha }}
         run: |
           test -f release/trust/root.json
           test -f release/trust/metadata.json
@@ -80,15 +81,18 @@ jobs:
             --key "release/trust/$recovery" \
             --bundle release/trust/metadata.sigstore.json \
             release/trust/metadata.json
-          jq -e --arg version "$VERSION" '
-            .pending_release.version == $version and
-            (.pending_release.sequence | type == "number") and
-            .pending_release.manifest_sha256 == ("0" * 64) and
-            ([.releases[]? | select(.version == $version)] | length) == 0
-          ' release/trust/metadata.json
           jq -r '.primary_keys[].public_key' release/trust/metadata.json | while IFS= read -r key; do
             test -f "release/trust/$key"
           done
+          version=${TAG#v}
+          candidate="$RUNNER_TEMP/release-candidate.json"
+          ./scripts/release/resolve-candidate.sh \
+            release/trust/metadata.json "$version" "$COMMIT" pending >"$candidate"
+          candidate_sha256=$(sha256sum "$candidate" | awk '{print $1}')
+          resolved_version=$(jq -r '.version' "$candidate")
+          resolved_commit=$(jq -r '.commit' "$candidate")
+          printf 'path=%s\nsha256=%s\nversion=%s\ncommit=%s\n' \
+            "$candidate" "$candidate_sha256" "$resolved_version" "$resolved_commit" >>"$GITHUB_OUTPUT"
 
       - name: Test release source
         run: |
@@ -104,16 +108,47 @@ jobs:
           ./scripts/ci/check-docs-live.sh \
             https://hikyo.app security@developwent.io
 
+      - name: Validate candidate for GoReleaser
+        env:
+          CANDIDATE: ${{ steps.candidate.outputs.path }}
+          CANDIDATE_SHA256: ${{ steps.candidate.outputs.sha256 }}
+          RELEASE_VERSION: ${{ steps.candidate.outputs.version }}
+          RELEASE_COMMIT: ${{ steps.candidate.outputs.commit }}
+        run: |
+          ./scripts/release/check-candidate.sh "$CANDIDATE" "$CANDIDATE_SHA256"
+          jq -e --arg version "$RELEASE_VERSION" --arg commit "$RELEASE_COMMIT" '
+            .version == $version and .commit == $commit
+          ' "$CANDIDATE" >/dev/null
+
       - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        env:
+          HIKYO_RELEASE_VERSION: ${{ steps.candidate.outputs.version }}
+          HIKYO_RELEASE_COMMIT: ${{ steps.candidate.outputs.commit }}
         with:
           distribution: goreleaser
           version: v2.17.1
           args: release --clean --skip=publish
 
+      - name: Verify GoReleaser candidate identity
+        env:
+          CANDIDATE: ${{ steps.candidate.outputs.path }}
+          CANDIDATE_SHA256: ${{ steps.candidate.outputs.sha256 }}
+        run: |
+          ./scripts/release/check-candidate.sh "$CANDIDATE" "$CANDIDATE_SHA256"
+          jq -e --slurpfile candidate "$CANDIDATE" '
+            .version == $candidate[0].version and
+            .commit == $candidate[0].commit
+          ' dist/metadata.json >/dev/null
+
       - name: Prepare canonical image inputs
-        run: >-
-          ./scripts/release/prepare-image-root.sh
-          dist image-root "$(git rev-parse HEAD)" .goreleaser.yaml
+        env:
+          CANDIDATE: ${{ steps.candidate.outputs.path }}
+          CANDIDATE_SHA256: ${{ steps.candidate.outputs.sha256 }}
+        run: |
+          ./scripts/release/check-candidate.sh "$CANDIDATE" "$CANDIDATE_SHA256"
+          commit=$(jq -r '.commit' "$CANDIDATE")
+          ./scripts/release/prepare-image-root.sh \
+            dist image-root "$commit" .goreleaser.yaml
 
       - name: Remove GoReleaser internal metadata
         run: rm -f dist/artifacts.json dist/config.yaml dist/metadata.json
@@ -140,7 +175,7 @@ jobs:
       - name: Refuse an already-used image version
         env:
           IMAGE: ${{ steps.identity.outputs.image }}
-          VERSION: ${{ steps.identity.outputs.version }}
+          VERSION: ${{ steps.candidate.outputs.version }}
         run: ./scripts/release/check-oci-unused.sh "$IMAGE:$VERSION"
       - name: Publish unsigned multi-arch image
         id: image
@@ -150,13 +185,13 @@ jobs:
           file: Dockerfile.release
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ steps.identity.outputs.image }}:${{ steps.identity.outputs.version }}
+          tags: ${{ steps.identity.outputs.image }}:${{ steps.candidate.outputs.version }}
           provenance: false
           sbom: false
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.version=${{ steps.identity.outputs.version }}
+            org.opencontainers.image.revision=${{ steps.candidate.outputs.commit }}
+            org.opencontainers.image.version=${{ steps.candidate.outputs.version }}
 
       - name: Published image SBOM
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
@@ -173,24 +208,19 @@ jobs:
       - name: Package and publish digest-pinned Helm chart
         id: chart
         env:
-          VERSION: ${{ steps.identity.outputs.version }}
+          CANDIDATE: ${{ steps.candidate.outputs.path }}
+          CANDIDATE_SHA256: ${{ steps.candidate.outputs.sha256 }}
           IMAGE: ${{ steps.identity.outputs.image }}
           IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
           ACTOR: ${{ github.actor }}
           GH_TOKEN: ${{ github.token }}
           REPOSITORY_OWNER: ${{ github.repository_owner }}
         run: |
+          ./scripts/release/check-candidate.sh "$CANDIDATE" "$CANDIDATE_SHA256"
+          version=$(jq -r '.version' "$CANDIDATE")
           chart_dir="$RUNNER_TEMP/hikyo-chart"
           cp -R chart/hikyo "$chart_dir"
-          active_key=$(jq -r --argjson sequence "$(jq -r --arg version "$VERSION" '([.releases[]?, .pending_release?] | .[] | select(.version == $version) | .sequence)' release/trust/metadata.json)" '
-            .primary_keys[] |
-            select(.revoked == false and
-              .valid_from_release_sequence <= $sequence and
-              (.valid_through_release_sequence == null or .valid_through_release_sequence >= $sequence)) |
-            .public_key
-          ' release/trust/metadata.json)
-          test -n "$active_key"
-          test "$(printf '%s\n' "$active_key" | sed '/^$/d' | wc -l)" -eq 1
+          active_key=$(jq -r '.public_key' "$CANDIDATE")
           cp release/trust/root.json "$chart_dir/files/release/trust/root.json"
           cp "release/trust/$active_key" "$chart_dir/files/release/trust/primary.pub"
           sed -i "s|repository: ghcr.io/hikyo-org/hikyo|repository: $IMAGE|" "$chart_dir/values.yaml"
@@ -201,11 +231,11 @@ jobs:
             --set 'network.trustedProxyCIDRs={10.42.0.0/16}'
           helm template fixture "$chart_dir" --set database.existingSecret=hikyo-database \
             --set 'network.trustedProxyCIDRs={10.42.0.0/16}' >/dev/null
-          helm package "$chart_dir" --version "$VERSION" --app-version "$VERSION" --destination dist
+          helm package "$chart_dir" --version "$version" --app-version "$version" --destination dist
           printf '%s' "$GH_TOKEN" | helm registry login ghcr.io --username "$ACTOR" --password-stdin
           chart=$(printf 'ghcr.io/%s/charts/hikyo' "$REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')
-          ./scripts/release/check-oci-unused.sh "$chart:$VERSION"
-          push_output=$(helm push "dist/hikyo-$VERSION.tgz" "oci://$(dirname "$chart")")
+          ./scripts/release/check-oci-unused.sh "$chart:$version"
+          push_output=$(helm push "dist/hikyo-$version.tgz" "oci://$(dirname "$chart")")
           chart_digest=$(printf '%s\n' "$push_output" | awk '$1 == "Digest:" {print $2}' | tail -n 1)
           printf '%s\n' "$chart_digest" | grep -Eq '^sha256:[0-9a-f]{64}$'
           printf 'chart=%s\nchart_digest=%s\n' "$chart" "$chart_digest" >>"$GITHUB_OUTPUT"
@@ -222,33 +252,28 @@ jobs:
 
       - name: Render installer with pinned trust root
         env:
-          VERSION: ${{ steps.identity.outputs.version }}
-        run: >-
-          ./scripts/release/render-installer.sh "$VERSION"
-          release/trust/root.json scripts/release/verify-bundle.sh dist/install.sh
+          CANDIDATE: ${{ steps.candidate.outputs.path }}
+          CANDIDATE_SHA256: ${{ steps.candidate.outputs.sha256 }}
+        run: |
+          ./scripts/release/check-candidate.sh "$CANDIDATE" "$CANDIDATE_SHA256"
+          version=$(jq -r '.version' "$CANDIDATE")
+          ./scripts/release/render-installer.sh "$version" \
+            release/trust/root.json scripts/release/verify-bundle.sh dist/install.sh
 
       - name: Build release manifest
         env:
-          VERSION: ${{ steps.identity.outputs.version }}
-          COMMIT: ${{ github.sha }}
+          CANDIDATE: ${{ steps.candidate.outputs.path }}
+          CANDIDATE_SHA256: ${{ steps.candidate.outputs.sha256 }}
           IMAGE: ${{ steps.identity.outputs.image }}
           IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
           CHART: ${{ steps.chart.outputs.chart }}
           CHART_DIGEST: ${{ steps.chart.outputs.chart_digest }}
         run: |
-          sequence=$(jq -r --arg version "$VERSION" '([.releases[]?, .pending_release?] | .[] | select(.version == $version) | .sequence)' release/trust/metadata.json)
-          key_id=$(jq -r --argjson sequence "$sequence" '
-            .primary_keys[] |
-            select(.revoked == false and
-              .valid_from_release_sequence <= $sequence and
-              (.valid_through_release_sequence == null or .valid_through_release_sequence >= $sequence)) |
-            .id
-          ' release/trust/metadata.json)
-          test -n "$key_id"
-          test "$(printf '%s\n' "$key_id" | sed '/^$/d' | wc -l)" -eq 1
-          ./scripts/release/create-manifest.sh "$VERSION" "$COMMIT" "$key_id" \
+          ./scripts/release/check-candidate.sh "$CANDIDATE" "$CANDIDATE_SHA256"
+          cp "$CANDIDATE" dist/release-candidate.json
+          ./scripts/release/create-manifest.sh dist/release-candidate.json \
             "$IMAGE" "$IMAGE_DIGEST" "$CHART" "$CHART_DIGEST" \
-            dist release/trust/metadata.json
+            dist
 
       - name: Create unsigned draft release
         env:

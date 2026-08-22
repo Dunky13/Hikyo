@@ -225,7 +225,7 @@ jq -e '
 	([.artifacts[].name] | unique | length) == (.artifacts | length) and
 	all(.artifacts[]; . as $artifact |
 		($artifact.name | type == "string" and length > 0) and
-		($artifact.kind as $kind | ["binary", "binary-provenance", "sbom", "image", "checksum", "chart", "chart-digest", "installer", "oci-payload"] | index($kind) != null) and
+		($artifact.kind as $kind | ["binary", "binary-provenance", "sbom", "image", "checksum", "chart", "chart-digest", "installer", "oci-payload", "release-candidate"] | index($kind) != null) and
 		($artifact.sha256 | type == "string" and test("^[0-9a-f]{64}$")) and
 		(if $artifact.kind == "image" then
 			($artifact.digest | type == "string" and test("^sha256:[0-9a-f]{64}$")) and
@@ -266,19 +266,17 @@ else
 	[ "$version" = "$historical_version" ] || fail "historical install requested $historical_version, bundle is $version"
 fi
 
-signing_key_id=$(jq -r '.signing_key_id' "$manifest")
-key_count=$(jq -r --arg id "$signing_key_id" --argjson sequence "$release_sequence" '
-	[.primary_keys[] | select(
-		.id == $id and
-		.valid_from_release_sequence <= $sequence and
-		(.valid_through_release_sequence == null or .valid_through_release_sequence >= $sequence)
-	)] | length
-' "$metadata")
-[ "$key_count" -eq 1 ] || fail "no unique primary key authorizes release $version"
-revoked=$(jq -r --arg id "$signing_key_id" '.primary_keys[] | select(.id == $id) | .revoked' "$metadata")
-[ "$revoked" = false ] || fail "primary key $signing_key_id is revoked"
-primary_name=$(jq -r --arg id "$signing_key_id" '.primary_keys[] | select(.id == $id) | .public_key' "$metadata")
-primary_sha=$(jq -r --arg id "$signing_key_id" '.primary_keys[] | select(.id == $id) | .sha256' "$metadata")
+verify_release_candidate_artifact "$manifest" "$bundle_dir" \
+	|| fail 'release candidate artifact is invalid'
+candidate="$bundle_dir/release-candidate.json"
+release_manifest_matches_candidate "$manifest" "$candidate" \
+	|| fail 'manifest and release candidate identities differ'
+authorize_release_candidate "$metadata" "$candidate" \
+	|| fail 'release candidate is not authorized by trust metadata'
+signing_key_id=$(jq -r '.key_id' "$candidate")
+primary_name=$(jq -r '.public_key' "$candidate")
+primary_sha=$(jq -r --arg id "$signing_key_id" --arg public_key "$primary_name" \
+	'.primary_keys[] | select(.id == $id and .public_key == $public_key) | .sha256' "$metadata")
 safe_release_name "$primary_name" || fail 'unsafe primary public-key path'
 primary_key="$root_dir/$primary_name"
 [ -f "$primary_key" ] || fail "missing primary public key $primary_name"
@@ -297,6 +295,7 @@ chart_count=0
 chart_digest_count=0
 installer_count=0
 oci_payload_count=0
+candidate_count=0
 image_payload_count=0
 chart_payload_count=0
 image_manifest_digest=
@@ -324,6 +323,7 @@ while [ "$i" -lt "$artifact_count" ]; do
 		chart-digest) chart_digest_count=$((chart_digest_count + 1)) ;;
 		installer) installer_count=$((installer_count + 1)) ;;
 		oci-payload) oci_payload_count=$((oci_payload_count + 1)) ;;
+		release-candidate) candidate_count=$((candidate_count + 1)) ;;
 		checksum) ;;
 		*) fail "unsupported artifact kind $kind" ;;
 	esac
@@ -413,6 +413,7 @@ done
 [ "$chart_count" -eq 1 ] || fail 'manifest must contain exactly one Helm chart'
 [ "$chart_digest_count" -eq 1 ] || fail 'manifest must contain exactly one chart digest artifact'
 [ "$installer_count" -eq 1 ] || fail 'manifest must contain exactly one installer'
+[ "$candidate_count" -eq 1 ] || fail 'manifest must contain exactly one release candidate'
 [ "$oci_payload_count" -eq 2 ] || fail 'manifest must contain image and chart OCI signing payloads'
 [ "$image_payload_count" -eq 1 ] || fail 'manifest must contain exactly one image OCI signing payload'
 [ "$chart_payload_count" -eq 1 ] || fail 'manifest must contain exactly one chart OCI signing payload'

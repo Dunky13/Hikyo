@@ -17,6 +17,7 @@ primary_key=$2
 metadata=$3
 manifest="$bundle/release-manifest.json"
 image_digest="$bundle/image-index.digest"
+candidate="$bundle/release-candidate.json"
 
 [ -f "$manifest" ] || { printf 'sign: missing release manifest\n' >&2; exit 2; }
 [ -f "$image_digest" ] || { printf 'sign: missing image digest\n' >&2; exit 2; }
@@ -26,26 +27,36 @@ image_digest="$bundle/image-index.digest"
 # shellcheck disable=SC3045
 [ "$(ulimit -c)" = 0 ] || { printf 'sign: core dumps must be disabled with ulimit -c 0\n' >&2; exit 1; }
 
-key_id=$(jq -r '.signing_key_id' "$manifest")
-version=$(jq -r '.version' "$manifest")
-release_sequence=$(jq -r '.release_sequence' "$manifest")
+verify_release_candidate_artifact "$manifest" "$bundle" || exit 1
+release_manifest_matches_candidate "$manifest" "$candidate" || exit 1
+authorize_release_candidate "$metadata" "$candidate" || exit 1
+version=$(jq -r '.version' "$candidate")
+release_sequence=$(jq -r '.sequence' "$candidate")
+public_key_name=$(jq -r '.public_key' "$candidate")
+trust_dir=$(CDPATH='' cd -- "$(dirname "$metadata")" && pwd)
+candidate_public_key="$trust_dir/$public_key_name"
+[ -f "$candidate_public_key" ] || { printf 'sign: missing candidate public key\n' >&2; exit 2; }
+candidate_key_sha=$(jq -r --arg public_key "$public_key_name" \
+	'.primary_keys[] | select(.public_key == $public_key) | .sha256' "$metadata")
+[ "$(sha256_file "$candidate_public_key")" = "$candidate_key_sha" ] || {
+	printf 'sign: candidate public-key hash mismatch\n' >&2
+	exit 1
+}
 bound_manifest_sha=$(jq -r --arg version "$version" --argjson sequence "$release_sequence" \
 	'.releases[] | select(.version == $version and .sequence == $sequence) | .manifest_sha256' "$metadata")
 [ "$bound_manifest_sha" = "$(sha256_file "$manifest")" ] || {
 	printf 'sign: recovery metadata does not bind this release manifest\n' >&2
 	exit 1
 }
-authorized=$(jq -r --arg id "$key_id" --argjson sequence "$release_sequence" \
-	'[.primary_keys[] | select(
-		.id == $id and .revoked == false and
-		.valid_from_release_sequence <= $sequence and
-		(.valid_through_release_sequence == null or .valid_through_release_sequence >= $sequence)
-	)] | length' "$metadata")
-[ "$authorized" -eq 1 ] || { printf 'sign: manifest key %s is not uniquely authorized\n' "$key_id" >&2; exit 1; }
-
 "$COSIGN_BIN" sign-blob --yes --new-bundle-format=false --tlog-upload=false \
 	--use-signing-config=false --key "$primary_key" \
 	--bundle "$bundle/release-manifest.sigstore.json" "$manifest"
+"$COSIGN_BIN" verify-blob --insecure-ignore-tlog --key "$candidate_public_key" \
+	--bundle "$bundle/release-manifest.sigstore.json" "$manifest" >/dev/null || {
+	rm -f "$bundle/release-manifest.sigstore.json"
+	printf 'sign: private key does not match release candidate\n' >&2
+	exit 1
+}
 
 artifact_count=$(jq -r '.artifacts | length' "$manifest")
 i=0
@@ -65,6 +76,11 @@ while [ "$i" -lt "$artifact_count" ]; do
 			--use-signing-config=false --key "$primary_key" \
 			--bundle "$artifact.sigstore.json" "$artifact" >/dev/null
 	fi
+	"$COSIGN_BIN" verify-blob --insecure-ignore-tlog --key "$candidate_public_key" \
+		--bundle "$artifact.sigstore.json" "$artifact" >/dev/null || {
+		printf 'sign: generated signature invalid for %s\n' "$name" >&2
+		exit 1
+	}
 	i=$((i + 1))
 done
 
