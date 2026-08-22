@@ -62,7 +62,7 @@ type StampPair struct {
 // Change propagation).
 //
 // The info string is PIPE-JOINED exactly as § 0.2 fixes it — not the
-// length-prefixed encoding scopedCursorKey uses — and it is injective anyway:
+// length-prefixed encoding scoped token derivation uses — and it is injective anyway:
 // a Kubernetes UID is a hyphenated hex UUID and a Secret name obeys RFC 1123,
 // so neither component can contain the `|` separator.
 func StampKey(root []byte, instanceUID, crUID, secretName string) ([]byte, error) {
