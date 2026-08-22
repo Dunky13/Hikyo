@@ -4,6 +4,7 @@ node_modules/
 src/content/docs/security.md
 src/content/docs/support.md
 src/content/docs/governance.md
+src/content/docs/implementation-status.md
 src/content/docs/trademark.md
 src/content/docs/contributing.md
 src/content/docs/license.md
