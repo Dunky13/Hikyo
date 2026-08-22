@@ -121,3 +121,20 @@ test('a 401 for a value that was already rotated leaves the replacement alone', 
   expect(workspaceBearer(ORIGIN)?.session).toBe('ses_1');
   expect(workspaceBearer(ORIGIN)?.value).toBe('secret-2');
 });
+
+test('a stale 401 cannot drop a replacement epoch even if bearer text matches', async () => {
+  seed('secret-1', 'ses_1');
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+    if (!(input instanceof Request)) {
+      throw new Error('workspace client did not issue a Request');
+    }
+    expect(input.headers.get('Authorization')).toBe('Bearer secret-1');
+    seed('secret-1', 'ses_2');
+    return new Response('{}', { status: 401, headers: { 'Content-Type': 'application/json' } });
+  });
+
+  await createWorkspaceClient(ORIGIN).get({ url: '/api/v1/x' });
+
+  expect(workspaceBearer(ORIGIN)?.session).toBe('ses_2');
+  expect(workspaceBearer(ORIGIN)?.value).toBe('secret-1');
+});
