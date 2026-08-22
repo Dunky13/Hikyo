@@ -1117,16 +1117,16 @@ func (s *Values) Copy(ctx context.Context, actor Actor, scope domain.Scope, req 
 		if err != nil {
 			return copyWriteResult{}, err
 		}
-		// Classify the named keys under the source read — nothing is opened here.
-		// This decides which destination legs the copy will need, and supplies
-		// the units the two ceremonies enumerate.
-		hasConfig, secretKeyIDs, allKeyIDs, err := classifyCopyKeys(ctx, r, az, caller, sourceScope, req.KeyNames)
+		// Resolve every named source key ONCE into a metadata-only plan under
+		// the source read. Destination authorization consumes that metadata
+		// before the same plan is handed to the opener below.
+		plan, err := resolveCopySourcePlan(ctx, r, az, caller, sourceScope, req.KeyNames)
 		if err != nil {
 			return copyWriteResult{}, err
 		}
 		// PREFLIGHT every destination — the copy formula and the protected-
 		// destination ceremony — BEFORE any source secret is opened. A
-		// destination refused here lands ahead of readSourceMaterial's reveal
+		// destination refused here lands ahead of openSourceMaterial's ceremony
 		// gate, so a refused copy opens no material and writes no disclosure
 		// record: the trail records what was genuinely read, and a rollback can no
 		// longer erase a disclosure that should have stood. Past this loop every
@@ -1135,7 +1135,7 @@ func (s *Values) Copy(ctx context.Context, actor Actor, scope domain.Scope, req 
 		for _, destID := range req.DestinationEnvironmentIDs {
 			destScope := domain.Scope{Org: scope.Org, Project: scope.Project, Env: domain.EnvID(destID)}
 			if err := authorizeDestination(ctx, r, az, caller, destScope,
-				req.ConfirmProtected, hasConfig, len(secretKeyIDs) > 0, allKeyIDs,
+				req.ConfirmProtected, plan.hasConfig, len(plan.secretKeyIDs) > 0, plan.keyIDs,
 				ceremonyGate(ctx, s.Auth, az, caller, publishIntentBuilder(destID))); err != nil {
 				return copyWriteResult{}, err
 			}
@@ -1144,8 +1144,7 @@ func (s *Values) Copy(ctx context.Context, actor Actor, scope domain.Scope, req 
 		// formula, so it takes the same enumerated-key ceremony a cell reveal
 		// does — including copy-without-display, which discloses to a
 		// destination rather than to a screen and is a disclosure either way.
-		material, _, err := readSourceMaterial(ctx, r, az, caller, sealer, scope,
-			req.SourceEnvironmentID, req.KeyNames, false, copyOpCopy,
+		material, err := openCopySourcePlan(ctx, r, az, caller, sealer, sourceScope, plan, copyOpCopy,
 			ceremonyGate(ctx, s.Auth, az, caller, copyIntentBuilder(req.SourceEnvironmentID)))
 		if err != nil {
 			return copyWriteResult{}, err
@@ -1175,41 +1174,10 @@ func (s *Values) Copy(ctx context.Context, actor Actor, scope domain.Scope, req 
 	return result.copy, nil
 }
 
-// classifyCopyKeys resolves the named keys under the source read and reports
-// which classifications the copy carries, opening NO material. It is the copy
-// preflight's input: which destination legs to authorize before a single secret
-// is decrypted. An absent named key is a refusal here just as it is in
-// readSourceMaterial, so the two agree on what a copy names.
-func classifyCopyKeys(ctx context.Context, r store.Repos, az *authz.TxAuthorizer, caller authz.Identity,
-	sourceScope domain.Scope, keyNames []string) (hasConfig bool, secretKeyIDs, allKeyIDs []string, err error) {
-	readProof, err := az.Authorize(ctx, caller, authz.OpValueList, sourceScope)
-	if err != nil {
-		return false, nil, nil, err
-	}
-	for _, name := range keyNames {
-		key, err := findKey(ctx, r.Catalogue(), readProof, name)
-		if err != nil {
-			return false, nil, nil, err
-		}
-		// allKeyIDs is what the DESTINATION ceremony enumerates: every key the
-		// decision carries, `config` included. The human is agreeing to deliver
-		// this batch into a protected environment, and a modal that listed only
-		// the secret half would be asking them to approve something narrower
-		// than what happens.
-		allKeyIDs = append(allKeyIDs, key.ID)
-		if key.Classification == string(schema.Secret) {
-			secretKeyIDs = append(secretKeyIDs, key.ID)
-		} else {
-			hasConfig = true
-		}
-	}
-	return hasConfig, secretKeyIDs, allKeyIDs, nil
-}
-
 // authorizeDestination clears one copy destination up front: the destination
 // legs the material requires (config, secret, or both) and the protected-
 // environment ceremony, writing NOTHING. Running it for every destination
-// before readSourceMaterial is what keeps the disclosure trail truthful — a
+// before openSourceMaterial is what keeps the disclosure trail truthful — a
 // destination refusal lands before any secret is opened. Each leg is authorized
 // only where its classification is present, preserving the non-empty-batch rule
 // the copy formula split depends on.
@@ -1290,73 +1258,131 @@ type materialSet struct {
 
 func (m materialSet) empty() bool { return len(m.config) == 0 && len(m.secret) == 0 }
 
-// sourceCell is one resolved-but-unopened piece of source material: the key and
-// its ciphertext row, carried from a preflight to the open WITHOUT decrypting.
-// Splitting resolution from the open is what lets clone run its born-invalid
-// abort (cloneInto) before any plaintext is touched or any disclosure event
-// written — an aborted clone then rolls back nothing it opened, honouring the
-// OpValueCopySource promise of one durable disclosure event per secret OPENED.
+// sourceCell is one resolved-but-unopened piece of source material. Resolution
+// first records the key; loading later adds its ciphertext row without
+// decrypting. Splitting those phases lets explicit copy authorize destinations
+// before acquiring source material, while clone can run its born-invalid abort
+// before any plaintext is touched or disclosure event is written.
 type sourceCell struct {
 	key   store.CatalogueKey
 	entry store.ValueEntry
 }
 
-// sourcePlan is what planSourceMaterial resolved: which cells will be opened,
-// split by classification, the secrets it could not take (skipped), and the
-// reveal proof under which the planned secrets are opened and their disclosure
-// records written. Nothing here has been decrypted.
-type sourcePlan struct {
-	config      []sourceCell
-	secret      []sourceCell
-	skipped     []string
-	revealProof authz.Proof // non-nil iff at least one secret cell is planned
+// copySourcePlan is the transaction-local representation shared by resolution,
+// destination preflight, source loading, and opening: cells, classification
+// facts and key ids in request order, clone-only skipped names, and required
+// proofs. It never contains plaintext.
+type copySourcePlan struct {
+	config       []sourceCell
+	secret       []sourceCell
+	hasConfig    bool
+	keyIDs       []string
+	secretKeyIDs []string
+	skipped      []string
+	readProof    authz.Proof
+	revealProof  authz.Proof // non-nil iff at least one secret cell is planned
 }
 
-// planSourceMaterial authorizes the source legs and resolves what a duplication
-// will move, opening NOTHING: it reads ciphertext rows and evaluates the
-// source-material gate, but decrypts no plaintext and writes no disclosure
-// event. The open is openSourceMaterial's, run only once the caller has
-// confirmed the preflight will not abort (clone), or immediately (copy).
-//
-// `config` rides the ordinary environment read; `secret` rides the reveal-gated
-// copy-source operation, authorized ONLY when secret material is actually named
-// — an unused leg that could fail is a refusal nobody asked for.
-//
-// tolerateGateFailure is clone's preflight behaviour: a clone plans what it can
-// and enumerates the rest, while an explicit copy of a named secret the caller
-// cannot read out of the source is a refusal.
-func planSourceMaterial(ctx context.Context, r store.Repos, az *authz.TxAuthorizer, caller authz.Identity,
-	scope domain.Scope, sourceEnvID string, keyNames []string, tolerateGateFailure bool) (sourcePlan, error) {
-	var plan sourcePlan
-	sourceScope := domain.Scope{Org: scope.Org, Project: scope.Project, Env: domain.EnvID(sourceEnvID)}
+// copySourceKeyResolver snapshots the source catalogue once, then resolves
+// every requested name against that snapshot. The injectable list function is
+// the query-count seam: one plan performs one catalogue query regardless of
+// how many names it carries.
+type copySourceKeyResolver struct {
+	list func(context.Context, authz.Proof) ([]store.CatalogueKey, error)
+}
+
+func catalogueCopySourceKeyResolver(cat store.CatalogueReader) copySourceKeyResolver {
+	return copySourceKeyResolver{list: cat.List}
+}
+
+func resolvedCopySourceKeyResolver(keys []store.CatalogueKey) copySourceKeyResolver {
+	return copySourceKeyResolver{
+		list: func(context.Context, authz.Proof) ([]store.CatalogueKey, error) { return keys, nil },
+	}
+}
+
+func (r copySourceKeyResolver) resolve(ctx context.Context, p authz.Proof, names []string) ([]store.CatalogueKey, error) {
+	keys, err := r.list(ctx, p)
+	if err != nil {
+		return nil, err
+	}
+	byName := make(map[string]store.CatalogueKey, len(keys))
+	for _, key := range keys {
+		byName[key.Name] = key
+	}
+	resolved := make([]store.CatalogueKey, 0, len(names))
+	for _, name := range names {
+		key, ok := byName[name]
+		if !ok {
+			return nil, fmt.Errorf("%w: no key %q is declared in this project", domain.ErrNotFound, name)
+		}
+		resolved = append(resolved, key)
+	}
+	return resolved, nil
+}
+
+// resolveCopySourcePlan resolves and classifies every named source key once,
+// opening and loading NOTHING. Explicit copy runs destination preflight against
+// this metadata-only plan before openCopySourcePlan acquires source proofs or
+// ciphertext. Clone reuses its existing catalogue snapshot at the same seam.
+func resolveCopySourcePlan(ctx context.Context, r store.Repos, az *authz.TxAuthorizer, caller authz.Identity,
+	sourceScope domain.Scope, keyNames []string) (copySourcePlan, error) {
 	readProof, err := az.Authorize(ctx, caller, authz.OpValueList, sourceScope)
+	if err != nil {
+		return copySourcePlan{}, err
+	}
+	return resolveCopySourcePlanWithResolver(ctx, readProof, keyNames,
+		catalogueCopySourceKeyResolver(r.Catalogue()))
+}
+
+func resolveCopySourcePlanWithResolver(ctx context.Context, readProof authz.Proof, keyNames []string,
+	resolver copySourceKeyResolver) (copySourcePlan, error) {
+	plan := copySourcePlan{readProof: readProof}
+	keys, err := resolver.resolve(ctx, readProof, keyNames)
 	if err != nil {
 		return plan, err
 	}
-	var secretKeys []store.CatalogueKey
-	for _, name := range keyNames {
-		key, err := findKey(ctx, r.Catalogue(), readProof, name)
-		if err != nil {
-			return plan, err
-		}
+	for _, key := range keys {
+		plan.keyIDs = append(plan.keyIDs, key.ID)
 		if key.Classification == string(schema.Secret) {
-			secretKeys = append(secretKeys, key)
+			plan.secretKeyIDs = append(plan.secretKeyIDs, key.ID)
+			plan.secret = append(plan.secret, sourceCell{key: key})
 			continue
 		}
-		entry, err := r.Values().Get(ctx, readProof, key.ID)
+		plan.hasConfig = true
+		plan.config = append(plan.config, sourceCell{key: key})
+	}
+	return plan, nil
+}
+
+// loadCopySourcePlan acquires the source proof and ciphertext rows, still
+// opening no plaintext. Explicit copy calls it only from openCopySourcePlan,
+// after every destination passed. Clone calls it before its born-invalid abort
+// because that abort must know which secret cells can actually land.
+//
+// tolerateGateFailure is clone-only: source-gate refusal enumerates secrets as
+// skipped, and absent source cells are omitted. Explicit copy returns either
+// condition as a refusal.
+func loadCopySourcePlan(ctx context.Context, r store.Repos, az *authz.TxAuthorizer, caller authz.Identity,
+	sourceScope domain.Scope, plan copySourcePlan, tolerateGateFailure bool) (copySourcePlan, error) {
+	config := make([]sourceCell, 0, len(plan.config))
+	for _, cell := range plan.config {
+		entry, err := r.Values().Get(ctx, plan.readProof, cell.key.ID)
 		if errors.Is(err, domain.ErrNotFound) {
 			if tolerateGateFailure {
 				continue
 			}
 			return plan, fmt.Errorf("%w: key %q is absent in the source environment",
-				domain.ErrNotFound, name)
+				domain.ErrNotFound, cell.key.Name)
 		}
 		if err != nil {
 			return plan, err
 		}
-		plan.config = append(plan.config, sourceCell{key: key, entry: entry})
+		cell.entry = entry
+		config = append(config, cell)
 	}
-	if len(secretKeys) == 0 {
+	plan.config = config
+	if len(plan.secret) == 0 {
 		return plan, nil
 	}
 	// The source-material gate, evaluated only because secret material is in
@@ -1367,15 +1393,17 @@ func planSourceMaterial(ctx context.Context, r store.Repos, az *authz.TxAuthoriz
 		if !tolerateGateFailure {
 			return plan, gateErr
 		}
-		plan.skipped = make([]string, 0, len(secretKeys))
-		for _, key := range secretKeys {
-			plan.skipped = append(plan.skipped, key.Name)
+		plan.skipped = make([]string, 0, len(plan.secret))
+		for _, cell := range plan.secret {
+			plan.skipped = append(plan.skipped, cell.key.Name)
 		}
+		plan.secret = nil
 		return plan, nil
 	}
 	plan.revealProof = revealProof
-	for _, key := range secretKeys {
-		entry, err := r.Values().Get(ctx, revealProof, key.ID)
+	secret := make([]sourceCell, 0, len(plan.secret))
+	for _, cell := range plan.secret {
+		entry, err := r.Values().Get(ctx, revealProof, cell.key.ID)
 		if errors.Is(err, domain.ErrNotFound) {
 			// A secret named by the clone's key list but absent at source (gate
 			// passed): neither copied nor skipped. It lands nowhere, and the
@@ -1385,14 +1413,29 @@ func planSourceMaterial(ctx context.Context, r store.Repos, az *authz.TxAuthoriz
 				continue
 			}
 			return plan, fmt.Errorf("%w: key %q is absent in the source environment",
-				domain.ErrNotFound, key.Name)
+				domain.ErrNotFound, cell.key.Name)
 		}
 		if err != nil {
 			return plan, err
 		}
-		plan.secret = append(plan.secret, sourceCell{key: key, entry: entry})
+		cell.entry = entry
+		secret = append(secret, cell)
 	}
+	plan.secret = secret
 	return plan, nil
+}
+
+// openCopySourcePlan is explicit copy's sole source consumer. It runs only
+// after destination preflight, loads ciphertext under source proofs, performs
+// the source ceremony, decrypts, and records disclosures in that order.
+func openCopySourcePlan(ctx context.Context, r store.Repos, az *authz.TxAuthorizer, caller authz.Identity,
+	sealer *crypto.ProjectSealer, sourceScope domain.Scope, plan copySourcePlan,
+	surface string, gate discloseGate) (materialSet, error) {
+	loaded, err := loadCopySourcePlan(ctx, r, az, caller, sourceScope, plan, false)
+	if err != nil {
+		return materialSet{}, err
+	}
+	return openSourceMaterial(ctx, r, sealer, caller.Principal, loaded, surface, gate)
 }
 
 // openSourceMaterial decrypts a preflight's planned cells into a materialSet and
@@ -1409,7 +1452,7 @@ func planSourceMaterial(ctx context.Context, r store.Repos, az *authz.TxAuthoriz
 // missing opens nothing and writes no disclosure event, which is the same
 // ordering the destination preflight already establishes.
 func openSourceMaterial(ctx context.Context, r store.Repos, sealer *crypto.ProjectSealer,
-	principal domain.PrincipalID, plan sourcePlan, surface string, gate discloseGate) (materialSet, error) {
+	principal domain.PrincipalID, plan copySourcePlan, surface string, gate discloseGate) (materialSet, error) {
 	var out materialSet
 	if gate != nil && len(plan.secret) > 0 {
 		unit := make([]string, 0, len(plan.secret))
@@ -1440,26 +1483,6 @@ func openSourceMaterial(ctx context.Context, r store.Repos, sealer *crypto.Proje
 		}
 	}
 	return out, nil
-}
-
-// readSourceMaterial is the plan-then-open path an explicit copy takes: it
-// resolves and immediately opens, because Copy has already authorized every
-// destination before it is called (see Copy), so no abort can intervene between
-// the plan and the open. Clone runs the two halves separately (cloneInto) to fit
-// its born-invalid abort between them, so it never opens material an abort would
-// roll back.
-func readSourceMaterial(ctx context.Context, r store.Repos, az *authz.TxAuthorizer, caller authz.Identity,
-	sealer *crypto.ProjectSealer, scope domain.Scope, sourceEnvID string, keyNames []string,
-	tolerateGateFailure bool, surface string, gate discloseGate) (materialSet, []string, error) {
-	plan, err := planSourceMaterial(ctx, r, az, caller, scope, sourceEnvID, keyNames, tolerateGateFailure)
-	if err != nil {
-		return materialSet{}, nil, err
-	}
-	material, err := openSourceMaterial(ctx, r, sealer, caller.Principal, plan, surface, gate)
-	if err != nil {
-		return materialSet{}, nil, err
-	}
-	return material, plan.skipped, nil
 }
 
 // auditSourceDisclosures records the source half of a duplication.
@@ -1652,10 +1675,15 @@ func cloneInto(ctx context.Context, r store.Repos, az *authz.TxAuthorizer, calle
 
 	// PREFLIGHT ONLY — resolve the gate and what would land WITHOUT decrypting
 	// anything or writing a disclosure event. The born-invalid abort below runs
-	// against this plan, so an aborted clone rolls back nothing it opened: the
+	// against the resolved-and-loaded plan, so an aborted clone rolls back
+	// nothing it opened: the
 	// OpValueCopySource promise is one durable disclosure event per secret
 	// OPENED, and a secret the abort strands is never opened.
-	plan, err := planSourceMaterial(ctx, r, az, caller, scope, sourceEnvID, names, true)
+	plan, err := resolveCopySourcePlanWithResolver(ctx, readProof, names, resolvedCopySourceKeyResolver(keys))
+	if err != nil {
+		return out, err
+	}
+	plan, err = loadCopySourcePlan(ctx, r, az, caller, sourceScope, plan, true)
 	if err != nil {
 		return out, err
 	}
@@ -1674,7 +1702,7 @@ func cloneInto(ctx context.Context, r store.Repos, az *authz.TxAuthorizer, calle
 	for _, c := range plan.secret {
 		landed[c.key.Name] = true
 	}
-	presence, err := r.Catalogue().ListPresence(ctx, readProof)
+	presence, err := r.Catalogue().ListPresence(ctx, plan.readProof)
 	if err != nil {
 		return out, err
 	}
