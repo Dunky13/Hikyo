@@ -624,7 +624,7 @@ func scenarioPinLifecycle(t *testing.T, db *store.DB) {
 	seed(t, db, []string{fmt.Sprintf(
 		"UPDATE snapshots SET payload_present = TRUE, collected_at = NULL, collected_policy = '' WHERE environment_id = '%s' AND revision = %d",
 		dev.Env, oldRevision)})
-	if err := pins.Release(t.Context(), actor, dev, workload); err != nil {
+	if _, err := pins.Release(t.Context(), actor, dev, workload); err != nil {
 		t.Fatal(err)
 	}
 	if listed, err := pins.List(t.Context(), actor, dev); err != nil || len(listed) != 0 {

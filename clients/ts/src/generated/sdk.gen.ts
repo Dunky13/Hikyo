@@ -3523,6 +3523,13 @@ export const createRevisionPin = <ThrowOnError extends boolean = false>(options:
 
 /**
  * Release a workload revision pin.
+ *
+ * Returns the released revision payload's retention consequence from the
+ * same locked transaction that removes the pin. This is transaction-time
+ * truth, not a durable retention promise: collection_eligible may be
+ * collected immediately after commit, while concurrent GC that commits
+ * first is reported as already_collected.
+ *
  */
 export const releaseRevisionPin = <ThrowOnError extends boolean = false>(options: Options<ReleaseRevisionPinData, ThrowOnError>) => (options.client ?? client).delete<ReleaseRevisionPinResponses, ReleaseRevisionPinErrors, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],

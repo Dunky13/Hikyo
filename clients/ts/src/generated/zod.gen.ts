@@ -623,6 +623,19 @@ export const zRevisionPinRequest = z.object({
     override_schema: z.boolean().optional().default(false)
 });
 
+/**
+ * Transaction-time payload state after a pin release. retained means the
+ * effective policy or another live pin still keeps the payload;
+ * collection_eligible means a sweep may collect it immediately;
+ * already_collected means GC committed collection before this result.
+ *
+ */
+export const zRetentionConsequence = z.enum([
+    'retained',
+    'collection_eligible',
+    'already_collected'
+]);
+
 export const zRevisionPin = z.object({
     id: zId,
     workload_principal_id: zId,
@@ -633,7 +646,8 @@ export const zRevisionPin = z.object({
     authorized_at: zTimestamp,
     history_authorized: z.boolean(),
     schema_override: z.boolean(),
-    expired: z.boolean()
+    expired: z.boolean(),
+    release_retention_consequence: zRetentionConsequence
 });
 
 export const zRevisionPinResult = z.object({
@@ -643,6 +657,11 @@ export const zRevisionPinResult = z.object({
         'renewed'
     ]),
     pin: zRevisionPin
+});
+
+export const zRevisionPinReleaseResult = z.object({
+    revision: z.coerce.bigint().gte(BigInt(1)).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }),
+    retention_consequence: zRetentionConsequence
 });
 
 export const zRevisionPinList = z.object({
@@ -4875,9 +4894,9 @@ export const zReleaseRevisionPinPath = z.object({
 });
 
 /**
- * Released.
+ * Released, with the server-derived retention consequence.
  */
-export const zReleaseRevisionPinResponse = z.void();
+export const zReleaseRevisionPinResponse = zRevisionPinReleaseResult;
 
 export const zListRevisionsPath = z.object({
     org: zId,

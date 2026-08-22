@@ -4,15 +4,17 @@
  *
  * Kept free of React and API clients for the same reason `matrix-state.ts` is:
  * these are the drawer's domain decisions — what a pin mutation actually does,
- * when a pin is the last thing keeping a payload alive, which revisions a
- * collected payload takes off the table, what the impact preview summarises to.
- * A UI test that clicked its way to those answers would be slower, less exact,
- * and would not fail when the rule changed.
+ * which revisions a collected payload takes off the table, and what the impact
+ * preview summarises to. Retention consequences are server vocabulary: the
+ * list carries a confirmation preview and the release response carries the
+ * authoritative transaction-time decision.
  *
  * Revision numbers are `bigint` throughout, because that is what the generated
  * Zod hands the boundary (`int64`). Mixing them with `number` is how an
  * ordering comparison silently stops being one.
  */
+
+import type { RetentionConsequence } from '@hikyo/client';
 
 export type HistoryChangedKey = {
   readonly keyId: string;
@@ -266,81 +268,9 @@ export type HistoryPin = {
   readonly expiresAt: string;
   readonly expired: boolean;
   readonly schemaOverride: boolean;
+  readonly releaseRetentionConsequence: RetentionConsequence;
 };
 
-/**
- * pastNormalRetention mirrors the GC's own predicate, exactly.
- *
- * `keep-if-either` keeps a payload while EITHER dimension still covers it, so a
- * payload is past normal retention only when BOTH are exceeded: older than the
- * age window AND further back than the last-N window. `rankFromNewest` is
- * 1-based, matching the sweep's `ROW_NUMBER() … ORDER BY revision DESC`, and
- * `unlimited` never collects anything.
- *
- * ponytail: the predicate is duplicated from `ListEligibleSnapshotPayloads`
- * rather than asked of the server, because there is no endpoint that answers
- * "would this be collected". It is only ever used to decide how LOUD a release
- * confirmation is — the server still refuses a collected payload by name — so a
- * client that drifts warns wrongly, it does not delete wrongly. If a
- * collectability endpoint ever lands, read it instead.
- */
-export function pastNormalRetention(input: {
-  readonly policy: HistoryRetention;
-  readonly ageSeconds: number;
-  readonly rankFromNewest: number;
-}): boolean {
-  const { policy } = input;
-  if (policy.mode === 'unlimited' || policy.maxAgeSeconds === null || policy.lastRevisions === null) {
-    return false;
-  }
-  return input.ageSeconds > policy.maxAgeSeconds && input.rankFromNewest > policy.lastRevisions;
-}
-
-/**
- * soleKeeperPinIds is the set of pins whose release makes a payload eligible
- * for deletion by the next retention sweep.
- *
- * The prototype's iteration-4 verdict is that "holds payload" is jargon: the
- * consequence language names the next retention sweep and permanent deletion.
- * This is the predicate behind that wording.
- *
- * A pin is a sole keeper when its revision is past normal retention, its
- * payload is STILL PRESENT (a collected revision has nothing left for a release
- * to delete), and no other LIVE pin holds the same revision. An expired pin is
- * never a sole keeper: GC only spares a payload for a pin with
- * `expires_at > now`, so an expired one is already not what is keeping it.
- *
- * `revisions` must be the environment's whole history, newest first — the
- * last-N window is a position in it.
- */
-export function soleKeeperPinIds(input: {
-  readonly pins: readonly HistoryPin[];
-  readonly revisions: readonly HistoryRevision[];
-  readonly policy: HistoryRetention;
-  readonly now: Date;
-}): ReadonlySet<string> {
-  const live = input.pins.filter((pin) => new Date(pin.expiresAt).getTime() > input.now.getTime());
-  const keepersByRevision = new Map<bigint, number>();
-  for (const pin of live) {
-    keepersByRevision.set(pin.revision, (keepersByRevision.get(pin.revision) ?? 0) + 1);
-  }
-  const sole = new Set<string>();
-  for (const pin of live) {
-    if ((keepersByRevision.get(pin.revision) ?? 0) !== 1) {
-      continue;
-    }
-    const rankFromNewest = input.revisions.findIndex((entry) => entry.revision === pin.revision) + 1;
-    const target = input.revisions[rankFromNewest - 1];
-    if (rankFromNewest === 0 || target === undefined || !target.payloadPresent) {
-      continue;
-    }
-    const ageSeconds = (input.now.getTime() - new Date(target.publishedAt).getTime()) / 1_000;
-    if (pastNormalRetention({ policy: input.policy, ageSeconds, rankFromNewest })) {
-      sole.add(pin.id);
-    }
-  }
-  return sole;
-}
 
 export type HistoryImpactChange = {
   readonly keyId: string;
@@ -557,16 +487,6 @@ export function pinExpiryInstant(dateInputValue: string): string {
     throw new Error(`Invalid pin expiry date: ${dateInputValue}`);
   }
   return instant.toISOString();
-}
-
-export const SOLE_KEEPER_RELEASE_TITLE = 'Release sole-keeper pin';
-export const SOLE_KEEPER_RELEASE_BUTTON = 'Release pin — values become eligible for collection';
-
-export function soleKeeperReleaseConsequences(revision: bigint): string {
-  return (
-    `Releasing makes r${String(revision)}'s values eligible for collection at the next ` +
-    'retention sweep — they will then be deleted permanently.'
-  );
 }
 
 /** Human-readable workload identity with the complete id retained by the caller's title. */

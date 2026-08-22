@@ -108,6 +108,52 @@ func TestLineageWireCarriesTheCollectionBit(t *testing.T) {
 	}
 }
 
+func TestPinReleaseWireCarriesServerRetentionConsequence(t *testing.T) {
+	api := &API{Pins: releasePinService{result: service.ReleasePinResult{
+		Revision:             3,
+		RetentionConsequence: service.RetentionCollectionEligible,
+	}}}
+	response, err := api.ReleaseRevisionPin(t.Context(), apigen.ReleaseRevisionPinRequestObject{
+		Org: "org_a", Project: "prj_a", Environment: "env_a", WorkloadPrincipal: "wld_a",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder := httptest.NewRecorder()
+	if err := response.VisitReleaseRevisionPinResponse(recorder); err != nil {
+		t.Fatal(err)
+	}
+	if recorder.Code != http.StatusOK || recorder.Body.String() != "{\"retention_consequence\":\"collection_eligible\",\"revision\":3}\n" {
+		t.Fatalf("release response = %d %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestPinWireCarriesServerReleasePreview(t *testing.T) {
+	got := wirePin(service.PinView{
+		ID: "pin_a", WorkloadPrincipalID: "mch_a", Revision: 3,
+		ReleaseRetentionConsequence: service.RetentionCollectionEligible,
+	})
+	if got.ReleaseRetentionConsequence != apigen.CollectionEligible {
+		t.Fatalf("pin release preview = %q, want collection_eligible", got.ReleaseRetentionConsequence)
+	}
+}
+
+type releasePinService struct {
+	result service.ReleasePinResult
+}
+
+func (releasePinService) Set(context.Context, service.Actor, domain.Scope, service.SetPinRequest) (service.SetPinResult, error) {
+	return service.SetPinResult{}, domain.ErrNotFound
+}
+
+func (releasePinService) List(context.Context, service.Actor, domain.Scope) ([]service.PinView, error) {
+	return nil, domain.ErrNotFound
+}
+
+func (s releasePinService) Release(context.Context, service.Actor, domain.Scope, domain.PrincipalID) (service.ReleasePinResult, error) {
+	return s.result, nil
+}
+
 type historyRevisionService struct {
 	history []service.RevisionView
 }

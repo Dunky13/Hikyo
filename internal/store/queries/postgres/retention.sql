@@ -2,6 +2,14 @@
 -- run only under the scheduler system-proof site. Tenant policy and pin reads
 -- carry the ordinary proof-bound chain conjuncts.
 
+-- name: LockSnapshotForRetentionConsequence :one
+SELECT id FROM snapshots
+WHERE org_id = sqlc.arg(chain_org_id)
+  AND project_id = sqlc.arg(chain_project_id)
+  AND environment_id = sqlc.arg(chain_env_id)
+  AND id = sqlc.arg(snapshot_id)
+FOR UPDATE;
+
 -- hikyo:instance-scoped
 -- name: ListEligibleSnapshotPayloads :many
 WITH ranked AS (

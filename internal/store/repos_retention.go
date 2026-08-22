@@ -20,6 +20,25 @@ type sqliteRetention struct {
 	tok *authz.TxToken
 }
 
+func (r sqliteRetention) LockSnapshot(ctx context.Context, p authz.Proof, snapshotID string) error {
+	chain, err := authz.Verify(p, authz.StoreRetentionSnapshotLock, r.tok)
+	if err != nil {
+		return err
+	}
+	env, err := envOf(chain, authz.StoreRetentionSnapshotLock)
+	if err != nil {
+		return err
+	}
+	_, err = r.q.LockSnapshotForRetentionConsequence(ctx, sqlitegen.LockSnapshotForRetentionConsequenceParams{
+		OrgID: string(chain.Org), ProjectID: string(chain.Project), EnvironmentID: env,
+		ID: snapshotID,
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	return err
+}
+
 func (r sqliteRetention) Eligible(ctx context.Context, p authz.Proof, now time.Time, limit int) ([]GCEligibleSnapshot, error) {
 	if _, err := authz.Verify(p, authz.StoreRetentionEligible, r.tok); err != nil {
 		return nil, err
@@ -91,6 +110,25 @@ func (r sqliteRetention) SetLastPruneSuccess(ctx context.Context, p authz.Proof,
 type pgRetention struct {
 	q   *pggen.Queries
 	tok *authz.TxToken
+}
+
+func (r pgRetention) LockSnapshot(ctx context.Context, p authz.Proof, snapshotID string) error {
+	chain, err := authz.Verify(p, authz.StoreRetentionSnapshotLock, r.tok)
+	if err != nil {
+		return err
+	}
+	env, err := envOf(chain, authz.StoreRetentionSnapshotLock)
+	if err != nil {
+		return err
+	}
+	_, err = r.q.LockSnapshotForRetentionConsequence(ctx, pggen.LockSnapshotForRetentionConsequenceParams{
+		ChainOrgID: string(chain.Org), ChainProjectID: string(chain.Project), ChainEnvID: env,
+		SnapshotID: snapshotID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+	return err
 }
 
 func (r pgRetention) Eligible(ctx context.Context, p authz.Proof, now time.Time, limit int) ([]GCEligibleSnapshot, error) {

@@ -659,6 +659,7 @@ import {
   zReencryptProjectResponse,
   zRefreshSamlProviderMetadataResponse,
   zRegenerateRecoveryCodesResponse,
+  zReleaseRevisionPinResponse,
   zRemoveAdapterTargetResponse,
   zRemovePasskeyResponse,
   zRemoveTotpResponse,
@@ -865,6 +866,7 @@ export const reencryptInstanceOp: BodyOperation<ReencryptInstanceData, typeof zR
 export const reencryptProjectOp: BodyOperation<ReencryptProjectData, typeof zReencryptProjectResponse> = /* @__PURE__ */ new GeneratedBodyOperation(reencryptProject, [200], zReencryptProjectResponse);
 export const refreshSamlProviderMetadataOp: BodyOperation<RefreshSamlProviderMetadataData, typeof zRefreshSamlProviderMetadataResponse> = /* @__PURE__ */ new GeneratedBodyOperation(refreshSamlProviderMetadata, [200], zRefreshSamlProviderMetadataResponse);
 export const regenerateRecoveryCodesOp: BodyOperation<RegenerateRecoveryCodesData, typeof zRegenerateRecoveryCodesResponse> = /* @__PURE__ */ new GeneratedBodyOperation(regenerateRecoveryCodes, [200], zRegenerateRecoveryCodesResponse);
+export const releaseRevisionPinOp: BodyOperation<ReleaseRevisionPinData, typeof zReleaseRevisionPinResponse> = /* @__PURE__ */ new GeneratedBodyOperation(releaseRevisionPin, [200], zReleaseRevisionPinResponse);
 export const removeAdapterTargetOp: BodyOperation<RemoveAdapterTargetData, typeof zRemoveAdapterTargetResponse> = /* @__PURE__ */ new GeneratedBodyOperation(removeAdapterTarget, [200], zRemoveAdapterTargetResponse);
 export const removePasskeyOp: BodyOperation<RemovePasskeyData, typeof zRemovePasskeyResponse> = /* @__PURE__ */ new GeneratedBodyOperation(removePasskey, [200], zRemovePasskeyResponse);
 export const removeTotpOp: BodyOperation<RemoveTotpData, typeof zRemoveTotpResponse> = /* @__PURE__ */ new GeneratedBodyOperation(removeTotp, [200], zRemoveTotpResponse);
@@ -949,7 +951,6 @@ export const deleteScimBindingOp: BodylessOperation<DeleteScimBindingData> = /* 
 export const deleteServiceAccountOp: BodylessOperation<DeleteServiceAccountData> = /* @__PURE__ */ new GeneratedBodylessOperation(deleteServiceAccount, [204]);
 export const establishCredentialOp: BodylessOperation<EstablishCredentialData> = /* @__PURE__ */ new GeneratedBodylessOperation(establishCredential, [204]);
 export const logoutOp: BodylessOperation<LogoutData> = /* @__PURE__ */ new GeneratedBodylessOperation(logout, [204]);
-export const releaseRevisionPinOp: BodylessOperation<ReleaseRevisionPinData> = /* @__PURE__ */ new GeneratedBodylessOperation(releaseRevisionPin, [204]);
 export const removeRemoteOp: BodylessOperation<RemoveRemoteData> = /* @__PURE__ */ new GeneratedBodylessOperation(removeRemote, [204]);
 export const retireSamlSpKeyOp: BodylessOperation<RetireSamlSpKeyData> = /* @__PURE__ */ new GeneratedBodylessOperation(retireSamlSpKey, [204]);
 export const revokeAdapterCredentialOp: BodylessOperation<RevokeAdapterCredentialData> = /* @__PURE__ */ new GeneratedBodylessOperation(revokeAdapterCredential, [204]);
