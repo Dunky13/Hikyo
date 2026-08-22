@@ -835,6 +835,224 @@ func TestComposeRenderIdenticalContentDistinctStamps(t *testing.T) {
 	}
 }
 
+func TestComposeRenderSnapshotFailureLeavesPublishedGenerationUsable(t *testing.T) {
+	projectDir := t.TempDir()
+	runtimeDir := filepath.Join(t.TempDir(), "runtime")
+	stateDir := t.TempDir()
+	if err := os.Chmod(stateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	keys, err := crypto.LoadOrCreateLocalKey(stateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lock, err := compose.NewWriter(stateDir, nil).BeginRender(projectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+
+	blockedParent := t.TempDir()
+	if err := os.Chmod(blockedParent, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	blockedStorage := filepath.Join(blockedParent, "not-a-directory")
+	if err := os.WriteFile(blockedStorage, []byte("block snapshot persistence"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	binding, err := newSnapshotBinding(blockedStorage, TrustEntry{Origin: "https://hikyo.example"}, "org_1", "prj_1", "env_1", "wl_token", false, []string{"api"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp := deliveryResp([]apigen.DeliveredKey{{
+		KeyId: "key_1", Name: "DATABASE_URL", Classification: apigen.KeyClassificationConfig,
+		Presence: apigen.DeliveredKeyPresenceSet, Value: strPtr("postgres://x"),
+	}})
+	binding, err = bindSnapshotDelivery(binding, resp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := &compose.Config{Targets: map[string]compose.Target{"api": {Keys: []string{"key_1"}}}}
+	ios, _, _ := composeIO(stateDir, projectDir, "wl_token", nil)
+
+	moved, err := composeRenderApply(ios, lock, cfg, stateDir, runtimeDir, keys, binding, "wl_token", "env_1", false, resp, map[string]string{})
+	if err == nil || moved {
+		t.Fatalf("composeRenderApply moved=%v err=%v, want post-publish snapshot failure", moved, err)
+	}
+	if !strings.Contains(err.Error(), "save snapshot") {
+		t.Fatalf("composeRenderApply error = %v, want snapshot boundary", err)
+	}
+	stamps, err := compose.CurrentStamps(projectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stamp := stamps["api"]
+	if present, complete := compose.GenerationState(runtimeDir, stamp); !present || !complete {
+		t.Fatalf("published generation present=%v complete=%v after snapshot failure", present, complete)
+	}
+	if !applyPendingExists(stateDir) {
+		t.Fatal("committed publication must persist apply-pending before snapshot bookkeeping")
+	}
+}
+
+func TestComposeRenderCursorFailureLeavesPublishedGenerationPendingApply(t *testing.T) {
+	projectDir := t.TempDir()
+	runtimeDir := filepath.Join(t.TempDir(), "runtime")
+	stateDir := t.TempDir()
+	if err := os.Chmod(stateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	keys, err := crypto.LoadOrCreateLocalKey(stateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lock, err := compose.NewWriter(stateDir, nil).BeginRender(projectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	if err := os.Mkdir(filepath.Join(stateDir, "cursor.json"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	binding, err := newSnapshotBinding(stateDir, TrustEntry{Origin: "https://hikyo.example"}, "org_1", "prj_1", "env_1", "wl_token", false, []string{"api"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp := deliveryResp([]apigen.DeliveredKey{{
+		KeyId: "key_1", Name: "DATABASE_URL", Classification: apigen.KeyClassificationConfig,
+		Presence: apigen.DeliveredKeyPresenceSet, Value: strPtr("postgres://x"),
+	}})
+	binding, err = bindSnapshotDelivery(binding, resp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := &compose.Config{Targets: map[string]compose.Target{"api": {Keys: []string{"key_1"}}}}
+	ios, _, _ := composeIO(stateDir, projectDir, "wl_token", nil)
+
+	_, err = composeRenderApply(ios, lock, cfg, stateDir, runtimeDir, keys, binding, "wl_token", "env_1", false, resp, map[string]string{})
+	if err == nil || !strings.Contains(err.Error(), "save cursor") {
+		t.Fatalf("composeRenderApply err=%v, want cursor persistence failure", err)
+	}
+	if _, err := os.Stat(filepath.Join(stateDir, "snapshot.bin")); err != nil {
+		t.Fatalf("snapshot must be durable before cursor failure: %v", err)
+	}
+	if !applyPendingExists(stateDir) {
+		t.Fatal("committed publication must remain pending apply after cursor failure")
+	}
+	stamps, err := compose.CurrentStamps(projectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if present, complete := compose.GenerationState(runtimeDir, stamps["api"]); !present || !complete {
+		t.Fatalf("published generation present=%v complete=%v after cursor failure", present, complete)
+	}
+}
+
+func TestComposeRenderOfflineRecordsDisclosureBeforePublishFailure(t *testing.T) {
+	origin := "https://hikyo.example"
+	projectDir := t.TempDir()
+	stateDir := filepath.Join(t.TempDir(), "compose-state")
+	rows := []compose.SnapshotRow{{Name: "DATABASE_URL", KeyID: "key_1", Classification: "config", Value: "postgres://x"}}
+	seedRenderSnapshot(t, stateDir, origin, "wl_token", "api", rows)
+	keys, err := crypto.LoadOrCreateLocalKey(stateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lock, err := compose.NewWriter(stateDir, nil).BeginRender(projectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	binding, err := newSnapshotBinding(stateDir, TrustEntry{Origin: origin}, "org_1", "prj_1", "env_1", "wl_token", false, []string{"api"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := compose.ParseConfig([]byte("version: 1\ninstance: " + origin + "\norg: org_1\nproject: prj_1\nenvironment: env_1\nsnapshot:\n  offline_serve: true\ntargets:\n  api:\n    keys: [key_1]\n    services: [api]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	blockedRuntime := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(blockedRuntime, []byte("block generation materialization"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ios, _, _ := composeIO(stateDir, projectDir, "wl_token", nil)
+
+	moved, err := composeRenderOffline(t.Context(), ios, lock, cfg, projectDir, stateDir, filepath.Join(blockedRuntime, "runtime"), keys, binding, false, failf(ExitUnavailable, "offline"))
+	if err == nil || moved {
+		t.Fatalf("composeRenderOffline moved=%v err=%v, want publish failure", moved, err)
+	}
+	records, _, pendingErr := compose.Pending(stateDir)
+	if pendingErr != nil {
+		t.Fatal(pendingErr)
+	}
+	if len(records) != 1 || records[0].KeyID != "key_1" {
+		t.Fatalf("pending offline records = %+v after err=%v, want disclosure durable before publish", records, err)
+	}
+	if stamps, stampErr := compose.CurrentStamps(projectDir); stampErr != nil || len(stamps) != 0 {
+		t.Fatalf("CurrentStamps = %v err=%v, want no stamp switch after publish failure", stamps, stampErr)
+	}
+}
+
+func TestComposeApplyStateDetectsCommittedGenerationWithoutPendingMarker(t *testing.T) {
+	stateDir := t.TempDir()
+	if err := os.Chmod(stateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	current := map[string]string{"api": "v1-11111111111111111111111111111111"}
+	applied, err := loadAppliedStamps(stateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !stampsNeedApply(current, applied) {
+		t.Fatal("missing last-applied record must force apply after a post-commit crash")
+	}
+	if err := writeAppliedStamps(stateDir, current); err != nil {
+		t.Fatal(err)
+	}
+	applied, err = loadAppliedStamps(stateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stampsNeedApply(current, applied) {
+		t.Fatal("matching last-applied record should not force a redundant apply")
+	}
+	current["api"] = "v1-22222222222222222222222222222222"
+	if !stampsNeedApply(current, applied) {
+		t.Fatal("changed active stamps must force apply without relying on apply-pending")
+	}
+}
+
+func TestComposeApplyPendingWriteFailureRemainsRetryVisible(t *testing.T) {
+	parent := t.TempDir()
+	blockedState := filepath.Join(parent, "state-is-a-file")
+	if err := os.WriteFile(blockedState, []byte("block marker write"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	current := map[string]string{"api": "v1-11111111111111111111111111111111"}
+	published := compose.PublishResult{
+		Phase:        compose.PublishPhaseComplete,
+		Stamps:       map[string]string{"api": "v1-22222222222222222222222222222222"},
+		Materialized: map[string]bool{"api": true},
+	}
+	plan := compose.RenderPlan{Targets: []compose.RenderTargetPlan{{Name: "api"}}}
+	if err := persistCommittedPublish(blockedState, t.TempDir(), plan, current, published); err == nil {
+		t.Fatal("persistCommittedPublish should surface the blocked marker write")
+	}
+	if err := os.Remove(blockedState); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(blockedState, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	applied, err := loadAppliedStamps(blockedState)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !stampsNeedApply(published.Stamps, applied) {
+		t.Fatal("missing last-applied record must force retry after marker-write recovery")
+	}
+}
+
 // TestComposeRenderOfflineRefusesUnacknowledged: a snapshot saved with a
 // loader-control key acknowledged, then a config with the ack removed, must be
 // refused by name on offline render BEFORE any offline record is written
