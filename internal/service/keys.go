@@ -216,24 +216,24 @@ func checkKeySpec(spec KeySpec) error {
 	return nil
 }
 
-// checkDeclaration runs the two declaration authorities together: the rules
-// must compile, and the presence rules must be well-formed and free of the
-// statically decidable required∧forbidden conflict.
-func checkDeclaration(d schema.Declaration, p schema.PresenceRules) error {
-	if _, err := schema.Compile(d); err != nil {
-		return fmt.Errorf("%w: %s", domain.ErrInvalid, err)
+// checkClassifiedDeclaration runs the declaration and presence authorities
+// together and returns the normalized artifact boundary callers persist.
+func checkClassifiedDeclaration(classification string, d schema.Declaration, p schema.PresenceRules) (*schema.Compiled, error) {
+	compiled, err := schema.CompileClassified(schema.Classification(classification), d)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s", domain.ErrInvalid, err)
 	}
+	if err := checkPresenceRules(p); err != nil {
+		return nil, err
+	}
+	return compiled, nil
+}
+
+func checkPresenceRules(p schema.PresenceRules) error {
 	if err := schema.CheckPresence(p.Required, p.Forbidden); err != nil {
 		return fmt.Errorf("%w: %s", domain.ErrInvalid, err)
 	}
 	return nil
-}
-
-func checkClassifiedDeclaration(classification string, d schema.Declaration, p schema.PresenceRules) error {
-	if err := schema.CheckDeclarationClassification(schema.Classification(classification), d); err != nil {
-		return fmt.Errorf("%w: %s", domain.ErrInvalid, err)
-	}
-	return checkDeclaration(d, p)
 }
 
 // keyOf converts a store row plus its presence rows into the service key.
@@ -547,10 +547,11 @@ func (s *Keys) Create(ctx context.Context, actor Actor, scope domain.Scope, spec
 	if err := checkKeySpec(spec); err != nil {
 		return Key{}, err
 	}
-	if err := checkClassifiedDeclaration(spec.Classification, spec.Declaration, spec.Presence); err != nil {
+	compiled, err := checkClassifiedDeclaration(spec.Classification, spec.Declaration, spec.Presence)
+	if err != nil {
 		return Key{}, err
 	}
-	canonical, err := schema.Canonical(spec.Declaration)
+	canonical, err := compiled.Canonical()
 	if err != nil {
 		return Key{}, fmt.Errorf("%w: %s", domain.ErrInvalid, err)
 	}
@@ -559,10 +560,7 @@ func (s *Keys) Create(ctx context.Context, actor Actor, scope domain.Scope, spec
 	// the JSON Schema re-encoded — so echoing the request would hand back a
 	// declaration that differs from the one a later read returns, byte for
 	// byte, on exactly the values the canonicalization exists to normalize.
-	stored, err := schema.ParseDeclaration(canonical)
-	if err != nil {
-		return Key{}, fmt.Errorf("service: canonical declaration unreadable: %w", err)
-	}
+	stored := compiled.Declaration()
 	id, err := newID("key")
 	if err != nil {
 		return Key{}, err
@@ -1061,10 +1059,11 @@ func (s *Keys) UpdateDeclaration(ctx context.Context, actor Actor, scope domain.
 		}
 
 		// Only now is the new declaration examined at all.
-		if err := checkClassifiedDeclaration(before.Classification, u.Declaration, u.Presence); err != nil {
+		compiled, err := checkClassifiedDeclaration(before.Classification, u.Declaration, u.Presence)
+		if err != nil {
 			return err
 		}
-		canonical, err := schema.Canonical(u.Declaration)
+		canonical, err := compiled.Canonical()
 		if err != nil {
 			return fmt.Errorf("%w: %s", domain.ErrInvalid, err)
 		}
@@ -1094,10 +1093,8 @@ func (s *Keys) UpdateDeclaration(ctx context.Context, actor Actor, scope domain.
 		// scanning declaration TEXT touches no stored value, so it opens no
 		// abort/success channel, and an unchanged declaration is never re-scanned
 		// (no retro-scan, ADR §6.1).
-		if stored, perr := schema.ParseDeclaration(canonical); perr == nil {
-			if err := applyDeclarationScan(ctx, r, p, az, s.Keyring, s.Scan, caller.Principal, scope, declarationLeaves(stored), newAckSet(acks), ingressEdit); err != nil {
-				return err
-			}
+		if err := applyDeclarationScan(ctx, r, p, az, s.Keyring, s.Scan, caller.Principal, scope, declarationLeaves(compiled.Declaration()), newAckSet(acks), ingressEdit); err != nil {
+			return err
 		}
 		if err := r.Catalogue().UpdateDeclaration(ctx, p, id, store.KeyDeclaration{
 			Declaration:   string(canonical),
@@ -1214,14 +1211,12 @@ func (s *Keys) Reclassify(ctx context.Context, actor Actor, scope domain.Scope, 
 			// happened.
 			return fmt.Errorf("%w: the key is already classified %q", domain.ErrInvalid, classification)
 		}
-		if classification == string(schema.Secret) {
-			decl, err := schema.ParseDeclaration([]byte(before.Declaration))
-			if err != nil {
-				return fmt.Errorf("service: key %s: stored declaration unreadable: %w", id, err)
-			}
-			if err := schema.CheckDeclarationClassification(schema.Secret, decl); err != nil {
-				return fmt.Errorf("%w: key %q cannot be classified secret: %s", domain.ErrInvalid, before.Name, err)
-			}
+		decl, err := schema.ParseDeclaration([]byte(before.Declaration))
+		if err != nil {
+			return fmt.Errorf("service: key %s: stored declaration unreadable: %w", id, err)
+		}
+		if _, err := schema.CompileClassified(schema.Classification(classification), decl); err != nil {
+			return fmt.Errorf("%w: key %q cannot be classified %s: %s", domain.ErrInvalid, before.Name, classification, err)
 		}
 		if classification == string(schema.Config) {
 			// The ATTEMPT record rides the rollback-surviving settlement path;

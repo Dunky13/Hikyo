@@ -252,17 +252,17 @@ func scenarioDeclarationFixtures(t *testing.T, db *store.DB) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		compiled, err := schema.Compile(stored.Declaration)
+		compiled, err := schema.CompileClassified(schema.Classification(stored.Classification), stored.Declaration)
 		if err != nil {
 			t.Fatalf("%s: the STORED declaration no longer compiles: %v", tc.name, err)
 		}
 		for _, value := range tc.valid {
-			if v := compiled.Validate(value, schema.Config); !v.Valid {
+			if v := compiled.Validate(value); !v.Valid {
 				t.Errorf("%s: %q refused: %+v", tc.name, value, v.Errors)
 			}
 		}
 		for _, value := range tc.invalid {
-			if v := compiled.Validate(value, schema.Config); v.Valid {
+			if v := compiled.Validate(value); v.Valid {
 				t.Errorf("%s: %q accepted", tc.name, value)
 			}
 		}

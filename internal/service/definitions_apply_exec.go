@@ -42,7 +42,7 @@ func (s *Definitions) Apply(ctx context.Context, actor Actor, scope domain.Scope
 	// This pre-flight reaches the verdict in a read transaction before the mint, so
 	// a skew-blocked apply persists NOTHING but the finding_blocked events. A
 	// same-version apply runs no scan here and returns no overrides.
-	overrides, err := s.scanApplySkew(ctx, actor, scope, planID, opts.Acknowledgements)
+	precompiled, overrides, err := s.scanApplySkew(ctx, actor, scope, planID, opts.Acknowledgements)
 	if err != nil {
 		return ApplyResult{}, err
 	}
@@ -78,10 +78,16 @@ func (s *Definitions) Apply(ctx context.Context, actor Actor, scope domain.Scope
 			return &detailErr{detail: "plan expired; re-plan", err: fmt.Errorf("%w: plan %s expired", domain.ErrConflict, planID)}
 		}
 
-		bundle, err := definitions.Parse([]byte(plan.Bundle))
-		if err != nil {
-			return fmt.Errorf("service: plan %s: stored bundle unreadable: %w", planID, err)
+		var compiledBundle definitions.CompiledBundle
+		if precompiled == nil {
+			compiledBundle, err = definitions.ParseCompiled([]byte(plan.Bundle))
+			if err != nil {
+				return fmt.Errorf("service: plan %s: stored bundle unreadable: %w", planID, err)
+			}
+		} else {
+			compiledBundle = *precompiled
 		}
+		bundle := compiledBundle.Bundle
 		cur, err := buildCurrentState(ctx, r.Catalogue(), r.Environments(), p)
 		if err != nil {
 			return err
@@ -113,7 +119,7 @@ func (s *Definitions) Apply(ctx context.Context, actor Actor, scope domain.Scope
 			return err
 		}
 
-		if err := s.executeResolution(ctx, r, az, caller, p, scope, res, cur, cur.SchemaRevision+1); err != nil {
+		if err := s.executeResolution(ctx, r, az, caller, p, scope, res, cur, compiledBundle, cur.SchemaRevision+1); err != nil {
 			return err
 		}
 		// § 151 schema-revision rate: charged only for a non-empty plan (the
@@ -194,10 +200,11 @@ func (s *Definitions) Apply(ctx context.Context, actor Actor, scope domain.Scope
 // An already-applied or expired plan re-scans nothing: the write transaction
 // yields the proper conflict, and blocking a plan that cannot apply would emit
 // spurious events.
-func (s *Definitions) scanApplySkew(ctx context.Context, actor Actor, scope domain.Scope, planID string, acks []string) ([]overrideAck, error) {
+func (s *Definitions) scanApplySkew(ctx context.Context, actor Actor, scope domain.Scope, planID string, acks []string) (*definitions.CompiledBundle, []overrideAck, error) {
 	if s.Scan == nil {
-		return nil, nil // scanning off (pre-#74 test); a booted server always wires it
+		return nil, nil, nil // scanning off (pre-#74 test); a booted server always wires it
 	}
+	var compiled *definitions.CompiledBundle
 	var overrides []overrideAck
 	err := tx.Read(ctx, s.DB, func(ctx context.Context, r store.ReadRepos, az *authz.TxAuthorizer) error {
 		caller, err := actor.resolve(ctx, az, s.now())
@@ -215,14 +222,15 @@ func (s *Definitions) scanApplySkew(ctx context.Context, actor Actor, scope doma
 		if plan.Applied || !s.now().Before(plan.ExpiresAt) {
 			return nil // the write transaction produces the applied/expired conflict
 		}
-		if plan.ScanSnapshot == s.Scan.SnapshotVersion() {
-			return nil // no skew: a same-version apply adds no second scan
-		}
-		bundle, err := definitions.Parse([]byte(plan.Bundle))
+		parsed, err := definitions.ParseCompiled([]byte(plan.Bundle))
 		if err != nil {
 			return fmt.Errorf("service: plan %s: stored bundle unreadable: %w", planID, err)
 		}
-		res, err := scanDeclaration(ctx, s.Keyring, s.Scan, bundleLeaves(bundle), newAckSet(acks), s.now(), ingressApply)
+		compiled = &parsed
+		if plan.ScanSnapshot == s.Scan.SnapshotVersion() {
+			return nil // no skew: a same-version apply adds no second scan
+		}
+		res, err := scanDeclaration(ctx, s.Keyring, s.Scan, bundleLeaves(parsed.Bundle), newAckSet(acks), s.now(), ingressApply)
 		if err != nil {
 			return err
 		}
@@ -240,9 +248,9 @@ func (s *Definitions) scanApplySkew(ctx context.Context, actor Actor, scope doma
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return overrides, nil
+	return compiled, overrides, nil
 }
 
 // recheckPins refuses the apply if the file digest or any pinned revision moved
@@ -439,7 +447,8 @@ func protectedSetGrew(pinned, current []string) bool {
 // and the two-phase rename resolve swaps, and key creates/updates resolve their
 // group and presence references against the final topology.
 func (s *Definitions) executeResolution(ctx context.Context, r store.Repos, az *authz.TxAuthorizer, caller authz.Identity,
-	p authz.Proof, scope domain.Scope, res definitions.Resolution, cur definitions.CurrentState, finalRevision int64) error {
+	p authz.Proof, scope domain.Scope, res definitions.Resolution, cur definitions.CurrentState,
+	compiledBundle definitions.CompiledBundle, finalRevision int64) error {
 	now := s.now()
 
 	// 1. Key deletes: clear the key's live values (so the foreign key admits the
@@ -587,12 +596,20 @@ func (s *Definitions) executeResolution(ctx context.Context, r store.Repos, az *
 	// 8. Key creates and updates, resolving group and presence names to the
 	// final topology's ids.
 	for _, k := range res.KeyCreates {
-		if err := s.createKey(ctx, r, caller, p, k, envIDByName, groupIDByName); err != nil {
+		compiled, ok := compiledBundle.CompiledDeclaration(k.Name)
+		if !ok {
+			return fmt.Errorf("service: compiled declaration missing for key %q", k.Name)
+		}
+		if err := s.createKey(ctx, r, caller, p, k, compiled, envIDByName, groupIDByName); err != nil {
 			return err
 		}
 	}
 	for _, upd := range res.KeyUpdates {
-		if err := s.updateKey(ctx, r, caller, p, upd, envIDByName, groupIDByName, finalRevision); err != nil {
+		compiled, ok := compiledBundle.CompiledDeclaration(upd.Desired.Name)
+		if !ok {
+			return fmt.Errorf("service: compiled declaration missing for key %q", upd.Desired.Name)
+		}
+		if err := s.updateKey(ctx, r, caller, p, upd, compiled, envIDByName, groupIDByName, finalRevision); err != nil {
 			return err
 		}
 	}
@@ -761,15 +778,15 @@ func (s *Definitions) renameEnv(ctx context.Context, r store.Repos, az *authz.Tx
 }
 
 func (s *Definitions) createKey(ctx context.Context, r store.Repos, caller authz.Identity, p authz.Proof, k definitions.Key,
-	envIDByName, groupIDByName map[string]string) error {
+	compiled *schema.Compiled, envIDByName, groupIDByName map[string]string) error {
 	presence, err := resolvePresence(k, envIDByName)
 	if err != nil {
 		return err
 	}
-	if err := checkClassifiedDeclaration(k.Classification, k.Declaration, presence); err != nil {
+	if err := checkPresenceRules(presence); err != nil {
 		return err
 	}
-	canonical, err := schema.Canonical(k.Declaration)
+	canonical, err := compiled.Canonical()
 	if err != nil {
 		return fmt.Errorf("%w: %s", domain.ErrInvalid, err)
 	}
@@ -800,7 +817,7 @@ func (s *Definitions) createKey(ctx context.Context, r store.Repos, caller authz
 }
 
 func (s *Definitions) updateKey(ctx context.Context, r store.Repos, caller authz.Identity, p authz.Proof, upd definitions.KeyUpdate,
-	envIDByName, groupIDByName map[string]string, finalRevision int64) error {
+	compiled *schema.Compiled, envIDByName, groupIDByName map[string]string, finalRevision int64) error {
 	k := upd.Desired
 	before, err := r.Catalogue().Get(ctx, p, upd.ID)
 	if err != nil {
@@ -810,7 +827,7 @@ func (s *Definitions) updateKey(ctx context.Context, r store.Repos, caller authz
 	if err != nil {
 		return err
 	}
-	if err := checkClassifiedDeclaration(k.Classification, k.Declaration, presence); err != nil {
+	if err := checkPresenceRules(presence); err != nil {
 		return err
 	}
 	// Rename was already applied in the two-phase pass; metadata, declaration,
@@ -828,7 +845,7 @@ func (s *Definitions) updateKey(ctx context.Context, r store.Repos, caller authz
 		}
 	}
 	if upd.DeclChanged || upd.PresenceChanged {
-		canonical, err := schema.Canonical(k.Declaration)
+		canonical, err := compiled.Canonical()
 		if err != nil {
 			return fmt.Errorf("%w: %s", domain.ErrInvalid, err)
 		}

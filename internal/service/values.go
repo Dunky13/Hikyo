@@ -341,11 +341,11 @@ func validateValue(key store.CatalogueKey, value string) error {
 	if err != nil {
 		return fmt.Errorf("service: key %s: stored declaration unreadable: %w", key.ID, err)
 	}
-	compiled, err := schema.Compile(decl)
+	compiled, err := schema.CompileClassified(schema.Classification(key.Classification), decl)
 	if err != nil {
 		return fmt.Errorf("service: key %s: stored declaration does not compile: %w", key.ID, err)
 	}
-	verdict := compiled.Validate(value, schema.Classification(key.Classification))
+	verdict := compiled.Validate(value)
 	if verdict.Valid {
 		return nil
 	}
