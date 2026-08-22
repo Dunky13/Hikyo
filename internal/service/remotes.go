@@ -480,7 +480,7 @@ func (s *Remotes) runRound(
 	fetchCtx, cancel := context.WithTimeout(ctx, s.Fetch.RoundBudget(len(targets)))
 	defer cancel()
 	for _, res := range s.Fetch.FetchAll(fetchCtx, targets) {
-		out[res.ID] = res
+		out[res.TargetID()] = res
 	}
 	return out
 }
@@ -517,9 +517,15 @@ func (s *Remotes) settle(
 		stale := 0
 		for _, e := range entries {
 			res, got := results[e.ID]
-			if !fetched || !got {
+			var attempted *remotefetch.Attempted
+			wasAttempted := false
+			if fetched && got {
+				attempted, wasAttempted = attemptedFetch(res)
+			}
+			if !fetched || !got || !wasAttempted {
 				// No round covered this entry — the trigger budget was
-				// exhausted, or the shared round's scope did not include it.
+				// exhausted, the shared round's scope did not include it, or
+				// local cancellation/admission prevented an actual request.
 				// The snapshot is served AS a snapshot: nothing is written, and
 				// nothing is claimed to be current. There is deliberately no
 				// outcome invented here; `unreachable` would name a connection
@@ -538,16 +544,16 @@ func (s *Remotes) settle(
 				views = append(views, v)
 				continue
 			}
-			outcome := res.Outcome
+			outcome := attempted.Outcome
 			switch {
-			case outcome == remotefetch.OutcomeOK && res.Listing.Identity == selfIdentity:
+			case outcome == remotefetch.OutcomeOK && attempted.Listing.Identity == selfIdentity:
 				outcome = remotefetch.OutcomeSelfConnected
-			case outcome == remotefetch.OutcomeOK && conflicted[res.Listing.Identity]:
+			case outcome == remotefetch.OutcomeOK && conflicted[attempted.Listing.Identity]:
 				outcome = remotefetch.OutcomeIdentityConflict
 			}
 
 			if outcome == remotefetch.OutcomeOK {
-				snap, err := snapshotOf(e.ID, res.Listing, now)
+				snap, err := snapshotOf(e.ID, attempted.Listing, now)
 				if err != nil {
 					return err
 				}
@@ -728,8 +734,9 @@ func knownIdentities(ctx context.Context, rr store.RemoteReader, p authz.Proof) 
 func conflictingIdentities(results map[string]remotefetch.Result) map[string]bool {
 	seen := map[string]int{}
 	for _, res := range results {
-		if res.Outcome == remotefetch.OutcomeOK {
-			seen[res.Listing.Identity]++
+		attempted, ok := attemptedFetch(res)
+		if ok && attempted.Outcome == remotefetch.OutcomeOK {
+			seen[attempted.Listing.Identity]++
 		}
 	}
 	out := map[string]bool{}
@@ -739,6 +746,26 @@ func conflictingIdentities(results map[string]remotefetch.Result) map[string]boo
 		}
 	}
 	return out
+}
+
+// attemptedFetch is the single variant check shared by settlement, identity
+// conflict detection, and gate coverage. A NotAttempted result is local
+// scheduler state and must never become remote health or audit evidence.
+func attemptedFetch(result remotefetch.Result) (*remotefetch.Attempted, bool) {
+	switch result := result.(type) {
+	case *remotefetch.Attempted:
+		if result == nil {
+			panic("service: nil attempted remote fetch result")
+		}
+		return result, true
+	case *remotefetch.NotAttempted:
+		if result == nil {
+			panic("service: nil not-attempted remote fetch result")
+		}
+		return nil, false
+	default:
+		panic("service: unknown remote fetch result variant")
+	}
 }
 
 func snapshotOf(remoteID string, l remotefetch.Listing, now time.Time) (store.RemoteSnapshot, error) {
