@@ -88,8 +88,10 @@ require_text "$repo_root/SECURITY.md" '| Latest patch release of the latest mino
 require_text "$repo_root/SECURITY.md" '| All older stable releases | No |'
 require_text "$repo_root/SECURITY.md" '| Prereleases | No |'
 require_text "$repo_root/GOVERNANCE.md" 'Organization-wide'
-require_text "$repo_root/GOVERNANCE.md" '2FA enforcement remains pending'
-reject_text "$repo_root/GOVERNANCE.md" 'organization 2FA are enforced'
+require_text "$repo_root/GOVERNANCE.md" 'OBL-REPOSITORY-TRANSFER'
+require_text "$repo_root/GOVERNANCE.md" 'implementation-status ledger'
+require_text "$repo_root/GOVERNANCE.md" 'historical handoff'
+reject_text "$repo_root/GOVERNANCE.md" '2FA enforcement remains pending'
 
 security_txt="$repo_root/docs/site/public/.well-known/security.txt"
 require_file "$security_txt"
@@ -126,6 +128,7 @@ for path in \
 	security/index.html \
 	support/index.html \
 	governance/index.html \
+	implementation-status/index.html \
 	trademark/index.html \
 	contributing/index.html \
 	license/index.html; do
