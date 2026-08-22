@@ -1077,20 +1077,6 @@ func doctorServerStamps(ctx context.Context, client *Client, cfg *compose.Config
 // error), and REQUIRES a machine credential. It never falls back to the stored
 // human session — that path is a refusal in this build.
 func resolveMachineTarget(st *State, ios IO, flags commonFlags, cfg *compose.Config, cfgPath, verb string) (*Client, TrustEntry, Resolved, string, error) {
-	kinds, err := authKindsFor(flags.operation)
-	if err != nil {
-		return nil, TrustEntry{}, Resolved{}, "", err
-	}
-	if !kinds.Allows(AuthKindMachineCredential) {
-		return nil, TrustEntry{}, Resolved{}, "", failf(ExitRefused, "hikyo %s does not accept machine credentials", flags.operation)
-	}
-	if flags.Auth == "human" {
-		hint := "this operation requires a machine credential"
-		if flags.operation == "run" {
-			hint = "pass --use-human-session for run's gated human-session exception"
-		}
-		return nil, TrustEntry{}, Resolved{}, "", failf(ExitRefused, "hikyo %s cannot use --auth=human: %s", flags.operation, hint)
-	}
 	resolved, err := Resolve(st, ios.Env, flags.Flags, ios.Workdir)
 	if err != nil {
 		return nil, TrustEntry{}, Resolved{}, "", err
@@ -1107,6 +1093,20 @@ func resolveMachineTarget(st *State, ios IO, flags commonFlags, cfg *compose.Con
 	}
 	if _, err := NewTenantScope(resolved); err != nil {
 		return nil, TrustEntry{}, Resolved{}, "", err
+	}
+	kinds, err := authKindsFor(flags.operation)
+	if err != nil {
+		return nil, TrustEntry{}, Resolved{}, "", err
+	}
+	if !kinds.Allows(AuthKindMachineCredential) {
+		return nil, TrustEntry{}, Resolved{}, "", failf(ExitRefused, "hikyo %s does not accept machine credentials", flags.operation)
+	}
+	if flags.Auth == "human" {
+		hint := "this operation requires a machine credential"
+		if flags.operation == "run" {
+			hint = "pass --use-human-session for run's gated human-session exception"
+		}
+		return nil, TrustEntry{}, Resolved{}, "", failf(ExitRefused, "hikyo %s cannot use --auth=human: %s", flags.operation, hint)
 	}
 
 	entry, err := machineEntry(st, resolved, cfg)
