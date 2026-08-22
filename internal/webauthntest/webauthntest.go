@@ -6,8 +6,16 @@
 package webauthntest
 
 import (
+	"errors"
+
 	vw "github.com/descope/virtualwebauthn"
 )
+
+// ErrNotEnrolled reports that a Device operation needs a credential the Device
+// does not have yet. Enrol must run first. Assert returns it; the credential
+// accessors panic with it, because a test that reads credential state before
+// enrolment is broken and must fail fast rather than act on the zero credential.
+var ErrNotEnrolled = errors.New("webauthntest: device not enrolled")
 
 // Device is one software authenticator holding a single credential. Two enrolled
 // passkeys on one account are two Devices sharing the account's opaque user
@@ -51,15 +59,33 @@ func (d *Device) SetBackupEligible(v bool) {
 func (d *Device) SuppressCredProps() { d.opts.ClientExtensionResults = nil }
 
 // SetCounter sets the authenticator sign counter the next assertion presents.
-// Enrolment records the counter as it stands at Enrol.
-func (d *Device) SetCounter(c uint32) { d.cred.Counter = c }
+// Enrolment records the counter as it stands at Enrol. It panics with
+// ErrNotEnrolled before enrolment.
+func (d *Device) SetCounter(c uint32) {
+	d.mustBeEnrolled()
+	d.cred.Counter = c
+}
 
-// Counter reports the current sign counter.
-func (d *Device) Counter() uint32 { return d.cred.Counter }
+// Counter reports the current sign counter. It panics with ErrNotEnrolled before
+// enrolment.
+func (d *Device) Counter() uint32 {
+	d.mustBeEnrolled()
+	return d.cred.Counter
+}
 
 // CredentialID is the authenticator-chosen credential id (base64url is the
-// server's, this is the raw bytes).
-func (d *Device) CredentialID() []byte { return d.cred.ID }
+// server's, this is the raw bytes). It panics with ErrNotEnrolled before
+// enrolment.
+func (d *Device) CredentialID() []byte {
+	d.mustBeEnrolled()
+	return d.cred.ID
+}
+
+func (d *Device) mustBeEnrolled() {
+	if !d.enrolled {
+		panic(ErrNotEnrolled)
+	}
+}
 
 // Enrol turns registration options from the server into an attestation response.
 // It reads the account's user handle from the options so a second Device for the
@@ -80,6 +106,9 @@ func (d *Device) Enrol(optionsJSON []byte) ([]byte, error) {
 // Assert turns assertion options (discoverable login, step-up or reauth) into an
 // assertion response signed by this Device's credential.
 func (d *Device) Assert(optionsJSON []byte) ([]byte, error) {
+	if !d.enrolled {
+		return nil, ErrNotEnrolled
+	}
 	as, err := vw.ParseAssertionOptions(string(optionsJSON))
 	if err != nil {
 		return nil, err
