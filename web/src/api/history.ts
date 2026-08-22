@@ -17,7 +17,7 @@ import {
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { z } from 'zod';
 
-import { ApiError, ok, parsed } from './client.ts';
+import { ApiError, parsed } from './client.ts';
 import {
   pinsKey,
   projectRetentionKey,
@@ -272,7 +272,7 @@ export function useReleaseRevisionPin(env: EnvRef) {
   const transport = useTransport();
   return useMutation({
     mutationFn: (workloadPrincipalID: string) =>
-      ok(releaseRevisionPinOp, { path: { ...env, workloadPrincipal: workloadPrincipalID }, ...transport }),
+      parsed(releaseRevisionPinOp, { path: { ...env, workloadPrincipal: workloadPrincipalID }, ...transport }),
     onSuccess: () =>
       Promise.all([
         queries.invalidateQueries({ queryKey: pinsKey(env) }),

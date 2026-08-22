@@ -1071,7 +1071,7 @@ func runValueLifecycle(t *testing.T, db *store.DB, actor service.Actor, who doma
 	if _, err := pins.Set(ctx, actor, sourceScope, service.SetPinRequest{WorkloadPrincipalID: workload, Revision: 1}); err != nil {
 		t.Fatal(err)
 	}
-	if err := pins.Release(ctx, actor, sourceScope, workload); err != nil {
+	if _, err := pins.Release(ctx, actor, sourceScope, workload); err != nil {
 		t.Fatal(err)
 	}
 	execRaw(t, db, "DELETE FROM pin_generations WHERE principal_id = 'mch_audit_pin'")
