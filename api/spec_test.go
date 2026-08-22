@@ -269,7 +269,7 @@ func TestRequestValidationRefusesUnknownMembers(t *testing.T) {
 		bytes.NewReader([]byte(`{"name":"acme","typo":true}`)))
 	req.Header.Set("Content-Type", "application/json")
 	var verr *api.ValidationError
-	err := api.ValidateRequest(req)
+	_, err := api.ValidateRequest(req)
 	if !errors.As(err, &verr) {
 		t.Fatalf("unknown member accepted: %v", err)
 	}
@@ -288,7 +288,7 @@ func TestRequestValidationAcceptsAbsentNullAndValue(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, api.PathPrefix+"/orgs",
 				bytes.NewReader([]byte(body)))
 			req.Header.Set("Content-Type", "application/json")
-			if err := api.ValidateRequest(req); err != nil {
+			if _, err := api.ValidateRequest(req); err != nil {
 				t.Fatalf("rejected: %v", err)
 			}
 		})
@@ -300,7 +300,7 @@ func TestRequestValidationReportsTheOffendingMember(t *testing.T) {
 		bytes.NewReader([]byte(`{"username":"","password":"x"}`)))
 	req.Header.Set("Content-Type", "application/json")
 	var verr *api.ValidationError
-	if !errors.As(api.ValidateRequest(req), &verr) {
+	if _, err := api.ValidateRequest(req); !errors.As(err, &verr) {
 		t.Fatal("empty username accepted")
 	}
 	if verr.Member != "username" {
@@ -310,7 +310,7 @@ func TestRequestValidationReportsTheOffendingMember(t *testing.T) {
 
 func TestUnroutedRequestIsDistinguishableFromMalformed(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, api.PathPrefix+"/nothing-here", nil)
-	if !errors.Is(api.ValidateRequest(req), api.ErrNoRoute) {
+	if _, err := api.ValidateRequest(req); !errors.Is(err, api.ErrNoRoute) {
 		t.Fatal("an undescribed path must be reported as unrouted, not as a bad body")
 	}
 }

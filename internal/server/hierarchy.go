@@ -75,7 +75,11 @@ func (a *API) writeRequestError(w http.ResponseWriter, r *http.Request, _ error)
 	// credential, or the wrong one, gets the uniform 401 and learns nothing
 	// about the shape of what it sent. Only an authenticated caller is told the
 	// body was malformed, and then in the RFC 7644 shape rather than Hikyo's.
-	if operation, ok := api.OperationIDFor(r); ok && api.IsSCIMWireOperation(operation) {
+	//
+	// The operation is read from the CONTEXT the admission middleware attached,
+	// not matched again: this leg only ever runs on a request that already
+	// passed contract validation, and one match per request is the rule.
+	if operation, ok := api.OperationFromContext(r.Context()); ok && api.IsSCIMWireOperation(operation.ID) {
 		a.writeSCIMRequestError(w, r,
 			scimproto.ErrInvalidSyntax("The request body is not a valid SCIM resource."))
 		return
@@ -107,11 +111,12 @@ func (a *API) writeSCIMRequestError(w http.ResponseWriter, r *http.Request, refu
 func (a *API) writeHandlerError(w http.ResponseWriter, r *http.Request, err error) {
 	policy := wireErrorFor(err)
 	if policy.code == apigen.ErrorCodeInternal {
-		operation, ok := api.OperationIDFor(r)
+		op, ok := api.OperationFromContext(r.Context())
+		name := op.ID
 		if !ok {
-			operation = "unrouted request"
+			name = "unrouted request"
 		}
-		a.fault(r.Context(), operation, err)
+		a.fault(r.Context(), name, err)
 	}
 	// A service refusal may carry a caller-safe detail (the clone abort names
 	// the stranded keys; a duplicate-item refusal names the duplicate; the
