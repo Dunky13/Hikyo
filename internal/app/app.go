@@ -188,6 +188,71 @@ func (s rootKeySource) Next(context.Context) ([]byte, error) {
 	return crypto.ReadRootKey(s.cfg.NewRootKeyFile, "")
 }
 
+// bootGuard tracks the resources Boot acquires so that any error after
+// acquisition releases exactly what was acquired, in reverse order. It is
+// armed by default — Boot defers cleanup so it runs on every return — and
+// disarmed once ownership transfers to the Server, which then becomes the sole
+// steady-state owner. Arming by default is the point: a future post-listen
+// constructor that forgets its cleanup on an error return is still released by
+// the deferred cleanup, so no error path can bypass it.
+type bootGuard struct {
+	closers []func() error
+	log     *slog.Logger
+}
+
+// bootResources is the narrow seam for resources whose acquisition can leave
+// Boot with something to release. Service construction and wiring stay local
+// to boot; tests replace only these constructors and cleanup functions so they
+// can inject failures at the ownership boundaries and count releases.
+type bootResources struct {
+	openDatabase       func(context.Context, store.Config) (*store.DB, error)
+	closeDatabase      func(*store.DB) error
+	listen             func(string, string) (net.Listener, error)
+	closeListener      func(net.Listener) error
+	newDirectoryClient func(remotefetch.Config) (*remotefetch.Client, error)
+}
+
+func defaultBootResources() bootResources {
+	return bootResources{
+		openDatabase: store.Open,
+		closeDatabase: func(db *store.DB) error {
+			return db.Close()
+		},
+		listen: net.Listen,
+		closeListener: func(ln net.Listener) error {
+			return ln.Close()
+		},
+		newDirectoryClient: remotefetch.New,
+	}
+}
+
+// add registers a resource's release in acquisition order. cleanup runs these
+// in reverse, so registering the database before the listener yields the
+// listener-before-database shutdown order Server.Close also uses.
+func (g *bootGuard) add(closer func() error) {
+	g.closers = append(g.closers, closer)
+}
+
+// cleanup releases every still-registered resource in reverse acquisition
+// order. It is idempotent (clears the list) and never returns an error: a
+// cleanup failure is logged, never allowed to mask the primary boot error that
+// triggered it.
+func (g *bootGuard) cleanup() {
+	for i := len(g.closers) - 1; i >= 0; i-- {
+		if err := g.closers[i](); err != nil {
+			g.log.Warn("boot cleanup: releasing an acquired resource failed", "err", err)
+		}
+	}
+	g.closers = nil
+}
+
+// disarm transfers ownership to the Server: the deferred cleanup becomes a
+// no-op. Called once, immediately before Boot's success return, with nothing
+// between it and the return that can fail.
+func (g *bootGuard) disarm() {
+	g.closers = nil
+}
+
 // Boot runs the fail-closed startup sequence: process hardening before any
 // key material exists, migrations (auto-apply by default; with auto-apply
 // disabled a pending migration state refuses to serve), datastore open with
@@ -196,10 +261,20 @@ func (s rootKeySource) Next(context.Context) ([]byte, error) {
 // does this), then the listener. Any error means the process must exit
 // without serving.
 func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, error) {
+	return boot(ctx, cfg, log, defaultBootResources())
+}
+
+func boot(ctx context.Context, cfg *config.Config, log *slog.Logger, resources bootResources) (*Server, error) {
 	if err := crypto.HardenProcess(); err != nil {
 		return nil, fmt.Errorf("boot: refusing to serve: %w", err)
 	}
 	sc := storeConfig(cfg)
+
+	// Every resource acquired below has one temporary owner — this guard —
+	// until the Server takes over. Armed by default; disarmed only at the
+	// ownership transfer immediately before the success return.
+	guard := &bootGuard{log: log}
+	defer guard.cleanup()
 
 	var migrationRecord preMigrationRecord
 	if cfg.AutoMigrate {
@@ -224,16 +299,17 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 		return nil, fmt.Errorf("boot: refusing to serve: %w", err)
 	}
 
-	db, err := store.Open(ctx, sc)
+	db, err := resources.openDatabase(ctx, sc)
 	if err != nil {
 		crypto.Zero(root)
 		return nil, fmt.Errorf("boot: refusing to serve: %w", err)
 	}
+	// Registered immediately after Open so every later error path releases it.
+	guard.add(func() error { return resources.closeDatabase(db) })
 
 	// LoadKeyring consumes root: it is zeroed before this returns.
 	kr, err := crypto.LoadKeyring(ctx, &keyring.Store{DB: db}, root)
 	if err != nil {
-		db.Close()
 		return nil, fmt.Errorf("boot: refusing to serve: %w", err)
 	}
 	if kr.RootRotationPending() {
@@ -248,13 +324,11 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 	// is a scanner that silently is not one).
 	ruleset, err := scanning.Load()
 	if err != nil {
-		db.Close()
 		return nil, fmt.Errorf("boot: refusing to serve: secret-scanning ruleset: %w", err)
 	}
 
 	kdf, limiter, err := AuthComponents(cfg)
 	if err != nil {
-		db.Close()
 		return nil, fmt.Errorf("boot: refusing to serve: %w", err)
 	}
 	// The advisory channel is in-process fan-out: one per server, wired into
@@ -272,21 +346,21 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 	// origin that cannot yield a valid relying party is a boot refusal, not a
 	// first-ceremony surprise.
 	if err := authSvc.ConfigureWebAuthnRP(); err != nil {
-		db.Close()
 		return nil, fmt.Errorf("boot: refusing to serve: webauthn relying party: %w", err)
 	}
 
 	proxies, err := parseCIDRs(cfg.TrustedProxyCIDRs)
 	if err != nil {
-		db.Close()
 		return nil, fmt.Errorf("boot: refusing to serve: %w", err)
 	}
 
-	ln, err := net.Listen("tcp", cfg.Listen)
+	ln, err := resources.listen("tcp", cfg.Listen)
 	if err != nil {
-		db.Close()
 		return nil, fmt.Errorf("boot: listen %s: %w", cfg.Listen, err)
 	}
+	// Registered immediately after Listen so every later error path releases
+	// it, and — being registered after the database — before the database.
+	guard.add(func() error { return resources.closeListener(ln) })
 
 	federation := &service.Federation{
 		DB: db, Auth: authSvc, Admission: limiter,
@@ -308,7 +382,7 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 		}
 		fetchCfg.Proxy = proxy
 	}
-	fetcher, err := remotefetch.New(fetchCfg)
+	fetcher, err := resources.newDirectoryClient(fetchCfg)
 	if err != nil {
 		return nil, fmt.Errorf("boot: outbound directory client: %w", err)
 	}
@@ -405,7 +479,9 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 
 	log.Info("boot complete", "engine", sc.Engine, "addr", ln.Addr().String(), "dev", cfg.Dev,
 		"argon2_memory_kib", cfg.Argon2MemoryKiB, "auth_concurrency", limiter.Concurrency())
-	return &Server{
+	// Construct the complete owner before disarming: future fallible work added
+	// to construction stays inside the guard's protection.
+	srv := &Server{
 		Addr:    ln.Addr().String(),
 		db:      db,
 		keyring: kr,
@@ -439,7 +515,11 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 			},
 		}}},
 		adapterWorker: adapterWorker,
-	}, nil
+	}
+	// Ownership transfers only after the Server is complete. Nothing remains
+	// between disarm and return, so Server.Close is now the sole owner.
+	guard.disarm()
+	return srv, nil
 }
 
 // serviceBudget keeps production policy fail-closed even when a caller builds
