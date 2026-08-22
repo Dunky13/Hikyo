@@ -23,15 +23,8 @@ test=false
 web=false
 saw_path=false
 
-# `race` and `fuzz` are deliberately absent from every per-path rule below, so
-# they are selected only by all_jobs — that is, by a main push, by a dependency
-# or workflow change, and by the fail-closed default. Both are long (~440s and
-# ~360s) and neither is a per-change regression gate: the race detector wants
-# repeated executions over time rather than one pass per commit, and the fuzz
-# job is a bounded exploration whose value comes from cumulative runs. Merges
-# still cover them, and fuzz-report.yml's report-main job already routes push
-# findings to a repository issue, so nothing is lost by keeping them off the
-# per-PR critical path.
+# Race and fuzz remain blocking for Go and SQL changes. Their jobs shard the
+# complete package and target sets, so path selection does not narrow coverage.
 all_jobs() {
 	client=true
 	compose_demo=true
@@ -115,9 +108,11 @@ else
 		# The operator (Go under test by the kind e2e) and the kind e2e test
 		# itself carry the *.go integration set PLUS the k8s_e2e job.
 		internal/operator/* | internal/isolation/k8s_*)
+			fuzz=true
 			generated=true
 			headline_guarantee=true
 			k8s_e2e=true
+			race=true
 			release_snapshot=true
 			test=true
 			web=true
@@ -142,8 +137,10 @@ else
 			supply_chain_checks=true
 			;;
 		*.go | *.sql)
+			fuzz=true
 			generated=true
 			headline_guarantee=true
+			race=true
 			release_snapshot=true
 			test=true
 			web=true

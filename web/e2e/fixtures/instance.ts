@@ -439,12 +439,18 @@ async function startInstanceAt(host: string, port: number, base: string): Promis
   }
 
   const dir = mkdtempSync(join(tmpdir(), 'hikyo-e2e-'));
-  const binary = join(dir, 'hikyo');
+  const prebuiltBinary = process.env.HIKYO_E2E_BINARY;
+  const binary = prebuiltBinary ?? join(dir, 'hikyo');
   // `-tags ui` is what embeds the bundle. A binary built without it serves the
   // API and answers 404 for the document, which is the correct default and the
-  // wrong thing to test a UI against. Built once per instance directory because
-  // `admin` reads its datastore from the working directory it is run in.
-  run('go', ['build', '-tags', 'ui', '-o', binary, './cmd/hikyo'], { cwd: repoRoot });
+  // wrong thing to test a UI against. CI supplies the exact app-build artifact
+  // once for both isolated instances; local runs retain the self-contained
+  // source-build path. `admin` selects its datastore from cwd, not binary path.
+  if (prebuiltBinary === undefined) {
+    run('go', ['build', '-tags', 'ui', '-o', binary, './cmd/hikyo'], { cwd: repoRoot });
+  } else if (!existsSync(prebuiltBinary)) {
+    throw new Error(`HIKYO_E2E_BINARY does not exist: ${prebuiltBinary}`);
+  }
 
   const proc = spawn(binary, ['server', '--dev', '--listen', `${host}:${port}`], {
     cwd: dir,
@@ -459,6 +465,11 @@ async function startInstanceAt(host: string, port: number, base: string): Promis
       // production. The alternative was deleting tests to fit under the
       // ceiling, which is measuring the throttle instead of the UI.
       HIKYO_DEV_ADMISSION_PER_IP_PER_MINUTE: '500',
+      // Flow scenarios also reuse one authenticated principal and collectively
+      // publish more than the production allowance of ten per minute. Budget
+      // behavior has its own conformance/unit coverage; this harness validates
+      // UI behavior. The server refuses this switch unless --dev is active.
+      HIKYO_DEV_SERVICE_BUDGETS_DISABLED: 'true',
     },
   });
   const instance: Instance = { proc, dir, binary, base, host, cookies: [] };

@@ -320,6 +320,45 @@ func TestAdmissionOverrideUnsetLeavesTheDefault(t *testing.T) {
 	}
 }
 
+func TestDevServiceBudgetDisableIsRefusedOutsideDevMode(t *testing.T) {
+	_, _, err := Load("server", nil,
+		env("HIKYO_DB", "sqlite:x.db", "HIKYO_DEV_SERVICE_BUDGETS_DISABLED", "true"), nil)
+	if err == nil {
+		t.Fatal("a production server accepted a development-only service-budget override")
+	}
+	if !strings.Contains(err.Error(), "development-mode override") {
+		t.Fatalf("error should say why it is refused, got: %v", err)
+	}
+}
+
+func TestDevServiceBudgetDisableAppliesInDevMode(t *testing.T) {
+	cfg, _, err := Load("server", []string{"--dev"},
+		env("HIKYO_DEV_SERVICE_BUDGETS_DISABLED", "true"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.DevServiceBudgetsDisabled {
+		t.Fatal("development service budgets remain enabled")
+	}
+}
+
+func TestDevServiceBudgetDisableRefusesNonsense(t *testing.T) {
+	if _, _, err := Load("server", []string{"--dev"},
+		env("HIKYO_DEV_SERVICE_BUDGETS_DISABLED", "sometimes"), nil); err == nil {
+		t.Fatal("a malformed service-budget override was accepted")
+	}
+}
+
+func TestDevServiceBudgetDisableUnsetLeavesBudgetsEnabled(t *testing.T) {
+	cfg, _, err := Load("server", []string{"--dev"}, env(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.DevServiceBudgetsDisabled {
+		t.Fatal("service budgets were disabled without an explicit override")
+	}
+}
+
 func TestAdmissionBudgetRefusesValuesThatCannotFitEverySupportedInt(t *testing.T) {
 	_, _, err := Load("server", []string{"--dev"},
 		env("HIKYO_ADMISSION_BUDGET_MIB", "4294967295"), nil)

@@ -78,6 +78,21 @@ func TestHTTPServerSlowClientLimitsConfigured(t *testing.T) {
 	}
 }
 
+func TestServiceBudgetCanOnlyBeDisabledByExplicitDevConfig(t *testing.T) {
+	cfg := &config.Config{}
+	if serviceBudget(cfg) == nil {
+		t.Fatal("service budget disabled by default")
+	}
+	cfg.DevServiceBudgetsDisabled = true
+	if serviceBudget(cfg) == nil {
+		t.Fatal("production service budget disabled by a development-only setting")
+	}
+	cfg.Dev = true
+	if serviceBudget(cfg) != nil {
+		t.Fatal("explicit development service-budget override was ignored")
+	}
+}
+
 func TestPendingMigrationsWithAutoMigrateOffRefusesToServe(t *testing.T) {
 	cfg := devConfig(t)
 	cfg.AutoMigrate = false
