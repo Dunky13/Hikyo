@@ -93,6 +93,45 @@ func TestResolveAccessScopeRefusesSparseHierarchy(t *testing.T) {
 	}
 }
 
+func TestAccessRejectsSparseHierarchyBeforeAuthentication(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "grant project without org",
+			args: []string{"access", "grant", "list", "--instance", "local", "--project", "project_one"},
+			want: "project",
+		},
+		{
+			name: "grant environment without project",
+			args: []string{"access", "grant", "list", "--instance", "local", "--org", "org_one", "--env", "env_one"},
+			want: "environment",
+		},
+		{
+			name: "member project without org",
+			args: []string{"access", "member", "list", "--instance", "local", "--project", "project_one"},
+			want: "project",
+		},
+		{
+			name: "member environment without project",
+			args: []string{"access", "member", "list", "--instance", "local", "--org", "org_one", "--env", "env_one"},
+			want: "environment",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ios, _, stderr := composeIO(t.TempDir(), t.TempDir(), "", nil)
+			if code := Run(t.Context(), ios, tc.args); code != ExitUsage {
+				t.Fatalf("exit = %d, want ExitUsage; stderr=%s", code, stderr)
+			}
+			if !strings.Contains(stderr.String(), tc.want) || strings.Contains(stderr.String(), "trust") {
+				t.Fatalf("scope was not rejected before authentication: %s", stderr)
+			}
+		})
+	}
+}
+
 func resolvedTenantDimensions(org, project, environment string) Resolved {
 	return Resolved{Values: map[Dimension]string{
 		DimOrg: org, DimProject: project, DimEnv: environment,

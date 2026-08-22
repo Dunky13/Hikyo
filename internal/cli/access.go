@@ -146,11 +146,15 @@ func runAccessGrant(ctx context.Context, ios IO, args []string) error {
 		return failf(ExitUsage, "usage: hikyo access grant template --principal <id> --template <name>")
 	}
 
-	client, artifact, resolved, err := authenticatedTarget(st, ios, flags)
+	resolved, err := Resolve(st, ios.Env, flags.Flags, ios.Workdir)
 	if err != nil {
 		return err
 	}
 	scope, err := resolveAccessScope(resolved, flags, instanceScope, "access grant "+sub)
+	if err != nil {
+		return err
+	}
+	client, artifact, _, err := authenticatedResolvedTarget(st, ios, flags, resolved)
 	if err != nil {
 		return err
 	}
@@ -264,11 +268,15 @@ func runAccessMember(ctx context.Context, ios IO, args []string) error {
 		return failf(ExitUsage, "usage: hikyo access member remove --principal <id>")
 	}
 
-	client, _, resolved, err := authenticatedTarget(st, ios, flags)
+	resolved, err := Resolve(st, ios.Env, flags.Flags, ios.Workdir)
 	if err != nil {
 		return err
 	}
 	scope, err := resolveAccessScope(resolved, flags, instanceScope, "access member "+sub)
+	if err != nil {
+		return err
+	}
+	client, _, _, err := authenticatedResolvedTarget(st, ios, flags, resolved)
 	if err != nil {
 		return err
 	}

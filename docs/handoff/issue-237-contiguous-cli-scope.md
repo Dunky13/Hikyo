@@ -21,9 +21,11 @@ server authorization, API, database, migration, or generated output changed.
 
 ## Validation
 
-- `go test -count=1 ./internal/cli/... -run 'Scope|Access|Resolve'`: 26 passed
-- `go test -count=1 ./internal/cli/...`: 259 passed
+- `go test -count=1 ./internal/cli/... -run 'Scope|Access|Resolve'`: 34 passed
+- `go test -count=1 ./internal/cli/...`: 267 passed
 - `go test -count=1 ./internal/isolation/`: 1,092 passed
 - `go vet ./internal/cli/...`: passed
 - `go build ./...`: passed
-- `go test -count=1 ./...`: 3,259 passed in 57 packages
+- `go test -count=1 ./...`: 3,267 passed in 57 packages
+- Two-axis review round 1: standards CLEAN; both spec findings fixed before
+  round 2 (pre-auth access validation and config-fold validation).

@@ -1083,6 +1083,9 @@ func resolveMachineTarget(st *State, ios IO, flags commonFlags, cfg *compose.Con
 			}
 		}
 	}
+	if _, err := NewTenantScope(resolved); err != nil {
+		return nil, TrustEntry{}, Resolved{}, "", err
+	}
 
 	entry, err := machineEntry(st, resolved, cfg)
 	if err != nil {
