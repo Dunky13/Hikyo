@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MutableRefObject,
+  type ReactNode,
+} from 'react';
 import { useParams } from 'react-router';
 
 import type { FederatedClaimPin, GrantResult } from '@hikyo/client';
@@ -8,7 +16,6 @@ import {
   BINDING_LIFETIMES,
   bindingFailureText,
   CI_EVENTS,
-  dismissDecision,
   expiryLabel,
   FEDERATION_PRESETS,
   grantFailureText,
@@ -42,7 +49,16 @@ import {
   type ServiceAccount,
 } from '../api/identities.ts';
 import { useMachineReveal, useSetMachineReveal } from '../api/machineReveal.ts';
+import { useSession } from '../api/session.ts';
 import { runPasskeyCeremony, useEnvironments } from '../api/values.ts';
+import {
+  idleMintLifecycle,
+  mintLifecycleAtBoundary,
+  type MintBoundary,
+  transitionMintLifecycle,
+  type MintLifecycle,
+  type MintLifecycleEvent,
+} from './mintLifecycle.ts';
 import { useModalDialog } from './useModalDialog.ts';
 
 /**
@@ -74,9 +90,16 @@ import { useModalDialog } from './useModalDialog.ts';
 type Tab = 'accounts' | 'federation' | 'kubernetes';
 
 type Dialog =
-  | { kind: 'mint'; account: ServiceAccount; rotating: boolean }
   | { kind: 'binding'; account: ServiceAccount }
   | { kind: 'grant'; account: ServiceAccount };
+
+type MintTransitionResult = {
+  readonly state: MintLifecycle;
+  readonly accepted: boolean;
+};
+
+type MoveMint = (event: MintLifecycleEvent) => MintTransitionResult;
+type IsMintSubmitting = (requestId: number) => boolean;
 
 const TABS: ReadonlyArray<{ id: Tab; label: string }> = [
   { id: 'accounts', label: 'Service accounts' },
@@ -94,6 +117,8 @@ export function MachineAccess() {
   const accountsQuery = useServiceAccounts(project);
   const grantsQuery = useProjectGrants(project);
   const machineRevealQuery = useMachineReveal(project.org, project.project);
+  const session = useSession();
+  const liveSessionId = session.data?.session.id ?? null;
   const machineReveal = machineRevealQuery.data?.enabled ?? false;
   const environmentsQuery = useEnvironments({ ...project, environment: '' });
 
@@ -110,6 +135,58 @@ export function MachineAccess() {
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const [refusal, setRefusal] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [mintLifecycle, setMintLifecycle] = useState<MintLifecycle>(idleMintLifecycle);
+  const mintLifecycleRef = useRef<MintLifecycle>(idleMintLifecycle);
+  const mintBoundary: MintBoundary = {
+    sessionId: liveSessionId,
+    org: project.org,
+    project: project.project,
+  };
+  const mintBoundaryRef = useRef<MintBoundary>(mintBoundary);
+  mintBoundaryRef.current = mintBoundary;
+  const mintRequestId = useRef(0);
+
+  const moveMint = useCallback<MoveMint>((event) => {
+    const current = mintLifecycleRef.current;
+    const next = transitionMintLifecycle(current, event);
+    mintLifecycleRef.current = next;
+    if (next !== current) {
+      setMintLifecycle(next);
+    }
+    return { state: next, accepted: next !== current };
+  }, []);
+  const isMintSubmitting = useCallback<IsMintSubmitting>(
+    (requestId) => {
+      const current = mintLifecycleAtBoundary(
+        mintLifecycleRef.current,
+        mintBoundaryRef.current,
+      );
+      return current.kind === 'submitting' && current.request.id === requestId;
+    },
+    [],
+  );
+
+  // A project route is a new mint boundary. Clear before any completion from
+  // the old route can publish its display-once response into this one.
+  useEffect(() => {
+    moveMint({ type: 'clear', reason: 'navigation' });
+  }, [moveMint, project.org, project.project]);
+
+  // Session replacement is a harder boundary than navigation: even if the
+  // route remains mounted, no disclosure from the old browser session may
+  // survive into the new one.
+  useEffect(() => {
+    moveMint({ type: 'clear', reason: 'session-transition' });
+  }, [moveMint, session.data?.session.id]);
+
+  // Wipe the synchronous ref on unmount too, so an already-resolving promise
+  // sees idle and drops its late result.
+  useEffect(
+    () => () => {
+      mintLifecycleRef.current = idleMintLifecycle;
+    },
+    [],
+  );
 
   const revoke = useRevokeCredential(project);
   const now = useMemo(() => new Date(), []);
@@ -130,6 +207,27 @@ export function MachineAccess() {
   const bindings = (rows: readonly MachineCredential[]) =>
     showable(rows).filter((c) => c.kind === 'oidc-federation');
 
+  const reviewMint = (account: ServiceAccount, rotating: boolean) => {
+    if (liveSessionId === null) {
+      setRefusal('The current session could not be read. Reload before minting a credential.');
+      return;
+    }
+    mintRequestId.current += 1;
+    moveMint({
+      type: 'review',
+      request: {
+        id: mintRequestId.current,
+        sessionId: liveSessionId,
+        org: project.org,
+        project: project.project,
+        accountId: account.id,
+        accountName: account.name,
+        rotating,
+        reach: postStateReach(scopeFor(account)).map(({ id, name }) => ({ id, name })),
+      },
+    });
+  };
+
   const allBindings = accounts.flatMap((sa) =>
     bindings(credentialsFor(sa)).map((credential) => ({ account: sa, credential })),
   );
@@ -144,6 +242,7 @@ export function MachineAccess() {
    * a warning that understates what the operator is about to do.
    */
   const inputsReady =
+    liveSessionId !== null &&
     accountsQuery.isSuccess &&
     grantsQuery.isSuccess &&
     environmentsQuery.isSuccess &&
@@ -171,6 +270,8 @@ export function MachineAccess() {
       },
     );
   };
+
+  const activeMintLifecycle = mintLifecycleAtBoundary(mintLifecycle, mintBoundary);
 
   return (
     <section className="card card--wide machine" aria-labelledby="machine-title">
@@ -324,7 +425,7 @@ export function MachineAccess() {
                         bindings={bindings(rows)}
                         now={now}
                         ready={inputsReady}
-                        onMint={(rotating) => setDialog({ kind: 'mint', account: sa, rotating })}
+                        onMint={(rotating) => reviewMint(sa, rotating)}
                         onBind={() => setDialog({ kind: 'binding', account: sa })}
                         onGrant={() => setDialog({ kind: 'grant', account: sa })}
                         onRevoke={(credential) => doRevoke(sa, credential)}
@@ -410,13 +511,11 @@ export function MachineAccess() {
         ) : null}
       </div>
 
-      {dialog?.kind === 'mint' ? (
+      {activeMintLifecycle.kind !== 'idle' ? (
         <MintDialog
-          project={project}
-          account={dialog.account}
-          rotating={dialog.rotating}
-          reach={postStateReach(scopeFor(dialog.account))}
-          onClose={() => setDialog(null)}
+          lifecycle={activeMintLifecycle}
+          move={moveMint}
+          isSubmitting={isMintSubmitting}
         />
       ) : null}
 
@@ -955,8 +1054,9 @@ function useNavigationGuard(active: boolean, onAttempt: () => void) {
 }
 
 /**
- * MintDialog is the display-once ceremony, and it is the only component in the
- * SPA that ever holds a credential value.
+ * MintDialog renders the display-once ceremony. Its parent lifecycle is the
+ * only SPA state that can ever hold a credential value, and only while that
+ * lifecycle is `disclosed`.
  *
  * The step-up names the POST-STATE formula rather than what the mint adds: a
  * mint adds no grants, so a replacement credential is not a smaller act than a
@@ -965,41 +1065,38 @@ function useNavigationGuard(active: boolean, onAttempt: () => void) {
  * reauthentication, which the panel says in words rather than performing a
  * ceremony that authorises nothing.
  */
-function MintDialog({
-  project,
-  account,
-  rotating,
-  reach,
-  onClose,
+export function MintDialog({
+  lifecycle,
+  move,
+  isSubmitting,
 }: {
-  project: ProjectRef;
-  account: ServiceAccount;
-  rotating: boolean;
-  reach: readonly MachineEnvScope[];
-  onClose: () => void;
+  lifecycle: Exclude<MintLifecycle, { readonly kind: 'idle' }>;
+  move: MoveMint;
+  isSubmitting: IsMintSubmitting;
 }) {
   const dialog = useModalDialog();
-  const refresh = useRefreshAccount(project);
-  const [value, setValue] = useState<string | null>(null);
-  const [clamped, setClamped] = useState(false);
-  const [stored, setStored] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [failure, setFailure] = useState<string | null>(null);
-  const [heldBack, setHeldBack] = useState(false);
-  const [copied, setCopied] = useState<string | null>(null);
+  const request = lifecycle.request;
+  const refresh = useRefreshAccount({ org: request.org, project: request.project });
   const confirmation = useRef<HTMLInputElement>(null);
+  const disclosed = lifecycle.kind === 'disclosed' ? lifecycle : null;
+  const disclosedValue = disclosed?.result.value ?? null;
+  const busy = lifecycle.kind === 'submitting';
+  const failure = lifecycle.kind === 'failed' ? lifecycle.error : null;
 
   // The panel the value arrives on replaces the control that was focused, so
   // focus goes to the one decision left: the stored-confirmation checkbox.
   useEffect(() => {
-    if (value !== null) {
+    if (disclosedValue !== null) {
       confirmation.current?.focus();
     }
-  }, [value]);
+  }, [disclosedValue]);
 
   const run = async () => {
-    setBusy(true);
-    setFailure(null);
+    const started = move({ type: 'submit' });
+    if (!started.accepted || started.state.kind !== 'submitting') {
+      return;
+    }
+    const active = started.state.request;
     // `issued` is the difference between "nothing happened" and "something may
     // have". Once the request leaves, a failure says nothing about whether the
     // server committed — and a mint that committed and whose response was lost
@@ -1009,47 +1106,43 @@ function MintDialog({
       // One reauthentication per environment the account reaches in the
       // post-state, which is exactly the set the server will consume. An empty
       // reach runs no ceremony because there is no disclosure to authorise.
-      for (const environment of reach) {
+      for (const environment of active.reach) {
         await runPasskeyCeremony({
           operation: 'mint',
           environmentId: environment.id,
           keyIds: [],
         });
+        if (!isSubmitting(active.id)) {
+          return;
+        }
+      }
+      if (!isSubmitting(active.id)) {
+        return;
       }
       issued = true;
-      const minted = await mintCredential(project, account.id);
-      setValue(minted.value);
-      setClamped(minted.clamped);
-      refresh(account.id);
+      const minted = await mintCredential(
+        { org: active.org, project: active.project },
+        active.accountId,
+      );
+      move({ type: 'succeeded', requestId: active.id, result: minted });
+      refresh(active.accountId);
     } catch (error) {
       if (issued) {
         // Re-read the rows so the operator can see — and revoke — whatever may
         // have landed.
-        refresh(account.id);
-        setFailure(mintFailureText(error));
+        refresh(active.accountId);
+        move({ type: 'failed', requestId: active.id, error: mintFailureText(error) });
       } else {
-        setFailure(identityRefusalText(error));
+        move({ type: 'failed', requestId: active.id, error: identityRefusalText(error) });
       }
-    } finally {
-      setBusy(false);
     }
   };
 
-  const dismiss = () => {
-    switch (dismissDecision({ busy, hasValue: value !== null, stored })) {
-      case 'ignore':
-        return;
-      case 'hold-back':
-        setHeldBack(true);
-        return;
-      default:
-        onClose();
-    }
-  };
+  const dismiss = () => move({ type: 'dismiss' });
 
   // Back, reload and tab close are dismissals too — an in-flight mint or an
   // unstored value must not be lost to a navigation the buttons would refuse.
-  useNavigationGuard(busy || (value !== null && !stored), dismiss);
+  useNavigationGuard(busy || (disclosed !== null && !disclosed.stored), dismiss);
 
   return (
     <dialog
@@ -1062,10 +1155,10 @@ function MintDialog({
         dismiss();
       }}
     >
-      {value === null ? (
+      {disclosed === null ? (
         <>
           <h2 className="ceremony__title" id="mint-title">
-            {`${rotating ? 'rotate' : 'mint'} credential · ${account.name}`}
+            {`${request.rotating ? 'rotate' : 'mint'} credential · ${request.accountName}`}
           </h2>
           <p className="ceremony__stepup">
             <span className="alert__glyph" aria-hidden="true">
@@ -1079,11 +1172,11 @@ function MintDialog({
             </span>
           </p>
           <p className="ceremony__scope">
-            {reach.length === 0
+            {request.reach.length === 0
               ? 'This account reaches no plaintext in the resulting post-state, so no disclosure capability and no reauthentication are required. Its deliveries stay configuration and secret presence only.'
-              : `This account decrypts ${reach.map((r) => r.name).join(', ')}. Each takes its own passkey reauthentication before the value is minted.`}
+              : `This account decrypts ${request.reach.map((r) => r.name).join(', ')}. Each takes its own passkey reauthentication before the value is minted.`}
           </p>
-          {rotating ? (
+          {request.rotating ? (
             <p className="ceremony__lede">
               The prior value is never returned. The predecessor keeps authenticating until you
               revoke it — rotation and revocation are separate, deliberate acts, so a mint that
@@ -1107,11 +1200,11 @@ function MintDialog({
             >
               {busy
                 ? 'Minting…'
-                : reach.length === 0
+                : request.reach.length === 0
                   ? 'Mint credential'
                   : 'Use a passkey and mint'}
             </button>
-            <button className="btn" type="button" onClick={onClose} disabled={busy}>
+            <button className="btn" type="button" onClick={dismiss} disabled={busy}>
               Cancel
             </button>
           </div>
@@ -1121,8 +1214,8 @@ function MintDialog({
           <h2 className="ceremony__title" id="mint-title">
             Credential minted — shown exactly once
           </h2>
-          <p className="mono machine__token">{value}</p>
-          {clamped ? (
+          <p className="mono machine__token">{disclosed.result.value}</p>
+          {disclosed.result.clamped ? (
             <p className="notice" role="status">
               <span className="alert__glyph" aria-hidden="true">
                 !
@@ -1148,23 +1241,31 @@ function MintDialog({
             type="button"
             onClick={() => {
               void navigator.clipboard
-                .writeText(value)
+                .writeText(disclosed.result.value)
                 .then(() =>
-                  setCopied(
-                    'Copied. The clipboard is now the only copy outside its target system.',
-                  ),
+                  move({
+                    type: 'copy-status',
+                    requestId: request.id,
+                    message: 'Copied. The clipboard is now the only copy outside its target system.',
+                  }),
                 )
-                .catch(() => setCopied('This browser refused clipboard access, so nothing was copied.'));
+                .catch(() =>
+                  move({
+                    type: 'copy-status',
+                    requestId: request.id,
+                    message: 'This browser refused clipboard access, so nothing was copied.',
+                  }),
+                );
             }}
           >
             Copy to clipboard
           </button>
-          {copied === null ? null : (
+          {disclosed.copyStatus === null ? null : (
             <p className="notice" role="status">
               <span className="alert__glyph" aria-hidden="true">
                 ⧉
               </span>
-              <span>{copied}</span>
+              <span>{disclosed.copyStatus}</span>
             </p>
           )}
           <div className="field chk">
@@ -1172,15 +1273,14 @@ function MintDialog({
               id="mint-stored"
               type="checkbox"
               ref={confirmation}
-              checked={stored}
+              checked={disclosed.stored}
               onChange={(event) => {
-                setStored(event.target.checked);
-                setHeldBack(false);
+                move({ type: 'confirm-stored', stored: event.target.checked });
               }}
             />
             <label htmlFor="mint-stored">I have stored this credential in its target system.</label>
           </div>
-          {heldBack ? (
+          {disclosed.heldBack ? (
             <p className="alert" role="alert">
               <span className="alert__glyph" aria-hidden="true">
                 !
