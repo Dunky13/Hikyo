@@ -227,8 +227,11 @@ describe('AuthProvider', () => {
         <Probe />
       </AuthProvider>,
     );
-    await settle(30);
-    expect(text(container, 'private')).toContain(id('ses', '00'));
+    await act(async () => {
+      await vi.waitFor(() => {
+        expect(text(container, 'private')).toContain(id('ses', '00'));
+      });
+    });
 
     await act(async () => globalThis.dispatchEvent(new Event('focus')));
     expect(text(container, 'state')).toBe('transitioning');
