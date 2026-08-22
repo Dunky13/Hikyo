@@ -49,7 +49,7 @@ import {
   type ServiceAccount,
 } from '../api/identities.ts';
 import { useMachineReveal, useSetMachineReveal } from '../api/machineReveal.ts';
-import { useSession } from '../api/session.ts';
+import { useAuth } from '../app/AuthProvider.tsx';
 import { runPasskeyCeremony, useEnvironments } from '../api/values.ts';
 import {
   idleMintLifecycle,
@@ -117,8 +117,8 @@ export function MachineAccess() {
   const accountsQuery = useServiceAccounts(project);
   const grantsQuery = useProjectGrants(project);
   const machineRevealQuery = useMachineReveal(project.org, project.project);
-  const session = useSession();
-  const liveSessionId = session.data?.session.id ?? null;
+  const auth = useAuth();
+  const liveSessionId = auth.identity?.session.id ?? null;
   const machineReveal = machineRevealQuery.data?.enabled ?? false;
   const environmentsQuery = useEnvironments({ ...project, environment: '' });
 
@@ -177,7 +177,7 @@ export function MachineAccess() {
   // survive into the new one.
   useEffect(() => {
     moveMint({ type: 'clear', reason: 'session-transition' });
-  }, [moveMint, session.data?.session.id]);
+  }, [liveSessionId, moveMint]);
 
   // Wipe the synchronous ref on unmount too, so an already-resolving promise
   // sees idle and drops its late result.

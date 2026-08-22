@@ -57,3 +57,10 @@ Pre-commit results on Node 24:
 - 25 web test files and 257 tests passed;
 - the production web build passed;
 - TypeScript client typecheck and all 12 client tests passed.
+
+After integrating current `main`, web typecheck, the production build, all 269
+web tests, client typecheck, and all 12 client tests passed. The rebuilt binary
+passed the machine-access flow in both desktop and mobile projects. One
+mobile-light pinned-assertion run hit the 30-second harness timeout after 20
+passes; that case passed alone in 1.8 seconds, and the display-once case it had
+skipped passed alone in 995 milliseconds.
