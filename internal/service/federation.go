@@ -16,6 +16,7 @@ import (
 	"github.com/Hikyo-Org/hikyo/internal/audit"
 	"github.com/Hikyo-Org/hikyo/internal/authz"
 	"github.com/Hikyo-Org/hikyo/internal/domain"
+	"github.com/Hikyo-Org/hikyo/internal/jwkssource"
 	"github.com/Hikyo-Org/hikyo/internal/oidcfed"
 	"github.com/Hikyo-Org/hikyo/internal/store"
 	"github.com/Hikyo-Org/hikyo/internal/store/tx"
@@ -137,15 +138,13 @@ func (s *Federation) now() time.Time {
 	return s.Now().UTC()
 }
 
-// IssuerView is one issuer configuration as the API renders it. The static JWKS
-// document is NOT a field: it is configuration an operator supplied and can
-// re-supply, it is not secret, and returning it would make the read surface
-// carry a key document nothing needs back.
+// IssuerView is one issuer configuration. The API renders only KeySource.Mode;
+// the static document remains write-only on the wire.
 type IssuerView struct {
 	ID               string
 	Issuer           string
 	Type             domain.IssuerType
-	Mode             domain.JWKSMode
+	KeySource        jwkssource.KeySource
 	RefusedAudiences []string
 	CreatedAt        time.Time
 	CreatedBy        domain.PrincipalID
@@ -162,8 +161,7 @@ type IssuerView struct {
 type IssuerRequest struct {
 	Issuer           string
 	Type             domain.IssuerType
-	Mode             domain.JWKSMode
-	StaticJWKS       string
+	KeySource        jwkssource.KeySource
 	RefusedAudiences []string
 }
 
@@ -188,14 +186,14 @@ func (s *Federation) CreateIssuer(ctx context.Context, actor Actor, req IssuerRe
 			return err
 		}
 		if err := az.CreateFederationIssuer(ctx, authz.NewFederationIssuer{
-			ID: id, Issuer: req.Issuer, Type: req.Type, Mode: req.Mode,
-			StaticJWKS: req.StaticJWKS, RefusedAudiences: req.RefusedAudiences,
-			CreatedAt: now, CreatedBy: caller.Principal,
+			ID: id, Issuer: req.Issuer, Type: req.Type, KeySource: req.KeySource,
+			RefusedAudiences: req.RefusedAudiences,
+			CreatedAt:        now, CreatedBy: caller.Principal,
 		}); err != nil {
 			return err
 		}
 		out = IssuerView{
-			ID: id, Issuer: req.Issuer, Type: req.Type, Mode: req.Mode,
+			ID: id, Issuer: req.Issuer, Type: req.Type, KeySource: req.KeySource,
 			RefusedAudiences: req.RefusedAudiences, CreatedAt: now, CreatedBy: caller.Principal,
 		}
 		e, err := issuerEvent(ctx, caller.Principal, id, req.Issuer, "created", req)
@@ -211,10 +209,7 @@ func (s *Federation) CreateIssuer(ctx context.Context, actor Actor, req IssuerRe
 // audiences. It cannot move the issuer string or the platform type: changing
 // either would silently re-point every binding underneath at a different
 // external authority, which is a replacement, not an edit.
-func (s *Federation) UpdateIssuer(ctx context.Context, actor Actor, id string, mode domain.JWKSMode, staticJWKS string, refused []string) (IssuerView, error) {
-	if err := checkJWKSMode(mode, staticJWKS); err != nil {
-		return IssuerView{}, err
-	}
+func (s *Federation) UpdateIssuer(ctx context.Context, actor Actor, id string, source jwkssource.KeySource, refused []string) (IssuerView, error) {
 	if err := checkRefusedAudiences(refused); err != nil {
 		return IssuerView{}, err
 	}
@@ -236,17 +231,17 @@ func (s *Federation) UpdateIssuer(ctx context.Context, actor Actor, id string, m
 			}
 			return err
 		}
-		if _, err := az.UpdateFederationIssuer(ctx, id, mode, staticJWKS, refused, caller.Principal, now); err != nil {
+		if _, err := az.UpdateFederationIssuer(ctx, id, source, refused, caller.Principal, now); err != nil {
 			return err
 		}
 		out = IssuerView{
-			ID: id, Issuer: before.Issuer, Type: before.Type, Mode: mode,
+			ID: id, Issuer: before.Issuer, Type: before.Type, KeySource: source,
 			RefusedAudiences: refused, CreatedAt: before.CreatedAt, CreatedBy: before.CreatedBy,
 			UpdatedAt: now, UpdatedBy: caller.Principal,
 		}
 		e, err := issuerEvent(ctx, caller.Principal, id, before.Issuer, "updated", IssuerRequest{
-			Issuer: before.Issuer, Type: before.Type, Mode: mode,
-			StaticJWKS: staticJWKS, RefusedAudiences: refused,
+			Issuer: before.Issuer, Type: before.Type, KeySource: source,
+			RefusedAudiences: refused,
 		})
 		if err != nil {
 			return err
@@ -284,7 +279,7 @@ func (s *Federation) ListIssuers(ctx context.Context, actor Actor) ([]IssuerView
 				return err
 			}
 			out = append(out, IssuerView{
-				ID: iss.ID, Issuer: iss.Issuer, Type: iss.Type, Mode: iss.Mode,
+				ID: iss.ID, Issuer: iss.Issuer, Type: iss.Type, KeySource: iss.KeySource,
 				RefusedAudiences: iss.RefusedAudiences, CreatedAt: iss.CreatedAt,
 				CreatedBy: iss.CreatedBy, UpdatedAt: iss.UpdatedAt, UpdatedBy: iss.UpdatedBy,
 				Bindings: bindings,
@@ -338,7 +333,7 @@ func (s *Federation) DeleteIssuer(ctx context.Context, actor Actor, id string) e
 			return err
 		}
 		e, err := issuerEvent(ctx, caller.Principal, id, before.Issuer, "deleted", IssuerRequest{
-			Issuer: before.Issuer, Type: before.Type, Mode: before.Mode,
+			Issuer: before.Issuer, Type: before.Type, KeySource: before.KeySource,
 			RefusedAudiences: before.RefusedAudiences,
 		})
 		if err != nil {
@@ -772,8 +767,8 @@ func (s *Federation) Authenticate(ctx context.Context, presented string) (Federa
 	}
 
 	fedIssuer := oidcfed.Issuer{
-		ID: issuer.ID, Issuer: issuer.Issuer, Type: issuer.Type, Mode: issuer.Mode,
-		StaticJWKS: issuer.StaticJWKS, RefusedAudiences: issuer.RefusedAudiences,
+		ID: issuer.ID, Issuer: issuer.Issuer, Type: issuer.Type, KeySource: issuer.KeySource,
+		RefusedAudiences: issuer.RefusedAudiences,
 	}
 	claims, state, err := s.Cache.Verify(ctx, fedIssuer, presented, now)
 	// The JWKS observations are recorded whatever the outcome: a tolerated
@@ -817,7 +812,7 @@ func (s *Federation) Authenticate(ctx context.Context, presented string) (Federa
 			// accepted.
 			err := oidcfed.CheckBinding(oidcfed.Issuer{
 				ID: current.ID, Issuer: current.Issuer, Type: current.Type,
-				Mode: current.Mode, StaticJWKS: current.StaticJWKS,
+				KeySource:        current.KeySource,
 				RefusedAudiences: current.RefusedAudiences,
 			}, oidcfed.Binding{
 				Audience:           b.Audience,
@@ -852,8 +847,7 @@ func (s *Federation) Authenticate(ctx context.Context, presented string) (Federa
 // them means the row was replaced, which the id comparison catches.
 func issuerPolicyMoved(before, current authz.FederationIssuer) bool {
 	if before.ID != current.ID || before.Issuer != current.Issuer ||
-		before.Type != current.Type || before.Mode != current.Mode ||
-		before.StaticJWKS != current.StaticJWKS {
+		before.Type != current.Type || !before.KeySource.Equal(current.KeySource) {
 		return true
 	}
 	return !slices.Equal(before.RefusedAudiences, current.RefusedAudiences)
@@ -990,23 +984,7 @@ func checkIssuerRequest(req IssuerRequest) error {
 	if !domain.IsIssuerType(req.Type) {
 		return ErrIssuerValue
 	}
-	if err := checkJWKSMode(req.Mode, req.StaticJWKS); err != nil {
-		return err
-	}
 	return checkRefusedAudiences(req.RefusedAudiences)
-}
-
-func checkJWKSMode(mode domain.JWKSMode, staticJWKS string) error {
-	if !domain.IsJWKSMode(mode) {
-		return ErrIssuerValue
-	}
-	if (mode == domain.JWKSStatic) != (staticJWKS != "") {
-		// The pairing is total: static mode needs a document, discovery mode
-		// must not carry one. A document that is stored but unused is a key set
-		// nobody rotates.
-		return ErrIssuerValue
-	}
-	return nil
 }
 
 // checkRefusedAudiences requires at least one. That is deliberate rather than
@@ -1193,7 +1171,7 @@ func issuerEvent(ctx context.Context, actor domain.PrincipalID, id, issuer, chan
 			"issuer":            audit.SanitizeFreeText(issuer),
 			"issuer_type":       string(req.Type),
 			"change":            change,
-			"jwks_mode":         string(req.Mode),
+			"jwks_mode":         string(req.KeySource.Mode()),
 			"refused_audiences": req.RefusedAudiences,
 		})
 }

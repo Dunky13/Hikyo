@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/Hikyo-Org/hikyo/internal/domain"
+	"github.com/Hikyo-Org/hikyo/internal/jwkssource"
 	"github.com/Hikyo-Org/hikyo/internal/store/authn"
 )
 
@@ -177,8 +178,8 @@ func (a *TxAuthorizer) FederationIssuers(ctx context.Context) ([]FederationIssue
 	return a.r.FederationIssuers(ctx)
 }
 
-func (a *TxAuthorizer) UpdateFederationIssuer(ctx context.Context, id string, mode domain.JWKSMode, staticJWKS string, refused []string, actor domain.PrincipalID, at time.Time) (bool, error) {
-	return a.r.UpdateFederationIssuer(ctx, id, mode, staticJWKS, refused, actor, at)
+func (a *TxAuthorizer) UpdateFederationIssuer(ctx context.Context, id string, source jwkssource.KeySource, refused []string, actor domain.PrincipalID, at time.Time) (bool, error) {
+	return a.r.UpdateFederationIssuer(ctx, id, source, refused, actor, at)
 }
 
 func (a *TxAuthorizer) DeleteFederationIssuer(ctx context.Context, id string) (bool, error) {

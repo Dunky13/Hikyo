@@ -12,6 +12,7 @@ import (
 	sqlitelib "modernc.org/sqlite/lib"
 
 	"github.com/Hikyo-Org/hikyo/internal/domain"
+	"github.com/Hikyo-Org/hikyo/internal/jwkssource"
 	"github.com/Hikyo-Org/hikyo/internal/store/pggen"
 	"github.com/Hikyo-Org/hikyo/internal/store/sqlitegen"
 )
@@ -55,10 +56,9 @@ type FederationIssuer struct {
 	// resolves a URL or strips a trailing slash.
 	Issuer string
 	Type   domain.IssuerType
-	Mode   domain.JWKSMode
-	// StaticJWKS is the air-gap alternative's key document, empty under
-	// discovery. The database CHECK ties presence to the mode.
-	StaticJWKS string
+	// KeySource is the closed remote-discovery or canonical-static value. The
+	// database keeps its compatible two-column encoding behind this façade.
+	KeySource jwkssource.KeySource
 	// RefusedAudiences are the issuer's DEFAULT audiences, which a binding may
 	// never name. This is not ceremony: a Kubernetes token minted for the
 	// default API-server audience would otherwise authenticate to Hikyo, and
@@ -76,8 +76,7 @@ type NewFederationIssuer struct {
 	ID               string
 	Issuer           string
 	Type             domain.IssuerType
-	Mode             domain.JWKSMode
-	StaticJWKS       string
+	KeySource        jwkssource.KeySource
 	RefusedAudiences []string
 	CreatedAt        time.Time
 	CreatedBy        domain.PrincipalID
@@ -102,17 +101,18 @@ func splitAudiences(s string) []string {
 // CreateFederationIssuer configures one issuer. A duplicate `iss` is an
 // operator CONFLICT: the caller is authorized, the current state refuses.
 func (r *Resolver) CreateFederationIssuer(ctx context.Context, iss NewFederationIssuer) error {
+	mode, staticJWKS := iss.KeySource.StorageColumns()
 	if r.sq != nil {
 		return issuerConstraint(r.sq.InsertFederationIssuer(ctx, sqlitegen.InsertFederationIssuerParams{
 			ID: iss.ID, Issuer: iss.Issuer, IssuerType: string(iss.Type),
-			JwksMode: string(iss.Mode), StaticJwks: nullString(iss.StaticJWKS),
+			JwksMode: string(mode), StaticJwks: nullString(staticJWKS),
 			RefusedAudiences: joinAudiences(iss.RefusedAudiences),
 			CreatedAt:        encodeTime(iss.CreatedAt), CreatedBy: string(iss.CreatedBy),
 		}))
 	}
 	return issuerConstraint(r.pg.InsertFederationIssuer(ctx, pggen.InsertFederationIssuerParams{
 		ID: iss.ID, Issuer: iss.Issuer, IssuerType: string(iss.Type),
-		JwksMode: string(iss.Mode), StaticJwks: pgText(iss.StaticJWKS),
+		JwksMode: string(mode), StaticJwks: pgText(staticJWKS),
 		RefusedAudiences: joinAudiences(iss.RefusedAudiences),
 		CreatedAt:        pgTime(iss.CreatedAt), CreatedBy: string(iss.CreatedBy),
 	}))
@@ -171,7 +171,7 @@ func (r *Resolver) FederationIssuerByIssuer(ctx context.Context, issuer string) 
 	if err != nil {
 		return FederationIssuer{}, notFoundOr(err)
 	}
-	return issuerFromPG(pggen.FederationIssuer(row)), nil
+	return issuerFromPG(pggen.FederationIssuer(row))
 }
 
 // FederationIssuerByID resolves a configuration by id, for the administrative
@@ -188,7 +188,7 @@ func (r *Resolver) FederationIssuerByID(ctx context.Context, id string) (Federat
 	if err != nil {
 		return FederationIssuer{}, notFoundOr(err)
 	}
-	return issuerFromPG(pggen.FederationIssuer(row)), nil
+	return issuerFromPG(pggen.FederationIssuer(row))
 }
 
 // FederationIssuers lists every configured issuer.
@@ -214,7 +214,11 @@ func (r *Resolver) FederationIssuers(ctx context.Context) ([]FederationIssuer, e
 	}
 	out := make([]FederationIssuer, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, issuerFromPG(pggen.FederationIssuer(row)))
+		iss, err := issuerFromPG(pggen.FederationIssuer(row))
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, iss)
 	}
 	return out, nil
 }
@@ -223,9 +227,10 @@ func (r *Resolver) FederationIssuers(ctx context.Context) ([]FederationIssuer, e
 // refused audiences. It cannot move `issuer` or `issuer_type`: changing either
 // would silently re-point every binding underneath at a different external
 // authority, which is a replacement, not an edit.
-func (r *Resolver) UpdateFederationIssuer(ctx context.Context, id string, mode domain.JWKSMode, staticJWKS string, refused []string, actor domain.PrincipalID, at time.Time) (bool, error) {
+func (r *Resolver) UpdateFederationIssuer(ctx context.Context, id string, source jwkssource.KeySource, refused []string, actor domain.PrincipalID, at time.Time) (bool, error) {
 	var n int64
 	var err error
+	mode, staticJWKS := source.StorageColumns()
 	if r.sq != nil {
 		n, err = r.sq.UpdateFederationIssuer(ctx, sqlitegen.UpdateFederationIssuerParams{
 			JwksMode: string(mode), StaticJwks: nullString(staticJWKS),
@@ -399,21 +404,29 @@ func issuerFromSQLite(row sqlitegen.FederationIssuer) (FederationIssuer, error) 
 	if err != nil {
 		return FederationIssuer{}, err
 	}
+	source, err := jwkssource.ParseStoredKeySource(domain.JWKSMode(row.JwksMode), row.StaticJwks.String, row.StaticJwks.Valid)
+	if err != nil {
+		return FederationIssuer{}, fmt.Errorf("store: federation issuer %s key source: %w", row.ID, err)
+	}
 	return FederationIssuer{
 		ID: row.ID, Issuer: row.Issuer, Type: domain.IssuerType(row.IssuerType),
-		Mode: domain.JWKSMode(row.JwksMode), StaticJWKS: row.StaticJwks.String,
+		KeySource:        source,
 		RefusedAudiences: splitAudiences(row.RefusedAudiences),
 		CreatedAt:        created, CreatedBy: domain.PrincipalID(row.CreatedBy),
 		UpdatedAt: updated, UpdatedBy: domain.PrincipalID(row.UpdatedBy.String),
 	}, nil
 }
 
-func issuerFromPG(row pggen.FederationIssuer) FederationIssuer {
+func issuerFromPG(row pggen.FederationIssuer) (FederationIssuer, error) {
+	source, err := jwkssource.ParseStoredKeySource(domain.JWKSMode(row.JwksMode), row.StaticJwks.String, row.StaticJwks.Valid)
+	if err != nil {
+		return FederationIssuer{}, fmt.Errorf("store: federation issuer %s key source: %w", row.ID, err)
+	}
 	return FederationIssuer{
 		ID: row.ID, Issuer: row.Issuer, Type: domain.IssuerType(row.IssuerType),
-		Mode: domain.JWKSMode(row.JwksMode), StaticJWKS: row.StaticJwks.String,
+		KeySource:        source,
 		RefusedAudiences: splitAudiences(row.RefusedAudiences),
 		CreatedAt:        row.CreatedAt.Time, CreatedBy: domain.PrincipalID(row.CreatedBy),
 		UpdatedAt: row.UpdatedAt.Time, UpdatedBy: domain.PrincipalID(row.UpdatedBy.String),
-	}
+	}, nil
 }

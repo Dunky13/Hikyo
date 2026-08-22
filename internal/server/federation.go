@@ -2,10 +2,12 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/Hikyo-Org/hikyo/api/apigen"
 	"github.com/Hikyo-Org/hikyo/internal/domain"
+	"github.com/Hikyo-Org/hikyo/internal/jwkssource"
 	"github.com/Hikyo-Org/hikyo/internal/service"
 )
 
@@ -29,7 +31,7 @@ import (
 // FederationService is the domain surface this transport exposes.
 type FederationService interface {
 	CreateIssuer(ctx context.Context, actor service.Actor, req service.IssuerRequest) (service.IssuerView, error)
-	UpdateIssuer(ctx context.Context, actor service.Actor, id string, mode domain.JWKSMode, staticJWKS string, refused []string) (service.IssuerView, error)
+	UpdateIssuer(ctx context.Context, actor service.Actor, id string, source jwkssource.KeySource, refused []string) (service.IssuerView, error)
 	ListIssuers(ctx context.Context, actor service.Actor) ([]service.IssuerView, error)
 	DeleteIssuer(ctx context.Context, actor service.Actor, id string) error
 	CreateBinding(ctx context.Context, actor service.Actor, scope domain.Scope, saID string, req service.BindingRequest) (service.BindingView, error)
@@ -48,14 +50,15 @@ func (a *API) ListFederationIssuers(ctx context.Context, _ apigen.ListFederation
 }
 
 func (a *API) CreateFederationIssuer(ctx context.Context, req apigen.CreateFederationIssuerRequestObject) (apigen.CreateFederationIssuerResponseObject, error) {
+	source, err := requestKeySource(req.Body.JwksMode, req.Body.StaticJwks)
+	if err != nil {
+		return nil, err
+	}
 	want := service.IssuerRequest{
 		Issuer:           req.Body.Issuer,
 		Type:             domain.IssuerType(req.Body.IssuerType),
-		Mode:             domain.JWKSMode(req.Body.JwksMode),
+		KeySource:        source,
 		RefusedAudiences: req.Body.RefusedAudiences,
-	}
-	if req.Body.StaticJwks != nil {
-		want.StaticJWKS = *req.Body.StaticJwks
 	}
 	iss, err := a.Federation.CreateIssuer(ctx, service.Bearer(bearer(ctx)), want)
 	if err != nil {
@@ -65,12 +68,12 @@ func (a *API) CreateFederationIssuer(ctx context.Context, req apigen.CreateFeder
 }
 
 func (a *API) UpdateFederationIssuer(ctx context.Context, req apigen.UpdateFederationIssuerRequestObject) (apigen.UpdateFederationIssuerResponseObject, error) {
-	static := ""
-	if req.Body.StaticJwks != nil {
-		static = *req.Body.StaticJwks
+	source, err := requestKeySource(req.Body.JwksMode, req.Body.StaticJwks)
+	if err != nil {
+		return nil, err
 	}
 	iss, err := a.Federation.UpdateIssuer(ctx, service.Bearer(bearer(ctx)), req.Issuer,
-		domain.JWKSMode(req.Body.JwksMode), static, req.Body.RefusedAudiences)
+		source, req.Body.RefusedAudiences)
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +115,7 @@ func wireIssuer(iss service.IssuerView) apigen.FederationIssuer {
 	out := apigen.FederationIssuer{
 		Id: iss.ID, Issuer: iss.Issuer,
 		IssuerType:       apigen.IssuerType(iss.Type),
-		JwksMode:         apigen.JWKSMode(iss.Mode),
+		JwksMode:         apigen.JWKSMode(iss.KeySource.Mode()),
 		RefusedAudiences: iss.RefusedAudiences,
 		CreatedAt:        iss.CreatedAt, CreatedBy: string(iss.CreatedBy),
 		LiveBindings: int(iss.Bindings),
@@ -120,6 +123,14 @@ func wireIssuer(iss service.IssuerView) apigen.FederationIssuer {
 	out.UpdatedAt = optionalTime(iss.UpdatedAt)
 	out.UpdatedBy = optional(string(iss.UpdatedBy))
 	return out
+}
+
+func requestKeySource(mode apigen.JWKSMode, staticJWKS *string) (jwkssource.KeySource, error) {
+	source, err := jwkssource.ParseKeySource(domain.JWKSMode(mode), staticJWKS)
+	if err != nil {
+		return jwkssource.KeySource{}, fmt.Errorf("%w: %v", service.ErrIssuerValue, err)
+	}
+	return source, nil
 }
 
 // wireBinding renders the binding as a credential row plus the mint's own

@@ -37,6 +37,7 @@ import (
 	jose "github.com/go-jose/go-jose/v4"
 
 	"github.com/Hikyo-Org/hikyo/internal/domain"
+	"github.com/Hikyo-Org/hikyo/internal/jwkssource"
 )
 
 // The operations-spec fog values this ticket chose, every one recorded for
@@ -100,7 +101,7 @@ const (
 	// maxJWKSBytes bounds a JWKS document before anything parses it. The
 	// document comes from a configured issuer, but "configured" is not
 	// "trusted to be small".
-	maxJWKSBytes = 1 << 20
+	maxJWKSBytes = jwkssource.MaxJWKSBytes
 	// maxTrackedIssuers bounds the cache. Issuers are operator-configured, not
 	// attacker-chosen, so this is a sanity ceiling rather than a defence.
 	maxTrackedIssuers = 64
@@ -173,11 +174,10 @@ var (
 // Issuer is the cache's projection of one configured issuer. It carries only
 // what fetching and verifying need, so this package never sees a stored row.
 type Issuer struct {
-	ID         string
-	Issuer     string
-	Type       domain.IssuerType
-	Mode       domain.JWKSMode
-	StaticJWKS string
+	ID        string
+	Issuer    string
+	Type      domain.IssuerType
+	KeySource jwkssource.KeySource
 	// RefusedAudiences are the issuer's default audiences. A token carrying
 	// ANY of them is refused even when it also carries the bound one: a token
 	// minted for the Kubernetes API server that happens to list Hikyo too is
@@ -915,8 +915,8 @@ func (c *Cache) keysFor(ctx context.Context, iss Issuer, kid string, now time.Ti
 	// past, never fetched, and has no age to be stale. That is exactly why it
 	// is not the default — a static-only installation breaks silently on the
 	// day someone rotates the issuer's keys, and the operator chose that.
-	if iss.Mode == domain.JWKSStatic {
-		keys, kids, err := parseJWKS([]byte(iss.StaticJWKS))
+	if document, static := iss.KeySource.CanonicalJWKS(); static {
+		keys, kids, err := jwkssource.ParseJWKS([]byte(document))
 		if err != nil {
 			return nil, KeyState{}, fmt.Errorf("%w: static jwks: %v", ErrKeysUnavailable, err)
 		}
@@ -1140,43 +1140,9 @@ func (c *Cache) fetch(ctx context.Context, iss Issuer, now time.Time) (*entry, e
 	if len(body) > maxJWKSBytes {
 		return nil, fmt.Errorf("jwks document exceeds %d bytes", maxJWKSBytes)
 	}
-	keys, kids, err := parseJWKS(body)
+	keys, kids, err := jwkssource.ParseJWKS(body)
 	if err != nil {
 		return nil, err
 	}
 	return &entry{keys: keys, kids: kids, fetchedAt: now}, nil
-}
-
-// parseJWKS turns a JWKS document into public keys, through go-jose. This is
-// key PARSING, not verification: the signature check is go-oidc's, against
-// whatever this returns.
-//
-// A rotation is not a special case: the issuer publishes old and new keys
-// together, so both land in the set and tokens signed by either verify. That is
-// what makes StaticKeySet's try-every-key behaviour correct here rather than a
-// shortcut — the set is exactly the issuer's current published set.
-func parseJWKS(body []byte) ([]crypto.PublicKey, map[string]bool, error) {
-	var set jose.JSONWebKeySet
-	if err := json.Unmarshal(body, &set); err != nil {
-		return nil, nil, fmt.Errorf("jwks parse: %w", err)
-	}
-	keys := make([]crypto.PublicKey, 0, len(set.Keys))
-	kids := map[string]bool{}
-	for _, k := range set.Keys {
-		if k.Use != "" && k.Use != "sig" {
-			continue
-		}
-		pub := k.Public()
-		if pub.Key == nil {
-			continue
-		}
-		keys = append(keys, pub.Key)
-		if k.KeyID != "" {
-			kids[k.KeyID] = true
-		}
-	}
-	if len(keys) == 0 {
-		return nil, nil, errors.New("jwks document carries no usable signing keys")
-	}
-	return keys, kids, nil
 }
