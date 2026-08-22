@@ -172,13 +172,53 @@ type Target struct {
 	Credential string
 }
 
-// Result pairs a target with what came back.
-type Result struct {
+// Result is the closed result union for one input target. Both variants carry
+// target identity, so FetchAll can preserve cardinality and order without
+// turning local scheduling state into a remote Outcome.
+type Result interface {
+	TargetID() string
+	resultKind()
+}
+
+// Attempted is a target for which Directory was called. Err is diagnostic
+// detail; Outcome is the closed operator-visible result even when Err is nil.
+type Attempted struct {
 	ID      string
 	Listing Listing
 	Outcome Outcome
 	Err     error
 }
+
+func (r *Attempted) TargetID() string {
+	if r == nil {
+		panic("remotefetch: nil Attempted result")
+	}
+	return r.ID
+}
+func (*Attempted) resultKind() {}
+
+// NotAttemptedReason says where local scheduling stopped before Directory was
+// called. It must never be persisted as remote health or a fetch-failure audit.
+type NotAttemptedReason string
+
+const (
+	NotAttemptedContextCancelled NotAttemptedReason = "context_cancelled"
+	NotAttemptedSlotNotAcquired  NotAttemptedReason = "slot_not_acquired"
+)
+
+// NotAttempted is local evidence only: the target produced no remote outcome.
+type NotAttempted struct {
+	ID     string
+	Reason NotAttemptedReason
+}
+
+func (r *NotAttempted) TargetID() string {
+	if r == nil {
+		panic("remotefetch: nil NotAttempted result")
+	}
+	return r.ID
+}
+func (*NotAttempted) resultKind() {}
 
 // FetchAll runs one fan-out round under the configured cap.
 //
@@ -187,47 +227,74 @@ type Result struct {
 // 50 and FanOut at 4, a pathological all-unreachable directory is thirteen
 // sequential rounds of the per-remote deadline, which is the arithmetic the
 // bound was chosen for.
-// FetchAll returns a result for every target it ATTEMPTED, and omits every
-// target it did not. The distinction is the whole contract: a target the round
-// never reached has produced no evidence about the remote, and inventing
-// `unreachable` for it would persist a failure snapshot and an audit event for
-// a connection nobody opened. A caller that finds no entry for a target serves
-// its last-known snapshot AS a snapshot, which is the honest answer.
+// FetchAll returns exactly one ordered result per target. A target the round
+// never reached is NotAttempted: it produced no evidence about the remote, and
+// inventing `unreachable` for it would persist a failure snapshot and an audit
+// event for a connection nobody opened.
 //
-// Two places drop a target, both before any byte is written: the queue, if the
-// round ends while it is waiting for a fan-out slot, and the moment after
-// acquiring one, if the round ended in between.
+// Cancellation can prevent an attempt in three scheduling windows: before the
+// scheduler reaches a target, after a slot is granted but before Directory is
+// called, or while the next target waits for a full slot. The first two are
+// context_cancelled; the waiting target is slot_not_acquired. None calls
+// Directory.
 func (c *Client) FetchAll(ctx context.Context, targets []Target) []Result {
 	out := make([]Result, len(targets))
-	attempted := make([]bool, len(targets))
+	if ctx.Err() != nil {
+		fillNotAttempted(out, targets, 0, NotAttemptedContextCancelled)
+		return out
+	}
+
 	sem := make(chan struct{}, c.cfg.FanOut)
 	var wg sync.WaitGroup
+
+schedule:
 	for i, t := range targets {
-		wg.Add(1)
-		go func(i int, t Target) {
-			defer wg.Done()
+		if ctx.Err() != nil {
+			fillNotAttempted(out, targets, i, NotAttemptedContextCancelled)
+			break
+		}
+
+		// Fast path distinguishes a free slot from a target that had to queue.
+		// If cancellation wins after the queue begins, that target names the
+		// slot refusal and targets not yet queued name context cancellation.
+		select {
+		case sem <- struct{}{}:
+		default:
 			select {
 			case sem <- struct{}{}:
 			case <-ctx.Done():
-				return
+				out[i] = &NotAttempted{ID: t.ID, Reason: NotAttemptedSlotNotAcquired}
+				fillNotAttempted(out, targets, i+1, NotAttemptedContextCancelled)
+				break schedule
 			}
+			if ctx.Err() != nil {
+				<-sem
+				out[i] = &NotAttempted{ID: t.ID, Reason: NotAttemptedSlotNotAcquired}
+				fillNotAttempted(out, targets, i+1, NotAttemptedContextCancelled)
+				break schedule
+			}
+		}
+
+		wg.Add(1)
+		go func(i int, t Target) {
+			defer wg.Done()
 			defer func() { <-sem }()
 			if ctx.Err() != nil {
+				out[i] = &NotAttempted{ID: t.ID, Reason: NotAttemptedContextCancelled}
 				return
 			}
-			attempted[i] = true
 			l, o, err := c.Directory(ctx, t.Origin, t.Pin, t.Credential)
-			out[i] = Result{ID: t.ID, Listing: l, Outcome: o, Err: err}
+			out[i] = &Attempted{ID: t.ID, Listing: l, Outcome: o, Err: err}
 		}(i, t)
 	}
 	wg.Wait()
-	got := make([]Result, 0, len(targets))
-	for i := range out {
-		if attempted[i] {
-			got = append(got, out[i])
-		}
+	return out
+}
+
+func fillNotAttempted(out []Result, targets []Target, from int, reason NotAttemptedReason) {
+	for i := from; i < len(targets); i++ {
+		out[i] = &NotAttempted{ID: targets[i].ID, Reason: reason}
 	}
-	return got
 }
 
 // RoundBudget is the honest whole-round maximum for n targets: the number of
