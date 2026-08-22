@@ -66,6 +66,7 @@ printf '{"releases":[{"version":"%s","sequence":1}]}\n' "$version" >"$fixture_di
 
 jq -e '
 	([.artifacts[] | select(.kind == "binary")] | length) == 6 and
+	([.artifacts[] | select(.kind == "binary-provenance")] | length) == 1 and
 	([.artifacts[] | select(.kind == "chart")] | length) == 1 and
 	([.artifacts[] | select(.kind == "oci-payload")] | length) == 2
 ' "$fixture_dist/release-manifest.json" >/dev/null
