@@ -574,8 +574,8 @@ func testFederation(t *testing.T, restCfg *rest.Config, sch *runtime.Scheme) {
 	e.createInstance(instanceName, fedAudience)
 
 	if _, err := e.fed.CreateIssuer(e.ctx, service.LocalPrincipal(root), service.IssuerRequest{
-		Issuer: clusterIssuer, Type: domain.IssuerKubernetes, Mode: domain.JWKSStatic,
-		StaticJWKS: jwks, RefusedAudiences: []string{defaultAud},
+		Issuer: clusterIssuer, Type: domain.IssuerKubernetes, KeySource: staticKeySource(t, jwks),
+		RefusedAudiences: []string{defaultAud},
 	}); err != nil {
 		t.Fatalf("configure kubernetes issuer: %v", err)
 	}

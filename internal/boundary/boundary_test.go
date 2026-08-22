@@ -360,13 +360,16 @@ func TestForbiddenEdges(t *testing.T) {
 
 // TestAuthnImportAllowlist enforces the resolution surface's boundary in
 // both directions: only the packages on authnImporters may import it, and it
-// itself builds on generated queries and the domain vocabulary only — never
+// itself builds on generated queries and leaf domain vocabularies only — never
 // the repository layer (which would create a cycle through authz) and never
 // anything upward.
 func TestAuthnImportAllowlist(t *testing.T) {
 	authn := module + "/internal/store/authn"
 	allowedImports := map[string]bool{
-		module + "/internal/domain":          true,
+		module + "/internal/domain": true,
+		// Closed federation-key-source vocabulary shared with oidcfed. This leaf
+		// performs no fetch, service, authorization, or persistence work.
+		module + "/internal/jwkssource":      true,
 		module + "/internal/store/sqlitegen": true,
 		module + "/internal/store/pggen":     true,
 		// The audit vocabulary (leaf) and the shared Row→params mapping, for
@@ -381,7 +384,7 @@ func TestAuthnImportAllowlist(t *testing.T) {
 				t.Errorf("%s imports %s: not on the authn-importer allowlist", p.ImportPath, imp)
 			}
 			if p.ImportPath == authn && strings.HasPrefix(imp, module+"/") && !allowedImports[imp] {
-				t.Errorf("%s imports %s: the resolution surface builds on generated queries and domain only", p.ImportPath, imp)
+				t.Errorf("%s imports %s: the resolution surface builds on generated queries and leaf domain vocabularies only", p.ImportPath, imp)
 			}
 		}
 	}

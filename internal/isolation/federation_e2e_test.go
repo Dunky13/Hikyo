@@ -1,8 +1,11 @@
 package isolation
 
 import (
+	"bytes"
+	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -13,14 +16,17 @@ import (
 	"time"
 
 	"github.com/Hikyo-Org/hikyo/internal/admission"
+	"github.com/Hikyo-Org/hikyo/internal/authz"
 	"github.com/Hikyo-Org/hikyo/internal/crypto"
 	"github.com/Hikyo-Org/hikyo/internal/delivery"
 	"github.com/Hikyo-Org/hikyo/internal/domain"
+	"github.com/Hikyo-Org/hikyo/internal/jwkssource"
 	"github.com/Hikyo-Org/hikyo/internal/oidcfed"
 	"github.com/Hikyo-Org/hikyo/internal/oidctest"
 	"github.com/Hikyo-Org/hikyo/internal/schema"
 	"github.com/Hikyo-Org/hikyo/internal/service"
 	"github.com/Hikyo-Org/hikyo/internal/store"
+	"github.com/Hikyo-Org/hikyo/internal/store/tx"
 )
 
 // OIDC federation and the conditional fetch cursor (#62, machine-identities ADR
@@ -214,13 +220,22 @@ func grantMachineRead(t *testing.T, db *store.DB, p domain.PrincipalID, env doma
 func (r *fedRig) configureIssuer(t *testing.T, typ domain.IssuerType, refused []string) service.IssuerView {
 	t.Helper()
 	iss, err := r.fed.CreateIssuer(t.Context(), service.LocalPrincipal(root), service.IssuerRequest{
-		Issuer: r.idp.Issuer(), Type: typ, Mode: domain.JWKSDiscovery,
+		Issuer: r.idp.Issuer(), Type: typ, KeySource: jwkssource.RemoteDiscovery(),
 		RefusedAudiences: refused,
 	})
 	if err != nil {
 		t.Fatalf("configure issuer: %v", err)
 	}
 	return iss
+}
+
+func staticKeySource(t *testing.T, document string) jwkssource.KeySource {
+	t.Helper()
+	source, err := jwkssource.ParseKeySource(domain.JWKSStatic, &document)
+	if err != nil {
+		t.Fatalf("parse static key source: %v", err)
+	}
+	return source
 }
 
 // bindShape creates a service account and binds the shape's subject and pinned
@@ -698,7 +713,14 @@ func runUnknownKIDRateLimit(t *testing.T, db *store.DB) {
 }
 
 func TestFederationStaticJWKSSQLite(t *testing.T) {
-	db := seededDB(t, openSQLite)
+	runFederationStaticJWKS(t, seededDB(t, openSQLite))
+}
+
+func TestFederationStaticJWKSPostgres(t *testing.T) {
+	runFederationStaticJWKS(t, seededDB(t, openPostgres))
+}
+
+func runFederationStaticJWKS(t *testing.T, db *store.DB) {
 	r := newFedRig(t, db)
 	shape := oidctest.KubernetesShape("prod", "airgapped", "uid-air", "https://kubernetes.default.svc")
 
@@ -707,8 +729,8 @@ func TestFederationStaticJWKSSQLite(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := r.fed.CreateIssuer(t.Context(), service.LocalPrincipal(root), service.IssuerRequest{
-		Issuer: r.idp.Issuer(), Type: domain.IssuerKubernetes, Mode: domain.JWKSStatic,
-		StaticJWKS: document, RefusedAudiences: []string{shape.DefaultAudience},
+		Issuer: r.idp.Issuer(), Type: domain.IssuerKubernetes, KeySource: staticKeySource(t, document),
+		RefusedAudiences: []string{shape.DefaultAudience},
 	}); err != nil {
 		t.Fatalf("configure static issuer: %v", err)
 	}
@@ -740,6 +762,72 @@ func TestFederationStaticJWKSSQLite(t *testing.T) {
 	}
 	if _, err := r.del.Fetch(t.Context(), rotated, scopeEnv(orgA, prjA1, envA1), "", service.FetchOptions{}); !errors.Is(err, domain.ErrUnauthenticated) {
 		t.Fatalf("static JWKS after an unrecorded rotation = %v, want the uniform refusal", err)
+	}
+}
+
+func TestFederationKeySourceRoundTripSQLite(t *testing.T) {
+	runFederationKeySourceRoundTrip(t, seededDB(t, openSQLite))
+}
+
+func TestFederationKeySourceRoundTripPostgres(t *testing.T) {
+	runFederationKeySourceRoundTrip(t, seededDB(t, openPostgres))
+}
+
+func runFederationKeySourceRoundTrip(t *testing.T, db *store.DB) {
+	r := newFedRig(t, db)
+	document, err := r.idp.JWKSDocument()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var formatted bytes.Buffer
+	if err := json.Indent(&formatted, []byte(document), "", "  "); err != nil {
+		t.Fatal(err)
+	}
+	staticSource := staticKeySource(t, formatted.String())
+
+	remote, err := r.fed.CreateIssuer(t.Context(), service.LocalPrincipal(root), service.IssuerRequest{
+		Issuer: "https://remote-roundtrip.example.test", Type: domain.IssuerForgejo,
+		KeySource: jwkssource.RemoteDiscovery(), RefusedAudiences: []string{"https://forgejo.example.test"},
+	})
+	if err != nil {
+		t.Fatalf("create remote issuer: %v", err)
+	}
+	static, err := r.fed.CreateIssuer(t.Context(), service.LocalPrincipal(root), service.IssuerRequest{
+		Issuer: r.idp.Issuer(), Type: domain.IssuerKubernetes,
+		KeySource: staticSource, RefusedAudiences: []string{"https://kubernetes.default.svc"},
+	})
+	if err != nil {
+		t.Fatalf("create static issuer: %v", err)
+	}
+
+	got := map[string]authz.FederationIssuer{}
+	if err := tx.Read(t.Context(), db, func(ctx context.Context, _ store.ReadRepos, az *authz.TxAuthorizer) error {
+		for _, id := range []string{remote.ID, static.ID} {
+			issuer, err := az.FederationIssuerByID(ctx, id)
+			if err != nil {
+				return err
+			}
+			got[id] = issuer
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("read issuer key sources: %v", err)
+	}
+
+	if got[remote.ID].KeySource.Mode() != domain.JWKSDiscovery {
+		t.Fatalf("remote source round-tripped as %q", got[remote.ID].KeySource.Mode())
+	}
+	if _, ok := got[remote.ID].KeySource.CanonicalJWKS(); ok {
+		t.Fatal("remote source gained a static JWKS during round-trip")
+	}
+	if !got[static.ID].KeySource.Equal(staticSource) {
+		stored, _ := got[static.ID].KeySource.CanonicalJWKS()
+		want, _ := staticSource.CanonicalJWKS()
+		t.Fatalf("static source changed during round-trip:\n got %s\nwant %s", stored, want)
+	}
+	canonical, ok := got[static.ID].KeySource.CanonicalJWKS()
+	if !ok || bytes.ContainsAny([]byte(canonical), "\n\t") {
+		t.Fatalf("stored static JWKS is not canonical: %q", canonical)
 	}
 }
 
@@ -1106,7 +1194,7 @@ func TestFederationOutageDoesNotSerializeIssuersSQLite(t *testing.T) {
 	r.cache.HTTP = multiCAClient(r.idp, healthyIdP)
 	healthy := oidctest.ForgejoShape("https://git.example.test", "acme/healthy", "refs/heads/main", "push")
 	if _, err := r.fed.CreateIssuer(t.Context(), service.LocalPrincipal(root), service.IssuerRequest{
-		Issuer: healthyIdP.Issuer(), Type: domain.IssuerForgejo, Mode: domain.JWKSDiscovery,
+		Issuer: healthyIdP.Issuer(), Type: domain.IssuerForgejo, KeySource: jwkssource.RemoteDiscovery(),
 		RefusedAudiences: []string{healthy.DefaultAudience},
 	}); err != nil {
 		t.Fatalf("configure the healthy issuer: %v", err)
@@ -1253,7 +1341,7 @@ func TestFederationIssuerPolicyCannotGoStaleSQLite(t *testing.T) {
 	// audience this token carries.
 	r.fed.OnValidated = func() {
 		if _, err := r.fed.UpdateIssuer(t.Context(), service.LocalPrincipal(root), iss.ID,
-			domain.JWKSDiscovery, "", []string{shape.DefaultAudience, hikyoAudience}); err != nil {
+			jwkssource.RemoteDiscovery(), []string{shape.DefaultAudience, hikyoAudience}); err != nil {
 			t.Errorf("mid-flight issuer update: %v", err)
 		}
 		r.fed.OnValidated = nil
@@ -1554,7 +1642,7 @@ func runFederationLifecycle(t *testing.T, db *store.DB) {
 		t.Fatalf("identity.federation_issuer_read: %v", err)
 	}
 	if _, err := r.fed.UpdateIssuer(t.Context(), service.LocalPrincipal(root), iss.ID,
-		domain.JWKSDiscovery, "", []string{shape.DefaultAudience, "https://other.test"}); err != nil {
+		jwkssource.RemoteDiscovery(), []string{shape.DefaultAudience, "https://other.test"}); err != nil {
 		t.Fatalf("identity.federation_issuer_changed (updated): %v", err)
 	}
 	sa, binding := r.bindShape(t, "audited-binding", shape, hikyoAudience)
@@ -1727,7 +1815,7 @@ func TestFederationIssuerGrammarRefusesNonIssuerURLs(t *testing.T) {
 		{"empty", ""},
 	} {
 		if _, err := r.fed.CreateIssuer(t.Context(), service.LocalPrincipal(root), service.IssuerRequest{
-			Issuer: tc.issuer, Type: domain.IssuerForgejo, Mode: domain.JWKSDiscovery,
+			Issuer: tc.issuer, Type: domain.IssuerForgejo, KeySource: jwkssource.RemoteDiscovery(),
 			RefusedAudiences: []string{"https://forgejo.example.test"},
 		}); !errors.Is(err, service.ErrIssuerValue) {
 			t.Errorf("%s: CreateIssuer(%q) = %v, want the issuer-grammar refusal", tc.name, tc.issuer, err)
@@ -1738,7 +1826,7 @@ func TestFederationIssuerGrammarRefusesNonIssuerURLs(t *testing.T) {
 	// part of real issuer identifiers (kind clusters, tenant paths).
 	if _, err := r.fed.CreateIssuer(t.Context(), service.LocalPrincipal(root), service.IssuerRequest{
 		Issuer: "https://issuer.example.test:6443/tenant", Type: domain.IssuerForgejo,
-		Mode: domain.JWKSDiscovery, RefusedAudiences: []string{"https://forgejo.example.test"},
+		KeySource: jwkssource.RemoteDiscovery(), RefusedAudiences: []string{"https://forgejo.example.test"},
 	}); err != nil {
 		t.Fatalf("a host:port/path issuer must stay admitted, got %v", err)
 	}

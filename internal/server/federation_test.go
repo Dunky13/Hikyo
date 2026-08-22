@@ -12,6 +12,7 @@ import (
 	"github.com/Hikyo-Org/hikyo/api/apigen"
 	"github.com/Hikyo-Org/hikyo/internal/delivery"
 	"github.com/Hikyo-Org/hikyo/internal/domain"
+	"github.com/Hikyo-Org/hikyo/internal/jwkssource"
 	"github.com/Hikyo-Org/hikyo/internal/server"
 	"github.com/Hikyo-Org/hikyo/internal/service"
 )
@@ -83,13 +84,23 @@ func (s stubDelivery) ReconcileOfflineRecords(_ context.Context, presented strin
 	return service.ReconcileResult{Accepted: len(records)}, nil
 }
 
-type stubFederation struct{ err error }
-
-func (s stubFederation) CreateIssuer(context.Context, service.Actor, service.IssuerRequest) (service.IssuerView, error) {
-	return service.IssuerView{}, s.err
+type stubFederation struct {
+	err           error
+	createRequest *service.IssuerRequest
 }
 
-func (s stubFederation) UpdateIssuer(context.Context, service.Actor, string, domain.JWKSMode, string, []string) (service.IssuerView, error) {
+func (s stubFederation) CreateIssuer(_ context.Context, _ service.Actor, req service.IssuerRequest) (service.IssuerView, error) {
+	if s.createRequest != nil {
+		*s.createRequest = req
+	}
+	return service.IssuerView{
+		ID: "fis_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f15", Issuer: req.Issuer,
+		Type: req.Type, KeySource: req.KeySource, RefusedAudiences: req.RefusedAudiences,
+		CreatedAt: time.Unix(1_800_000_000, 0).UTC(), CreatedBy: "usr_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f17",
+	}, s.err
+}
+
+func (s stubFederation) UpdateIssuer(context.Context, service.Actor, string, jwkssource.KeySource, []string) (service.IssuerView, error) {
 	return service.IssuerView{}, s.err
 }
 
@@ -99,7 +110,7 @@ func (s stubFederation) ListIssuers(context.Context, service.Actor) ([]service.I
 	}
 	return []service.IssuerView{{
 		ID: "fis_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f15", Issuer: "https://issuer.test", Type: domain.IssuerKubernetes,
-		Mode: domain.JWKSDiscovery, RefusedAudiences: []string{"https://kubernetes.default.svc"},
+		KeySource: jwkssource.RemoteDiscovery(), RefusedAudiences: []string{"https://kubernetes.default.svc"},
 		CreatedAt: time.Unix(1_800_000_000, 0).UTC(), CreatedBy: "usr_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f17", Bindings: 2,
 	}}, nil
 }
@@ -450,5 +461,59 @@ func TestFederationIssuerRouteHidesTheStaticDocument(t *testing.T) {
 		if _, present := raw[0][forbidden]; present {
 			t.Errorf("the issuer read shape carries %q", forbidden)
 		}
+	}
+}
+
+func TestFederationIssuerRouteRejectsImpossibleKeySources(t *testing.T) {
+	valid := `{"keys":[{"kty":"OKP","crv":"Ed25519","x":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","kid":"test","use":"sig"}]}`
+	empty := ""
+	for _, tc := range []struct {
+		name   string
+		mode   apigen.JWKSMode
+		static *string
+	}{
+		{name: "discovery with document", mode: apigen.Discovery, static: &valid},
+		{name: "discovery with empty document", mode: apigen.Discovery, static: &empty},
+		{name: "static without document", mode: apigen.Static},
+		{name: "static with empty document", mode: apigen.Static, static: &empty},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var got service.IssuerRequest
+			srv := federationServer(t, stubFederation{createRequest: &got}, stubDelivery{})
+			body := apigen.CreateFederationIssuerRequest{
+				Issuer: "https://issuer.test", IssuerType: apigen.IssuerTypeKubernetes,
+				JwksMode: tc.mode, StaticJwks: tc.static,
+				RefusedAudiences: []string{"https://kubernetes.default.svc"},
+			}
+			resp, payload := call(t, srv, http.MethodPost, api.PathPrefix+"/instance/federation-issuers", "hik_1_cli_abc", body)
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("invalid key source -> %d: %s", resp.StatusCode, payload)
+			}
+			if got.Issuer != "" {
+				t.Fatal("invalid key source reached the federation service")
+			}
+		})
+	}
+}
+
+func TestFederationIssuerRouteCanonicalizesStaticJWKSOnce(t *testing.T) {
+	raw := "{\n  \"keys\": [{\"use\":\"sig\",\"x\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"kid\":\"test\",\"crv\":\"Ed25519\",\"kty\":\"OKP\"}]\n}"
+	var got service.IssuerRequest
+	srv := federationServer(t, stubFederation{createRequest: &got}, stubDelivery{})
+	body := apigen.CreateFederationIssuerRequest{
+		Issuer: "https://issuer.test", IssuerType: apigen.IssuerTypeKubernetes,
+		JwksMode: apigen.Static, StaticJwks: &raw,
+		RefusedAudiences: []string{"https://kubernetes.default.svc"},
+	}
+	resp, payload := call(t, srv, http.MethodPost, api.PathPrefix+"/instance/federation-issuers", "hik_1_cli_abc", body)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create static issuer -> %d: %s", resp.StatusCode, payload)
+	}
+	canonical, ok := got.KeySource.CanonicalJWKS()
+	if !ok {
+		t.Fatal("static request reached the service as remote discovery")
+	}
+	if canonical == raw || !json.Valid([]byte(canonical)) {
+		t.Fatalf("service received non-canonical JWKS %q", canonical)
 	}
 }

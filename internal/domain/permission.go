@@ -207,7 +207,9 @@ func IsCIIssuerType(t IssuerType) bool {
 	return t == IssuerForgejo || t == IssuerGitHubActions
 }
 
-// JWKSMode is where an issuer's signing keys come from.
+// JWKSMode is the API/database compatibility encoding of an issuer key source.
+// Runtime models use a closed key-source value so mode and static material
+// cannot drift.
 type JWKSMode string
 
 const (
@@ -221,9 +223,6 @@ const (
 	// silently on the day someone rotates the issuer's keys.
 	JWKSStatic JWKSMode = "static"
 )
-
-// IsJWKSMode reports whether m is one of the two sources.
-func IsJWKSMode(m JWKSMode) bool { return m == JWKSDiscovery || m == JWKSStatic }
 
 // CredentialLifetime is the ADR's typed lifetime. `indefinite` is a VALUE,
 // not a large number: it is unreachable by raising any ceiling, which is the
