@@ -77,6 +77,10 @@ type Client struct {
 func (c *Client) Forget() { c.token = "" }
 
 func NewClient(cfg ClientConfig) (*Client, error) {
+	return newClient(cfg, net.DefaultResolver, &net.Dialer{Timeout: cfg.Deadline})
+}
+
+func newClient(cfg ClientConfig, resolver netpolicy.Resolver, dialer netpolicy.Dialer) (*Client, error) {
 	origin, err := canonicalOrigin(cfg.Origin)
 	if err != nil {
 		return nil, err
@@ -90,27 +94,14 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 	if cfg.Deadline >= adapter.LeaseTime {
 		return nil, errors.New("forgejo: request deadline must be shorter than the provider-write lease")
 	}
-	allowed := append([]netip.Prefix(nil), cfg.AllowedCIDRs...)
-	dialer := &net.Dialer{Timeout: cfg.Deadline}
+	publicDialer, err := netpolicy.NewPublicDialer(cfg.AllowedCIDRs, resolver, dialer)
+	if err != nil {
+		return nil, fmt.Errorf("forgejo: egress policy: %w", err)
+	}
 	transport := &http.Transport{
 		Proxy:           nil,
 		TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12},
-		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
-			host, port, err := net.SplitHostPort(address)
-			if err != nil {
-				return nil, fmt.Errorf("forgejo: destination address: %w", err)
-			}
-			ips, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
-			if err != nil {
-				return nil, fmt.Errorf("forgejo: resolve destination: %w", err)
-			}
-			for _, ip := range ips {
-				if permitted(ip, allowed) {
-					return dialer.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
-				}
-			}
-			return nil, errors.New("forgejo: destination resolved only to non-global or special-use addresses")
-		},
+		DialContext:     publicDialer.DialContext,
 	}
 	return &Client{
 		origin: origin,
@@ -148,16 +139,6 @@ func canonicalOrigin(raw string) (string, error) {
 		return "", errors.New("forgejo: origin must be a bare https origin")
 	}
 	return "https://" + u.Host, nil
-}
-
-func permitted(ip netip.Addr, exceptions []netip.Prefix) bool {
-	ip = ip.Unmap()
-	for _, prefix := range exceptions {
-		if prefix.Contains(ip) {
-			return true
-		}
-	}
-	return !netpolicy.IsNonPublic(ip)
 }
 
 type ResponseError struct {

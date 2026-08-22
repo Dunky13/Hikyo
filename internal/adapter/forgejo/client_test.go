@@ -1,9 +1,12 @@
 package forgejo
 
 import (
+	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -16,6 +19,21 @@ import (
 
 	"github.com/Hikyo-Org/hikyo/internal/adapter"
 )
+
+type staticNetworkResolver []netip.Addr
+
+func (r staticNetworkResolver) LookupNetIP(context.Context, string, string) ([]netip.Addr, error) {
+	return append([]netip.Addr(nil), r...), nil
+}
+
+type recordingNetworkDialer struct{ attempts []string }
+
+func (d *recordingNetworkDialer) DialContext(_ context.Context, _, address string) (net.Conn, error) {
+	d.attempts = append(d.attempts, address)
+	client, server := net.Pipe()
+	server.Close()
+	return client, nil
+}
 
 // API is the import boundary Sync can link. Its exact method set contains a
 // name-only secret read and no variable read. The production HTTP client is
@@ -51,19 +69,72 @@ func TestClientRefusesDeadlineThatCanOutliveProviderFence(t *testing.T) {
 	}
 }
 
-func TestEgressRefusesSpecialUseAddressesUnlessOperatorAllowsThem(t *testing.T) {
-	for _, raw := range []string{"127.0.0.1", "192.0.2.1", "198.51.100.1", "203.0.113.1", "198.18.0.1", "2001:db8::1"} {
-		ip := netip.MustParseAddr(raw)
-		if permitted(ip, nil) {
-			t.Errorf("special-use address %s was admitted by default", ip)
-		}
+func TestClientRetainsProviderPolicyOutsidePublicDialer(t *testing.T) {
+	client, err := NewClient(ClientConfig{Origin: "https://git.example", Credential: "token", Deadline: 15 * time.Second})
+	if err != nil {
+		t.Fatal(err)
 	}
-	exception := netip.MustParsePrefix("192.0.2.0/24")
-	if !permitted(netip.MustParseAddr("192.0.2.9"), []netip.Prefix{exception}) {
-		t.Fatal("operator CIDR exception did not admit its named range")
+	transport, ok := client.http.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("transport type = %T, want *http.Transport", client.http.Transport)
 	}
-	if !permitted(netip.MustParseAddr("::ffff:192.0.2.9"), []netip.Prefix{exception}) {
-		t.Fatal("operator CIDR exception did not admit the IPv4-mapped form returned by some resolvers")
+	if transport.Proxy != nil {
+		t.Fatal("Forgejo transport unexpectedly accepted an ambient or opaque proxy")
+	}
+	if transport.DialContext == nil {
+		t.Fatal("Forgejo transport omitted the public-address dialer")
+	}
+	if transport.TLSClientConfig == nil || transport.TLSClientConfig.MinVersion != tls.VersionTLS12 {
+		t.Fatalf("TLS policy = %#v, want TLS 1.2 minimum", transport.TLSClientConfig)
+	}
+	if err := client.http.CheckRedirect(&http.Request{}, nil); err == nil || !strings.Contains(err.Error(), "redirects are refused") {
+		t.Fatalf("redirect policy error = %v, want provider-specific refusal", err)
+	}
+}
+
+func TestClientRoutesAllowedAndMixedAnswersThroughPublicDialer(t *testing.T) {
+	allowedDialer := &recordingNetworkDialer{}
+	client, err := newClient(ClientConfig{
+		Origin:       "https://git.example",
+		Credential:   "token",
+		AllowedCIDRs: []netip.Prefix{netip.MustParsePrefix("10.24.0.0/16")},
+		Deadline:     15 * time.Second,
+	}, staticNetworkResolver{netip.MustParseAddr("10.24.3.9")}, allowedDialer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transport := client.http.Transport.(*http.Transport)
+	conn, err := transport.DialContext(t.Context(), "tcp", "git.example:443")
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn.Close()
+	if want := []string{"10.24.3.9:443"}; !slices.Equal(allowedDialer.attempts, want) {
+		t.Fatalf("allowed dial attempts = %v, want %v", allowedDialer.attempts, want)
+	}
+
+	mixedDialer := &recordingNetworkDialer{}
+	mixed, err := newClient(ClientConfig{
+		Origin: "https://git.example", Credential: "token", Deadline: 15 * time.Second,
+	}, staticNetworkResolver{netip.MustParseAddr("8.8.8.8"), netip.MustParseAddr("127.0.0.1")}, mixedDialer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transport = mixed.http.Transport.(*http.Transport)
+	if _, err := transport.DialContext(t.Context(), "tcp", "git.example:443"); err == nil {
+		t.Fatal("mixed public/private resolution unexpectedly dialed")
+	}
+	if len(mixedDialer.attempts) != 0 {
+		t.Fatalf("mixed-answer dial attempts = %v, want none", mixedDialer.attempts)
+	}
+}
+
+func TestClientRejectsInvalidAllowedCIDRAtConstruction(t *testing.T) {
+	_, err := NewClient(ClientConfig{
+		Origin: "https://git.example", Credential: "token", AllowedCIDRs: []netip.Prefix{{}}, Deadline: 15 * time.Second,
+	})
+	if err == nil || !strings.Contains(err.Error(), "invalid allowed CIDR") {
+		t.Fatalf("NewClient() error = %v, want invalid-CIDR refusal", err)
 	}
 }
 

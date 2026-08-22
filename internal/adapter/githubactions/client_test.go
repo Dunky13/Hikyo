@@ -2,11 +2,14 @@ package githubactions
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/netip"
 	"reflect"
 	"slices"
 	"strings"
@@ -16,6 +19,21 @@ import (
 	"github.com/Hikyo-Org/hikyo/internal/adapter"
 	"github.com/Hikyo-Org/hikyo/internal/crypto"
 )
+
+type staticNetworkResolver []netip.Addr
+
+func (r staticNetworkResolver) LookupNetIP(context.Context, string, string) ([]netip.Addr, error) {
+	return append([]netip.Addr(nil), r...), nil
+}
+
+type recordingNetworkDialer struct{ attempts []string }
+
+func (d *recordingNetworkDialer) DialContext(_ context.Context, _, address string) (net.Conn, error) {
+	d.attempts = append(d.attempts, address)
+	client, server := net.Pipe()
+	server.Close()
+	return client, nil
+}
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
@@ -32,6 +50,82 @@ func response(status int, body string, headers ...http.Header) *http.Response {
 func TestClientRefusesClassicPATBeforeProviderContact(t *testing.T) {
 	if _, err := NewTestClient("https://api.github.com", "ghp_classic", &http.Client{}); err == nil || !strings.Contains(err.Error(), "classic") {
 		t.Fatalf("NewTestClient() = %v, want named classic PAT refusal", err)
+	}
+}
+
+func TestClientRetainsProviderPolicyOutsidePublicDialer(t *testing.T) {
+	client, err := NewClient(ClientConfig{
+		Origin:     "https://api.github.com",
+		Credential: "github_pat_transport_policy",
+		Deadline:   15 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(client.Forget)
+	transport, ok := client.http.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("transport type = %T, want *http.Transport", client.http.Transport)
+	}
+	if transport.Proxy != nil {
+		t.Fatal("GitHub Actions transport unexpectedly accepted an ambient or opaque proxy")
+	}
+	if transport.DialContext == nil {
+		t.Fatal("GitHub Actions transport omitted the public-address dialer")
+	}
+	if transport.TLSClientConfig == nil || transport.TLSClientConfig.MinVersion != tls.VersionTLS12 {
+		t.Fatalf("TLS policy = %#v, want TLS 1.2 minimum", transport.TLSClientConfig)
+	}
+	if err := client.http.CheckRedirect(&http.Request{}, nil); err == nil || !strings.Contains(err.Error(), "redirects are refused") {
+		t.Fatalf("redirect policy error = %v, want provider-specific refusal", err)
+	}
+}
+
+func TestClientRoutesAllowedAndMixedAnswersThroughPublicDialer(t *testing.T) {
+	allowedDialer := &recordingNetworkDialer{}
+	client, err := newClient(ClientConfig{
+		Origin:       "https://api.github.com",
+		Credential:   "github_pat_allowed_network",
+		AllowedCIDRs: []netip.Prefix{netip.MustParsePrefix("10.24.0.0/16")},
+		Deadline:     15 * time.Second,
+	}, staticNetworkResolver{netip.MustParseAddr("10.24.3.9")}, allowedDialer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(client.Forget)
+	transport := client.http.Transport.(*http.Transport)
+	conn, err := transport.DialContext(t.Context(), "tcp", "api.github.com:443")
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn.Close()
+	if want := []string{"10.24.3.9:443"}; !slices.Equal(allowedDialer.attempts, want) {
+		t.Fatalf("allowed dial attempts = %v, want %v", allowedDialer.attempts, want)
+	}
+
+	mixedDialer := &recordingNetworkDialer{}
+	mixed, err := newClient(ClientConfig{
+		Origin: "https://api.github.com", Credential: "github_pat_mixed_network", Deadline: 15 * time.Second,
+	}, staticNetworkResolver{netip.MustParseAddr("8.8.8.8"), netip.MustParseAddr("127.0.0.1")}, mixedDialer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(mixed.Forget)
+	transport = mixed.http.Transport.(*http.Transport)
+	if _, err := transport.DialContext(t.Context(), "tcp", "api.github.com:443"); err == nil {
+		t.Fatal("mixed public/private resolution unexpectedly dialed")
+	}
+	if len(mixedDialer.attempts) != 0 {
+		t.Fatalf("mixed-answer dial attempts = %v, want none", mixedDialer.attempts)
+	}
+}
+
+func TestClientRejectsInvalidAllowedCIDRAtConstruction(t *testing.T) {
+	_, err := NewClient(ClientConfig{
+		Origin: "https://api.github.com", Credential: "github_pat_invalid_network", AllowedCIDRs: []netip.Prefix{{}}, Deadline: 15 * time.Second,
+	})
+	if err == nil || !strings.Contains(err.Error(), "invalid allowed CIDR") {
+		t.Fatalf("NewClient() error = %v, want invalid-CIDR refusal", err)
 	}
 }
 
