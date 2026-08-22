@@ -175,6 +175,79 @@ func TestAdapterTargetNarrowingSkipsCeremonyAndUsesSynchronousTargetResponse(t *
 	}
 }
 
+func TestAdapterTargetMutationCLIAPIParity(t *testing.T) {
+	tests := []struct {
+		name        string
+		destination string
+		status      int
+		response    string
+		wantOutput  string
+	}{
+		{
+			name: "metadata update", destination: "app", status: http.StatusOK,
+			response:   `{"id":"tgt_one","adapter_id":"adp_one","environment_id":"env_one","destination_kind":"repository","destination_owner":"team","destination_name":"app","destination_id":42,"name_prefix":"NEXT_","generation":2,"state":"active","sync_status":"converging","failure_names":[]}`,
+			wantOutput: "converging",
+		},
+		{
+			name: "move started", destination: "next", status: http.StatusAccepted,
+			response:   `{"id":"mov_one","adapter_id":"adp_one","kind":"target","state":"scrubbing","keep_remote":false,"pending_origin":"","targets":[{"target_id":"tgt_one","environment_id":"env_one","destination_kind":"repository","destination_owner":"team","destination_name":"next","visibility":"","selected_repository_ids":[],"name_prefix":"NEXT_","key_ids":["key_one"],"jobs":[],"orphaned_names":[]}],"created_at":"2026-08-17T00:00:00Z"}`,
+			wantOutput: "mov_one",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var patchCount int
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch {
+				case r.Method == http.MethodGet && r.URL.Path == "/api/v1/orgs/org_one/projects/prj_one/adapter-targets/tgt_one":
+					_, _ = io.WriteString(w, `{"target":{"id":"tgt_one","adapter_id":"adp_one","environment_id":"env_one","destination_kind":"repository","destination_owner":"team","destination_name":"app","destination_id":42,"name_prefix":"PROD_","generation":1,"state":"active","sync_status":"converged","failure_names":[]},"mapping":[{"key_id":"key_one","canonical_name":"ONE","surface":"secret","effective_name":"PROD_ONE"}],"conflicts":[]}`)
+				case r.Method == http.MethodPatch && r.URL.Path == "/api/v1/orgs/org_one/projects/prj_one/adapter-targets/tgt_one":
+					patchCount++
+					var body map[string]any
+					if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+						t.Error(err)
+						return
+					}
+					if body["destination_name"] != tt.destination || body["expected_generation"] != float64(1) {
+						t.Errorf("patch body=%v", body)
+					}
+					if _, ok := body["move"]; ok {
+						t.Errorf("transport supplied move decision: %v", body)
+					}
+					w.WriteHeader(tt.status)
+					_, _ = io.WriteString(w, tt.response)
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer server.Close()
+
+			stateDir := t.TempDir()
+			st := &State{dir: stateDir}
+			if err := st.Trust().Put(TrustEntry{Name: "local", Origin: server.URL}); err != nil {
+				t.Fatal(err)
+			}
+			if err := st.PutSession(SessionArtifact{Instance: "local", Origin: server.URL, Token: "session-secret", SessionID: "ses_one", Principal: "usr_one", ExpiresAt: "2030-01-01T00:00:00Z"}); err != nil {
+				t.Fatal(err)
+			}
+			var stdout, stderr bytes.Buffer
+			code := Run(t.Context(), IO{
+				Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr,
+				Env: Env{Getenv: func(name string) string {
+					if name == "HIKYO_STATE_DIR" {
+						return stateDir
+					}
+					return ""
+				}},
+			}, []string{"adapter", "update", "adp_one", "--instance", "local", "--org", "org_one", "--project", "prj_one", "--env", "env_one", "--target", "tgt_one", "--kind", "repository", "--owner", "team", "--repo", tt.destination, "--prefix", "NEXT_", "--keys", "key_one"})
+			if code != ExitOK || patchCount != 1 || !strings.Contains(stdout.String(), tt.wantOutput) {
+				t.Fatalf("exit=%d patches=%d stdout=%q stderr=%q", code, patchCount, stdout.String(), stderr.String())
+			}
+		})
+	}
+}
+
 func TestRunCLIAdapterReauthBindsExactLoopbackStateAndSilentlyRotatesBearer(t *testing.T) {
 	const (
 		oldBearer = "old-session-secret"

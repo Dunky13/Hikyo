@@ -104,6 +104,36 @@ func TestAdapterMoveOutputEnumeratesPendingRouteJobsAndOrphansWithoutCredential(
 	}
 }
 
+func TestAdapterTargetMutationOutputFollowsServiceResult(t *testing.T) {
+	tests := []struct {
+		name     string
+		response string
+		want     string
+	}{
+		{
+			name:     "updated",
+			response: `{"id":"tgt_one","adapter_id":"adp_one","environment_id":"env_one","destination_kind":"repository","destination_owner":"team","destination_name":"app","destination_id":42,"name_prefix":"PROD_","generation":2,"state":"active","sync_status":"converging","failure_names":[]}`,
+			want:     "converging",
+		},
+		{
+			name:     "move started",
+			response: `{"id":"mov_one","adapter_id":"adp_one","kind":"target","state":"scrubbing","keep_remote":false,"pending_origin":"","targets":[{"target_id":"tgt_one","environment_id":"env_one","destination_kind":"repository","destination_owner":"team","destination_name":"next","visibility":"","selected_repository_ids":[],"name_prefix":"PROD_","key_ids":["key_one"],"jobs":[],"orphaned_names":[]}],"created_at":"2026-08-17T00:00:00Z"}`,
+			want:     "mov_one",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var out bytes.Buffer
+			if err := renderAdapterTargetMutation(&out, FormatTable, []byte(tt.response)); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(out.String(), tt.want) {
+				t.Fatalf("output = %q, want %q", out.String(), tt.want)
+			}
+		})
+	}
+}
+
 func TestAdapterShowIncludesTargetStatusRevisionAndFailures(t *testing.T) {
 	revision := int64(42)
 	adapter := apigen.Adapter{Id: "adp_one", Origin: "https://forgejo.example", Targets: []apigen.AdapterTarget{{

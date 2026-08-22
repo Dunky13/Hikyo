@@ -168,6 +168,24 @@ type UpdateAdapterTargetRequest struct {
 	Target             AdapterTargetInput
 }
 
+// TargetMutationResult is the closed result of applying target intent. Its
+// unexported marker keeps callers from inventing a third transport workflow.
+type TargetMutationResult interface {
+	targetMutationResult()
+}
+
+type TargetMutationUpdated struct {
+	Target store.AdapterTarget
+}
+
+func (TargetMutationUpdated) targetMutationResult() {}
+
+type TargetMutationMoveStarted struct {
+	Move store.AdapterRouteMoveResult
+}
+
+func (TargetMutationMoveStarted) targetMutationResult() {}
+
 type AdoptAdapterRequest struct {
 	TargetID              string
 	ArtifactID            string
@@ -528,24 +546,73 @@ func (s *Adapters) AddTarget(ctx context.Context, actor Actor, scope domain.Scop
 	return out, err
 }
 
-func (s *Adapters) UpdateTarget(ctx context.Context, actor Actor, scope domain.Scope, request UpdateAdapterTargetRequest) (store.AdapterTarget, error) {
+func targetDestinationChanged(current store.AdapterTarget, requested AdapterTargetInput) bool {
+	return requested.DestinationKind != current.DestinationKind ||
+		requested.DestinationOwner != current.DestinationOwner ||
+		requested.DestinationName != current.DestinationName ||
+		requested.DestinationEnvironment != current.DestinationEnvironment
+}
+
+// prepareTargetMutation performs only the provider-preflight classification.
+// ApplyTargetMutation repeats the authoritative decision in its write
+// transaction before selecting either result branch.
+func (s *Adapters) prepareTargetMutation(ctx context.Context, actor Actor, scope domain.Scope, request UpdateAdapterTargetRequest) (bool, error) {
 	if scope.Project == "" || scope.Env != "" || request.TargetID == "" || request.ExpectedGeneration <= 0 || len(request.Target.KeyIDs) == 0 {
-		return store.AdapterTarget{}, fmt.Errorf("%w: target update requires target, generation, and full keys replacement", domain.ErrInvalid)
+		return false, fmt.Errorf("%w: target mutation requires target, generation, and full keys replacement", domain.ErrInvalid)
 	}
-	if err := s.preflightTargetRouting(ctx, actor, scope, request); err != nil {
-		return store.AdapterTarget{}, err
-	}
-	// § 179 adapter sync/trigger concurrency: 4 per org, held for the reconfigure
-	// exactly as SyncTarget holds it — a reconfigure that re-syncs is an adapter
-	// trigger, so it takes the same concurrency slot, not just the rate. Acquired
-	// at entry (before the provider fence retries), released on return.
-	release, err := s.Budget.acquire(budgetAdapter, budgetKeys{Org: scope.Org})
+	var move bool
+	err := tx.Read(ctx, s.DB, func(ctx context.Context, r store.ReadRepos, az *authz.TxAuthorizer) error {
+		caller, err := actor.resolve(ctx, az, s.now())
+		if err != nil {
+			return err
+		}
+		proof, err := az.Authorize(ctx, caller, authz.OpAdapterConfigure, scope)
+		if err != nil {
+			return err
+		}
+		current, err := r.Adapters().Target(ctx, proof, request.TargetID)
+		if err != nil {
+			return err
+		}
+		if current.Generation != request.ExpectedGeneration {
+			return adapter.ErrSuperseded
+		}
+		if request.Target.EnvironmentID != current.EnvironmentID {
+			return fmt.Errorf("%w: target environment is immutable; remove and add the target", domain.ErrConflict)
+		}
+		move = targetDestinationChanged(current, request.Target)
+		return nil
+	})
+	return move, err
+}
+
+// ApplyTargetMutation accepts requested target state and owns the update-versus-
+// move decision. The decision and selected mutation share one write transaction,
+// so a concurrent target mutation cannot bypass scrub-before-switch.
+func (s *Adapters) ApplyTargetMutation(ctx context.Context, actor Actor, scope domain.Scope, request UpdateAdapterTargetRequest, keepRemote bool) (TargetMutationResult, error) {
+	preparedMove, err := s.prepareTargetMutation(ctx, actor, scope, request)
 	if err != nil {
-		return store.AdapterTarget{}, err
+		return nil, err
+	}
+	release := func() {}
+	if !preparedMove {
+		if keepRemote {
+			return nil, fmt.Errorf("%w: keep_remote applies only to a destination move", domain.ErrInvalid)
+		}
+		if err := s.preflightTargetRouting(ctx, actor, scope, request); err != nil {
+			return nil, err
+		}
+		release, err = s.Budget.acquire(budgetAdapter, budgetKeys{Org: scope.Org})
+		if err != nil {
+			return nil, err
+		}
 	}
 	defer release()
+	// § 179 adapter sync/trigger concurrency: 4 per org, held for the reconfigure
+	// exactly as SyncTarget holds it. Preparation acquires it only for an update;
+	// generation fencing refuses any classification drift before mutation.
 	now := store.CanonTime(s.now())
-	var out store.AdapterTarget
+	var result TargetMutationResult
 	var rateCharged bool
 	err = retryAdapterProviderFence(ctx, func() error {
 		return tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
@@ -564,87 +631,107 @@ func (s *Adapters) UpdateTarget(ctx context.Context, actor Actor, scope domain.S
 			if current.Generation != request.ExpectedGeneration {
 				return adapter.ErrSuperseded
 			}
-			if current.Provider == "github-actions" && request.Target.DestinationKind == string(adapter.Organization) && request.Target.Visibility == "" {
-				return fmt.Errorf("%w: GitHub organization target requires all, private, or selected visibility", domain.ErrInvalid)
+			if request.Target.EnvironmentID != current.EnvironmentID {
+				return fmt.Errorf("%w: target environment is immutable; remove and add the target", domain.ErrConflict)
 			}
-			oldIDs, err := r.Adapters().TargetKeyIDs(ctx, p, request.TargetID)
-			if err != nil {
-				return err
+			move := targetDestinationChanged(current, request.Target)
+			if move != preparedMove {
+				return adapter.ErrSuperseded
 			}
-			slices.Sort(oldIDs)
-			newIDs := append([]string(nil), request.Target.KeyIDs...)
-			slices.Sort(newIDs)
-			widened := false
-			for _, id := range newIDs {
-				if !slices.Contains(oldIDs, id) {
-					widened = true
-					break
+			if !move && keepRemote {
+				return fmt.Errorf("%w: keep_remote applies only to a destination move", domain.ErrInvalid)
+			}
+			if move {
+				started, err := s.applyTargetMove(ctx, r, az, caller, p, scope, request, current, keepRemote, now)
+				if err == nil {
+					result = TargetMutationMoveStarted{Move: started}
 				}
-			}
-			full := widened || request.Target.NamePrefix != current.NamePrefix ||
-				adapter.RecipientSetNeedsCeremony(current.Visibility, current.SelectedRepositoryIDs, request.Target.Visibility, request.Target.SelectedRepositoryIDs)
-			authority := current.AuthorityPrincipalID
-			if full {
-				environmentIDs, err := r.Adapters().Environments(ctx, p, current.AdapterID)
-				if err != nil {
-					return err
-				}
-				if err := s.requireAdapterCeremony(ctx, az, caller, scope, adapterEnvironmentSet(environmentIDs), authz.OpAdapterConfigure, now); err != nil {
-					return err
-				}
-				authority = string(caller.Principal)
-			}
-			updated, err := r.Adapters().UpdateTarget(ctx, p, store.AdapterTargetUpdate{ExpectedGeneration: request.ExpectedGeneration, AuthorityPrincipalID: authority, At: now, Target: store.AdapterTargetMutation{ID: request.TargetID, AdapterID: current.AdapterID, EnvironmentID: request.Target.EnvironmentID, DestinationKind: request.Target.DestinationKind, DestinationOwner: request.Target.DestinationOwner, DestinationName: request.Target.DestinationName, DestinationEnvironment: request.Target.DestinationEnvironment, DestinationID: current.DestinationID, RepositoryID: current.RepositoryID, Visibility: request.Target.Visibility, SelectedRepositoryIDs: append([]int64(nil), request.Target.SelectedRepositoryIDs...), NamePrefix: request.Target.NamePrefix, KeyIDs: newIDs}})
-			if err != nil {
 				return err
 			}
-			out = updated.Target
-			// § 179 adapter sync/trigger rate: a reconfigure that re-syncs enqueues
-			// a "trigger":"manual" job just like SyncTarget, so it charges the same
-			// 10/min per-principal budget — otherwise a script re-toggles a target's
-			// keys to trigger syncs past the bound. Charged only when a job was
-			// actually enqueued (a pure config edit that re-syncs nothing does not),
-			// once across the fence/tx retry loops; a refusal rolls the enqueue back.
-			if updated.Enqueue.JobID != "" {
-				if err := s.Budget.chargeOnce(&rateCharged, budgetAdapterRate, budgetKeys{Principal: caller.Principal}); err != nil {
-					return err
-				}
+			updated, err := s.applyTargetUpdate(ctx, r, az, caller, p, scope, request, current, now, &rateCharged)
+			if err == nil {
+				result = TargetMutationUpdated{Target: updated}
 			}
-			payload := audit.Payload{"mutation": "target-update", "authority": updated.AuthorityPrincipalID}
-			if full {
-				payload["previous_authority"] = updated.PreviousAuthorityPrincipalID
-			}
-			ev, err := domainEvent(ctx, audit.EventAdapterConfigure, caller.Principal, audit.Object{Type: "adapter-target", ID: request.TargetID}, payload)
-			if err != nil {
-				return err
-			}
-			if err := r.Audit().InsertTenant(ctx, p, ev); err != nil {
-				return err
-			}
-			requested, err := newAuditEvent(ctx, audit.EventAdapterSyncRequested, caller.Principal,
-				audit.Object{Type: "adapter-target", ID: request.TargetID}, audit.OutcomeSuccess,
-				updated.Enqueue.JobID, audit.Payload{"trigger": "manual"})
-			if err != nil {
-				return err
-			}
-			requested.AuthorityID = updated.Enqueue.AuthorityPrincipalID
-			if err := r.Audit().InsertTenant(ctx, p, requested); err != nil {
-				return err
-			}
-			if updated.Enqueue.SupersededJobID == "" {
-				return nil
-			}
-			superseded, err := domainEvent(ctx, audit.EventAdapterSuperseded, caller.Principal,
-				audit.Object{Type: "adapter-target", ID: request.TargetID}, audit.Payload{
-					"previous_job_id": updated.Enqueue.SupersededJobID, "job_id": updated.Enqueue.JobID,
-				})
-			if err != nil {
-				return err
-			}
-			return r.Audit().InsertTenant(ctx, p, superseded)
+			return err
 		})
 	})
-	return out, err
+	return result, err
+}
+
+func (s *Adapters) applyTargetUpdate(ctx context.Context, r store.Repos, az *authz.TxAuthorizer, caller authz.Identity, proof authz.Proof, scope domain.Scope, request UpdateAdapterTargetRequest, current store.AdapterTarget, now time.Time, rateCharged *bool) (store.AdapterTarget, error) {
+	if current.Provider == "github-actions" && request.Target.DestinationKind == string(adapter.Organization) && request.Target.Visibility == "" {
+		return store.AdapterTarget{}, fmt.Errorf("%w: GitHub organization target requires all, private, or selected visibility", domain.ErrInvalid)
+	}
+	oldIDs, err := r.Adapters().TargetKeyIDs(ctx, proof, request.TargetID)
+	if err != nil {
+		return store.AdapterTarget{}, err
+	}
+	slices.Sort(oldIDs)
+	newIDs := append([]string(nil), request.Target.KeyIDs...)
+	slices.Sort(newIDs)
+	widened := false
+	for _, id := range newIDs {
+		if !slices.Contains(oldIDs, id) {
+			widened = true
+			break
+		}
+	}
+	full := widened || request.Target.NamePrefix != current.NamePrefix ||
+		adapter.RecipientSetNeedsCeremony(current.Visibility, current.SelectedRepositoryIDs, request.Target.Visibility, request.Target.SelectedRepositoryIDs)
+	authority := current.AuthorityPrincipalID
+	if full {
+		environmentIDs, err := r.Adapters().Environments(ctx, proof, current.AdapterID)
+		if err != nil {
+			return store.AdapterTarget{}, err
+		}
+		if err := s.requireAdapterCeremony(ctx, az, caller, scope, adapterEnvironmentSet(environmentIDs), authz.OpAdapterConfigure, now); err != nil {
+			return store.AdapterTarget{}, err
+		}
+		authority = string(caller.Principal)
+	}
+	updated, err := r.Adapters().UpdateTarget(ctx, proof, store.AdapterTargetUpdate{ExpectedGeneration: request.ExpectedGeneration, AuthorityPrincipalID: authority, At: now, Target: store.AdapterTargetMutation{ID: request.TargetID, AdapterID: current.AdapterID, EnvironmentID: request.Target.EnvironmentID, DestinationKind: request.Target.DestinationKind, DestinationOwner: request.Target.DestinationOwner, DestinationName: request.Target.DestinationName, DestinationEnvironment: request.Target.DestinationEnvironment, DestinationID: current.DestinationID, RepositoryID: current.RepositoryID, Visibility: request.Target.Visibility, SelectedRepositoryIDs: append([]int64(nil), request.Target.SelectedRepositoryIDs...), NamePrefix: request.Target.NamePrefix, KeyIDs: newIDs}})
+	if err != nil {
+		return store.AdapterTarget{}, err
+	}
+	if updated.Enqueue.JobID != "" {
+		if err := s.Budget.chargeOnce(rateCharged, budgetAdapterRate, budgetKeys{Principal: caller.Principal}); err != nil {
+			return store.AdapterTarget{}, err
+		}
+	}
+	payload := audit.Payload{"mutation": "target-update", "authority": updated.AuthorityPrincipalID}
+	if full {
+		payload["previous_authority"] = updated.PreviousAuthorityPrincipalID
+	}
+	ev, err := domainEvent(ctx, audit.EventAdapterConfigure, caller.Principal, audit.Object{Type: "adapter-target", ID: request.TargetID}, payload)
+	if err != nil {
+		return store.AdapterTarget{}, err
+	}
+	if err := r.Audit().InsertTenant(ctx, proof, ev); err != nil {
+		return store.AdapterTarget{}, err
+	}
+	requested, err := newAuditEvent(ctx, audit.EventAdapterSyncRequested, caller.Principal,
+		audit.Object{Type: "adapter-target", ID: request.TargetID}, audit.OutcomeSuccess,
+		updated.Enqueue.JobID, audit.Payload{"trigger": "manual"})
+	if err != nil {
+		return store.AdapterTarget{}, err
+	}
+	requested.AuthorityID = updated.Enqueue.AuthorityPrincipalID
+	if err := r.Audit().InsertTenant(ctx, proof, requested); err != nil {
+		return store.AdapterTarget{}, err
+	}
+	if updated.Enqueue.SupersededJobID != "" {
+		superseded, err := domainEvent(ctx, audit.EventAdapterSuperseded, caller.Principal,
+			audit.Object{Type: "adapter-target", ID: request.TargetID}, audit.Payload{
+				"previous_job_id": updated.Enqueue.SupersededJobID, "job_id": updated.Enqueue.JobID,
+			})
+		if err != nil {
+			return store.AdapterTarget{}, err
+		}
+		if err := r.Audit().InsertTenant(ctx, proof, superseded); err != nil {
+			return store.AdapterTarget{}, err
+		}
+	}
+	return updated.Target, nil
 }
 
 func (s *Adapters) preflightTargetRouting(ctx context.Context, actor Actor, scope domain.Scope, request UpdateAdapterTargetRequest) error {
@@ -707,92 +794,66 @@ func (s *Adapters) preflightTargetRouting(ctx context.Context, actor Actor, scop
 	return err
 }
 
-// MoveTarget begins the scrub-before-switch transition for a destination or
+// applyTargetMove begins the scrub-before-switch transition for a destination or
 // environment move. The current route stays stored for the scrub job; the new
 // route is pending and cannot receive a push until activation tests it.
-func (s *Adapters) MoveTarget(ctx context.Context, actor Actor, scope domain.Scope, request UpdateAdapterTargetRequest, keepRemote bool) (store.AdapterRouteMoveResult, error) {
-	if scope.Project == "" || scope.Env != "" || request.TargetID == "" || request.ExpectedGeneration <= 0 || len(request.Target.KeyIDs) == 0 {
-		return store.AdapterRouteMoveResult{}, fmt.Errorf("%w: target move requires target, generation, and full keys replacement", domain.ErrInvalid)
+func (s *Adapters) applyTargetMove(ctx context.Context, r store.Repos, az *authz.TxAuthorizer, caller authz.Identity, proof authz.Proof, scope domain.Scope, request UpdateAdapterTargetRequest, current store.AdapterTarget, keepRemote bool, now time.Time) (store.AdapterRouteMoveResult, error) {
+	environments, err := r.Adapters().Environments(ctx, proof, current.AdapterID)
+	if err != nil {
+		return store.AdapterRouteMoveResult{}, err
 	}
-	now := store.CanonTime(s.now())
-	var out store.AdapterRouteMoveResult
-	err := retryAdapterProviderFence(ctx, func() error {
-		return tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
-			caller, err := actor.resolve(ctx, az, now)
-			if err != nil {
-				return err
-			}
-			proof, err := az.Authorize(ctx, caller, authz.OpAdapterConfigure, scope)
-			if err != nil {
-				return err
-			}
-			current, err := r.Adapters().Target(ctx, proof, request.TargetID)
-			if err != nil {
-				return err
-			}
-			if current.Generation != request.ExpectedGeneration {
-				return adapter.ErrSuperseded
-			}
-			if request.Target.EnvironmentID != current.EnvironmentID {
-				return fmt.Errorf("%w: target environment is immutable; remove and add the target", domain.ErrConflict)
-			}
-			environments, err := r.Adapters().Environments(ctx, proof, current.AdapterID)
-			if err != nil {
-				return err
-			}
-			environments = adapterEnvironmentSet(environments, request.Target.EnvironmentID)
-			if err := s.requireAdapterCeremony(ctx, az, caller, scope, environments, authz.OpAdapterConfigure, now); err != nil {
-				return err
-			}
-			out, err = r.Adapters().MoveTarget(ctx, proof, store.AdapterRouteMoveMutation{
-				Target: store.AdapterTargetMutation{
-					ID: request.TargetID, AdapterID: current.AdapterID, EnvironmentID: request.Target.EnvironmentID,
-					DestinationKind: request.Target.DestinationKind, DestinationOwner: request.Target.DestinationOwner,
-					DestinationName: request.Target.DestinationName, DestinationEnvironment: request.Target.DestinationEnvironment,
-					Visibility: request.Target.Visibility, SelectedRepositoryIDs: append([]int64(nil), request.Target.SelectedRepositoryIDs...), NamePrefix: request.Target.NamePrefix,
-					KeyIDs: append([]string(nil), request.Target.KeyIDs...),
-				},
-				ExpectedGeneration: request.ExpectedGeneration, AuthorityPrincipalID: string(caller.Principal),
-				KeepRemote: keepRemote, At: now,
-			})
-			if err != nil {
-				return err
-			}
-			configured, err := domainEvent(ctx, audit.EventAdapterConfigure, caller.Principal,
-				audit.Object{Type: "adapter-target", ID: request.TargetID}, audit.Payload{
-					"mutation": "target-move", "previous_authority": current.AuthorityPrincipalID,
-					"authority": string(caller.Principal),
-				})
-			if err != nil {
-				return err
-			}
-			if err := r.Audit().InsertTenant(ctx, proof, configured); err != nil {
-				return err
-			}
-			if out.SupersededJobID != "" {
-				superseded, err := domainEvent(ctx, audit.EventAdapterSuperseded, caller.Principal,
-					audit.Object{Type: "adapter-target", ID: request.TargetID}, audit.Payload{
-						"previous_job_id": out.SupersededJobID, "job_id": out.JobID,
-					})
-				if err != nil {
-					return err
-				}
-				if err := r.Audit().InsertTenant(ctx, proof, superseded); err != nil {
-					return err
-				}
-			}
-			if !keepRemote {
-				return nil
-			}
-			scrubbed, err := domainEvent(ctx, audit.EventAdapterScrub, caller.Principal,
-				audit.Object{Type: "adapter-target", ID: request.TargetID}, audit.Payload{"orphaned": append([]string(nil), out.Orphaned...)})
-			if err != nil {
-				return err
-			}
-			return r.Audit().InsertTenant(ctx, proof, scrubbed)
-		})
+	environments = adapterEnvironmentSet(environments, request.Target.EnvironmentID)
+	if err := s.requireAdapterCeremony(ctx, az, caller, scope, environments, authz.OpAdapterConfigure, now); err != nil {
+		return store.AdapterRouteMoveResult{}, err
+	}
+	out, err := r.Adapters().MoveTarget(ctx, proof, store.AdapterRouteMoveMutation{
+		Target: store.AdapterTargetMutation{
+			ID: request.TargetID, AdapterID: current.AdapterID, EnvironmentID: request.Target.EnvironmentID,
+			DestinationKind: request.Target.DestinationKind, DestinationOwner: request.Target.DestinationOwner,
+			DestinationName: request.Target.DestinationName, DestinationEnvironment: request.Target.DestinationEnvironment,
+			Visibility: request.Target.Visibility, SelectedRepositoryIDs: append([]int64(nil), request.Target.SelectedRepositoryIDs...), NamePrefix: request.Target.NamePrefix,
+			KeyIDs: append([]string(nil), request.Target.KeyIDs...),
+		},
+		ExpectedGeneration: request.ExpectedGeneration, AuthorityPrincipalID: string(caller.Principal),
+		KeepRemote: keepRemote, At: now,
 	})
-	return out, err
+	if err != nil {
+		return store.AdapterRouteMoveResult{}, err
+	}
+	configured, err := domainEvent(ctx, audit.EventAdapterConfigure, caller.Principal,
+		audit.Object{Type: "adapter-target", ID: request.TargetID}, audit.Payload{
+			"mutation": "target-move", "previous_authority": current.AuthorityPrincipalID,
+			"authority": string(caller.Principal),
+		})
+	if err != nil {
+		return store.AdapterRouteMoveResult{}, err
+	}
+	if err := r.Audit().InsertTenant(ctx, proof, configured); err != nil {
+		return store.AdapterRouteMoveResult{}, err
+	}
+	if out.SupersededJobID != "" {
+		superseded, err := domainEvent(ctx, audit.EventAdapterSuperseded, caller.Principal,
+			audit.Object{Type: "adapter-target", ID: request.TargetID}, audit.Payload{
+				"previous_job_id": out.SupersededJobID, "job_id": out.JobID,
+			})
+		if err != nil {
+			return store.AdapterRouteMoveResult{}, err
+		}
+		if err := r.Audit().InsertTenant(ctx, proof, superseded); err != nil {
+			return store.AdapterRouteMoveResult{}, err
+		}
+	}
+	if keepRemote {
+		scrubbed, err := domainEvent(ctx, audit.EventAdapterScrub, caller.Principal,
+			audit.Object{Type: "adapter-target", ID: request.TargetID}, audit.Payload{"orphaned": append([]string(nil), out.Orphaned...)})
+		if err != nil {
+			return store.AdapterRouteMoveResult{}, err
+		}
+		if err := r.Audit().InsertTenant(ctx, proof, scrubbed); err != nil {
+			return store.AdapterRouteMoveResult{}, err
+		}
+	}
+	return out, nil
 }
 
 // MoveOrigin keeps the old credential and origin authoritative through every

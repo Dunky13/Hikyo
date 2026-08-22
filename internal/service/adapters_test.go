@@ -73,6 +73,32 @@ func adapterServiceDB(t *testing.T) *store.DB {
 	return db
 }
 
+// updateTarget and moveTarget preserve the focused assertions of older tests
+// while routing every mutation through the public classifier under test.
+func (s *Adapters) updateTarget(ctx context.Context, actor Actor, scope domain.Scope, request UpdateAdapterTargetRequest) (store.AdapterTarget, error) {
+	result, err := s.ApplyTargetMutation(ctx, actor, scope, request, false)
+	if err != nil {
+		return store.AdapterTarget{}, err
+	}
+	updated, ok := result.(TargetMutationUpdated)
+	if !ok {
+		return store.AdapterTarget{}, fmt.Errorf("target update returned %T", result)
+	}
+	return updated.Target, nil
+}
+
+func (s *Adapters) moveTarget(ctx context.Context, actor Actor, scope domain.Scope, request UpdateAdapterTargetRequest, keepRemote bool) (store.AdapterRouteMoveResult, error) {
+	result, err := s.ApplyTargetMutation(ctx, actor, scope, request, keepRemote)
+	if err != nil {
+		return store.AdapterRouteMoveResult{}, err
+	}
+	started, ok := result.(TargetMutationMoveStarted)
+	if !ok {
+		return store.AdapterRouteMoveResult{}, fmt.Errorf("target move returned %T", result)
+	}
+	return started.Move, nil
+}
+
 type fakeAdapterPlanModule struct{ plan adapter.Plan }
 
 func testModuleFactory(factory func(adapter.Provider, string, string) (adapter.Module, func(), error)) adapter.ModuleFactory {
@@ -152,6 +178,24 @@ func (fakeEnvironmentConfigureModule) Sync(context.Context, adapter.SyncRequest,
 type fakeRoutingPreflightModule struct {
 	seen *[]int64
 	err  error
+}
+
+type blockingRoutingPreflightModule struct {
+	started chan<- struct{}
+	proceed <-chan struct{}
+}
+
+func (blockingRoutingPreflightModule) ValidateConfig(adapter.Config) error { return nil }
+func (m blockingRoutingPreflightModule) TestConnection(context.Context, adapter.ConnectionRequest) (adapter.Connection, error) {
+	m.started <- struct{}{}
+	<-m.proceed
+	return adapter.Connection{Version: "github-actions", DestinationID: 42}, nil
+}
+func (blockingRoutingPreflightModule) Plan(context.Context, adapter.PlanRequest) (adapter.Plan, error) {
+	return adapter.Plan{}, nil
+}
+func (blockingRoutingPreflightModule) Sync(context.Context, adapter.SyncRequest, adapter.Journal) (adapter.SyncResult, error) {
+	return adapter.SyncResult{}, nil
 }
 
 func (fakeRoutingPreflightModule) ValidateConfig(adapter.Config) error { return nil }
@@ -395,7 +439,7 @@ func TestOrganizationSelectedRepositoryIDsAreVerifiedBeforeRoutingCommit(t *test
 		}
 		return fakeRoutingPreflightModule{seen: &seen}, nil, nil
 	})}
-	updated, err := svc.UpdateTarget(t.Context(), LocalPrincipal("usr_adapter"), domain.Scope{Org: "org_adapter", Project: "prj_adapter"}, UpdateAdapterTargetRequest{
+	updated, err := svc.updateTarget(t.Context(), LocalPrincipal("usr_adapter"), domain.Scope{Org: "org_adapter", Project: "prj_adapter"}, UpdateAdapterTargetRequest{
 		TargetID: "tgt_one", ExpectedGeneration: 1,
 		Target: AdapterTargetInput{EnvironmentID: "env_one", DestinationKind: "organization", DestinationOwner: "acme", Visibility: "selected", SelectedRepositoryIDs: []int64{11, 22}, NamePrefix: "ONE_", KeyIDs: []string{"key_org_route"}},
 	})
@@ -424,6 +468,232 @@ func TestAdapterRoutingStateRoundTripsFromStore(t *testing.T) {
 	target := view.Targets[0]
 	if target.Provider != "github-actions" || target.DestinationEnvironment != "prod/blue" || target.DestinationID != 73 || target.RepositoryID != 42 {
 		t.Fatalf("round-trip target = %+v", target)
+	}
+}
+
+func TestApplyTargetMutationClassifiesUpdateAndMove(t *testing.T) {
+	tests := []struct {
+		name        string
+		target      AdapterTargetInput
+		keepRemote  bool
+		wantUpdated bool
+	}{
+		{
+			name: "metadata update",
+			target: AdapterTargetInput{
+				EnvironmentID: "env_one", DestinationKind: "repository", DestinationOwner: "acme",
+				DestinationName: "app", NamePrefix: "NARROW_", KeyIDs: []string{"key_mutation"},
+			},
+			wantUpdated: true,
+		},
+		{
+			name: "destination identity move",
+			target: AdapterTargetInput{
+				EnvironmentID: "env_one", DestinationKind: "repository", DestinationOwner: "acme",
+				DestinationName: "next", NamePrefix: "ONE_", KeyIDs: []string{"key_mutation"},
+			},
+			keepRemote: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := adapterServiceDB(t)
+			for _, statement := range []string{
+				`INSERT INTO grants (id,principal_id,capability,org_id,project_id,env_id,created_at) VALUES ('gr_mutation_reveal_two','usr_adapter','reveal','org_adapter','prj_adapter','env_two','2026-08-17T00:00:00Z')`,
+				`INSERT INTO keys (id,org_id,project_id,name,folder_path,classification,description,deprecated,deprecation_note,declaration,required_mode,forbidden_mode,created_at) VALUES ('key_mutation','org_adapter','prj_adapter','API_TOKEN','','secret','',0,'','optional','none','none','2026-08-17T00:00:00Z')`,
+				`INSERT INTO adapter_target_keys (org_id,project_id,environment_id,target_id,adapter_id,key_id) VALUES ('org_adapter','prj_adapter','env_one','tgt_one','adp_1','key_mutation')`,
+			} {
+				if _, err := db.SQLiteWrite().ExecContext(t.Context(), statement); err != nil {
+					t.Fatal(err)
+				}
+			}
+			result, err := (&Adapters{DB: db}).ApplyTargetMutation(t.Context(), LocalPrincipal("usr_adapter"), domain.Scope{Org: "org_adapter", Project: "prj_adapter"}, UpdateAdapterTargetRequest{
+				TargetID: "tgt_one", ExpectedGeneration: 1, Target: tt.target,
+			}, tt.keepRemote)
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch result := result.(type) {
+			case TargetMutationUpdated:
+				if !tt.wantUpdated || result.Target.NamePrefix != "NARROW_" || result.Target.Generation != 2 {
+					t.Fatalf("updated result = %+v", result)
+				}
+			case TargetMutationMoveStarted:
+				if tt.wantUpdated || result.Move.MoveID == "" || result.Move.Generation != 2 {
+					t.Fatalf("move result = %+v", result)
+				}
+			default:
+				t.Fatalf("result type = %T", result)
+			}
+		})
+	}
+}
+
+func TestApplyTargetMutationKeepsMovePolicyInsideService(t *testing.T) {
+	tests := []struct {
+		name       string
+		target     AdapterTargetInput
+		keepRemote bool
+		want       error
+	}{
+		{
+			name: "keep remote without move",
+			target: AdapterTargetInput{
+				EnvironmentID: "env_one", DestinationKind: "repository", DestinationOwner: "acme",
+				DestinationName: "app", NamePrefix: "ONE_", KeyIDs: []string{"key_policy"},
+			},
+			keepRemote: true,
+			want:       domain.ErrInvalid,
+		},
+		{
+			name: "environment remains immutable",
+			target: AdapterTargetInput{
+				EnvironmentID: "env_two", DestinationKind: "repository", DestinationOwner: "acme",
+				DestinationName: "app", NamePrefix: "ONE_", KeyIDs: []string{"key_policy"},
+			},
+			want: domain.ErrConflict,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := adapterServiceDB(t)
+			if _, err := db.SQLiteWrite().ExecContext(t.Context(), `INSERT INTO keys (id,org_id,project_id,name,folder_path,classification,description,deprecated,deprecation_note,declaration,required_mode,forbidden_mode,created_at) VALUES ('key_policy','org_adapter','prj_adapter','API_TOKEN','','secret','',0,'','optional','none','none','2026-08-17T00:00:00Z')`); err != nil {
+				t.Fatal(err)
+			}
+			_, err := (&Adapters{DB: db}).ApplyTargetMutation(t.Context(), LocalPrincipal("usr_adapter"), domain.Scope{Org: "org_adapter", Project: "prj_adapter"}, UpdateAdapterTargetRequest{
+				TargetID: "tgt_one", ExpectedGeneration: 1, Target: tt.target,
+			}, tt.keepRemote)
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("ApplyTargetMutation() error = %v, want %v", err, tt.want)
+			}
+			var generation int64
+			if err := db.SQLiteRead().QueryRowContext(t.Context(), `SELECT generation FROM adapter_targets WHERE id='tgt_one'`).Scan(&generation); err != nil {
+				t.Fatal(err)
+			}
+			if generation != 1 {
+				t.Fatalf("refused mutation changed generation to %d", generation)
+			}
+		})
+	}
+}
+
+func TestApplyTargetMutationRequiresCeremonyForUpdateAndMove(t *testing.T) {
+	tests := []struct {
+		name   string
+		target AdapterTargetInput
+	}{
+		{
+			name: "metadata widening",
+			target: AdapterTargetInput{
+				EnvironmentID: "env_one", DestinationKind: "repository", DestinationOwner: "acme",
+				DestinationName: "app", NamePrefix: "WIDER_", KeyIDs: []string{"key_ceremony"},
+			},
+		},
+		{
+			name: "destination move",
+			target: AdapterTargetInput{
+				EnvironmentID: "env_one", DestinationKind: "repository", DestinationOwner: "acme",
+				DestinationName: "next", NamePrefix: "ONE_", KeyIDs: []string{"key_ceremony"},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := adapterServiceDB(t)
+			for _, statement := range []string{
+				`INSERT INTO grants (id,principal_id,capability,org_id,project_id,env_id,created_at) VALUES ('gr_ceremony_reveal_two','usr_adapter','reveal','org_adapter','prj_adapter','env_two','2026-08-17T00:00:00Z')`,
+				`INSERT INTO keys (id,org_id,project_id,name,folder_path,classification,description,deprecated,deprecation_note,declaration,required_mode,forbidden_mode,created_at) VALUES ('key_ceremony','org_adapter','prj_adapter','API_TOKEN','','secret','',0,'','optional','none','none','2026-08-17T00:00:00Z')`,
+				`INSERT INTO adapter_target_keys (org_id,project_id,environment_id,target_id,adapter_id,key_id) VALUES ('org_adapter','prj_adapter','env_one','tgt_one','adp_1','key_ceremony')`,
+			} {
+				if _, err := db.SQLiteWrite().ExecContext(t.Context(), statement); err != nil {
+					t.Fatal(err)
+				}
+			}
+			bearer := adapterCLISession(t, db)
+			_, err := (&Adapters{DB: db, Auth: &Auth{DB: db}}).ApplyTargetMutation(t.Context(), Bearer(bearer), domain.Scope{Org: "org_adapter", Project: "prj_adapter"}, UpdateAdapterTargetRequest{
+				TargetID: "tgt_one", ExpectedGeneration: 1, Target: tt.target,
+			}, false)
+			if !errors.Is(err, ErrReauthRequired) {
+				t.Fatalf("ApplyTargetMutation() error = %v, want reauth required", err)
+			}
+			var generation, audits int
+			if err := db.SQLiteRead().QueryRowContext(t.Context(), `SELECT generation FROM adapter_targets WHERE id='tgt_one'`).Scan(&generation); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.SQLiteRead().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM audit_tenant_events WHERE object_id='tgt_one' AND type='adapter.configure'`).Scan(&audits); err != nil {
+				t.Fatal(err)
+			}
+			if generation != 1 || audits != 0 {
+				t.Fatalf("refused ceremony generation=%d audits=%d", generation, audits)
+			}
+		})
+	}
+}
+
+func TestApplyTargetMutationConcurrentChangesUseLockedGeneration(t *testing.T) {
+	db := adapterServiceDB(t)
+	for _, statement := range []string{
+		`INSERT INTO grants (id,principal_id,capability,org_id,project_id,env_id,created_at) VALUES ('gr_concurrent_mutation_reveal_two','usr_adapter','reveal','org_adapter','prj_adapter','env_two','2026-08-17T00:00:00Z')`,
+		`INSERT INTO keys (id,org_id,project_id,name,folder_path,classification,description,deprecated,deprecation_note,declaration,required_mode,forbidden_mode,created_at) VALUES ('key_concurrent_mutation','org_adapter','prj_adapter','API_TOKEN','','secret','',0,'','optional','none','none','2026-08-17T00:00:00Z')`,
+		`INSERT INTO adapter_target_keys (org_id,project_id,environment_id,target_id,adapter_id,key_id) VALUES ('org_adapter','prj_adapter','env_one','tgt_one','adp_1','key_concurrent_mutation')`,
+		`UPDATE adapters SET provider='github-actions' WHERE id='adp_1'`,
+		`UPDATE adapter_targets SET destination_kind='organization',destination_name='',visibility='all' WHERE id='tgt_one'`,
+	} {
+		if _, err := db.SQLiteWrite().ExecContext(t.Context(), statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	root, err := crypto.GenerateRootKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	kr, err := crypto.LoadKeyring(t.Context(), &keyring.Store{DB: db}, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealer, err := kr.ForProject(t.Context(), "org_adapter", "prj_adapter")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := sealer.SealField(crypto.ProjectFieldAAD{OrgID: "org_adapter", ProjectID: "prj_adapter", OwnerTable: "adapters", OwnerRowID: "adp_1", FieldTag: "credential"}, []byte("github_pat_fine"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.SQLiteWrite().ExecContext(t.Context(), `UPDATE adapters SET credential_ciphertext=?,credential_set_at='2026-08-17T00:00:00Z' WHERE id='adp_1'`, sealed); err != nil {
+		t.Fatal(err)
+	}
+	preflightStarted := make(chan struct{}, 1)
+	preflightProceed := make(chan struct{})
+	svc := &Adapters{DB: db, Keyring: kr, ModuleFactory: testModuleFactory(func(adapter.Provider, string, string) (adapter.Module, func(), error) {
+		return blockingRoutingPreflightModule{started: preflightStarted, proceed: preflightProceed}, nil, nil
+	})}
+	scope := domain.Scope{Org: "org_adapter", Project: "prj_adapter"}
+	update := UpdateAdapterTargetRequest{
+		TargetID: "tgt_one", ExpectedGeneration: 1,
+		Target: AdapterTargetInput{EnvironmentID: "env_one", DestinationKind: "organization", DestinationOwner: "acme", Visibility: "selected", SelectedRepositoryIDs: []int64{11}, NamePrefix: "ONE_", KeyIDs: []string{"key_concurrent_mutation"}},
+	}
+	updateDone := make(chan error, 1)
+	go func() {
+		_, err := svc.ApplyTargetMutation(t.Context(), LocalPrincipal("usr_adapter"), scope, update, false)
+		updateDone <- err
+	}()
+	<-preflightStarted
+
+	move, err := svc.ApplyTargetMutation(t.Context(), LocalPrincipal("usr_adapter"), scope, UpdateAdapterTargetRequest{
+		TargetID: "tgt_one", ExpectedGeneration: 1,
+		Target: AdapterTargetInput{EnvironmentID: "env_one", DestinationKind: "organization", DestinationOwner: "next", Visibility: "all", NamePrefix: "ONE_", KeyIDs: []string{"key_concurrent_mutation"}},
+	}, false)
+	if err != nil {
+		close(preflightProceed)
+		t.Fatal(err)
+	}
+	if _, ok := move.(TargetMutationMoveStarted); !ok {
+		close(preflightProceed)
+		t.Fatalf("move result = %T", move)
+	}
+	close(preflightProceed)
+	if err := <-updateDone; !errors.Is(err, adapter.ErrSuperseded) {
+		t.Fatalf("stale update error = %v, want superseded", err)
 	}
 }
 
@@ -647,7 +917,7 @@ func TestAdapterTargetDestinationMoveScrubsOldRouteBeforePendingRouteActivation(
 		}
 	}
 	svc := &Adapters{DB: db}
-	result, err := svc.MoveTarget(t.Context(), LocalPrincipal("usr_adapter"), domain.Scope{Org: "org_adapter", Project: "prj_adapter"}, UpdateAdapterTargetRequest{
+	result, err := svc.moveTarget(t.Context(), LocalPrincipal("usr_adapter"), domain.Scope{Org: "org_adapter", Project: "prj_adapter"}, UpdateAdapterTargetRequest{
 		TargetID: "tgt_one", ExpectedGeneration: 1,
 		Target: AdapterTargetInput{EnvironmentID: "env_one", DestinationKind: "repository", DestinationOwner: "acme", DestinationName: "next", NamePrefix: "ONE_", KeyIDs: []string{"key_move"}},
 	}, false)
@@ -708,7 +978,7 @@ func TestAdapterTargetDestinationMoveKeepRemoteReleasesBeforeActivation(t *testi
 			t.Fatal(err)
 		}
 	}
-	result, err := (&Adapters{DB: db}).MoveTarget(t.Context(), LocalPrincipal("usr_adapter"), domain.Scope{Org: "org_adapter", Project: "prj_adapter"}, UpdateAdapterTargetRequest{
+	result, err := (&Adapters{DB: db}).moveTarget(t.Context(), LocalPrincipal("usr_adapter"), domain.Scope{Org: "org_adapter", Project: "prj_adapter"}, UpdateAdapterTargetRequest{
 		TargetID: "tgt_one", ExpectedGeneration: 1,
 		Target: AdapterTargetInput{EnvironmentID: "env_one", DestinationKind: "repository", DestinationOwner: "acme", DestinationName: "next", NamePrefix: "ONE_", KeyIDs: []string{"key_keep_move"}},
 	}, true)
@@ -754,7 +1024,7 @@ func TestAdapterTargetMoveScrubCompletionQueuesPendingRouteActivation(t *testing
 	}
 	now := time.Date(2026, 8, 17, 1, 0, 0, 0, time.UTC)
 	svc := &Adapters{DB: db, Now: func() time.Time { return now }}
-	move, err := svc.MoveTarget(t.Context(), LocalPrincipal("usr_adapter"), domain.Scope{Org: "org_adapter", Project: "prj_adapter"}, UpdateAdapterTargetRequest{
+	move, err := svc.moveTarget(t.Context(), LocalPrincipal("usr_adapter"), domain.Scope{Org: "org_adapter", Project: "prj_adapter"}, UpdateAdapterTargetRequest{
 		TargetID: "tgt_one", ExpectedGeneration: 1,
 		Target: AdapterTargetInput{EnvironmentID: "env_one", DestinationKind: "repository", DestinationOwner: "acme", DestinationName: "next", NamePrefix: "ONE_", KeyIDs: []string{"key_scrub_move"}},
 	}, false)
@@ -802,7 +1072,7 @@ func TestAdapterTargetMoveDeadCredentialReleasesOldCustodyThenActivates(t *testi
 		}
 	}
 	now := time.Now().UTC()
-	move, err := (&Adapters{DB: db, Now: func() time.Time { return now }}).MoveTarget(t.Context(), LocalPrincipal("usr_adapter"), domain.Scope{Org: "org_adapter", Project: "prj_adapter"}, UpdateAdapterTargetRequest{
+	move, err := (&Adapters{DB: db, Now: func() time.Time { return now }}).moveTarget(t.Context(), LocalPrincipal("usr_adapter"), domain.Scope{Org: "org_adapter", Project: "prj_adapter"}, UpdateAdapterTargetRequest{
 		TargetID: "tgt_one", ExpectedGeneration: 1,
 		Target: AdapterTargetInput{EnvironmentID: "env_one", DestinationKind: "repository", DestinationOwner: "acme", DestinationName: "next", NamePrefix: "ONE_", KeyIDs: []string{"key_dead_move"}},
 	}, false)
@@ -856,7 +1126,7 @@ func TestAdapterMoveCredentialFailureRequiresAttentionAndCancelReconvergesOldRou
 	}
 	now := time.Date(2026, 8, 17, 1, 0, 0, 0, time.UTC)
 	svc := &Adapters{DB: db, Now: func() time.Time { return now }}
-	move, err := svc.MoveTarget(t.Context(), LocalPrincipal("usr_adapter"), domain.Scope{Org: "org_adapter", Project: "prj_adapter"}, UpdateAdapterTargetRequest{
+	move, err := svc.moveTarget(t.Context(), LocalPrincipal("usr_adapter"), domain.Scope{Org: "org_adapter", Project: "prj_adapter"}, UpdateAdapterTargetRequest{
 		TargetID: "tgt_one", ExpectedGeneration: 1,
 		Target: AdapterTargetInput{EnvironmentID: "env_one", DestinationKind: "repository", DestinationOwner: "acme", DestinationName: "next", NamePrefix: "ONE_", KeyIDs: []string{"key_attention"}},
 	}, true)
@@ -922,7 +1192,7 @@ func TestAdapterAttentionTargetReplacementResumesActivation(t *testing.T) {
 	}
 	now := time.Date(2026, 8, 17, 1, 0, 0, 0, time.UTC)
 	svc := &Adapters{DB: db, Now: func() time.Time { return now }}
-	move, err := svc.MoveTarget(t.Context(), LocalPrincipal("usr_adapter"), domain.Scope{Org: "org_adapter", Project: "prj_adapter"}, UpdateAdapterTargetRequest{
+	move, err := svc.moveTarget(t.Context(), LocalPrincipal("usr_adapter"), domain.Scope{Org: "org_adapter", Project: "prj_adapter"}, UpdateAdapterTargetRequest{
 		TargetID: "tgt_one", ExpectedGeneration: 1,
 		Target: AdapterTargetInput{EnvironmentID: "env_one", DestinationKind: "repository", DestinationOwner: "acme", DestinationName: "bad", NamePrefix: "BAD_", KeyIDs: []string{"key_resume"}},
 	}, true)
@@ -989,7 +1259,7 @@ func TestAdapterTargetMoveActivationTestsPendingRouteThenEnqueuesConverge(t *tes
 		}
 	}
 	now := time.Now().UTC()
-	move, err := (&Adapters{DB: db, Now: func() time.Time { return now }}).MoveTarget(t.Context(), LocalPrincipal("usr_adapter"), domain.Scope{Org: "org_adapter", Project: "prj_adapter"}, UpdateAdapterTargetRequest{
+	move, err := (&Adapters{DB: db, Now: func() time.Time { return now }}).moveTarget(t.Context(), LocalPrincipal("usr_adapter"), domain.Scope{Org: "org_adapter", Project: "prj_adapter"}, UpdateAdapterTargetRequest{
 		TargetID: "tgt_one", ExpectedGeneration: 1,
 		Target: AdapterTargetInput{EnvironmentID: "env_one", DestinationKind: "repository", DestinationOwner: "acme", DestinationName: "next", NamePrefix: "NEXT_", KeyIDs: []string{"key_activate_move"}},
 	}, true)
@@ -1261,7 +1531,7 @@ func TestAdapterTargetWidenRequiresRevealAcrossEveryAdapterEnvironment(t *testin
 		}
 	}
 	svc := &Adapters{DB: db}
-	_, err := svc.UpdateTarget(t.Context(), LocalPrincipal("usr_adapter"), domain.Scope{Org: "org_adapter", Project: "prj_adapter"}, UpdateAdapterTargetRequest{TargetID: "tgt_one", ExpectedGeneration: 1, Target: AdapterTargetInput{EnvironmentID: "env_one", DestinationKind: "repository", DestinationOwner: "acme", DestinationName: "app", NamePrefix: "ONE_", KeyIDs: []string{"key_existing", "key_widened"}}})
+	_, err := svc.updateTarget(t.Context(), LocalPrincipal("usr_adapter"), domain.Scope{Org: "org_adapter", Project: "prj_adapter"}, UpdateAdapterTargetRequest{TargetID: "tgt_one", ExpectedGeneration: 1, Target: AdapterTargetInput{EnvironmentID: "env_one", DestinationKind: "repository", DestinationOwner: "acme", DestinationName: "app", NamePrefix: "ONE_", KeyIDs: []string{"key_existing", "key_widened"}}})
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("UpdateTarget() error = %v, want tenant-safe refusal without env_two reveal", err)
 	}
@@ -1302,7 +1572,7 @@ func TestAdapterTargetInPlaceClassificationAndReplacementConverge(t *testing.T) 
 			t.Fatal(err)
 		}
 		bearer := adapterCLISession(t, db)
-		out, err := (&Adapters{DB: db, Auth: &Auth{DB: db}}).UpdateTarget(t.Context(), Bearer(bearer), domain.Scope{Org: "org_adapter", Project: "prj_adapter"}, UpdateAdapterTargetRequest{
+		out, err := (&Adapters{DB: db, Auth: &Auth{DB: db}}).updateTarget(t.Context(), Bearer(bearer), domain.Scope{Org: "org_adapter", Project: "prj_adapter"}, UpdateAdapterTargetRequest{
 			TargetID: "tgt_one", ExpectedGeneration: 1,
 			Target: AdapterTargetInput{EnvironmentID: "env_one", DestinationKind: "repository", DestinationOwner: "acme", DestinationName: "app", NamePrefix: "ONE_", KeyIDs: []string{"key_update_a"}},
 		})
@@ -1349,7 +1619,7 @@ func TestAdapterTargetInPlaceClassificationAndReplacementConverge(t *testing.T) 
 				t.Fatal(err)
 			}
 			bearer := adapterCLISession(t, db)
-			_, err := (&Adapters{DB: db, Auth: &Auth{DB: db}}).UpdateTarget(t.Context(), Bearer(bearer), domain.Scope{Org: "org_adapter", Project: "prj_adapter"}, UpdateAdapterTargetRequest{
+			_, err := (&Adapters{DB: db, Auth: &Auth{DB: db}}).updateTarget(t.Context(), Bearer(bearer), domain.Scope{Org: "org_adapter", Project: "prj_adapter"}, UpdateAdapterTargetRequest{
 				TargetID: "tgt_one", ExpectedGeneration: 1,
 				Target: AdapterTargetInput{EnvironmentID: "env_one", DestinationKind: "repository", DestinationOwner: "acme", DestinationName: "app", NamePrefix: tc.prefix, KeyIDs: tc.keys},
 			})
@@ -1382,7 +1652,7 @@ func TestAdapterFullTargetUpdateAuditsTransactionAuthorityTransition(t *testing.
 			t.Fatal(err)
 		}
 	}
-	out, err := (&Adapters{DB: db}).UpdateTarget(t.Context(), LocalPrincipal("usr_adapter"), domain.Scope{Org: "org_adapter", Project: "prj_adapter"}, UpdateAdapterTargetRequest{
+	out, err := (&Adapters{DB: db}).updateTarget(t.Context(), LocalPrincipal("usr_adapter"), domain.Scope{Org: "org_adapter", Project: "prj_adapter"}, UpdateAdapterTargetRequest{
 		TargetID: "tgt_one", ExpectedGeneration: 1,
 		Target: AdapterTargetInput{EnvironmentID: "env_one", DestinationKind: "repository", DestinationOwner: "acme", DestinationName: "app", NamePrefix: "ONE_", KeyIDs: []string{"key_update_a", "key_update_b"}},
 	})
