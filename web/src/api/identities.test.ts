@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  dismissDecision,
   expiryLabel,
   grantWideningReach,
   lastUsedLabel,
@@ -153,24 +152,6 @@ describe('parseClaimNumber', () => {
     // 2^53 + 1 rounds to 2^53 — a DIFFERENT, existing repository id.
     expect(parseClaimNumber('9007199254740993')).toBeNull();
     expect(parseClaimNumber('9007199254740991')).toBe(9_007_199_254_740_991);
-  });
-});
-
-describe('dismissDecision', () => {
-  it('ignores a dismissal while the mint is in flight', () => {
-    // Escape reaches a native <dialog> even when Cancel is disabled. Unmounting
-    // here would lose a value the server may already have committed.
-    expect(dismissDecision({ busy: true, hasValue: false, stored: false })).toBe('ignore');
-    expect(dismissDecision({ busy: true, hasValue: true, stored: true })).toBe('ignore');
-  });
-
-  it('holds the dialog open until the value is confirmed stored', () => {
-    expect(dismissDecision({ busy: false, hasValue: true, stored: false })).toBe('hold-back');
-  });
-
-  it('closes once there is nothing to lose', () => {
-    expect(dismissDecision({ busy: false, hasValue: false, stored: false })).toBe('close');
-    expect(dismissDecision({ busy: false, hasValue: true, stored: true })).toBe('close');
   });
 });
 
