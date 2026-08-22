@@ -20,11 +20,11 @@ the bearer; it still receives a new local epoch.
 
 ## Root ownership
 
-The session API calls `transitionWorkspaceOwner` when `whoami` observes a
-session id, a login installs a new session, logout succeeds, or `whoami` answers
-401. Re-reading the same root session id preserves workspace health; changing
-or losing it clears all remote workspace aggregates before cached local data is
-reset or invalidated.
+The root `AuthProvider` calls `transitionWorkspaceOwner` whenever its
+cookie-authoritative identity settles. Re-reading the same root session id
+preserves workspace health; login replacement, logout, expiry, or a cross-tab
+session change clears every remote workspace aggregate before the new root
+epoch renders.
 
 No bearer enters TanStack Query cache, mutation cache, browser storage, URLs,
 logs, snapshots, generated output, or durable state.

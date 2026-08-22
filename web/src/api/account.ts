@@ -23,6 +23,7 @@ import {
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import type { z } from 'zod';
 
+import { useAuth } from '../app/AuthProvider.tsx';
 import { ApiError, parsed } from './client.ts';
 import { fromBase64URL, toBase64URL } from './values.ts';
 
@@ -107,9 +108,9 @@ export function useAuthMethods(): UseQueryResult<AuthMethods> {
 
 /** invalidate everything: a reissued session invalidates every cached answer. */
 function useAfterAccountMutation(): () => void {
-  const queries = useQueryClient();
+  const auth = useAuth();
   return () => {
-    void queries.invalidateQueries();
+    void auth.refreshSession();
   };
 }
 
