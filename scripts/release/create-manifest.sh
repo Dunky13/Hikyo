@@ -5,38 +5,39 @@ script_dir=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 # shellcheck disable=SC1091
 . "$script_dir/../lib/release.sh"
 
-if [ "$#" -ne 9 ]; then
-	printf 'usage: %s VERSION COMMIT KEY_ID IMAGE IMAGE_DIGEST CHART CHART_DIGEST DIST TRUST_METADATA\n' "$0" >&2
+if [ "$#" -ne 6 ]; then
+	printf 'usage: %s RELEASE_CANDIDATE IMAGE IMAGE_DIGEST CHART CHART_DIGEST DIST\n' "$0" >&2
 	exit 2
 fi
 
-version=$1
-commit=$2
-key_id=$3
-image=$4
-image_digest=$5
-chart=$6
-chart_digest=$7
-dist=$8
-metadata=$9
+candidate=$1
+image=$2
+image_digest=$3
+chart=$4
+chart_digest=$5
+dist=$6
 
-is_semver "$version" || { printf 'manifest: invalid version %s\n' "$version" >&2; exit 2; }
-is_full_sha "$commit" || { printf 'manifest: commit must be a full SHA\n' >&2; exit 2; }
 is_digest "$image_digest" || { printf 'manifest: invalid image digest\n' >&2; exit 2; }
 is_digest "$chart_digest" || { printf 'manifest: invalid chart digest\n' >&2; exit 2; }
 [ -d "$dist" ] || { printf 'manifest: missing dist directory\n' >&2; exit 2; }
-[ -f "$metadata" ] || { printf 'manifest: missing trust metadata\n' >&2; exit 2; }
+validate_release_candidate_record "$candidate" || exit 2
+[ -f "$dist/release-candidate.json" ] || {
+	printf 'manifest: release candidate is absent from dist\n' >&2
+	exit 2
+}
+[ "$(sha256_file "$candidate")" = "$(sha256_file "$dist/release-candidate.json")" ] || {
+	printf 'manifest: dist release candidate differs from resolved record\n' >&2
+	exit 1
+}
 if find "$dist" -maxdepth 1 -type l | grep . >/dev/null; then
 	printf 'manifest: symlinked release artifacts are forbidden\n' >&2
 	exit 1
 fi
 
-release_sequence=$(jq -r --arg version "$version" \
-	'([.releases[]?, .pending_release?] | .[] | select(.version == $version) | .sequence)' "$metadata")
-[ -n "$release_sequence" ] && [ "$release_sequence" != null ] \
-	|| { printf 'manifest: version %s absent from trust metadata\n' "$version" >&2; exit 1; }
-[ "$(printf '%s\n' "$release_sequence" | wc -l | tr -d ' ')" -eq 1 ] \
-	|| { printf 'manifest: duplicate version in trust metadata\n' >&2; exit 1; }
+version=$(jq -r '.version' "$candidate")
+commit=$(jq -r '.commit' "$candidate")
+release_sequence=$(jq -r '.sequence' "$candidate")
+key_id=$(jq -r '.key_id' "$candidate")
 
 printf '%s\n' "$image_digest" >"$dist/image-index.digest"
 printf '%s\n' "$chart_digest" >"$dist/chart-index.digest"
@@ -49,6 +50,7 @@ while IFS= read -r path; do
 	name=$(basename "$path")
 	case "$name" in
 		release-manifest.json | *.sigstore.json) continue ;;
+		release-candidate.json) kind='release-candidate' ;;
 		image-index.oci-payload.json) kind='oci-payload'; subject_kind=image ;;
 		chart-index.oci-payload.json) kind='oci-payload'; subject_kind=chart ;;
 		hikyo_*.tar.gz | hikyo_*.zip) kind=binary ;;

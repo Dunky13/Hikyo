@@ -170,6 +170,8 @@ printf '{"spdxVersion":"SPDX-2.3"}\n' >"$bundle_dir/hikyo-source.spdx.json"
 printf 'sha256:%064d\n' 1 >"$bundle_dir/image-index.digest"
 printf 'sha256:%064d\n' 2 >"$bundle_dir/chart-index.digest"
 printf '#!/bin/sh\nprintf "fixture installer\\n"\n' >"$bundle_dir/install.sh"
+printf '{"commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","key_id":"primary-1","public_key":"primary-1.pub","sequence":1,"version":"0.1.0"}\n' \
+	>"$bundle_dir/release-candidate.json"
 mkdir -p "$fixture_dir/chart/hikyo"
 printf 'name: hikyo\nversion: 0.1.0\nappVersion: 0.1.0\n' >"$fixture_dir/chart/hikyo/Chart.yaml"
 printf 'image:\n  repository: ghcr.io/hikyo-org/hikyo\n  digest: sha256:%064d\n' 1 \
@@ -184,6 +186,7 @@ chart_file_sha=$(sha256_file "$bundle_dir/hikyo-0.1.0.tgz")
 chart_digest_file_sha=$(sha256_file "$bundle_dir/chart-index.digest")
 chart_digest=$(tr -d '\n' <"$bundle_dir/chart-index.digest")
 installer_sha=$(sha256_file "$bundle_dir/install.sh")
+candidate_sha=$(sha256_file "$bundle_dir/release-candidate.json")
 jq -n --arg digest "$image_digest" '{critical:{identity:{"docker-reference":"ghcr.io/hikyo-org/hikyo"},image:{"docker-manifest-digest":$digest},type:"cosign container image signature"},optional:null}' \
 	>"$bundle_dir/image-index.oci-payload.json"
 jq -n --arg digest "$chart_digest" '{critical:{identity:{"docker-reference":"ghcr.io/hikyo-org/charts/hikyo"},image:{"docker-manifest-digest":$digest},type:"cosign container image signature"},optional:null}' \
@@ -200,6 +203,7 @@ jq -n \
 	--arg chart_digest_file_sha "$chart_digest_file_sha" \
 	--arg chart_digest "$chart_digest" \
 	--arg installer_sha "$installer_sha" \
+	--arg candidate_sha "$candidate_sha" \
 	--arg image_payload_sha "$image_payload_sha" \
 	--arg chart_payload_sha "$chart_payload_sha" \
 	'{
@@ -210,6 +214,7 @@ jq -n \
 		release_sequence: 1,
 		signing_key_id: "primary-1",
 		artifacts: [
+			{name: "release-candidate.json", kind: "release-candidate", sha256: $candidate_sha},
 			{name: "hikyo_Linux_arm64.tar.gz", kind: "binary", sha256: $binary_sha},
 			{name: "hikyo-source.spdx.json", kind: "sbom", sha256: $sbom_sha},
 			{name: "image-index.digest", kind: "image", sha256: $image_file_sha, digest: $image_digest, image: "ghcr.io/hikyo-org/hikyo", tag: "0.1.0"},
@@ -275,7 +280,8 @@ chmod +x "$fixture_dir/cosign-publish"
 : >"$fixture_dir/publish.log"
 export COSIGN_PUBLISH_LOG="$fixture_dir/publish.log"
 COSIGN_BIN="$fixture_dir/cosign-publish" "$(dirname "$0")/publish-oci-signatures.sh" \
-	"$bundle_dir" "$trust_dir/primary-1.pub" >/dev/null
+	"$bundle_dir" "$trust_dir/root.json" "$trust_dir/metadata.json" \
+	"$trust_dir/metadata.sigstore.json" >/dev/null
 grep -Fx "attach ghcr.io/hikyo-org/hikyo@$image_digest" "$fixture_dir/publish.log" >/dev/null
 grep -Fx "verify ghcr.io/hikyo-org/hikyo@$image_digest" "$fixture_dir/publish.log" >/dev/null
 grep -Fx "attach ghcr.io/hikyo-org/charts/hikyo@$chart_digest" "$fixture_dir/publish.log" >/dev/null
@@ -284,6 +290,14 @@ grep -Fx "verify ghcr.io/hikyo-org/charts/hikyo@$chart_digest" "$fixture_dir/pub
 printf 'release fixture: OCI signatures attached and verified for exact subjects\n'
 
 cp -R "$bundle_dir" "$fixture_dir/bundle-v1"
+
+printf ' ' >>"$bundle_dir/release-candidate.json"
+expect_reject 'tampered release candidate' 'release-candidate.json hash mismatch' \
+	"$(dirname "$0")/verify-bundle.sh" \
+	--root "$trust_dir/root.json" --metadata "$trust_dir/metadata.json" \
+	--metadata-signature "$trust_dir/metadata.sigstore.json" \
+	--bundle "$bundle_dir" --state "$state" --latest
+restore_bundle_file release-candidate.json
 
 printf 'tampered\n' >>"$bundle_dir/hikyo_Linux_arm64.tar.gz"
 expect_reject 'tampered artifact' 'artifact hash mismatch' "$(dirname "$0")/verify-bundle.sh" \
@@ -409,14 +423,18 @@ printf 'release fixture: current release remains installable while successor is 
 
 cp -R "$fixture_dir/bundle-v1" "$fixture_dir/bundle-v2"
 rm "$fixture_dir/bundle-v2/hikyo-0.1.0.tgz" "$fixture_dir/bundle-v2/hikyo-0.1.0.tgz.sigstore.json"
+printf '{"commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","key_id":"primary-2","public_key":"primary-2.pub","sequence":2,"version":"0.2.0"}\n' \
+	>"$fixture_dir/bundle-v2/release-candidate.json"
+candidate_v2_sha=$(sha256_file "$fixture_dir/bundle-v2/release-candidate.json")
 printf 'name: hikyo\nversion: 0.2.0\nappVersion: 0.2.0\n' >"$fixture_dir/chart/hikyo/Chart.yaml"
 tar -czf "$fixture_dir/bundle-v2/hikyo-0.2.0.tgz" -C "$fixture_dir/chart" hikyo
 chart_v2_sha=$(sha256_file "$fixture_dir/bundle-v2/hikyo-0.2.0.tgz")
-jq --arg chart_v2_sha "$chart_v2_sha" '
+jq --arg chart_v2_sha "$chart_v2_sha" --arg candidate_v2_sha "$candidate_v2_sha" '
 	.version = "0.2.0" |
 	.tag = "v0.2.0" |
 	.release_sequence = 2 |
 	.signing_key_id = "primary-2" |
+	(.artifacts[] | select(.kind == "release-candidate")).sha256 = $candidate_v2_sha |
 	(.artifacts[] | select(.kind == "image")).tag = "0.2.0" |
 	(.artifacts[] | select(.kind == "chart")) |= (
 		.name = "hikyo-0.2.0.tgz" |
@@ -461,19 +479,42 @@ HTTPS_PROXY=http://127.0.0.1:9 HTTP_PROXY=http://127.0.0.1:9 ALL_PROXY=http://12
 	--state "$state" --latest >/dev/null
 printf 'release fixture: recovery-authorized primary rotation accepted\n'
 
+cp -R "$fixture_dir/bundle-v2" "$fixture_dir/bundle-v2-wrong-private"
+expect_reject 'wrong private key for candidate' 'private key does not match release candidate' \
+	env HTTPS_PROXY=http://127.0.0.1:9 HTTP_PROXY=http://127.0.0.1:9 \
+	ALL_PROXY=http://127.0.0.1:9 NO_PROXY='' COSIGN_PASSWORD=fixture-pass \
+	"$(dirname "$0")/sign-bundle.sh" "$fixture_dir/bundle-v2-wrong-private" \
+	"$trust_dir/primary-1.key" "$trust_dir/metadata.json"
+
 cp -R "$fixture_dir/bundle-v2" "$fixture_dir/bundle-v2-superseded"
-jq '.signing_key_id = "primary-1"' "$fixture_dir/bundle-v2/release-manifest.json" \
+printf '{"commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","key_id":"primary-1","public_key":"primary-1.pub","sequence":2,"version":"0.2.0"}\n' \
+	>"$fixture_dir/bundle-v2-superseded/release-candidate.json"
+superseded_candidate_sha=$(sha256_file "$fixture_dir/bundle-v2-superseded/release-candidate.json")
+jq --arg candidate_sha "$superseded_candidate_sha" '
+	.signing_key_id = "primary-1" |
+	(.artifacts[] | select(.kind == "release-candidate")).sha256 = $candidate_sha
+	' "$fixture_dir/bundle-v2/release-manifest.json" \
 	>"$fixture_dir/bundle-v2-superseded/release-manifest.json"
+sign_blob "$trust_dir/primary-1.key" \
+	"$fixture_dir/bundle-v2-superseded/release-candidate.json" \
+	"$fixture_dir/bundle-v2-superseded/release-candidate.json.sigstore.json"
 sign_blob "$trust_dir/primary-1.key" "$fixture_dir/bundle-v2-superseded/release-manifest.json" \
 	"$fixture_dir/bundle-v2-superseded/release-manifest.sigstore.json"
 rebind_negative_metadata "$fixture_dir/bundle-v2-superseded/release-manifest.json" \
 	"$trust_dir/metadata.json" "$fixture_dir/superseded-metadata.json"
-expect_reject 'superseded primary past release cutoff' 'no unique primary key authorizes release 0.2.0' \
+expect_reject 'superseded primary past release cutoff' 'record does not match trust metadata' \
 	"$(dirname "$0")/verify-bundle.sh" \
 	--root "$trust_dir/root.json" --metadata "$fixture_dir/superseded-metadata.json" \
 	--metadata-signature "$fixture_dir/superseded-metadata.json.sigstore.json" \
 	--bundle "$fixture_dir/bundle-v2-superseded" \
 	--state "$fixture_dir/superseded-state.json" --latest
+expect_reject 'OCI publication with superseded candidate key' \
+	'bundle is not candidate-authorized' \
+	env COSIGN_BIN="$fixture_dir/cosign-publish" \
+	"$(dirname "$0")/publish-oci-signatures.sh" \
+	"$fixture_dir/bundle-v2-superseded" "$trust_dir/root.json" \
+	"$fixture_dir/superseded-metadata.json" \
+	"$fixture_dir/superseded-metadata.json.sigstore.json"
 
 cp "$trust_dir/metadata.json" "$trust_dir/metadata-v4.json"
 jq '
@@ -482,7 +523,7 @@ jq '
 	.primary_keys[0].revoked = true
 	' "$trust_dir/metadata-v4.json" >"$trust_dir/metadata.json"
 sign_blob "$trust_dir/recovery.key" "$trust_dir/metadata.json" "$trust_dir/metadata.sigstore.json"
-expect_reject 'revoked primary on formerly valid release' 'primary key primary-1 is revoked' \
+expect_reject 'revoked primary on formerly valid release' 'primary key is revoked' \
 	"$(dirname "$0")/verify-bundle.sh" \
 	--root "$trust_dir/root.json" --metadata "$trust_dir/metadata.json" \
 	--metadata-signature "$trust_dir/metadata.sigstore.json" --bundle "$fixture_dir/bundle-v1" \

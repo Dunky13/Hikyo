@@ -87,7 +87,9 @@ an ADR amendment, not an implementation refactor.
 3. With networking on and no decrypted key present, download every draft asset.
    Recompute `checksums.txt`, compare the GHCR index digest with
    `image-index.digest` and `chart-index.digest`. Confirm both prepared OCI
-   payloads name those exact published subjects.
+   payloads name those exact published subjects. Confirm the manifest's
+   version, sequence, commit, and signing key match the canonical
+   `release-candidate.json` artifact; its hash is part of the manifest.
 4. Disconnect networking, mount tmpfs, decrypt only the recovery key, and run
    `scripts/release/bind-manifest.sh release-manifest.json metadata.json
    metadata.bound.json`. Recovery-sign `metadata.bound.json`, then re-encrypt
@@ -103,11 +105,13 @@ an ADR amendment, not an implementation refactor.
    and raw signatures for both prepared OCI payloads. Remove plaintext,
    unmount tmpfs, and eject the key media before networking returns.
 6. With networking restored and no private key mounted, run
-   `scripts/release/publish-oci-signatures.sh BUNDLE PRIMARY.pub`. It attaches
-   the offline signatures to the exact image and chart digests, then requires
-   `cosign verify` to succeed for both published subjects. Upload the manifest
-   and every `*.sigstore.json` bundle to the draft; raw OCI signatures are
-   transport scratch and are not release assets.
+   `scripts/release/publish-oci-signatures.sh BUNDLE ROOT METADATA
+   METADATA_SIGNATURE`. It re-verifies the candidate-bound bundle, derives the
+   primary public key from that candidate, attaches the offline signatures to
+   the exact image and chart digests, then requires `cosign verify` to succeed
+   for both published subjects. Upload the manifest and every
+   `*.sigstore.json` bundle to the draft; raw OCI signatures are transport
+   scratch and are not release assets.
 7. Redownload the complete draft and verify it through
    `verify-bundle.sh --published --state
    "$XDG_STATE_HOME/hikyo/release-trust.json"`; then publish the draft. The
@@ -118,8 +122,8 @@ an ADR amendment, not an implementation refactor.
    state file; deleting it discards locally remembered rollback protection.
 
 `checksums.txt` is GoReleaser's bare-binary checksum list. The signed release
-manifest is authoritative for binaries, SBOMs, installer, chart, digest files,
-and OCI payloads.
+manifest is authoritative for the canonical release candidate, binaries,
+SBOMs, installer, chart, digest files, and OCI payloads.
 
 Hash agreement proves asset consistency, not an honest CI build. Reproducible
 build comparison is the named future control for compromised-CI risk.

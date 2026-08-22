@@ -173,6 +173,8 @@ jobs:
         run: ./scripts/ci/check-chart.sh
       - name: Release trust and refusal fixtures
         run: ./scripts/release/test-fixtures.sh
+      - name: Release candidate resolver fixture
+        run: ./scripts/release/resolve-candidate_test.sh
       - name: Manifest binding fixture
         run: ./scripts/release/bind-manifest_test.sh
       - name: Release manifest fixture

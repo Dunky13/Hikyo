@@ -18,14 +18,15 @@ mkdir -p "$fixture_dir/hikyo"
 printf 'name: hikyo\nversion: 0.1.0\nappVersion: 0.1.0\n' >"$fixture_dir/hikyo/Chart.yaml"
 printf 'image:\n  digest: sha256:%064d\n' 1 >"$fixture_dir/hikyo/values.yaml"
 tar -czf "$dist/hikyo-0.1.0.tgz" -C "$fixture_dir" hikyo
-printf '{"releases":[{"version":"0.1.0","sequence":7}]}\n' >"$fixture_dir/metadata.json"
+printf '{"commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","key_id":"primary-1","public_key":"primary-1.pub","sequence":7,"version":"0.1.0"}\n' \
+	>"$dist/release-candidate.json"
 
 "$(dirname "$0")/create-manifest.sh" \
-	0.1.0 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa primary-1 ghcr.io/hikyo-org/hikyo \
+	"$dist/release-candidate.json" ghcr.io/hikyo-org/hikyo \
 	sha256:1111111111111111111111111111111111111111111111111111111111111111 \
 	ghcr.io/hikyo-org/charts/hikyo \
 	sha256:2222222222222222222222222222222222222222222222222222222222222222 \
-	"$dist" "$fixture_dir/metadata.json" >/dev/null
+	"$dist" >/dev/null
 
 jq -e '
 	.version == "0.1.0" and
@@ -39,6 +40,7 @@ jq -e '
 	([.artifacts[] | select(.kind == "chart")] | length) == 1 and
 	([.artifacts[] | select(.kind == "chart-digest")] | length) == 1 and
 	([.artifacts[] | select(.kind == "installer")] | length) == 1 and
+	([.artifacts[] | select(.kind == "release-candidate")] | length) == 1 and
 	([.artifacts[] | select(.kind == "oci-payload")] | length) == 2 and
 	([.artifacts[] | select(.kind == "chart")][0] |
 		.chart_version == "0.1.0" and .app_version == "0.1.0" and

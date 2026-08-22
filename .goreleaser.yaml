@@ -29,8 +29,8 @@ builds:
     ldflags:
       - >-
         -s -w
-        -X main.version={{ .Version }}
-        -X main.commit={{ .Commit }}
+        -X main.version={{ if .Env.HIKYO_RELEASE_VERSION }}{{ .Env.HIKYO_RELEASE_VERSION }}{{ else }}{{ .Version }}{{ end }}
+        -X main.commit={{ if .Env.HIKYO_RELEASE_COMMIT }}{{ .Env.HIKYO_RELEASE_COMMIT }}{{ else }}{{ .Commit }}{{ end }}
         -X main.buildDate={{ .CommitDate }}
 
 archives:
