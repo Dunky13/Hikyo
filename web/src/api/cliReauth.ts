@@ -1,19 +1,20 @@
 import {
-  approveCliReauth,
-  showCliReauthTransaction,
+  approveCliReauthOp,
+  showCliReauthTransactionOp,
+} from '@hikyo/operations';
+import {
   type CliReauthApproved,
   type CliReauthTransaction,
 } from '@hikyo/client';
-import { zCliReauthApproved, zCliReauthTransaction } from '@hikyo/zod';
 
 import { parsed } from './client.ts';
 
 export async function loadCLIReauthTransaction(state: string): Promise<CliReauthTransaction> {
-  return parsed(showCliReauthTransaction({ path: { state } }), zCliReauthTransaction);
+  return parsed(showCliReauthTransactionOp, { path: { state } });
 }
 
 export async function approveCLIReauth(state: string): Promise<CliReauthApproved> {
-  return parsed(approveCliReauth({ body: { state } }), zCliReauthApproved);
+  return parsed(approveCliReauthOp, { body: { state } });
 }
 
 /** Build the only permitted front-channel return: exact bound URI + code/state. */

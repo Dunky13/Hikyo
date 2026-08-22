@@ -24,6 +24,10 @@ export default defineConfig({
       // rejected: it relocates the lockfile and breaks the `client` CI job's
       // frozen-lockfile install.
       '@hikyo/client': here('../clients/ts/src/generated/index.ts'),
+      // The operation-bound descriptors (#213): one value per operation binding
+      // its call, success status and response parser, so `parsed`/`ok` select an
+      // operation instead of pairing a promise and a schema by hand.
+      '@hikyo/operations': here('../clients/ts/src/generated/operations.gen.ts'),
       '@hikyo/zod': here('../clients/ts/src/generated/zod.gen.ts'),
       '@hikyo/runtime': here('../clients/ts/src/generated/client.gen.ts'),
       // The client FACTORY, not the shared singleton. `@hikyo/runtime` is the

@@ -1,26 +1,21 @@
 import {
-  clearValue,
-  copyValues,
-  getEnvironmentSignals,
-  listKeyGroups,
-  listKeys,
-  listPendingDrafts,
-  listValues,
-  publishPendingChanges,
-  reclassifyKey,
-  setValue,
-} from '@hikyo/client';
+  clearValueOp,
+  copyValuesOp,
+  getEnvironmentSignalsOp,
+  listKeyGroupsOp,
+  listKeysOp,
+  listPendingDraftsOp,
+  listValuesOp,
+  publishPendingChangesOp,
+  reclassifyKeyOp,
+  setValueOp,
+} from '@hikyo/operations';
 import {
   zEnvironmentSignals,
-  zCopyValuesResult,
-  zKey,
-  zKeyGroupList,
   zKeyList,
-  zPendingChange,
   zPendingDraftList,
   zPublishResult,
   zScanFinding,
-  zValueList,
 } from '@hikyo/zod';
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
@@ -257,13 +252,13 @@ export function useMatrixProject(ref: MatrixRef) {
   const environments = useEnvironments(ref.org, ref.project);
   const keys = useQuery({
     queryKey: matrixKeysKey(ref),
-    queryFn: () => parsed(listKeys({ path: ref, ...transport }), zKeyList),
+    queryFn: () => parsed(listKeysOp, { path: ref, ...transport }),
     enabled: ref.org !== '' && ref.project !== '',
     retry: false,
   });
   const groups = useQuery({
     queryKey: matrixGroupsKey(ref),
-    queryFn: () => parsed(listKeyGroups({ path: ref, ...transport }), zKeyGroupList),
+    queryFn: () => parsed(listKeyGroupsOp, { path: ref, ...transport }),
     enabled: ref.org !== '' && ref.project !== '',
     retry: false,
   });
@@ -272,10 +267,7 @@ export function useMatrixProject(ref: MatrixRef) {
     queries: environmentItems.map((environment) => ({
       queryKey: valuesKey({ ...ref, environment: environment.id }),
       queryFn: () =>
-        parsed(
-          listValues({ path: { ...ref, environment: environment.id }, ...transport }),
-          zValueList,
-        ),
+        parsed(listValuesOp, { path: { ...ref, environment: environment.id }, ...transport }),
       retry: false,
     })),
   });
@@ -290,12 +282,11 @@ export function useMatrixProject(ref: MatrixRef) {
       queryFn: async () => {
         const key = signalsKey(ref, environment.id);
         const previous = queries.getQueryData<MatrixEnvironmentSignals>(key);
-        const next = await parsed(
-          getEnvironmentSignals({
+        const next = zMatrixEnvironmentSignals.parse(
+          await parsed(getEnvironmentSignalsOp, {
             path: { ...ref, environment: environment.id },
             ...transport,
           }),
-          zMatrixEnvironmentSignals,
         );
         if (signalsRequireValuesRefresh(previous?.revision, next.revision)) {
           await queries.invalidateQueries({
@@ -311,10 +302,12 @@ export function useMatrixProject(ref: MatrixRef) {
   const pendingDrafts = useQueries({
     queries: environmentItems.map((environment) => ({
       queryKey: pendingDraftsKey(ref, environment.id),
-      queryFn: () =>
-        parsed(
-          listPendingDrafts({ path: { ...ref, environment: environment.id }, ...transport }),
-          zMatrixPendingDraftList,
+      queryFn: async () =>
+        zMatrixPendingDraftList.parse(
+          await parsed(listPendingDraftsOp, {
+            path: { ...ref, environment: environment.id },
+            ...transport,
+          }),
         ),
       retry: false,
     })),
@@ -337,8 +330,7 @@ export function useStageMatrixValue(ref: MatrixRef) {
       readonly value: string;
       readonly acknowledgements?: readonly string[];
     }) =>
-      parsed(
-        setValue({
+      parsed(setValueOp, {
           path: { ...ref, environment: input.environment, key: input.key },
           body: {
             value: input.value,
@@ -348,8 +340,6 @@ export function useStageMatrixValue(ref: MatrixRef) {
           },
           ...transport,
         }),
-        zPendingChange,
-      ),
     onSuccess: (_result, input) =>
       Promise.all([
         queries.invalidateQueries({ queryKey: valuesKey({ ...ref, environment: input.environment }) }),
@@ -371,14 +361,11 @@ export function useReclassifyKey(ref: MatrixRef) {
   const transport = useTransport();
   return useMutation({
     mutationFn: (input: { readonly key: string; readonly classification: 'secret' | 'config' }) =>
-      parsed(
-        reclassifyKey({
+      parsed(reclassifyKeyOp, {
           path: { ...ref, key: input.key },
           body: { classification: input.classification },
           ...transport,
         }),
-        zKey,
-      ),
     onSuccess: () => queries.invalidateQueries({ queryKey: matrixKeysKey(ref) }),
   });
 }
@@ -388,10 +375,7 @@ export function useClearMatrixValue(ref: MatrixRef) {
   const transport = useTransport();
   return useMutation({
     mutationFn: (input: { readonly environment: string; readonly key: string }) =>
-      parsed(
-        clearValue({ path: { ...ref, environment: input.environment, key: input.key }, ...transport }),
-        zPendingChange,
-      ),
+      parsed(clearValueOp, { path: { ...ref, environment: input.environment, key: input.key }, ...transport }),
     onSuccess: (_result, input) =>
       Promise.all([
         queries.invalidateQueries({ queryKey: valuesKey({ ...ref, environment: input.environment }) }),
@@ -420,17 +404,14 @@ export function usePublishMatrix(ref: MatrixRef) {
       const previewToken = preview?.token;
       let result: z.infer<typeof zPublishResult>;
       try {
-        result = await parsed(
-          publishPendingChanges({
+        result = await parsed(publishPendingChangesOp, {
             path: { ...ref, environment: input.addressedEnvironment },
             body: {
               version_ids: [...input.versionIds],
               ...(previewToken === undefined ? {} : { preview_token: previewToken }),
             },
             ...transport,
-          }),
-          zPublishResult,
-        );
+          });
       } catch (error) {
         if (previewToken !== undefined && error instanceof Error) {
           previewAttachedErrors.add(error);
@@ -479,8 +460,7 @@ export function useCopyMatrixConfig(ref: MatrixRef) {
       readonly destinationEnvironments: readonly string[];
       readonly confirmProtected: boolean;
     }) =>
-      parsed(
-        copyValues({
+      parsed(copyValuesOp, {
           path: ref,
           body: {
             source_environment_id: input.sourceEnvironment,
@@ -490,8 +470,6 @@ export function useCopyMatrixConfig(ref: MatrixRef) {
           },
           ...transport,
         }),
-        zCopyValuesResult,
-      ),
     onSuccess: (result, input) =>
       invalidateAfterCopy(queries, ref, [
         ...new Set([

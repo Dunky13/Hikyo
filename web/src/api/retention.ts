@@ -1,4 +1,6 @@
-import { getRetentionHealth } from '@hikyo/client';
+import {
+  getRetentionHealthOp,
+} from '@hikyo/operations';
 import { zRetentionHealth } from '@hikyo/zod';
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import type { z } from 'zod';
@@ -28,7 +30,7 @@ export function useRetentionHealth(enabled: boolean): UseQueryResult<RetentionHe
     queryKey: retentionHealthKey,
     queryFn: async () => {
       try {
-        return await parsed(getRetentionHealth(), zRetentionHealth);
+        return await parsed(getRetentionHealthOp, {});
       } catch (error) {
         if (error instanceof ApiError && (error.status === 403 || error.status === 404)) {
           return null;

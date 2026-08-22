@@ -1,18 +1,17 @@
 import {
-  createRevisionPin,
-  getProjectRetention,
-  getRevision,
-  listRevisionPins,
-  listRevisions,
-  releaseRevisionPin,
-  rollbackRevision,
-} from '@hikyo/client';
+  createRevisionPinOp,
+  getProjectRetentionOp,
+  getRevisionOp,
+  listRevisionPinsOp,
+  listRevisionsOp,
+  releaseRevisionPinOp,
+  rollbackRevisionOp,
+} from '@hikyo/operations';
 import {
   zProjectRetentionPolicy,
   zRevisionDetail,
   zRevisionList,
   zRevisionPinList,
-  zRevisionPinResult,
   zRollbackResult,
 } from '@hikyo/zod';
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
@@ -152,7 +151,10 @@ export function useRevisionHistory(env: EnvRef): UseQueryResult<HistoryRevisionL
   const transport = useTransport();
   return useQuery({
     queryKey: revisionsKey(env),
-    queryFn: () => parsed(listRevisions({ path: { ...env }, ...transport }), zHistoryRevisionList),
+    queryFn: async () =>
+      zHistoryRevisionList.parse(
+        await parsed(listRevisionsOp, { path: { ...env }, ...transport }),
+      ),
     enabled: enabledEnv(env),
     retry: false,
   });
@@ -178,7 +180,7 @@ export function useRevisionDetail(
   return useQuery({
     queryKey: revisionDetailKey(env, label),
     queryFn: () =>
-      parsed(getRevision({ path: { ...env, revision: label }, ...transport }), zHistoryRevisionDetail),
+      parsed(getRevisionOp, { path: { ...env, revision: label }, ...transport }),
     enabled: enabledEnv(env) && revision !== null && payloadPresent,
     retry: false,
   });
@@ -188,7 +190,7 @@ export function useRevisionPins(env: EnvRef): UseQueryResult<RevisionPinList> {
   const transport = useTransport();
   return useQuery({
     queryKey: pinsKey(env),
-    queryFn: () => parsed(listRevisionPins({ path: { ...env }, ...transport }), zRevisionPinList),
+    queryFn: () => parsed(listRevisionPinsOp, { path: { ...env }, ...transport }),
     enabled: enabledEnv(env),
     retry: false,
   });
@@ -206,7 +208,7 @@ export function useProjectRetention(ref: MatrixRef): UseQueryResult<ProjectReten
   const transport = useTransport();
   return useQuery({
     queryKey: projectRetentionKey(ref),
-    queryFn: () => parsed(getProjectRetention({ path: { ...ref }, ...transport }), zProjectRetentionPolicy),
+    queryFn: () => parsed(getProjectRetentionOp, { path: { ...ref }, ...transport }),
     enabled: ref.org !== '' && ref.project !== '',
     retry: false,
   });
@@ -224,14 +226,13 @@ export function useRestoreRevision(env: EnvRef) {
   const queries = useQueryClient();
   const transport = useTransport();
   return useMutation({
-    mutationFn: (input: { readonly revision: bigint; readonly key?: string }) =>
-      parsed(
-        rollbackRevision({
+    mutationFn: async (input: { readonly revision: bigint; readonly key?: string }) =>
+      zHistoryRollbackResult.parse(
+        await parsed(rollbackRevisionOp, {
           path: { ...env, revision: revisionNumber(input.revision) },
           body: input.key === undefined ? {} : { key: input.key },
           ...transport,
         }),
-        zHistoryRollbackResult,
       ),
     onSuccess: () =>
       Promise.all([
@@ -252,8 +253,7 @@ export function useSetRevisionPin(env: EnvRef) {
       readonly expiresAt: string;
       readonly overrideSchema: boolean;
     }) =>
-      parsed(
-        createRevisionPin({
+      parsed(createRevisionPinOp, {
           path: { ...env },
           body: {
             workload_principal_id: input.workloadPrincipalID,
@@ -263,8 +263,6 @@ export function useSetRevisionPin(env: EnvRef) {
           },
           ...transport,
         }),
-        zRevisionPinResult,
-      ),
     onSuccess: () => queries.invalidateQueries({ queryKey: pinsKey(env) }),
   });
 }
@@ -274,7 +272,7 @@ export function useReleaseRevisionPin(env: EnvRef) {
   const transport = useTransport();
   return useMutation({
     mutationFn: (workloadPrincipalID: string) =>
-      ok(releaseRevisionPin({ path: { ...env, workloadPrincipal: workloadPrincipalID }, ...transport })),
+      ok(releaseRevisionPinOp, { path: { ...env, workloadPrincipal: workloadPrincipalID }, ...transport }),
     onSuccess: () =>
       Promise.all([
         queries.invalidateQueries({ queryKey: pinsKey(env) }),

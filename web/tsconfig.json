@@ -18,6 +18,7 @@
     "types": ["node", "vite/client"],
     "paths": {
       "@hikyo/client": ["../clients/ts/src/generated/index.ts"],
+      "@hikyo/operations": ["../clients/ts/src/generated/operations.gen.ts"],
       "@hikyo/zod": ["../clients/ts/src/generated/zod.gen.ts"],
       "@hikyo/runtime": ["../clients/ts/src/generated/client.gen.ts"],
       "@hikyo/runtime-core": ["../clients/ts/src/generated/client/index.ts"]
