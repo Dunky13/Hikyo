@@ -31,13 +31,13 @@ logs, snapshots, generated output, or durable state.
 
 ## Validation
 
-- `pnpm --dir web exec vitest run src/api/workspace.test.ts src/api/workspaceClient.test.ts src/api/session.test.ts`:
-  28 passed
-- `pnpm --dir web run test`: 262 passed across 24 files
+- `pnpm --dir web exec vitest run src/api/workspace.test.ts src/api/workspaceClient.test.ts src/api/session.test.ts src/app/AuthProvider.test.tsx`:
+  33 passed
+- `pnpm --dir web run test`: 267 passed across 25 files
 - `pnpm --dir web run typecheck`: passed
 - `pnpm --dir web run build`: passed
 - `pnpm --dir web exec playwright test flows/workspace.spec.ts`: 26 passed
   across desktop and mobile against the exact rebuilt bundle
-- two-axis review round 2: standards CLEAN; spec CLEAN
+- two-axis review round 3: standards CLEAN; spec SOUND
 
 No API, database, migration, generated output, or wire contract changed.
