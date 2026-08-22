@@ -35,14 +35,14 @@ func runSCIMOriginTupleIsExact(t *testing.T, db *store.DB) {
 	bindingID, token := newSCIMBinding(t, db, "okta")
 	wire := service.SCIMCredentialActor(token, bindingID)
 
-	user, err := s.CreateUser(ctx, wire, orgA, bindingID, service.SCIMUserInput{
+	user, err := s.CreateUser(ctx, wire, orgA, bindingID, service.DesiredUser{Active: true,
 		UserName: "tuple@example.test", ExternalID: "ext-tuple", SubjectRaw: "ext-tuple",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	group, err := s.CreateGroup(ctx, wire, orgA, bindingID, service.SCIMGroupInput{
-		DisplayName: "Tuple", Members: []string{user.ID}, MembersPresent: true,
+	group, err := s.CreateGroup(ctx, wire, orgA, bindingID, service.DesiredGroup{
+		DisplayName: "Tuple", Members: []string{user.ID},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -94,7 +94,7 @@ func runSCIMMultiGroupUnion(t *testing.T, db *store.DB) {
 	wire := service.SCIMCredentialActor(token, bindingID)
 	scope := domain.Scope{Org: orgA, Project: prjA1}
 
-	user, err := s.CreateUser(ctx, wire, orgA, bindingID, service.SCIMUserInput{
+	user, err := s.CreateUser(ctx, wire, orgA, bindingID, service.DesiredUser{Active: true,
 		UserName: "union@example.test", ExternalID: "ext-union", SubjectRaw: "ext-union",
 	})
 	if err != nil {
@@ -109,8 +109,8 @@ func runSCIMMultiGroupUnion(t *testing.T, db *store.DB) {
 	for name, template := range map[string]domain.Template{
 		"Readers": domain.TemplateViewer, "Editors": domain.TemplateEditor,
 	} {
-		g, err := s.CreateGroup(ctx, wire, orgA, bindingID, service.SCIMGroupInput{
-			DisplayName: name, Members: []string{user.ID}, MembersPresent: true,
+		g, err := s.CreateGroup(ctx, wire, orgA, bindingID, service.DesiredGroup{
+			DisplayName: name, Members: []string{user.ID},
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -166,15 +166,15 @@ func runSCIMMappingWidenAndNarrow(t *testing.T, db *store.DB) {
 	wire := service.SCIMCredentialActor(token, bindingID)
 	scope := domain.Scope{Org: orgA, Project: prjA1}
 
-	user, err := s.CreateUser(ctx, wire, orgA, bindingID, service.SCIMUserInput{
+	user, err := s.CreateUser(ctx, wire, orgA, bindingID, service.DesiredUser{Active: true,
 		UserName: "widen@example.test", ExternalID: "ext-widen", SubjectRaw: "ext-widen",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	principal := principalOf(t, db, accountOf(t, db, user.ID))
-	group, err := s.CreateGroup(ctx, wire, orgA, bindingID, service.SCIMGroupInput{
-		DisplayName: "Widen", Members: []string{user.ID}, MembersPresent: true,
+	group, err := s.CreateGroup(ctx, wire, orgA, bindingID, service.DesiredGroup{
+		DisplayName: "Widen", Members: []string{user.ID},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -273,13 +273,14 @@ func runSCIMLockoutAcrossEveryReleasePath(t *testing.T, open func(*testing.T) *s
 	}{
 		{"deprovision", func(t *testing.T, s *service.SCIM, wire, self service.Actor, binding, user, group string) {
 			off := false
-			if _, err := s.PatchUser(ctx, wire, orgA, binding, user, service.SCIMUserInput{Active: &off}); err != nil {
+			if _, err := s.PatchUser(ctx, wire, orgA, binding, user,
+				[]service.UserPatchCommand{service.UserPatchSetActive{Active: off}}); err != nil {
 				t.Fatal(err)
 			}
 		}, "deprovision"},
 		{"member_removed", func(t *testing.T, s *service.SCIM, wire, self service.Actor, binding, user, group string) {
 			if _, err := s.PatchGroup(ctx, wire, orgA, binding, group,
-				service.SCIMGroupInput{MembersPresent: true}); err != nil {
+				[]service.GroupPatchCommand{service.GroupPatchClearMembers{}}); err != nil {
 				t.Fatal(err)
 			}
 		}, "member_removed"},
@@ -328,14 +329,14 @@ func runOneLockoutPath(
 	bindingID, token := newSCIMBinding(t, db, "lockout-"+name)
 	wire := service.SCIMCredentialActor(token, bindingID)
 
-	user, err := s.CreateUser(ctx, wire, orgA, bindingID, service.SCIMUserInput{
+	user, err := s.CreateUser(ctx, wire, orgA, bindingID, service.DesiredUser{Active: true,
 		UserName: name + "@example.test", ExternalID: "ext-" + name, SubjectRaw: "ext-" + name,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	group, err := s.CreateGroup(ctx, wire, orgA, bindingID, service.SCIMGroupInput{
-		DisplayName: "Admins " + name, Members: []string{user.ID}, MembersPresent: true,
+	group, err := s.CreateGroup(ctx, wire, orgA, bindingID, service.DesiredGroup{
+		DisplayName: "Admins " + name, Members: []string{user.ID},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -509,7 +510,7 @@ func runSCIMAttentionStatePairs(t *testing.T, db *store.DB) {
 	// provider_unavailable: raised by disabling, cleared by re-enabling.
 	bindingID, token := newSCIMBinding(t, db, "second-idp")
 	wire := service.SCIMCredentialActor(token, bindingID)
-	user, err := s.CreateUser(ctx, wire, orgA, bindingID, service.SCIMUserInput{
+	user, err := s.CreateUser(ctx, wire, orgA, bindingID, service.DesiredUser{Active: true,
 		UserName: "att@example.test", ExternalID: "ext-att", SubjectRaw: "ext-att",
 	})
 	if err != nil {
@@ -535,7 +536,8 @@ func runSCIMAttentionStatePairs(t *testing.T, db *store.DB) {
 		t.Fatal(err)
 	}
 	off, on := false, true
-	if _, err := s.PatchUser(ctx, wire, orgA, bindingID, user.ID, service.SCIMUserInput{Active: &off}); err != nil {
+	if _, err := s.PatchUser(ctx, wire, orgA, bindingID, user.ID,
+		[]service.UserPatchCommand{service.UserPatchSetActive{Active: off}}); err != nil {
 		t.Fatal(err)
 	}
 	record()
@@ -545,14 +547,15 @@ func runSCIMAttentionStatePairs(t *testing.T, db *store.DB) {
 		t.Fatal(err)
 	}
 	// Reactivation reconciles the flag: the remainder is gone, so the state is.
-	if _, err := s.PatchUser(ctx, wire, orgA, bindingID, user.ID, service.SCIMUserInput{Active: &on}); err != nil {
+	if _, err := s.PatchUser(ctx, wire, orgA, bindingID, user.ID,
+		[]service.UserPatchCommand{service.UserPatchSetActive{Active: on}}); err != nil {
 		t.Fatal(err)
 	}
 	record()
 
 	// inert_mapping: raised by a group delete, cleared by deleting the row.
-	group, err := s.CreateGroup(ctx, wire, orgA, bindingID, service.SCIMGroupInput{
-		DisplayName: "Inert", Members: []string{user.ID}, MembersPresent: true,
+	group, err := s.CreateGroup(ctx, wire, orgA, bindingID, service.DesiredGroup{
+		DisplayName: "Inert", Members: []string{user.ID},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -608,7 +611,8 @@ func runSCIMAttentionStatePairs(t *testing.T, db *store.DB) {
 	runOneLockoutPath(t, db, "pairs", "deprovision",
 		func(t *testing.T, s *service.SCIM, wire, self service.Actor, binding, user, group string) {
 			off := false
-			if _, err := s.PatchUser(ctx, wire, orgA, binding, user, service.SCIMUserInput{Active: &off}); err != nil {
+			if _, err := s.PatchUser(ctx, wire, orgA, binding, user,
+				[]service.UserPatchCommand{service.UserPatchSetActive{Active: off}}); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -916,7 +920,7 @@ func runSCIMRedactsIdPStrings(t *testing.T, db *store.DB) {
 	if strings.Contains(embedded, poison[10:]) {
 		t.Fatalf("redaction left token material behind: %q", embedded)
 	}
-	if _, err := s.CreateGroup(ctx, wire, orgA, bindingID, service.SCIMGroupInput{
+	if _, err := s.CreateGroup(ctx, wire, orgA, bindingID, service.DesiredGroup{
 		DisplayName: poison,
 	}); err != nil {
 		t.Fatal(err)
