@@ -1031,7 +1031,7 @@ jobs:
           restore-keys: |
             go-fuzz-v2-shard-${{ matrix.shard }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-cache-abi.outputs.value }}-${{ hashFiles('go.mod', 'go.sum') }}-
             go-fuzz-v2-shard-${{ matrix.shard }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-cache-abi.outputs.value }}-
-      - name: Fuzz every target for a bounded time
+      - name: Fuzz every target for bounded work
         env:
           FUZZ_PLAN: ${{ needs.analysis_shards.outputs.fuzz_plan }}
           FUZZ_SHARD: ${{ matrix.shard }}
@@ -1047,7 +1047,9 @@ jobs:
               continue
             fi
             echo "::group::$pkg $target"
-            if ! go test -run='^$' -fuzz="^${target}\$" -fuzztime=15s "$pkg"; then
+            # An iteration budget avoids Go's wall-clock fuzz cutoff racing an
+            # otherwise healthy worker shutdown under hosted-runner load.
+            if ! go test -run='^$' -fuzz="^${target}\$" -fuzztime=100000x -timeout=2m "$pkg"; then
               failed=1
             fi
             echo "::endgroup::"
