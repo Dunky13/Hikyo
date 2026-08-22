@@ -579,66 +579,11 @@ func composeRenderApply(ios IO, lock *compose.RenderLock, cfg *compose.Config, s
 	if _, err := binding.CanonicalAAD(); err != nil {
 		return false, failf(ExitRefused, "compose render: snapshot binding: %v", err)
 	}
-	byID := deliveredByID(resp.Keys)
-
-	type rendered struct {
-		name    string
-		content []byte
-		rows    []compose.SnapshotRow
+	plan, err := compose.BuildRenderPlan(liveRenderInput(cfg, configOnly, resp.Keys))
+	if err != nil {
+		return false, failf(ExitInternal, "compose render: %v", err)
 	}
-	var results []rendered
-	var refusals []string
-
-	for _, name := range cfg.TargetNames() {
-		tgt := cfg.Targets[name]
-		var rows []compose.Row
-		var srows []compose.SnapshotRow
-		var names []string
-		for _, id := range tgt.Keys {
-			k, ok := byID[id]
-			if !ok {
-				// Under --config-only the server OMITS secrets ENTIRELY — from the
-				// delivery and from the manifest (#64's locked rule) — so a
-				// projected-out secret is indistinguishable from a deleted config
-				// id. A configured id that is not delivered is therefore a SKIP in
-				// config-only, not a refusal; `compose doctor`'s drift checks are the
-				// compensating control that surface a genuinely deleted key. Under the
-				// FULL projection every configured id must be delivered, so an absent
-				// one refuses the target.
-				if configOnly {
-					continue
-				}
-				refusals = append(refusals, fmt.Sprintf("%s: %s: key id was not delivered by the server", name, id))
-				continue
-			}
-			if !configOnly && isUnrevealedSecret(k) {
-				refusals = append(refusals, fmt.Sprintf("%s: %s: secret has no value — %s", name, k.Name, machineRevealOptIn))
-				continue
-			}
-			// A delivered row with no value is genuinely unset / projected-out:
-			// never emit NAME= for a nil value (finding 7).
-			if k.Value == nil {
-				continue
-			}
-			rows = append(rows, compose.Row{Name: k.Name, Value: *k.Value})
-			srows = append(srows, compose.SnapshotRow{Name: k.Name, KeyID: k.KeyId, Classification: string(k.Classification), Value: *k.Value})
-			names = append(names, k.Name)
-		}
-		for _, ln := range compose.RefuseUnacknowledged(names, tgt.AcknowledgeLoaderControl) {
-			refusals = append(refusals, fmt.Sprintf("%s: %s: loader-control key not acknowledged (add it to this target's acknowledge_loader_control)", name, ln))
-		}
-		content, encRefusals, err := compose.EncodeRaw(rows)
-		if err != nil {
-			return false, failf(ExitInternal, "compose render: encode %s: %v", name, err)
-		}
-		for _, r := range encRefusals {
-			refusals = append(refusals, fmt.Sprintf("%s: %s: %s", name, r.Key, r.Reason))
-		}
-		results = append(results, rendered{name: name, content: content, rows: srows})
-	}
-
-	if len(refusals) > 0 {
-		sort.Strings(refusals)
+	if refusals := renderRefusalMessages(plan.Refusals); len(refusals) > 0 {
 		return false, failf(ExitRefused, "hikyo compose render refused; no generation written, cursor not advanced:\n  %s", strings.Join(refusals, "\n  "))
 	}
 
@@ -651,20 +596,20 @@ func composeRenderApply(ios IO, lock *compose.RenderLock, cfg *compose.Config, s
 	var allRows []compose.SnapshotRow
 	var lines []string
 	moved := false
-	for _, r := range results {
-		allRows = append(allRows, r.rows...)
-		stamp, materialized, err := lock.WriteGeneration(runtimeDir, keys, r.name, r.content)
+	for _, target := range plan.Targets {
+		allRows = append(allRows, target.SnapshotRows...)
+		stamp, materialized, err := lock.WriteGeneration(runtimeDir, keys, target.Name, target.Content)
 		if err != nil {
-			return false, failf(ExitInternal, "compose render: write generation %s: %v", r.name, err)
+			return false, failf(ExitInternal, "compose render: write generation %s: %v", target.Name, err)
 		}
-		finalStamps[r.name] = stamp
+		finalStamps[target.Name] = stamp
 		// moved when the stamp changed OR the generation had to be re-materialised
 		// (the tmpfs copy was lost): either way sync must re-apply (R1-10).
-		if currentStamps[r.name] != stamp || materialized {
+		if currentStamps[target.Name] != stamp || materialized {
 			moved = true
-			lines = append(lines, fmt.Sprintf("rendered %s generation %s → %s", r.name, stamp, filepath.Join(runtimeDir, stamp, r.name+".env")))
+			lines = append(lines, fmt.Sprintf("rendered %s generation %s → %s", target.Name, stamp, filepath.Join(runtimeDir, stamp, target.Name+".env")))
 		} else {
-			lines = append(lines, fmt.Sprintf("unchanged %s generation %s", r.name, stamp))
+			lines = append(lines, fmt.Sprintf("unchanged %s generation %s", target.Name, stamp))
 		}
 	}
 	if err := lock.CommitStamps(finalStamps); err != nil {
@@ -711,80 +656,32 @@ func composeRenderOffline(ctx context.Context, ios IO, lock *compose.RenderLock,
 	if err != nil {
 		return false, failf(ExitInternal, "compose render: reading offline snapshot binding: %v", err)
 	}
-	byID := map[string]compose.SnapshotRow{}
-	for _, r := range payload.Rows {
-		if r.KeyID != "" {
-			byID[r.KeyID] = r
-		}
+	plan, err := compose.BuildRenderPlan(offlineRenderInput(cfg, configOnly, payload.Rows))
+	if err != nil {
+		return false, failf(ExitInternal, "compose render: %v", err)
 	}
-
-	type rendered struct {
-		name    string
-		stamp   string
-		content []byte
-		rows    []compose.SnapshotRow
-	}
-	var results []rendered
-	var refusals []string
-	for _, name := range cfg.TargetNames() {
-		tgt := cfg.Targets[name]
-		var rows []compose.Row
-		var srows []compose.SnapshotRow
-		var names []string
-		for _, id := range tgt.Keys {
-			r, ok := byID[id]
-			if !ok {
-				// Under the FULL projection every configured target key id must be
-				// present in the sealed payload rows — the render-target set check at
-				// key granularity (R1-3), an absent id is a genuinely deleted key and
-				// refuses. Under --config-only the snapshot never held secrets (the
-				// server omits them entirely, #64's locked rule), so an absent id is
-				// indistinguishable from a projected-out secret and is a SKIP, not a
-				// refusal — `compose doctor`'s drift checks are the compensating
-				// control. This mirrors the live-fetch config-only skip.
-				if configOnly {
-					continue
-				}
-				refusals = append(refusals, fmt.Sprintf("%s: %s: not present in the last snapshot", name, id))
-				continue
-			}
-			rows = append(rows, compose.Row{Name: r.Name, Value: r.Value})
-			srows = append(srows, r)
-			names = append(names, r.Name)
-		}
-		// Loader-control BEFORE any offline record or write (finding 6).
-		for _, ln := range compose.RefuseUnacknowledged(names, tgt.AcknowledgeLoaderControl) {
-			refusals = append(refusals, fmt.Sprintf("%s: %s: loader-control key not acknowledged (add it to this target's acknowledge_loader_control)", name, ln))
-		}
-		content, encRefusals, err := compose.EncodeRaw(rows)
-		if err != nil {
-			return false, failf(ExitInternal, "compose render: encode %s: %v", name, err)
-		}
-		for _, rr := range encRefusals {
-			refusals = append(refusals, fmt.Sprintf("%s: %s: %s", name, rr.Key, rr.Reason))
-		}
-		// The stamp is bound to the target name (finding 5); it must match the
-		// stamp WriteGeneration will compute below.
-		results = append(results, rendered{name: name, stamp: compose.TargetStamp(keys, name, content), content: content, rows: srows})
-	}
-	if len(refusals) > 0 {
-		sort.Strings(refusals)
+	if refusals := renderRefusalMessages(plan.Refusals); len(refusals) > 0 {
 		return false, failf(ExitRefused, "hikyo compose render (offline) refused; no generation written:\n  %s", strings.Join(refusals, "\n  "))
 	}
 
 	// One offline record per served key, fsynced BEFORE any generation is
 	// written, then the generations, then the stamp commit and GC.
 	var records []compose.OfflineRecord
-	for _, r := range results {
-		for _, sr := range r.rows {
+	stamps := make(map[string]string, len(plan.Targets))
+	for _, target := range plan.Targets {
+		// The stamp is bound to the target name and must match the value
+		// WriteGeneration computes after the disclosure record is durable.
+		stamp := compose.TargetStamp(keys, target.Name, target.Content)
+		stamps[target.Name] = stamp
+		for _, row := range target.SnapshotRows {
 			id, err := compose.NewRecordID()
 			if err != nil {
 				return false, failf(ExitInternal, "compose render: record id: %v", err)
 			}
 			records = append(records, compose.OfflineRecord{
-				RecordID: id, KeyID: sr.KeyID, KeyName: sr.Name, Classification: sr.Classification,
+				RecordID: id, KeyID: row.KeyID, KeyName: row.Name, Classification: row.Classification,
 				OccurredAt: ios.now().UTC().Format(time.RFC3339), CredentialID: aad.CredentialID,
-				Generation: r.stamp, ServedFrom: aad.IssuedAt,
+				Generation: stamp, ServedFrom: aad.IssuedAt,
 			})
 		}
 	}
@@ -799,20 +696,23 @@ func composeRenderOffline(ctx context.Context, ios IO, lock *compose.RenderLock,
 	finalStamps := map[string]string{}
 	var lines []string
 	moved := false
-	for _, r := range results {
-		stamp, materialized, err := lock.WriteGeneration(runtimeDir, keys, r.name, r.content)
+	for _, target := range plan.Targets {
+		stamp, materialized, err := lock.WriteGeneration(runtimeDir, keys, target.Name, target.Content)
 		if err != nil {
-			return false, failf(ExitInternal, "compose render: write generation %s: %v", r.name, err)
+			return false, failf(ExitInternal, "compose render: write generation %s: %v", target.Name, err)
 		}
-		finalStamps[r.name] = stamp
+		if stamp != stamps[target.Name] {
+			return false, failf(ExitInternal, "compose render: target %s stamp changed between planning and write", target.Name)
+		}
+		finalStamps[target.Name] = stamp
 		fmt.Fprintf(ios.Stderr, "serving stale from %s, generation %s\n", aad.IssuedAt, stamp)
 		// moved when the stamp changed OR the generation had to be re-materialised
 		// (the tmpfs copy was lost): either way sync must re-apply (R1-10).
-		if currentStamps[r.name] != stamp || materialized {
+		if currentStamps[target.Name] != stamp || materialized {
 			moved = true
-			lines = append(lines, fmt.Sprintf("rendered %s generation %s → %s", r.name, stamp, filepath.Join(runtimeDir, stamp, r.name+".env")))
+			lines = append(lines, fmt.Sprintf("rendered %s generation %s → %s", target.Name, stamp, filepath.Join(runtimeDir, stamp, target.Name+".env")))
 		} else {
-			lines = append(lines, fmt.Sprintf("unchanged %s generation %s", r.name, stamp))
+			lines = append(lines, fmt.Sprintf("unchanged %s generation %s", target.Name, stamp))
 		}
 	}
 	if err := lock.CommitStamps(finalStamps); err != nil {
@@ -1890,6 +1790,70 @@ func isUnrevealedSecret(k apigen.DeliveredKey) bool {
 		k.Classification == apigen.KeyClassificationSecret && k.Value == nil
 }
 
+func liveRenderInput(cfg *compose.Config, configOnly bool, keys []apigen.DeliveredKey) compose.RenderInput {
+	rows := make([]compose.RenderSourceRow, 0, len(keys))
+	for _, key := range keys {
+		rows = append(rows, compose.RenderSourceRow{
+			KeyID: key.KeyId, Name: key.Name, Classification: string(key.Classification), Value: key.Value,
+			UnrevealedSecret: !configOnly && isUnrevealedSecret(key),
+		})
+	}
+	return renderInput(cfg, configOnly, compose.AbsentKeyRefuseNotDelivered, rows)
+}
+
+func offlineRenderInput(cfg *compose.Config, configOnly bool, rows []compose.SnapshotRow) compose.RenderInput {
+	sourceRows := make([]compose.RenderSourceRow, 0, len(rows))
+	for _, row := range rows {
+		value := row.Value
+		sourceRows = append(sourceRows, compose.RenderSourceRow{
+			KeyID: row.KeyID, Name: row.Name, Classification: row.Classification, Value: &value,
+		})
+	}
+	return renderInput(cfg, configOnly, compose.AbsentKeyRefuseNotInSnapshot, sourceRows)
+}
+
+func renderInput(cfg *compose.Config, configOnly bool, fullProjectionPolicy compose.AbsentKeyPolicy, rows []compose.RenderSourceRow) compose.RenderInput {
+	projection := compose.RenderProjectionFull
+	absentKeys := fullProjectionPolicy
+	if configOnly {
+		projection = compose.RenderProjectionConfigOnly
+		absentKeys = compose.AbsentKeySkip
+	}
+	targets := make([]compose.RenderTarget, 0, len(cfg.Targets))
+	for _, name := range cfg.TargetNames() {
+		target := cfg.Targets[name]
+		targets = append(targets, compose.RenderTarget{
+			Name: name, KeyIDs: append([]string(nil), target.Keys...),
+			AcknowledgeLoaderControl: append([]string(nil), target.AcknowledgeLoaderControl...),
+		})
+	}
+	return compose.RenderInput{Projection: projection, AbsentKeys: absentKeys, Targets: targets, Rows: rows}
+}
+
+func renderRefusalMessages(refusals []compose.RenderRefusal) []string {
+	messages := make([]string, 0, len(refusals))
+	for _, refusal := range refusals {
+		var detail string
+		switch refusal.Kind {
+		case compose.RenderRefusalKeyNotDelivered:
+			detail = "key id was not delivered by the server"
+		case compose.RenderRefusalKeyNotInSnapshot:
+			detail = "not present in the last snapshot"
+		case compose.RenderRefusalSecretUnrevealed:
+			detail = "secret has no value — " + machineRevealOptIn
+		case compose.RenderRefusalLoaderControl:
+			detail = "loader-control key not acknowledged (add it to this target's acknowledge_loader_control)"
+		case compose.RenderRefusalEncoding:
+			detail = refusal.Reason
+		default:
+			detail = fmt.Sprintf("unknown render refusal %q", refusal.Kind)
+		}
+		messages = append(messages, fmt.Sprintf("%s: %s: %s", refusal.Target, refusal.Key, detail))
+	}
+	sort.Strings(messages)
+	return messages
+}
+
 func deliveredValues(keys []apigen.DeliveredKey) map[string]string {
 	out := map[string]string{}
 	for _, k := range keys {
@@ -1918,14 +1882,6 @@ func rowNames(rows []compose.SnapshotRow) []string {
 		out = append(out, r.Name)
 	}
 	return out
-}
-
-func deliveredByID(keys []apigen.DeliveredKey) map[string]apigen.DeliveredKey {
-	m := make(map[string]apigen.DeliveredKey, len(keys))
-	for _, k := range keys {
-		m[k.KeyId] = k
-	}
-	return m
 }
 
 func rowsToValues(rows []compose.SnapshotRow) map[string]string {

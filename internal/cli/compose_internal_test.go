@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -918,6 +919,70 @@ func TestSnapshotBindingLiveAndOfflineRenderPathsAreEquivalent(t *testing.T) {
 	}
 	if !bytes.Equal(liveAAD, offlineAAD) {
 		t.Fatalf("live/offline binding mismatch:\n live %s\noffline %s", liveAAD, offlineAAD)
+	}
+}
+
+func TestLiveAndOfflineRenderAdaptersAreEquivalent(t *testing.T) {
+	tests := []struct {
+		name       string
+		configOnly bool
+		target     compose.Target
+		live       []apigen.DeliveredKey
+		offline    []compose.SnapshotRow
+	}{
+		{
+			name:   "selected values preserve bytes and row order",
+			target: compose.Target{Keys: []string{"key_url", "key_mode"}},
+			live: []apigen.DeliveredKey{
+				{KeyId: "key_mode", Name: "APP_MODE", Classification: apigen.KeyClassificationConfig, Value: strPtr("production")},
+				{KeyId: "key_url", Name: "DATABASE_URL", Classification: apigen.KeyClassificationSecret, Value: strPtr("postgres://db")},
+			},
+			offline: []compose.SnapshotRow{
+				{Name: "APP_MODE", KeyID: "key_mode", Classification: "config", Value: "production"},
+				{Name: "DATABASE_URL", KeyID: "key_url", Classification: "secret", Value: "postgres://db"},
+			},
+		},
+		{
+			name:   "loader and encoding refusals match",
+			target: compose.Target{Keys: []string{"key_path", "key_bad"}},
+			live: []apigen.DeliveredKey{
+				{KeyId: "key_path", Name: "PATH", Classification: apigen.KeyClassificationConfig, Value: strPtr("/srv/bin")},
+				{KeyId: "key_bad", Name: "MULTILINE", Classification: apigen.KeyClassificationConfig, Value: strPtr("a\nb")},
+			},
+			offline: []compose.SnapshotRow{
+				{Name: "PATH", KeyID: "key_path", Classification: "config", Value: "/srv/bin"},
+				{Name: "MULTILINE", KeyID: "key_bad", Classification: "config", Value: "a\nb"},
+			},
+		},
+		{
+			name:       "config-only projected and unset rows render identically",
+			configOnly: true,
+			target:     compose.Target{Keys: []string{"key_cfg", "key_unset", "key_secret"}},
+			live: []apigen.DeliveredKey{
+				{KeyId: "key_cfg", Name: "APP_MODE", Classification: apigen.KeyClassificationConfig, Value: strPtr("production")},
+				{KeyId: "key_unset", Name: "OPTIONAL", Classification: apigen.KeyClassificationConfig},
+			},
+			offline: []compose.SnapshotRow{{Name: "APP_MODE", KeyID: "key_cfg", Classification: "config", Value: "production"}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &compose.Config{Targets: map[string]compose.Target{"api": tt.target}}
+			live, err := compose.BuildRenderPlan(liveRenderInput(cfg, tt.configOnly, tt.live))
+			if err != nil {
+				t.Fatal(err)
+			}
+			offline, err := compose.BuildRenderPlan(offlineRenderInput(cfg, tt.configOnly, tt.offline))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(live.Targets, offline.Targets) {
+				t.Fatalf("target plans differ:\n live: %#v\noffline: %#v", live.Targets, offline.Targets)
+			}
+			if !reflect.DeepEqual(live.Refusals, offline.Refusals) {
+				t.Fatalf("refusals differ:\n live: %#v\noffline: %#v", live.Refusals, offline.Refusals)
+			}
+		})
 	}
 }
 
