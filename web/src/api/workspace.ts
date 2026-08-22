@@ -61,6 +61,8 @@ const workspaceSessions = new Map<string, WorkspaceSessionState>();
 const listeners = new Set<() => void>();
 let snapshot: readonly WorkspaceBearer[] = [];
 let nextWorkspaceEpoch = 0;
+let workspaceOwnerKnown = false;
+let workspaceOwnerSession: string | undefined;
 
 function publish(): void {
   snapshot = [...workspaceSessions.values()].map((state) => state.bearer);
@@ -76,6 +78,10 @@ export function workspaceBearer(origin: string): WorkspaceBearer | undefined {
 /** Captures the aggregate identity an asynchronous workspace request belongs to. */
 export function workspaceSession(origin: string): WorkspaceSessionReference | undefined {
   return workspaceSessions.get(origin);
+}
+
+function isCurrentWorkspaceSession(session: WorkspaceSessionReference): boolean {
+  return workspaceSessions.get(session.bearer.origin)?.epoch === session.epoch;
 }
 
 function workspaceSessionFor(bearer: WorkspaceBearer): WorkspaceSessionState | undefined {
@@ -98,6 +104,28 @@ export function forgetWorkspace(origin: string): void {
   }
 }
 
+function forgetAllWorkspaces(): void {
+  if (workspaceSessions.size === 0) {
+    return;
+  }
+  workspaceSessions.clear();
+  publish();
+}
+
+/**
+ * Moves workspace ownership with the root browser session. Login replacement,
+ * logout, and expiry all call this boundary; a new owner receives no remote
+ * bearer or health state from the session that ended.
+ */
+export function transitionWorkspaceOwner(sessionID: string | undefined): void {
+  if (workspaceOwnerKnown && workspaceOwnerSession === sessionID) {
+    return;
+  }
+  workspaceOwnerKnown = true;
+  workspaceOwnerSession = sessionID;
+  forgetAllWorkspaces();
+}
+
 /**
  * dropWorkspaceSession drops one origin ONLY IF the captured aggregate is
  * still current. The transport's 401 kill path and liveness probe both use it.
@@ -107,7 +135,7 @@ export function forgetWorkspace(origin: string): void {
  * work mutate a replacement session.
  */
 export function dropWorkspaceSession(session: WorkspaceSessionReference): void {
-  if (workspaceSessions.get(session.bearer.origin) !== session) {
+  if (!isCurrentWorkspaceSession(session)) {
     return;
   }
   workspaceSessions.delete(session.bearer.origin);
@@ -116,7 +144,7 @@ export function dropWorkspaceSession(session: WorkspaceSessionReference): void {
 
 /** Counts one unreachable probe only against the aggregate that launched it. */
 function strike(session: WorkspaceSessionState): boolean {
-  if (workspaceSessions.get(session.bearer.origin) !== session) {
+  if (!isCurrentWorkspaceSession(session)) {
     return false;
   }
   session.consecutiveFailures += 1;
@@ -205,7 +233,7 @@ export async function probeWorkspace(bearer: WorkspaceBearer): Promise<boolean> 
   // session — so a forbidden never becomes a false reconnect. It does not clear
   // the strike count either: it is not the clean answer that proves liveness.
   if (response.status === 403) {
-    return workspaceSessions.get(bearer.origin) === session;
+    return isCurrentWorkspaceSession(session);
   }
   // ONLY A WELL-FORMED SUCCESS CLEARS THE STRIKE COUNT. Anything else is a
   // strike: a 404 or a 500 is not this endpoint answering, and a 200 carrying
@@ -221,7 +249,7 @@ export async function probeWorkspace(bearer: WorkspaceBearer): Promise<boolean> 
   } catch {
     return strike(session);
   }
-  if (workspaceSessions.get(bearer.origin) !== session) {
+  if (!isCurrentWorkspaceSession(session)) {
     return false;
   }
   session.consecutiveFailures = 0;

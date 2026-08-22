@@ -4,6 +4,7 @@ import {
   forgetWorkspace,
   probeWorkspace,
   rememberWorkspace,
+  transitionWorkspaceOwner,
   workspaceBearer,
   type WorkspaceBearer,
 } from './workspace.ts';
@@ -36,9 +37,28 @@ function sessionList(): Response {
   );
 }
 
+function deferredResponse(): {
+  readonly promise: Promise<Response>;
+  readonly resolve: (response: Response) => void;
+  readonly reject: (error: Error) => void;
+} {
+  let resolveResponse = (_response: Response): void => {
+    throw new Error('deferred response was not initialized');
+  };
+  let rejectResponse = (_error: Error): void => {
+    throw new Error('deferred response was not initialized');
+  };
+  const promise = new Promise<Response>((resolve, reject) => {
+    resolveResponse = resolve;
+    rejectResponse = reject;
+  });
+  return { promise, resolve: resolveResponse, reject: rejectResponse };
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
   forgetWorkspace(bearer.origin);
+  transitionWorkspaceOwner(undefined);
 });
 
 // A blip must not cost a ceremony, and a re-established workspace is a NEW
@@ -96,16 +116,8 @@ describe('probeWorkspace strike counting', () => {
 // let the old probe's verdict delete the NEW session.
 describe('probeWorkspace session identity', () => {
   it('ignores a completion about a session that has been replaced', async () => {
-    let settle: (r: Response) => void = () => {};
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(
-        () =>
-          new Promise<Response>((resolve) => {
-            settle = resolve;
-          }),
-      ),
-    );
+    const response = deferredResponse();
+    vi.stubGlobal('fetch', vi.fn(() => response.promise));
     rememberWorkspace(bearer);
     const inFlight = probeWorkspace(bearer);
 
@@ -114,7 +126,7 @@ describe('probeWorkspace session identity', () => {
     rememberWorkspace(replacement);
 
     // S1's probe now fails. It must not touch S2.
-    settle(new Response(null, { status: 401 }));
+    response.resolve(new Response(null, { status: 401 }));
     expect(await inFlight).toBe(false);
     expect(workspaceBearer(bearer.origin)?.session).toBe('ses_2');
   });
@@ -122,18 +134,10 @@ describe('probeWorkspace session identity', () => {
   // A step-up ELEVATES in place: same session id, a freshly rotated value. A
   // probe fired with the pre-elevation value must not, on its stale 401, take
   // down the live elevated bearer that shares its session id — the drop is keyed
-  // by value, not session, exactly as the transport's kill path is.
+  // by local epoch, exactly as the transport's kill path is.
   it('ignores a stale 401 for a value the same session has since rotated', async () => {
-    let settle: (r: Response) => void = () => {};
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(
-        () =>
-          new Promise<Response>((resolve) => {
-            settle = resolve;
-          }),
-      ),
-    );
+    const response = deferredResponse();
+    vi.stubGlobal('fetch', vi.fn(() => response.promise));
     rememberWorkspace(bearer);
     const inFlight = probeWorkspace(bearer);
 
@@ -141,43 +145,30 @@ describe('probeWorkspace session identity', () => {
     const elevated: WorkspaceBearer = { ...bearer, value: 'hik_ws_elevated' };
     rememberWorkspace(elevated);
 
-    settle(new Response(null, { status: 401 }));
+    response.resolve(new Response(null, { status: 401 }));
     expect(await inFlight).toBe(false);
     expect(workspaceBearer(bearer.origin)?.value).toBe('hik_ws_elevated');
     expect(workspaceBearer(bearer.origin)?.session).toBe('ses_1');
   });
 
   it('does not report a stale successful probe as health for the replacement session', async () => {
-    let settle: (r: Response) => void = () => {};
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(
-        () =>
-          new Promise<Response>((resolve) => {
-            settle = resolve;
-          }),
-      ),
-    );
+    const response = deferredResponse();
+    vi.stubGlobal('fetch', vi.fn(() => response.promise));
     rememberWorkspace(bearer);
     const inFlight = probeWorkspace(bearer);
 
     rememberWorkspace({ ...bearer, session: 'ses_2', value: 'hik_ws_second' });
 
-    settle(sessionList());
+    response.resolve(sessionList());
     expect(await inFlight).toBe(false);
     expect(workspaceBearer(bearer.origin)?.session).toBe('ses_2');
   });
 
   it('does not spend a stale failed probe against a replacement epoch', async () => {
-    let rejectOld: (reason: Error) => void = () => {};
+    const response = deferredResponse();
     const fetchMock = vi
       .fn()
-      .mockImplementationOnce(
-        () =>
-          new Promise<Response>((_resolve, reject) => {
-            rejectOld = reject;
-          }),
-      )
+      .mockImplementationOnce(() => response.promise)
       .mockRejectedValue(new TypeError('Failed to fetch'));
     vi.stubGlobal('fetch', fetchMock);
     rememberWorkspace(bearer);
@@ -187,11 +178,48 @@ describe('probeWorkspace session identity', () => {
     // this adversarial case proves old async work cannot mutate replacement.
     const replacement = { ...bearer, session: 'ses_2' };
     rememberWorkspace(replacement);
-    rejectOld(new TypeError('Failed to fetch'));
+    response.reject(new TypeError('Failed to fetch'));
 
     expect(await inFlight).toBe(false);
     expect(await probeWorkspace(replacement)).toBe(true);
     expect(workspaceBearer(bearer.origin)?.session).toBe('ses_2');
+  });
+});
+
+describe('root session ownership', () => {
+  it('preserves workspace health while the root session epoch is unchanged', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.reject(new TypeError('Failed to fetch'))),
+    );
+    transitionWorkspaceOwner('browser_1');
+    rememberWorkspace(bearer);
+    expect(await probeWorkspace(bearer)).toBe(true);
+
+    transitionWorkspaceOwner('browser_1');
+
+    expect(await probeWorkspace(bearer)).toBe(false);
+    expect(workspaceBearer(bearer.origin)).toBeUndefined();
+  });
+
+  it.each([
+    ['logout or expiry', undefined],
+    ['session replacement', 'browser_2'],
+  ])('removes the whole workspace aggregate on %s', async (_transition, nextSession) => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.reject(new TypeError('Failed to fetch'))),
+    );
+    transitionWorkspaceOwner('browser_1');
+    rememberWorkspace(bearer);
+    expect(await probeWorkspace(bearer)).toBe(true);
+
+    transitionWorkspaceOwner(nextSession);
+
+    expect(workspaceBearer(bearer.origin)).toBeUndefined();
+    const reopened = { ...bearer, session: 'ses_2' };
+    rememberWorkspace(reopened);
+    expect(await probeWorkspace(reopened)).toBe(true);
   });
 });
 

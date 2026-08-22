@@ -10,6 +10,7 @@ import type { z } from 'zod';
 
 import { ApiError, ok, parsed } from './client.ts';
 import { useTransport } from './transport.tsx';
+import { transitionWorkspaceOwner } from './workspace.ts';
 
 /**
  * loginFailureText turns a login failure into something true.
@@ -54,9 +55,12 @@ export function useSession(): UseQueryResult<WhoAmI | null> {
     queryKey: sessionKey,
     queryFn: async () => {
       try {
-        return await parsed(whoamiOp, {});
+        const session = await parsed(whoamiOp, {});
+        transitionWorkspaceOwner(session.session.id);
+        return session;
       } catch (err) {
         if (err instanceof ApiError && err.status === 401) {
+          transitionWorkspaceOwner(undefined);
           return null;
         }
         throw err;
@@ -117,7 +121,10 @@ export function useLogin() {
       }
       return result;
     },
-    onSuccess: () => queries.invalidateQueries(),
+    onSuccess: (result) => {
+      transitionWorkspaceOwner(result.session.id);
+      return queries.invalidateQueries();
+    },
   });
 }
 
@@ -130,6 +137,9 @@ export function useLogout() {
     // ended. `resetQueries`, not `clear`: clearing empties the cache but
     // leaves mounted observers holding their last result, so the chrome would
     // keep rendering a signed-out principal until something else refetched.
-    onSuccess: () => queries.resetQueries(),
+    onSuccess: () => {
+      transitionWorkspaceOwner(undefined);
+      return queries.resetQueries();
+    },
   });
 }
