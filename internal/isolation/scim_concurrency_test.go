@@ -117,7 +117,7 @@ func runSCIMConcurrentDuplicateCreate(t *testing.T, db *store.DB) {
 		go func(i int) {
 			defer done.Done()
 			<-start
-			u, err := s.CreateUser(t.Context(), wire, orgA, bindingID, service.SCIMUserInput{
+			u, err := s.CreateUser(t.Context(), wire, orgA, bindingID, service.DesiredUser{Active: true,
 				UserName:   fmt.Sprintf("race-%d@example.test", i),
 				SubjectRaw: subject, ExternalID: subject,
 			})
@@ -183,7 +183,7 @@ func runSCIMConcurrentDuplicateCreate(t *testing.T, db *store.DB) {
 			defer done.Done()
 			<-start
 			users[i], errs[i] = s.CreateUser(t.Context(), legs[i].actor, legs[i].org, legs[i].binding,
-				service.SCIMUserInput{
+				service.DesiredUser{Active: true,
 					UserName:   fmt.Sprintf("cross-%d@example.test", i),
 					SubjectRaw: shared, ExternalID: shared,
 				})
@@ -253,14 +253,14 @@ func runSCIMTeardownPhaseOrder(t *testing.T, db *store.DB) {
 	bindingID, token := newSCIMBinding(t, db, "okta")
 	wire := service.SCIMCredentialActor(token, bindingID)
 
-	user, err := s.CreateUser(ctx, wire, orgA, bindingID, service.SCIMUserInput{
+	user, err := s.CreateUser(ctx, wire, orgA, bindingID, service.DesiredUser{Active: true,
 		UserName: "teardown@example.test", ExternalID: "ext-teardown", SubjectRaw: "ext-teardown",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	group, err := s.CreateGroup(ctx, wire, orgA, bindingID, service.SCIMGroupInput{
-		DisplayName: "Teardown", Members: []string{user.ID}, MembersPresent: true,
+	group, err := s.CreateGroup(ctx, wire, orgA, bindingID, service.DesiredGroup{
+		DisplayName: "Teardown", Members: []string{user.ID},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -459,7 +459,7 @@ func runSCIMPerBindingSerializationOrder(t *testing.T, db *store.DB) {
 	// the two racing transactions and nothing else.
 	members := make([]string, 0, 2)
 	for _, name := range []string{"ser-one", "ser-two"} {
-		u, err := s.CreateUser(ctx, wire, orgA, bindingID, service.SCIMUserInput{
+		u, err := s.CreateUser(ctx, wire, orgA, bindingID, service.DesiredUser{Active: true,
 			UserName: name + "@example.test", ExternalID: name, SubjectRaw: name,
 		})
 		if err != nil {
@@ -467,8 +467,8 @@ func runSCIMPerBindingSerializationOrder(t *testing.T, db *store.DB) {
 		}
 		members = append(members, u.ID)
 	}
-	group, err := s.CreateGroup(ctx, wire, orgA, bindingID, service.SCIMGroupInput{
-		DisplayName: "Serialized", MembersPresent: true,
+	group, err := s.CreateGroup(ctx, wire, orgA, bindingID, service.DesiredGroup{
+		DisplayName: "Serialized",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -499,10 +499,7 @@ func runSCIMPerBindingSerializationOrder(t *testing.T, db *store.DB) {
 			// wait, and that is a throughput answer, not a lost write.
 			for range 4 {
 				_, errs[i] = s.PatchGroup(ctx, wire, orgA, bindingID, group.ID,
-					service.SCIMGroupInput{
-						MemberOps: []service.SCIMMemberOp{{Kind: service.SCIMMemberAdd, Members: []string{members[i]}}},
-						Patch:     true,
-					})
+					[]service.GroupPatchCommand{service.GroupPatchAddMembers{Members: []string{members[i]}}})
 				if errs[i] == nil {
 					return
 				}
@@ -576,10 +573,7 @@ func runSCIMPerBindingSerializationOrder(t *testing.T, db *store.DB) {
 						service.SCIMMappingSpec{GroupID: group.ID, Template: domain.TemplateViewer, ProjectID: string(prjA1)})
 				} else {
 					_, adminErrs[i] = s.PatchGroup(ctx, wire, orgA, bindingID, group.ID,
-						service.SCIMGroupInput{
-							MemberOps: []service.SCIMMemberOp{{Kind: service.SCIMMemberRemoveOne, Value: members[0]}},
-							Patch:     true,
-						})
+						[]service.GroupPatchCommand{service.GroupPatchRemoveMember{Member: members[0]}})
 				}
 				if adminErrs[i] == nil {
 					return
@@ -633,7 +627,7 @@ func runSCIMSyncInvalidatesSessions(t *testing.T, db *store.DB) {
 	bindingID, token := newSCIMBinding(t, db, "okta")
 	wire := service.SCIMCredentialActor(token, bindingID)
 
-	user, err := s.CreateUser(ctx, wire, orgA, bindingID, service.SCIMUserInput{
+	user, err := s.CreateUser(ctx, wire, orgA, bindingID, service.DesiredUser{Active: true,
 		UserName: "sess@example.test", ExternalID: "ext-sess", SubjectRaw: "ext-sess",
 	})
 	if err != nil {
@@ -653,8 +647,8 @@ func runSCIMSyncInvalidatesSessions(t *testing.T, db *store.DB) {
 	before := queryInt(t, db,
 		`SELECT session_generation FROM principals WHERE id = '`+string(principal)+`'`)
 
-	group, err := s.CreateGroup(ctx, wire, orgA, bindingID, service.SCIMGroupInput{
-		DisplayName: "Session Readers", Members: []string{user.ID}, MembersPresent: true,
+	group, err := s.CreateGroup(ctx, wire, orgA, bindingID, service.DesiredGroup{
+		DisplayName: "Session Readers", Members: []string{user.ID},
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -57,9 +57,8 @@ func runSCIMProvisionThenLoginOIDC(t *testing.T, db *store.DB) {
 	wire := service.SCIMCredentialActor(mint.Token, binding.ID)
 
 	// The identity provider pushes a user whose `sub` will be `okta-sub-1`.
-	user, err := s.CreateUser(ctx, wire, orgA, binding.ID, service.SCIMUserInput{
+	user, err := s.CreateUser(ctx, wire, orgA, binding.ID, service.DesiredUser{Active: true,
 		UserName: "lea@okta.test", ExternalID: "okta-sub-1",
-		Resource: map[string]any{"userName": "lea@okta.test", "externalId": "okta-sub-1"},
 	})
 	if err != nil {
 		t.Fatalf("provision: %v", err)
@@ -148,9 +147,8 @@ func runSCIMProvisionThenLoginSAML(t *testing.T, db *store.DB) {
 	wire := service.SCIMCredentialActor(mint.Token, binding.ID)
 
 	const nameID = "entra-user-1"
-	user, err := s.CreateUser(ctx, wire, orgA, binding.ID, service.SCIMUserInput{
+	user, err := s.CreateUser(ctx, wire, orgA, binding.ID, service.DesiredUser{Active: true,
 		UserName: "mo@entra.test", ExternalID: nameID,
-		Resource: map[string]any{"userName": "mo@entra.test", "externalId": nameID},
 	})
 	if err != nil {
 		t.Fatalf("provision: %v", err)
@@ -234,7 +232,7 @@ func runSCIMTwoBindingRace(t *testing.T, db *store.DB) {
 		{first, firstToken, "one"}, {second, secondToken, "two"},
 	} {
 		wire := service.SCIMCredentialActor(b.token, b.id)
-		u, err := s.CreateUser(ctx, wire, orgA, b.id, service.SCIMUserInput{
+		u, err := s.CreateUser(ctx, wire, orgA, b.id, service.DesiredUser{Active: true,
 			UserName: "shared-" + b.name + "@example.test", ExternalID: "shared", SubjectRaw: "shared",
 		})
 		if err != nil {
@@ -243,8 +241,8 @@ func runSCIMTwoBindingRace(t *testing.T, db *store.DB) {
 		if accountOf(t, db, u.ID) != "acc_shared" {
 			t.Fatalf("binding %s did not attach the shared account", b.name)
 		}
-		g, err := s.CreateGroup(ctx, wire, orgA, b.id, service.SCIMGroupInput{
-			DisplayName: "Readers " + b.name, Members: []string{u.ID}, MembersPresent: true,
+		g, err := s.CreateGroup(ctx, wire, orgA, b.id, service.DesiredGroup{
+			DisplayName: "Readers " + b.name, Members: []string{u.ID},
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -308,7 +306,7 @@ func runSCIMTwoBindingRace(t *testing.T, db *store.DB) {
 	// binding still holds it, and a premature revocation here would take away
 	// access the second identity provider still asserts.
 	if _, err := s.PatchGroup(ctx, legs[0].wire, orgA, legs[0].binding, legs[0].group,
-		service.SCIMGroupInput{Members: nil, MembersPresent: true}); err != nil {
+		[]service.GroupPatchCommand{service.GroupPatchClearMembers{}}); err != nil {
 		t.Fatalf("release on the first binding: %v", err)
 	}
 	if !held(t, db, principal, domain.CapRead, scope) {
@@ -322,7 +320,7 @@ func runSCIMTwoBindingRace(t *testing.T, db *store.DB) {
 
 	// The second release is the last one, and only then does the row die.
 	if _, err := s.PatchGroup(ctx, legs[1].wire, orgA, legs[1].binding, legs[1].group,
-		service.SCIMGroupInput{Members: nil, MembersPresent: true}); err != nil {
+		[]service.GroupPatchCommand{service.GroupPatchClearMembers{}}); err != nil {
 		t.Fatalf("release on the second binding: %v", err)
 	}
 	if held(t, db, principal, domain.CapRead, scope) {
@@ -354,8 +352,8 @@ func runSCIMPerBindingSerialization(t *testing.T, db *store.DB) {
 		go func(i int) {
 			defer wg.Done()
 			name := fmt.Sprintf("concurrent-%d@example.test", i)
-			in := service.SCIMUserInput{
-				UserName: name, ExternalID: fmt.Sprintf("ext-%d", i), SubjectRaw: fmt.Sprintf("ext-%d", i),
+			in := service.DesiredUser{
+				UserName: name, ExternalID: fmt.Sprintf("ext-%d", i), SubjectRaw: fmt.Sprintf("ext-%d", i), Active: true,
 			}
 			// A bounded client-side retry, because that is what a connector
 			// does and what the property is about. Six-way parallelism on ONE
@@ -417,7 +415,7 @@ func runSCIMReconcileKeepsFreshOrigins(t *testing.T, db *store.DB) {
 	bindingID, token := newSCIMBinding(t, db, "okta")
 	wire := service.SCIMCredentialActor(token, bindingID)
 
-	user, err := s.CreateUser(ctx, wire, orgA, bindingID, service.SCIMUserInput{
+	user, err := s.CreateUser(ctx, wire, orgA, bindingID, service.DesiredUser{Active: true,
 		UserName: "both@okta.test", ExternalID: "both", SubjectRaw: "both",
 	})
 	if err != nil {
@@ -428,8 +426,8 @@ func runSCIMReconcileKeepsFreshOrigins(t *testing.T, db *store.DB) {
 
 	// THE ARCHIVED HALF: a group and a mapping that existed when the backup was
 	// taken, granting `read`.
-	archived, err := s.CreateGroup(ctx, wire, orgA, bindingID, service.SCIMGroupInput{
-		DisplayName: "Archived Readers", Members: []string{user.ID}, MembersPresent: true,
+	archived, err := s.CreateGroup(ctx, wire, orgA, bindingID, service.DesiredGroup{
+		DisplayName: "Archived Readers", Members: []string{user.ID},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -481,8 +479,8 @@ func runSCIMReconcileKeepsFreshOrigins(t *testing.T, db *store.DB) {
 	// apart: same capability, same template, different chain, so a fixture that
 	// discriminated on capability alone would be reading a template's expansion
 	// rather than an origin's provenance.
-	fresh, err := s.CreateGroup(ctx, rewire, orgA, bindingID, service.SCIMGroupInput{
-		DisplayName: "Fresh Editors", Members: []string{user.ID}, MembersPresent: true,
+	fresh, err := s.CreateGroup(ctx, rewire, orgA, bindingID, service.DesiredGroup{
+		DisplayName: "Fresh Editors", Members: []string{user.ID},
 	})
 	if err != nil {
 		t.Fatalf("re-assertion: %v", err)
@@ -550,20 +548,20 @@ func runSCIMRestoreDrill(t *testing.T, db *store.DB) {
 
 	// The backup's world: two provisioned users, one of whom is DEPROVISIONED
 	// after the backup is taken.
-	stays, err := s.CreateUser(ctx, wire, orgA, binding.ID, service.SCIMUserInput{
+	stays, err := s.CreateUser(ctx, wire, orgA, binding.ID, service.DesiredUser{Active: true,
 		UserName: "stays@okta.test", ExternalID: "stays", SubjectRaw: "stays",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	goes, err := s.CreateUser(ctx, wire, orgA, binding.ID, service.SCIMUserInput{
+	goes, err := s.CreateUser(ctx, wire, orgA, binding.ID, service.DesiredUser{Active: true,
 		UserName: "goes@okta.test", ExternalID: "goes", SubjectRaw: "goes",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	group, err := s.CreateGroup(ctx, wire, orgA, binding.ID, service.SCIMGroupInput{
-		DisplayName: "Restored Readers", Members: []string{stays.ID, goes.ID}, MembersPresent: true,
+	group, err := s.CreateGroup(ctx, wire, orgA, binding.ID, service.DesiredGroup{
+		DisplayName: "Restored Readers", Members: []string{stays.ID, goes.ID},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -635,7 +633,7 @@ func runSCIMRestoreDrill(t *testing.T, db *store.DB) {
 	// state the world is really in when the restore happens.
 	offGoes := false
 	if _, err := s.PatchUser(ctx, wire, orgA, binding.ID, goes.ID,
-		service.SCIMUserInput{Active: &offGoes}); err != nil {
+		[]service.UserPatchCommand{service.UserPatchSetActive{Active: offGoes}}); err != nil {
 		t.Fatalf("post-backup deprovision: %v", err)
 	}
 	if held(t, db, goesPrincipal, domain.CapRead, scope) {
@@ -719,7 +717,7 @@ func runSCIMRestoreDrill(t *testing.T, db *store.DB) {
 	}
 	// And no wire push can re-bless them either: every credential is dead.
 	if _, err := s.PatchUser(ctx, wire, orgA, binding.ID, goes.ID,
-		service.SCIMUserInput{}); !errors.Is(err, domain.ErrUnauthenticated) {
+		nil); !errors.Is(err, domain.ErrUnauthenticated) {
 		t.Fatalf("the restore window must refuse the whole wire surface, got %v", err)
 	}
 	// A PROTECTED OPERATION attempted as `goes`, through every door a human
@@ -808,9 +806,8 @@ func runSCIMRestoreDrill(t *testing.T, db *store.DB) {
 	// from the group, `stays` is not. This is the half of §9.1 that DOES work
 	// today — re-assertion rebuilds exactly what the IdP currently asserts, and
 	// what it no longer asserts is released.
-	if _, err := s.PatchGroup(ctx, rewire, orgA, binding.ID, group.ID, service.SCIMGroupInput{
-		Members: []string{stays.ID}, MembersPresent: true,
-	}); err != nil {
+	if _, err := s.PatchGroup(ctx, rewire, orgA, binding.ID, group.ID,
+		[]service.GroupPatchCommand{service.GroupPatchReplaceMembers{Members: []string{stays.ID}}}); err != nil {
 		t.Fatalf("re-assertion: %v", err)
 	}
 	if held(t, db, goesPrincipal, domain.CapRead, scope) {

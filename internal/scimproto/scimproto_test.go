@@ -68,6 +68,10 @@ func TestPatchMatrixCells(t *testing.T) {
 			`{"schemas":["urn:ietf:params:scim:api:messages:2.0:PatchOp"],"Operations":[{"op":"add","path":"members","value":[]}]}`, 0, TypeInvalidPath},
 		{"active-on-a-Group-REFUSED", ResourceGroup,
 			`{"schemas":["urn:ietf:params:scim:api:messages:2.0:PatchOp"],"Operations":[{"op":"replace","path":"active","value":true}]}`, 0, TypeInvalidPath},
+		{"unknown-plain-Group-attribute-REFUSED", ResourceGroup,
+			`{"schemas":["urn:ietf:params:scim:api:messages:2.0:PatchOp"],"Operations":[{"op":"replace","path":"description","value":"x"}]}`, 0, TypeInvalidPath},
+		{"unknown-pathless-Group-attribute-REFUSED", ResourceGroup,
+			`{"schemas":["urn:ietf:params:scim:api:messages:2.0:PatchOp"],"Operations":[{"op":"replace","value":{"description":"x"}}]}`, 0, TypeInvalidPath},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

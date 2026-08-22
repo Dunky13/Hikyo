@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/Hikyo-Org/hikyo/api/apigen"
 	"github.com/Hikyo-Org/hikyo/internal/domain"
@@ -24,18 +25,18 @@ import (
 
 // SCIMWireService is the provisioning surface this transport needs.
 type SCIMWireService interface {
-	CreateUser(ctx context.Context, actor service.Actor, org domain.OrgID, binding string, in service.SCIMUserInput) (service.SCIMUserResource, error)
+	CreateUser(ctx context.Context, actor service.Actor, org domain.OrgID, binding string, in service.DesiredUser) (service.SCIMUserResource, error)
 	GetUser(ctx context.Context, actor service.Actor, org domain.OrgID, binding, id string) (service.SCIMUserResource, error)
 	ListUsers(ctx context.Context, actor service.Actor, org domain.OrgID, binding string, filter scimproto.Filter, page scimproto.Page) ([]service.SCIMUserResource, int, error)
-	ReplaceUser(ctx context.Context, actor service.Actor, org domain.OrgID, binding, id string, in service.SCIMUserInput) (service.SCIMUserResource, error)
-	PatchUser(ctx context.Context, actor service.Actor, org domain.OrgID, binding, id string, in service.SCIMUserInput) (service.SCIMUserResource, error)
+	ReplaceUser(ctx context.Context, actor service.Actor, org domain.OrgID, binding, id string, in service.DesiredUser) (service.SCIMUserResource, error)
+	PatchUser(ctx context.Context, actor service.Actor, org domain.OrgID, binding, id string, commands []service.UserPatchCommand) (service.SCIMUserResource, error)
 	DeleteUser(ctx context.Context, actor service.Actor, org domain.OrgID, binding, id string) error
 
-	CreateGroup(ctx context.Context, actor service.Actor, org domain.OrgID, binding string, in service.SCIMGroupInput) (service.SCIMGroupResource, error)
+	CreateGroup(ctx context.Context, actor service.Actor, org domain.OrgID, binding string, in service.DesiredGroup) (service.SCIMGroupResource, error)
 	GetGroup(ctx context.Context, actor service.Actor, org domain.OrgID, binding, id string) (service.SCIMGroupResource, error)
 	ListGroups(ctx context.Context, actor service.Actor, org domain.OrgID, binding string, filter scimproto.Filter, page scimproto.Page) ([]service.SCIMGroupResource, int, error)
-	ReplaceGroup(ctx context.Context, actor service.Actor, org domain.OrgID, binding, id string, in service.SCIMGroupInput) (service.SCIMGroupResource, error)
-	PatchGroup(ctx context.Context, actor service.Actor, org domain.OrgID, binding, id string, in service.SCIMGroupInput) (service.SCIMGroupResource, error)
+	ReplaceGroup(ctx context.Context, actor service.Actor, org domain.OrgID, binding, id string, in service.DesiredGroup) (service.SCIMGroupResource, error)
+	PatchGroup(ctx context.Context, actor service.Actor, org domain.OrgID, binding, id string, commands []service.GroupPatchCommand) (service.SCIMGroupResource, error)
 	DeleteGroup(ctx context.Context, actor service.Actor, org domain.OrgID, binding, id string) error
 
 	// Discovery authenticates a probe and returns the binding's DECLARED schema
@@ -168,31 +169,30 @@ func rawJSON(body map[string]any) ([]byte, *scimproto.Error) {
 	return raw, nil
 }
 
-// scimUserInput decodes a User resource into the service's desired-state
+// scimDesiredUser decodes a User resource into the service's desired-state
 // input. `groups` is dropped on the floor: RFC 7643 makes it read-only, and
-// membership is authored exclusively through Group operations. The identity
-// material is NOT read here — the whole resource travels to the service, which
-// reads it at the attribute path the binding declares.
-func scimUserInput(body map[string]any) (service.SCIMUserInput, *scimproto.Error) {
+// membership is authored exclusively through Group operations. Identity
+// material remains in the desired core fields or extension attributes; the
+// service reads it at the path the binding declares.
+func scimDesiredUser(body map[string]any) (service.DesiredUser, *scimproto.Error) {
 	raw, e := rawJSON(body)
 	if e != nil {
-		return service.SCIMUserInput{}, e
+		return service.DesiredUser{}, e
 	}
 	u, e := scimproto.DecodeUser(raw)
 	if e != nil {
-		return service.SCIMUserInput{}, e
+		return service.DesiredUser{}, e
 	}
-	in := service.SCIMUserInput{UserName: u.UserName, ExternalID: u.ExternalID}
-	if v, ok := body["active"]; ok {
+	desired := service.DesiredUser{UserName: u.UserName, ExternalID: u.ExternalID, Active: true}
+	if v, ok := scimAttribute(body, "active"); ok {
 		active, e := scimproto.NormalizeActive(v)
 		if e != nil {
-			return service.SCIMUserInput{}, e
+			return service.DesiredUser{}, e
 		}
-		in.Active = &active
+		desired.Active = active
 	}
-	in.Resource = body
-	in.Attributes = scimDisplayAttributes(body)
-	return in, nil
+	desired.Attributes = scimDisplayAttributes(body)
+	return desired, nil
 }
 
 // scimDisplayAttributes keeps everything this server does not interpret, as
@@ -201,9 +201,7 @@ func scimUserInput(body map[string]any) (service.SCIMUserInput, *scimproto.Error
 func scimDisplayAttributes(body map[string]any) map[string]any {
 	out := map[string]any{}
 	for k, v := range body {
-		switch k {
-		case "id", "schemas", "meta", "userName", "externalId", "active", "groups",
-			"members", "displayName", "password":
+		if isInterpretedSCIMAttribute(k) {
 			continue
 		}
 		out[k] = v
@@ -211,28 +209,46 @@ func scimDisplayAttributes(body map[string]any) map[string]any {
 	return out
 }
 
-// scimGroupInput decodes a Group resource, applying §6's two named member
+func scimAttribute(body map[string]any, name string) (any, bool) {
+	for key, value := range body {
+		if strings.EqualFold(key, name) {
+			return value, true
+		}
+	}
+	return nil, false
+}
+
+func isInterpretedSCIMAttribute(name string) bool {
+	for _, interpreted := range []string{
+		"id", "schemas", "meta", "userName", "externalId", "active", "groups",
+		"members", "displayName", "password",
+	} {
+		if strings.EqualFold(name, interpreted) {
+			return true
+		}
+	}
+	return false
+}
+
+// scimDesiredGroup decodes a Group resource, applying §6's two named member
 // refusals before anything reaches the service.
-func scimGroupInput(body map[string]any) (service.SCIMGroupInput, *scimproto.Error) {
+func scimDesiredGroup(body map[string]any) (service.DesiredGroup, *scimproto.Error) {
 	raw, e := rawJSON(body)
 	if e != nil {
-		return service.SCIMGroupInput{}, e
+		return service.DesiredGroup{}, e
 	}
 	g, e := scimproto.DecodeGroup(raw)
 	if e != nil {
-		return service.SCIMGroupInput{}, e
+		return service.DesiredGroup{}, e
 	}
 	if e := scimproto.CheckMembers(g.Members); e != nil {
-		return service.SCIMGroupInput{}, e
+		return service.DesiredGroup{}, e
 	}
-	in := service.SCIMGroupInput{DisplayName: g.DisplayName, ExternalID: g.ExternalID}
-	if _, present := body["members"]; present {
-		in.MembersPresent = true
-		for _, m := range g.Members {
-			in.Members = append(in.Members, m.Value)
-		}
+	desired := service.DesiredGroup{DisplayName: g.DisplayName, ExternalID: g.ExternalID}
+	for _, m := range g.Members {
+		desired.Members = append(desired.Members, m.Value)
 	}
-	return in, nil
+	return desired, nil
 }
 
 // ---------------------------------------------------------------------------

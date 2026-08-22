@@ -98,7 +98,7 @@ func (a *API) ScimCreateUser(ctx context.Context, req apigen.ScimCreateUserReque
 	if e != nil {
 		return scimCreateUserRefusal(a.afterAuth(ctx, req.Org, req.Binding, e)), nil
 	}
-	in, e := scimUserInput(body)
+	in, e := scimDesiredUser(body)
 	if e != nil {
 		return scimCreateUserRefusal(a.afterAuth(ctx, req.Org, req.Binding, e)), nil
 	}
@@ -122,14 +122,9 @@ func (a *API) ScimReplaceUser(ctx context.Context, req apigen.ScimReplaceUserReq
 	if e != nil {
 		return scimReplaceUserRefusal(a.afterAuth(ctx, req.Org, req.Binding, e)), nil
 	}
-	in, e := scimUserInput(body)
+	in, e := scimDesiredUser(body)
 	if e != nil {
 		return scimReplaceUserRefusal(a.afterAuth(ctx, req.Org, req.Binding, e)), nil
-	}
-	// RFC replacement: an omitted `active` defaults TRUE, which reactivates.
-	if in.Active == nil {
-		on := true
-		in.Active = &on
 	}
 	u, err := a.SCIMWire.ReplaceUser(ctx, scimActor(ctx, req.Binding), domain.OrgID(req.Org), req.Binding, req.Id, in)
 	if err != nil {
@@ -143,7 +138,7 @@ func (a *API) ScimPatchUser(ctx context.Context, req apigen.ScimPatchUserRequest
 	if e != nil {
 		return scimPatchUserRefusal(a.afterAuth(ctx, req.Org, req.Binding, e)), nil
 	}
-	in, e := scimPatchUserInput(body)
+	in, e := scimPatchUserCommands(body)
 	if e != nil {
 		return scimPatchUserRefusal(a.afterAuth(ctx, req.Org, req.Binding, e)), nil
 	}
@@ -190,7 +185,7 @@ func (a *API) ScimCreateGroup(ctx context.Context, req apigen.ScimCreateGroupReq
 	if e != nil {
 		return scimCreateGroupRefusal(a.afterAuth(ctx, req.Org, req.Binding, e)), nil
 	}
-	in, e := scimGroupInput(body)
+	in, e := scimDesiredGroup(body)
 	if e != nil {
 		return scimCreateGroupRefusal(a.afterAuth(ctx, req.Org, req.Binding, e)), nil
 	}
@@ -214,7 +209,7 @@ func (a *API) ScimReplaceGroup(ctx context.Context, req apigen.ScimReplaceGroupR
 	if e != nil {
 		return scimReplaceGroupRefusal(a.afterAuth(ctx, req.Org, req.Binding, e)), nil
 	}
-	in, e := scimGroupInput(body)
+	in, e := scimDesiredGroup(body)
 	if e != nil {
 		return scimReplaceGroupRefusal(a.afterAuth(ctx, req.Org, req.Binding, e)), nil
 	}
@@ -230,7 +225,7 @@ func (a *API) ScimPatchGroup(ctx context.Context, req apigen.ScimPatchGroupReque
 	if e != nil {
 		return scimPatchGroupRefusal(a.afterAuth(ctx, req.Org, req.Binding, e)), nil
 	}
-	in, e := scimPatchGroupInput(body)
+	in, e := scimPatchGroupCommands(body)
 	if e != nil {
 		return scimPatchGroupRefusal(a.afterAuth(ctx, req.Org, req.Binding, e)), nil
 	}
@@ -289,90 +284,106 @@ func (a *API) ScimSearchGroups(ctx context.Context, req apigen.ScimSearchGroupsR
 // PATCH decoding
 // ---------------------------------------------------------------------------
 
-// scimPatchUserInput validates a PatchOp message against the closed matrix and
-// applies the accepted cells IN ORDER against one accumulating desired state.
+// scimPatchUserCommands validates a PatchOp message against the closed matrix
+// and converts accepted cells IN ORDER into the service's closed command set.
 //
 // Validation runs over EVERY operation first (inside ParsePatch), so whole-
-// request atomicity holds: one invalid operation fails the request with nothing
-// applied. Folding by CATEGORY — collecting every `active` op and taking the
-// last — lost the sequence, so `replace active=false` then `replace active=true`
-// and the reverse produced the same final authorization state.
-func scimPatchUserInput(body map[string]any) (service.SCIMUserInput, *scimproto.Error) {
+// request atomicity holds: one invalid operation fails the request before the
+// service reduces or persists anything.
+func scimPatchUserCommands(body map[string]any) ([]service.UserPatchCommand, *scimproto.Error) {
 	raw, e := rawJSON(body)
 	if e != nil {
-		return service.SCIMUserInput{}, e
+		return nil, e
 	}
 	ops, e := scimproto.ParsePatch(raw, scimproto.ResourceUser)
 	if e != nil {
-		return service.SCIMUserInput{}, e
+		return nil, e
 	}
-	merged := map[string]any{}
-	var active *bool
-	cleared := false
+	commands := make([]service.UserPatchCommand, 0, len(ops))
 	for _, op := range ops {
 		switch op.Kind {
 		case scimproto.PathNone:
 			values, e := decodeObjectValue(op.Value)
 			if e != nil {
-				return service.SCIMUserInput{}, e
+				return nil, e
 			}
-			for k, v := range values {
-				if strings.EqualFold(k, "active") {
-					on, e := scimproto.NormalizeActive(v)
-					if e != nil {
-						return service.SCIMUserInput{}, e
-					}
-					active = &on
-					continue
+			desired, e := scimDesiredUser(values)
+			if e != nil {
+				return nil, e
+			}
+			if _, present := scimAttribute(values, "userName"); present {
+				commands = append(commands, service.UserPatchSetUserName{UserName: desired.UserName})
+			}
+			if _, present := scimAttribute(values, "externalId"); present {
+				commands = append(commands, service.UserPatchSetExternalID{ExternalID: desired.ExternalID})
+			}
+			if value, present := scimAttribute(values, "active"); present {
+				active, e := scimproto.NormalizeActive(value)
+				if e != nil {
+					return nil, e
 				}
-				merged[k] = v
+				commands = append(commands, service.UserPatchSetActive{Active: active})
+			}
+			if len(desired.Attributes) > 0 {
+				commands = append(commands, service.UserPatchMergeAttributes{Attributes: desired.Attributes})
 			}
 		case scimproto.PathActive:
 			var v any
 			if e := decodeInto(op.Value, &v); e != nil {
-				return service.SCIMUserInput{}, e
+				return nil, e
 			}
 			on, e := scimproto.NormalizeActive(v)
 			if e != nil {
-				return service.SCIMUserInput{}, e
+				return nil, e
 			}
-			active = &on
+			commands = append(commands, service.UserPatchSetActive{Active: on})
 		case scimproto.PathPlain:
 			if op.Op == "remove" {
-				// Explicit CLEARING, distinct from omission: the service must
-				// be able to tell "the identity provider removed this" from
-				// "the identity provider did not mention it".
-				merged[op.Attr] = nil
 				if strings.EqualFold(op.Attr, "externalId") {
-					// `externalId` is a first-class column rather than display
-					// metadata, so its explicit removal needs its own presence
-					// bit — otherwise it arrives as `ExternalID == ""`, which is
-					// exactly what omission looks like.
-					cleared = true
+					commands = append(commands, service.UserPatchClearExternalID{})
+				} else {
+					desired, e := scimDesiredUser(map[string]any{op.Attr: nil})
+					if e != nil {
+						return nil, e
+					}
+					if len(desired.Attributes) > 0 {
+						commands = append(commands, service.UserPatchMergeAttributes{Attributes: desired.Attributes})
+					}
 				}
 				continue
 			}
 			var v any
 			if e := decodeInto(op.Value, &v); e != nil {
-				return service.SCIMUserInput{}, e
+				return nil, e
 			}
-			merged[op.Attr] = v
+			switch {
+			case strings.EqualFold(op.Attr, "userName"):
+				desired, e := scimDesiredUser(map[string]any{op.Attr: v})
+				if e != nil {
+					return nil, e
+				}
+				commands = append(commands, service.UserPatchSetUserName{UserName: desired.UserName})
+			case strings.EqualFold(op.Attr, "externalId"):
+				desired, e := scimDesiredUser(map[string]any{op.Attr: v})
+				if e != nil {
+					return nil, e
+				}
+				commands = append(commands, service.UserPatchSetExternalID{ExternalID: desired.ExternalID})
+			default:
+				desired, e := scimDesiredUser(map[string]any{op.Attr: v})
+				if e != nil {
+					return nil, e
+				}
+				if len(desired.Attributes) > 0 {
+					commands = append(commands, service.UserPatchMergeAttributes{Attributes: desired.Attributes})
+				}
+			}
 		}
 	}
-	in := service.SCIMUserInput{Active: active, Patch: true, ExternalIDCleared: cleared}
-	if len(merged) > 0 {
-		folded, e := scimUserInput(merged)
-		if e != nil {
-			return service.SCIMUserInput{}, e
-		}
-		in.UserName, in.ExternalID = folded.UserName, folded.ExternalID
-		in.Attributes, in.Resource = folded.Attributes, folded.Resource
-	}
-	return in, nil
+	return commands, nil
 }
 
-// scimPatchGroupInput does the same for a Group, resolving the member cells
-// into an ORDERED script the service folds over the stored set. The PATHLESS
+// scimPatchGroupCommands does the same for a Group. The PATHLESS
 // cell can carry `members` too — dropping it there silently discarded
 // membership changes, and a removal that never happened leaves grants standing.
 //
@@ -381,88 +392,76 @@ func scimPatchUserInput(body map[string]any) (service.SCIMUserInput, *scimproto.
 // `add X` then `remove members[value eq X]` and its reverse produce the same
 // final membership — and therefore the same final AUTHORIZATION — which is a
 // wrong answer to one of the two requests.
-func scimPatchGroupInput(body map[string]any) (service.SCIMGroupInput, *scimproto.Error) {
+func scimPatchGroupCommands(body map[string]any) ([]service.GroupPatchCommand, *scimproto.Error) {
 	raw, e := rawJSON(body)
 	if e != nil {
-		return service.SCIMGroupInput{}, e
+		return nil, e
 	}
 	ops, e := scimproto.ParsePatch(raw, scimproto.ResourceGroup)
 	if e != nil {
-		return service.SCIMGroupInput{}, e
+		return nil, e
 	}
-	in := service.SCIMGroupInput{Patch: true}
-	merged := map[string]any{}
+	commands := make([]service.GroupPatchCommand, 0, len(ops))
 	for _, op := range ops {
 		switch op.Kind {
 		case scimproto.PathNone:
 			values, e := decodeObjectValue(op.Value)
 			if e != nil {
-				return service.SCIMGroupInput{}, e
+				return nil, e
 			}
-			for k, v := range values {
-				if !strings.EqualFold(k, "members") {
-					merged[k] = v
-					continue
-				}
-				refs, e := memberRefsFrom(v)
-				if e != nil {
-					return service.SCIMGroupInput{}, e
-				}
-				// A pathless value object naming `members` states a desired SET,
-				// exactly like `replace` on the `members` path.
-				in.MemberOps = append(in.MemberOps,
-					service.SCIMMemberOp{Kind: service.SCIMMemberReplace, Members: refs})
+			desired, e := scimDesiredGroup(values)
+			if e != nil {
+				return nil, e
+			}
+			if _, present := scimAttribute(values, "displayName"); present {
+				commands = append(commands, service.GroupPatchSetDisplayName{DisplayName: desired.DisplayName})
+			}
+			if _, present := scimAttribute(values, "externalId"); present {
+				commands = append(commands, service.GroupPatchSetExternalID{ExternalID: desired.ExternalID})
+			}
+			if _, present := scimAttribute(values, "members"); present {
+				commands = append(commands, service.GroupPatchReplaceMembers{Members: desired.Members})
 			}
 		case scimproto.PathPlain:
 			if op.Op == "remove" {
-				merged[op.Attr] = nil
 				if strings.EqualFold(op.Attr, "externalId") {
-					in.ExternalIDCleared = true
+					commands = append(commands, service.GroupPatchClearExternalID{})
 				}
 				continue
 			}
 			var v any
 			if e := decodeInto(op.Value, &v); e != nil {
-				return service.SCIMGroupInput{}, e
+				return nil, e
 			}
-			merged[op.Attr] = v
+			desired, e := scimDesiredGroup(map[string]any{op.Attr: v})
+			if e != nil {
+				return nil, e
+			}
+			switch {
+			case strings.EqualFold(op.Attr, "displayName"):
+				commands = append(commands, service.GroupPatchSetDisplayName{DisplayName: desired.DisplayName})
+			case strings.EqualFold(op.Attr, "externalId"):
+				commands = append(commands, service.GroupPatchSetExternalID{ExternalID: desired.ExternalID})
+			}
 		case scimproto.PathMembers:
 			if op.Op == "remove" {
-				in.MemberOps = append(in.MemberOps, service.SCIMMemberOp{Kind: service.SCIMMemberClear})
+				commands = append(commands, service.GroupPatchClearMembers{})
 				continue
 			}
 			refs, e := decodeMemberRefs(op.Value)
 			if e != nil {
-				return service.SCIMGroupInput{}, e
+				return nil, e
 			}
-			kind := service.SCIMMemberAdd
 			if op.Op == "replace" {
-				kind = service.SCIMMemberReplace
+				commands = append(commands, service.GroupPatchReplaceMembers{Members: refs})
+			} else {
+				commands = append(commands, service.GroupPatchAddMembers{Members: refs})
 			}
-			in.MemberOps = append(in.MemberOps, service.SCIMMemberOp{Kind: kind, Members: refs})
 		case scimproto.PathMemberValue:
-			in.MemberOps = append(in.MemberOps,
-				service.SCIMMemberOp{Kind: service.SCIMMemberRemoveOne, Value: op.MemberValue})
+			commands = append(commands, service.GroupPatchRemoveMember{Member: op.MemberValue})
 		}
 	}
-	if len(merged) > 0 {
-		folded, e := scimGroupInput(merged)
-		if e != nil {
-			return service.SCIMGroupInput{}, e
-		}
-		in.DisplayName, in.ExternalID = folded.DisplayName, folded.ExternalID
-	}
-	return in, nil
-}
-
-// memberRefsFrom decodes a member array that arrived inside a pathless value
-// object, applying §6's two named refusals like any other member list.
-func memberRefsFrom(v any) ([]string, *scimproto.Error) {
-	raw, err := json.Marshal(v)
-	if err != nil {
-		return nil, scimproto.ErrInvalidValue("The members value has the wrong shape.")
-	}
-	return decodeMemberRefs(raw)
+	return commands, nil
 }
 
 func decodeObjectValue(raw []byte) (map[string]any, *scimproto.Error) {
