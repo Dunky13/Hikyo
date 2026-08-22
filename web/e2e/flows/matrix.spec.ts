@@ -1,9 +1,11 @@
 import { expect, test } from '@playwright/test';
+import { zEnvironmentList } from '@hikyo/zod';
 
 import {
   expectPinnedAssertionSet,
   expectStatusIsTextAndAria,
 } from '../fixtures/assertions.ts';
+import { fixtureBrowserCall } from '../fixtures/api.ts';
 import {
   installPasskeyAuthenticator,
   readSeed,
@@ -110,6 +112,66 @@ test.describe('environment matrix', () => {
     } finally {
       await persistPasskey();
       await refreshSharedSession();
+    }
+  });
+
+  test('keeps values on their environment IDs after display reorder without adding queries', async ({ page }) => {
+    const environmentsPath =
+      `/api/v1/orgs/${seed.org}/projects/${seed.project}/environments`;
+    const orderPath = `${environmentsPath}/order`;
+    await fixtureBrowserCall(page, 'PUT', orderPath, zEnvironmentList, {
+      environment_ids: [seed.prod, seed.dev],
+    });
+
+    const readResources = new Set<string>();
+    const recordMatrixRead = (request: { method: () => string; url: () => string }) => {
+      if (request.method() !== 'GET') return;
+      const path = new URL(request.url()).pathname;
+      if (
+        path === environmentsPath ||
+        path === `/api/v1/orgs/${seed.org}/projects/${seed.project}/keys` ||
+        path === `/api/v1/orgs/${seed.org}/projects/${seed.project}/key-groups` ||
+        path.startsWith(`${environmentsPath}/`)
+      ) {
+        readResources.add(path);
+      }
+    };
+    page.on('request', recordMatrixRead);
+
+    try {
+      await page.reload();
+      await expect(page.getByRole('columnheader').nth(1)).toContainText('production');
+      await expect(page.getByRole('columnheader').nth(2)).toContainText('development');
+      await expect(
+        page.getByRole('button', { name: new RegExp(`${seed.matrixRequired} in production:`) }),
+      ).toBeVisible();
+      await expect(
+        page.getByRole('button', { name: new RegExp(`${seed.matrixRequired} in development:`) }),
+      ).toBeVisible();
+
+      await page
+        .getByRole('button', { name: new RegExp(`${seed.matrixRequired} in production:`) })
+        .click();
+      const editor = page.getByRole('dialog');
+      await editor.getByLabel('production value').fill('identity-check-not-saved');
+      await expect(editor.getByLabel('production value')).toHaveValue('identity-check-not-saved');
+      await expect(editor.getByLabel('development value')).not.toHaveValue(
+        'identity-check-not-saved',
+      );
+      await expect(editor.getByRole('link', { name: 'Open Values' })).toHaveAttribute(
+        'href',
+        `/orgs/${seed.org}/projects/${seed.project}/environments/${seed.prod}/values`,
+      );
+      await editor.getByRole('button', { name: 'Close row editor' }).click();
+
+      // Three project reads plus four existing query families per environment.
+      // Re-keying changes representation, not observer/query count.
+      await expect.poll(() => readResources.size).toBe(3 + 4 * 2);
+    } finally {
+      page.off('request', recordMatrixRead);
+      await fixtureBrowserCall(page, 'PUT', orderPath, zEnvironmentList, {
+        environment_ids: [seed.dev, seed.prod],
+      });
     }
   });
 
