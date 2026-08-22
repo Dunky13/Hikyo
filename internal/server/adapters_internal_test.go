@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -8,8 +9,26 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Hikyo-Org/hikyo/api/apigen"
+	"github.com/Hikyo-Org/hikyo/internal/domain"
 	"github.com/Hikyo-Org/hikyo/internal/service"
 )
+
+type recordingTargetMutationService struct {
+	result     service.TargetMutationResult
+	request    service.UpdateAdapterTargetRequest
+	keepRemote bool
+}
+
+func (s *recordingTargetMutationService) ApplyTargetMutation(_ context.Context, _ service.Actor, _ domain.Scope, request service.UpdateAdapterTargetRequest, keepRemote bool) (service.TargetMutationResult, error) {
+	s.request = request
+	s.keepRemote = keepRemote
+	return s.result, nil
+}
+
+func (*recordingTargetMutationService) Move(context.Context, service.Actor, domain.Scope, string) (service.AdapterMove, error) {
+	return service.AdapterMove{ID: "mov_one", AdapterID: "adp_one", Kind: "target", State: "scrubbing", CreatedAt: "2026-08-17T00:00:00Z"}, nil
+}
 
 func TestAdapterResponseRejectsMalformedStoredTimestamps(t *testing.T) {
 	tests := []struct {
@@ -97,5 +116,41 @@ func TestAdapterTargetResponseIncludesConvergedRevisionAndPendingConflicts(t *te
 	}
 	if len(out.Conflicts) != 1 || string(out.Conflicts[0].Id) != artifact.ID || len(out.Conflicts[0].Entries) != 1 || out.Conflicts[0].Entries[0].EffectiveName != "PROD_MODE" {
 		t.Fatalf("conflicts = %+v", out.Conflicts)
+	}
+}
+
+func TestUpdateAdapterTargetMapsOneIntentToServiceResult(t *testing.T) {
+	tests := []struct {
+		name       string
+		result     service.TargetMutationResult
+		keepRemote bool
+		status     int
+	}{
+		{name: "updated", result: service.TargetMutationUpdated{Target: service.AdapterTarget{ID: "tgt_one", Generation: 8}}, status: http.StatusOK},
+		{name: "move started", result: service.TargetMutationMoveStarted{}, keepRemote: true, status: http.StatusAccepted},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			keepRemote := tt.keepRemote
+			body := apigen.UpdateAdapterTargetRequest{
+				EnvironmentId: "env_one", DestinationKind: "repository", DestinationOwner: "team",
+				DestinationName: "app", Visibility: "", NamePrefix: "PROD_",
+				KeyIds: []apigen.ID{"key_one"}, ExpectedGeneration: 7, KeepRemote: &keepRemote,
+			}
+			stub := &recordingTargetMutationService{result: tt.result}
+			response, err := updateAdapterTarget(withBearer(t.Context(), "bearer"), stub, apigen.UpdateAdapterTargetRequestObject{
+				Org: "org_one", Project: "prj_one", Target: "tgt_one", Body: &body,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			recorder := httptest.NewRecorder()
+			if err := response.VisitUpdateAdapterTargetResponse(recorder); err != nil {
+				t.Fatal(err)
+			}
+			if recorder.Code != tt.status || stub.request.TargetID != "tgt_one" || stub.request.ExpectedGeneration != 7 || stub.request.Target.DestinationName != "app" || stub.keepRemote != tt.keepRemote {
+				t.Fatalf("status=%d request=%+v keep_remote=%v", recorder.Code, stub.request, stub.keepRemote)
+			}
+		})
 	}
 }

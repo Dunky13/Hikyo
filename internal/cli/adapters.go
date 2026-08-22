@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -21,6 +22,27 @@ import (
 type adapterCredentialSource struct {
 	stdin bool
 	file  string
+}
+
+func renderAdapterTargetMutation(out io.Writer, format Format, payload []byte) error {
+	var discriminator struct {
+		Kind *apigen.AdapterMoveKind `json:"kind"`
+	}
+	if err := json.Unmarshal(payload, &discriminator); err != nil {
+		return failf(ExitInternal, "the server's response did not match the contract: %v", err)
+	}
+	if discriminator.Kind != nil {
+		var move apigen.AdapterMove
+		if err := json.Unmarshal(payload, &move); err != nil {
+			return failf(ExitInternal, "the server's move response did not match the contract: %v", err)
+		}
+		return Render(out, format, adapterMoveTable(move))
+	}
+	var target apigen.AdapterTarget
+	if err := json.Unmarshal(payload, &target); err != nil {
+		return failf(ExitInternal, "the server's target response did not match the contract: %v", err)
+	}
+	return Render(out, format, targetTable(apigen.AdapterTargetList{Items: []apigen.AdapterTarget{target}}))
 }
 
 func (s adapterCredentialSource) read(ios IO) ([]byte, error) {
@@ -399,13 +421,11 @@ func runAdapter(ctx context.Context, ios IO, args []string) error {
 			}
 			path = base + "/adapter-targets/" + url.PathEscape(target)
 			body = apigen.UpdateAdapterTargetRequest{EnvironmentId: input.EnvironmentId, DestinationKind: input.DestinationKind, DestinationOwner: input.DestinationOwner, DestinationName: input.DestinationName, DestinationEnvironment: input.DestinationEnvironment, Visibility: apigen.UpdateAdapterTargetRequestVisibility(input.Visibility), SelectedRepositoryIds: input.SelectedRepositoryIds, NamePrefix: input.NamePrefix, KeyIds: input.KeyIds, ExpectedGeneration: current.Target.Generation, KeepRemote: &keepRemote}
-			if !destinationChanged {
-				var updated apigen.AdapterTarget
-				if err := client.Do(ctx, http.MethodPatch, path, body, &updated); err != nil {
-					return err
-				}
-				return Render(ios.Stdout, f, targetTable(apigen.AdapterTargetList{Items: []apigen.AdapterTarget{updated}}))
+			var response []byte
+			if err := client.Do(ctx, http.MethodPatch, path, body, &response); err != nil {
+				return err
 			}
+			return renderAdapterTargetMutation(ios.Stdout, f, response)
 		}
 		if err := client.Do(ctx, http.MethodPatch, path, body, &out); err != nil {
 			return err
