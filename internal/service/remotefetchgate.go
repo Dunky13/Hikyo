@@ -71,7 +71,7 @@ type fetchGate struct {
 	// rather than one per human.
 	//
 	// A round is reusable ONLY by a request every one of whose remotes the
-	// round actually fetched — its keys ARE its scope. A `remote show A` caches
+	// round actually attempted. A `remote show A` caches
 	// a one-entry round, and handing that to a `remote list` would report every
 	// other entry as unreachable: there is no outcome in the closed enum for
 	// "we did not look", so sharing across scopes can only fabricate one. A
@@ -152,7 +152,11 @@ func covers(round map[string]remotefetch.Result, want []string) bool {
 		return false
 	}
 	for _, id := range want {
-		if _, ok := round[id]; !ok {
+		result, ok := round[id]
+		if !ok {
+			return false
+		}
+		if _, ok := attemptedFetch(result); !ok {
 			return false
 		}
 	}
