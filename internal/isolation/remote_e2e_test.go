@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -86,6 +87,21 @@ func remoteSvcs(t *testing.T, db *store.DB) (*service.Remotes, *service.Workspac
 	}
 	return &service.Remotes{DB: db, Keyring: auth.Keyring, Fetch: client},
 		&service.Workspace{DB: db, Version: "test"}
+}
+
+func TestRemoteCountCapSQLite(t *testing.T) {
+	db := seededDB(t, openSQLite)
+	remotes, _ := remoteSvcs(t, db)
+	execRaw(t, db, `INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) `+
+		`VALUES ('g_rmt_cap', 'usr_root', 'instance-directory', NULL, NULL, NULL, `+ts+`)`)
+	for i := range remotefetch.RemoteCount {
+		execRaw(t, db, fmt.Sprintf(`INSERT INTO remotes (id, name, url, spki_pin, credential_sealed, created_at, created_by)
+			VALUES ('rmt_cap_%d', 'remote-%d', 'https://remote-%d.example', 'pin', X'01', %s, 'usr_root')`, i, i, i, ts))
+	}
+	_, err := remotes.AddRemote(t.Context(), service.LocalPrincipal(root), "one-too-many", "https://overflow.example", "pin", "credential")
+	if !errors.Is(err, service.ErrRemoteCap) {
+		t.Fatalf("AddRemote() error = %v, want ErrRemoteCap", err)
+	}
 }
 
 // runRemoteLifecycle drives every #71 service verb once, so the audit
