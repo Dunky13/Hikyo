@@ -3,12 +3,12 @@ import { QueryClient } from '@tanstack/react-query';
 /**
  * makeQueryClient builds the app's TanStack client with ONE set of defaults.
  *
- * There is more than one client in this app: the root client the SPA uses for
- * its own instance, and a fresh client per open workspace (#71) so a remote's
- * cache is structurally isolated and dies with the subtree — same-named
- * org/project on two instances can never collide because the caches are
- * different objects, not merely different keys. Both must behave identically,
- * so the defaults live here rather than being written twice.
+ * There is more than one client in this app: AuthProvider owns and resets the
+ * local root client, destroying all of its entries at each browser-session
+ * epoch, and each open workspace gets another (#71). Both boundaries are
+ * structural: cache contents die with their owning session, so same-named data
+ * from different sessions or instances cannot collide merely because a query
+ * key was reused. Their defaults live here once.
  *
  * The choices are the architecture's, not taste:
  *

@@ -5,8 +5,9 @@ import {
   stepUpPasskeyStartOp,
   stepUpTotpOp,
 } from '@hikyo/operations';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation } from '@tanstack/react-query';
 
+import { useAuth } from '../app/AuthProvider.tsx';
 import { ApiError, parsed } from './client.ts';
 import type { WhoAmI } from './session.ts';
 import { requestOptions, toBase64URL } from './values.ts';
@@ -59,8 +60,9 @@ export function stepUpFailureText(error: unknown): string {
  * each of them was computed under the assurance that just changed.
  */
 export function useStepUpTotp() {
-  const queries = useQueryClient();
+  const auth = useAuth();
   return useMutation({
+    onMutate: auth.captureTransition,
     mutationFn: async (code: string) => {
       const result = await parsed(stepUpTotpOp, { body: { code } });
       if (result.session.artifact === 'browser' && result.session_token !== undefined) {
@@ -68,14 +70,15 @@ export function useStepUpTotp() {
       }
       return result;
     },
-    onSuccess: () => queries.invalidateQueries(),
+    onSuccess: (identity, _code, guard) => auth.acceptSession(identity, guard),
   });
 }
 
 /** useStepUpPasskey elevates the acting session with a passkey assertion. */
 export function useStepUpPasskey() {
-  const queries = useQueryClient();
+  const auth = useAuth();
   return useMutation({
+    onMutate: auth.captureTransition,
     mutationFn: async () => {
       const options = await parsed(stepUpPasskeyStartOp, {});
       const body = await assert(options);
@@ -85,7 +88,7 @@ export function useStepUpPasskey() {
       }
       return result;
     },
-    onSuccess: () => queries.invalidateQueries(),
+    onSuccess: (identity, _input, guard) => auth.acceptSession(identity, guard),
   });
 }
 
@@ -95,8 +98,9 @@ export function useStepUpPasskey() {
  * assurance — no step-up follows.
  */
 export function usePasskeyLogin() {
-  const queries = useQueryClient();
+  const auth = useAuth();
   return useMutation({
+    onMutate: auth.captureTransition,
     mutationFn: async () => {
       const options = await parsed(passkeyLoginStartOp, {});
       const body = await assert(options);
@@ -106,7 +110,7 @@ export function usePasskeyLogin() {
       }
       return result;
     },
-    onSuccess: () => queries.invalidateQueries(),
+    onSuccess: (identity, _input, guard) => auth.acceptSession(identity, guard),
   });
 }
 

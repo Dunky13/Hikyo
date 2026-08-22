@@ -245,4 +245,24 @@ test.describe('sign out', () => {
     expect(names).not.toContain('__Host-hikyo');
     expect(names).not.toContain('__Host-hikyo-csrf');
   });
+
+  test('moves two tabs through one login and logout state machine', async ({ context, page }) => {
+    const other = await context.newPage();
+    await page.goto('/login');
+    await other.goto('/login');
+    await expect(other.getByRole('heading', { name: 'Sign in to Hikyo' })).toBeVisible();
+
+    await page.getByLabel('Username').fill(ADMIN.username);
+    await page.getByLabel('Password').fill(ADMIN.password);
+    await page.getByRole('button', { name: 'Sign in' }).click();
+
+    await expect(page.getByRole('navigation', { name: 'Organisations' })).toBeVisible();
+    await expect(other.getByRole('navigation', { name: 'Organisations' })).toBeVisible();
+
+    await page.getByRole('button', { name: /^Account:/ }).click();
+    await page.getByRole('menuitem', { name: 'Sign out' }).click();
+
+    await expect(page.getByRole('heading', { name: 'Sign in to Hikyo' })).toBeVisible();
+    await expect(other.getByRole('heading', { name: 'Sign in to Hikyo' })).toBeVisible();
+  });
 });

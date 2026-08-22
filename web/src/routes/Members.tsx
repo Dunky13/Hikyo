@@ -27,8 +27,8 @@ import {
   type ScopeOption,
 } from '../api/access.ts';
 import type { Grant } from '../api/identities.ts';
-import { useSession } from '../api/session.ts';
 import { useOrg, useOrgTopology } from '../api/settings.ts';
+import { useAuth } from '../app/AuthProvider.tsx';
 import { Alert, Done, Explain, JumpIndex, Panel } from './Sections.tsx';
 import { useFeedback, useModalDialog } from './useModalDialog.ts';
 
@@ -55,7 +55,7 @@ export function Members() {
   const orgQuery = useOrg(org);
   const grants = useOrgGrants(org);
   const topology = useOrgTopology(org);
-  const session = useSession();
+  const auth = useAuth();
   const revoke = useRevokeGrant();
   const feedback = useFeedback(grantFailureText);
   const [modal, setModal] = useState<'none' | 'grant' | 'blast'>('none');
@@ -71,7 +71,7 @@ export function Members() {
       topology.projects.flatMap((p) => p.environments).find((e) => e.id === id)?.name ?? id,
   };
   const rows = membershipRows(lines, names);
-  const me = session.data === undefined || session.data === null ? '' : session.data.principal.id;
+  const me = auth.identity?.principal.id ?? '';
 
   const [draft, setDraft] = useState<GrantDraft>({
     principal: '',

@@ -1,7 +1,6 @@
 import type { ReactElement } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router';
 
-import { useSession } from '../api/session.ts';
 import { AccountSecurity } from '../routes/AccountSecurity.tsx';
 import { CLIReauth } from '../routes/CLIReauth.tsx';
 import { InstanceAdmin } from '../routes/InstanceAdmin.tsx';
@@ -21,6 +20,7 @@ import { WorkspaceCallback } from '../routes/WorkspaceCallback.tsx';
 import { WorkspaceScope } from '../routes/WorkspaceScope.tsx';
 import { CHROMELESS, SURFACES, surfaceById, type Surface, type SurfaceId } from './navigation.ts';
 import { ToastViewport } from './notifications.tsx';
+import { useAuth } from './AuthProvider.tsx';
 
 /**
  * ELEMENTS is what each locked surface renders.
@@ -95,21 +95,14 @@ const publicSurfaces: readonly Surface[] = CHROMELESS;
 /**
  * The application root.
  *
- * Two states, decided by one question asked once per load: `whoami` either
- * resolves a live session or answers 401. There is no third "maybe" state and
- * no optimistic render of the chrome — showing an org rail to someone who is
- * about to be bounced to the login page is a flash of somebody else's data.
+ * AuthProvider resolves and revalidates the one root identity. Checking and
+ * transitions render no chrome, so an old session cannot keep painting while
+ * its replacement is being bound to a fresh cache.
  */
 export function App() {
-  const session = useSession();
+  const auth = useAuth();
 
-  if (session.isPending) {
-    // Deliberately quiet: this resolves in one round trip against a local
-    // server, and a spinner that appears for 20ms is noise, not feedback.
-    return <><p className="login" role="status">Loading…</p><ToastViewport /></>;
-  }
-
-  if (session.isError) {
+  if (auth.failure !== null) {
     return <>
       <main className="login">
         <p className="alert" role="alert">
@@ -123,7 +116,21 @@ export function App() {
     </>;
   }
 
-  const live = session.data;
+  let live: typeof auth.identity = null;
+  switch (auth.state.status) {
+    case 'checking':
+    case 'transitioning':
+      // Deliberately quiet: this resolves in one round trip against a local
+      // server, and a spinner that appears for 20ms is noise, not feedback.
+      return <><p className="login" role="status">Loading…</p><ToastViewport /></>;
+    case 'anonymous':
+      break;
+    case 'authenticated':
+      live = auth.identity;
+      if (live === null) {
+        throw new Error('authenticated root state has no identity');
+      }
+  }
 
   return <>
     <BrowserRouter>
