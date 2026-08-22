@@ -11,13 +11,17 @@ import {
   setValueOp,
 } from '@hikyo/operations';
 import {
+  zEnvironmentList,
+  zEnvironmentSettings,
   zEnvironmentSignals,
   zKeyList,
   zPendingDraftList,
   zPublishResult,
   zScanFinding,
+  zValueList,
 } from '@hikyo/zod';
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMemo } from 'react';
 import { z } from 'zod';
 
 import { ApiError, parsed } from './client.ts';
@@ -60,6 +64,125 @@ export type MatrixKeyList = z.infer<typeof zKeyList>;
 export type ScanFinding = z.infer<typeof zScanFinding>;
 export type MatrixEnvironmentSignals = z.infer<typeof zEnvironmentSignals>;
 export type MatrixSignalCell = MatrixEnvironmentSignals['cells'][number];
+
+type MatrixEnvironment = z.infer<typeof zEnvironmentList>['items'][number];
+type MatrixEnvironmentSettings = z.infer<typeof zEnvironmentSettings>;
+type MatrixValueList = z.infer<typeof zValueList>;
+type MatrixPendingDraftList = z.infer<typeof zPendingDraftList>;
+
+export type MatrixQueryState<T> = {
+  readonly data: T | undefined;
+  readonly isPending: boolean;
+  readonly isError: boolean;
+};
+
+export type MatrixEnvironmentQuery<T> = {
+  readonly environmentId: string;
+  readonly query: MatrixQueryState<T>;
+};
+
+type EnvironmentQueryData<T> = {
+  readonly environmentId: string;
+  readonly value: T;
+};
+
+/** One ordered display row with every per-environment query attached by identity. */
+export type MatrixEnvironmentRow = {
+  readonly environmentId: string;
+  readonly environment: MatrixEnvironment;
+  readonly values: MatrixQueryState<MatrixValueList>;
+  readonly signals: MatrixQueryState<MatrixEnvironmentSignals>;
+  readonly settings: MatrixQueryState<MatrixEnvironmentSettings>;
+  readonly pendingDrafts: MatrixQueryState<MatrixPendingDraftList>;
+};
+
+type MatrixEnvironmentQueries = {
+  readonly values: readonly MatrixEnvironmentQuery<MatrixValueList>[];
+  readonly signals: readonly MatrixEnvironmentQuery<MatrixEnvironmentSignals>[];
+  readonly settings: readonly MatrixEnvironmentQuery<MatrixEnvironmentSettings>[];
+  readonly pendingDrafts: readonly MatrixEnvironmentQuery<MatrixPendingDraftList>[];
+};
+
+function matrixQueryIndex<T>(
+  label: string,
+  entries: readonly MatrixEnvironmentQuery<T>[],
+): ReadonlyMap<string, MatrixQueryState<T>> {
+  const queries = new Map<string, MatrixQueryState<T>>();
+  for (const entry of entries) {
+    if (queries.has(entry.environmentId)) {
+      throw new Error(
+        `matrix ${label} queries contain duplicate environment ${entry.environmentId}`,
+      );
+    }
+    queries.set(entry.environmentId, entry.query);
+  }
+  return queries;
+}
+
+function requiredMatrixQuery<T>(
+  label: string,
+  environmentId: string,
+  queries: ReadonlyMap<string, MatrixQueryState<T>>,
+): MatrixQueryState<T> {
+  const query = queries.get(environmentId);
+  if (query === undefined) {
+    throw new Error(`matrix ${label} query is missing environment ${environmentId}`);
+  }
+  return query;
+}
+
+/**
+ * Join independently updating query families by environment ID while keeping
+ * the server's environment order as the explicit display order.
+ */
+export function assembleMatrixEnvironmentRows(
+  environments: readonly MatrixEnvironment[],
+  input: MatrixEnvironmentQueries,
+): readonly MatrixEnvironmentRow[] {
+  const values = matrixQueryIndex('values', input.values);
+  const signals = matrixQueryIndex('signals', input.signals);
+  const settings = matrixQueryIndex('settings', input.settings);
+  const pendingDrafts = matrixQueryIndex('pending drafts', input.pendingDrafts);
+  return environments.map((environment) => ({
+    environmentId: environment.id,
+    environment,
+    values: requiredMatrixQuery('values', environment.id, values),
+    signals: requiredMatrixQuery('signals', environment.id, signals),
+    settings: requiredMatrixQuery('settings', environment.id, settings),
+    pendingDrafts: requiredMatrixQuery('pending drafts', environment.id, pendingDrafts),
+  }));
+}
+
+export function bindMatrixEnvironmentQueries<T>(
+  label: string,
+  environments: readonly MatrixEnvironment[],
+  queries: readonly MatrixQueryState<EnvironmentQueryData<T>>[],
+): readonly MatrixEnvironmentQuery<T>[] {
+  if (environments.length !== queries.length) {
+    throw new Error(
+      `matrix ${label} query count ${String(queries.length)} does not match environment count ${String(environments.length)}`,
+    );
+  }
+  return environments.map((environment, index) => {
+    const query = queries[index];
+    if (query === undefined) {
+      throw new Error(`matrix ${label} query is missing position ${String(index)}`);
+    }
+    if (query.data !== undefined && query.data.environmentId !== environment.id) {
+      throw new Error(
+        `matrix ${label} query for ${environment.id} returned data for ${query.data.environmentId}`,
+      );
+    }
+    return {
+      environmentId: environment.id,
+      query: {
+        data: query.data?.value,
+        isPending: query.isPending,
+        isError: query.isError,
+      },
+    };
+  });
+}
 
 type RestorePreview = { readonly versionIds: readonly string[]; readonly token: string };
 
@@ -267,14 +390,30 @@ export function useMatrixProject(ref: MatrixRef) {
     queries: environmentItems.map((environment) => ({
       queryKey: valuesKey({ ...ref, environment: environment.id }),
       queryFn: () =>
-        parsed(listValuesOp, { path: { ...ref, environment: environment.id }, ...transport }),
+        parsed(listValuesOp, {
+          path: { ...ref, environment: environment.id },
+          ...transport,
+        }),
+      select: (value: MatrixValueList) => ({ environmentId: environment.id, value }),
       retry: false,
     })),
   });
   const settings = useQueries({
-    queries: environmentItems.map((environment) =>
-      environmentSettingsQueryOptions(ref.org, ref.project, environment.id, transport.client),
-    ),
+    queries: environmentItems.map((environment) => {
+      const options = environmentSettingsQueryOptions(
+        ref.org,
+        ref.project,
+        environment.id,
+        transport.client,
+      );
+      return {
+        ...options,
+        select: (value: MatrixEnvironmentSettings) => ({
+          environmentId: environment.id,
+          value,
+        }),
+      };
+    }),
   });
   const signals = useQueries({
     queries: environmentItems.map((environment) => ({
@@ -293,8 +432,14 @@ export function useMatrixProject(ref: MatrixRef) {
             queryKey: valuesKey({ ...ref, environment: environment.id }),
           });
         }
+        if (next.environment_id !== environment.id) {
+          throw new Error(
+            `matrix signals query for ${environment.id} returned data for ${next.environment_id}`,
+          );
+        }
         return next;
       },
+      select: (value: MatrixEnvironmentSignals) => ({ environmentId: environment.id, value }),
       refetchInterval: 2_000,
       retry: false,
     })),
@@ -309,11 +454,27 @@ export function useMatrixProject(ref: MatrixRef) {
             ...transport,
           }),
         ),
+      select: (value: MatrixPendingDraftList) => ({ environmentId: environment.id, value }),
       retry: false,
     })),
   });
 
-  return { environments, keys, groups, values, signals, settings, pendingDrafts };
+  const environmentRows = useMemo(
+    () =>
+      assembleMatrixEnvironmentRows(environmentItems, {
+        values: bindMatrixEnvironmentQueries('values', environmentItems, values),
+        signals: bindMatrixEnvironmentQueries('signals', environmentItems, signals),
+        settings: bindMatrixEnvironmentQueries('settings', environmentItems, settings),
+        pendingDrafts: bindMatrixEnvironmentQueries(
+          'pending drafts',
+          environmentItems,
+          pendingDrafts,
+        ),
+      }),
+    [environmentItems, pendingDrafts, settings, signals, values],
+  );
+
+  return { environments, keys, groups, environmentRows };
 }
 
 export function useStageMatrixValue(ref: MatrixRef) {
