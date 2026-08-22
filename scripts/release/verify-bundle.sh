@@ -225,7 +225,7 @@ jq -e '
 	([.artifacts[].name] | unique | length) == (.artifacts | length) and
 	all(.artifacts[]; . as $artifact |
 		($artifact.name | type == "string" and length > 0) and
-		($artifact.kind as $kind | ["binary", "sbom", "image", "checksum", "chart", "chart-digest", "installer", "oci-payload"] | index($kind) != null) and
+		($artifact.kind as $kind | ["binary", "binary-provenance", "sbom", "image", "checksum", "chart", "chart-digest", "installer", "oci-payload"] | index($kind) != null) and
 		($artifact.sha256 | type == "string" and test("^[0-9a-f]{64}$")) and
 		(if $artifact.kind == "image" then
 			($artifact.digest | type == "string" and test("^sha256:[0-9a-f]{64}$")) and
@@ -290,6 +290,7 @@ primary_key="$root_dir/$primary_name"
 
 artifact_count=$(jq -r '.artifacts | length' "$manifest")
 binary_count=0
+binary_provenance_count=0
 sbom_count=0
 image_count=0
 chart_count=0
@@ -316,6 +317,7 @@ while [ "$i" -lt "$artifact_count" ]; do
 	safe_release_name "$name" || fail "unsafe artifact path $name"
 	case "$kind" in
 		binary) binary_count=$((binary_count + 1)) ;;
+		binary-provenance) binary_provenance_count=$((binary_provenance_count + 1)) ;;
 		sbom) sbom_count=$((sbom_count + 1)) ;;
 		image) image_count=$((image_count + 1)) ;;
 		chart) chart_count=$((chart_count + 1)) ;;
@@ -337,7 +339,11 @@ while [ "$i" -lt "$artifact_count" ]; do
 	"$COSIGN_BIN" verify-blob --insecure-ignore-tlog \
 		--key "$primary_key" --bundle "$artifact_signature" "$path" >/dev/null \
 		|| fail "artifact signature invalid: $name"
-	if [ "$kind" = image ]; then
+	if [ "$kind" = binary-provenance ]; then
+		validate_binary_provenance "$path" \
+			"$(jq -r '.source_commit' "$manifest")" "$version" \
+			|| fail "invalid binary provenance: $name"
+	elif [ "$kind" = image ]; then
 		digest=$(jq -r --argjson i "$i" '.artifacts[$i].digest' "$manifest")
 		image=$(jq -r --argjson i "$i" '.artifacts[$i].image' "$manifest")
 		is_digest "$digest" || fail "invalid image digest for $name"
@@ -401,6 +407,7 @@ while [ "$i" -lt "$artifact_count" ]; do
 done
 
 [ "$binary_count" -gt 0 ] || fail 'manifest contains no binary artifacts'
+[ "$binary_provenance_count" -eq 1 ] || fail 'manifest must contain exactly one binary provenance artifact'
 [ "$sbom_count" -gt 0 ] || fail 'manifest contains no SBOM artifact'
 [ "$image_count" -eq 1 ] || fail 'manifest must contain exactly one image digest artifact'
 [ "$chart_count" -eq 1 ] || fail 'manifest must contain exactly one Helm chart'
