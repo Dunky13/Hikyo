@@ -110,6 +110,11 @@ jobs:
           version: v2.17.1
           args: release --clean --skip=publish
 
+      - name: Prepare canonical image inputs
+        run: >-
+          ./scripts/release/prepare-image-root.sh
+          dist image-root "$(git rev-parse HEAD)" .goreleaser.yaml
+
       - name: Remove GoReleaser internal metadata
         run: rm -f dist/artifacts.json dist/config.yaml dist/metadata.json
 
@@ -122,19 +127,6 @@ jobs:
           syft-version: v1.50.0
           upload-artifact: false
           upload-release-assets: false
-
-      - name: Build pinned image inputs
-        env:
-          VERSION: ${{ steps.identity.outputs.version }}
-          COMMIT: ${{ github.sha }}
-        run: |
-          commit_date=$(git show -s --format=%cI "$COMMIT")
-          for arch in amd64 arm64; do
-            mkdir -p "image-root/$arch"
-            CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath \
-              -ldflags "-s -w -X main.version=$VERSION -X main.commit=$COMMIT -X main.buildDate=$commit_date" \
-              -o "image-root/$arch/hikyo" ./cmd/hikyo
-          done
 
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
         with:
