@@ -63,6 +63,14 @@ test.describe('app chrome', () => {
     await expect(page.getByRole('heading', { name: 'Projects', level: 1 })).toBeVisible();
   });
 
+  test('redirects the public login route to overview with a live session', async ({ page }) => {
+    await page.goto('/login');
+
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.getByRole('navigation', { name: 'Organisations' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Overview', level: 1 })).toBeVisible();
+  });
+
   test('the binary toggle flips theme and keeps the choice explicit', async ({ page }) => {
     // The header control is a two-state sun/moon; `system` lives in the account
     // Preferences panel. Each click writes an explicit theme opposite the one
