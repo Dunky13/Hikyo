@@ -4,18 +4,21 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/json"
 	"errors"
-	"io"
 	"math/big"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/netip"
 	"net/url"
+	"reflect"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -25,16 +28,39 @@ import (
 	"github.com/Hikyo-Org/hikyo/internal/samlsp"
 )
 
-type roundTripFunc func(*http.Request) (*http.Response, error)
-
-func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
-	return f(request)
-}
-
 type staticMetadataResolver []netip.Addr
 
 func (r staticMetadataResolver) LookupNetIP(context.Context, string, string) ([]netip.Addr, error) {
 	return r, nil
+}
+
+type metadataResolverFunc func(context.Context, string, string) ([]netip.Addr, error)
+
+func (f metadataResolverFunc) LookupNetIP(ctx context.Context, network, host string) ([]netip.Addr, error) {
+	return f(ctx, network, host)
+}
+
+type metadataDialFunc func(context.Context, string, string) (net.Conn, error)
+
+func (f metadataDialFunc) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	return f(ctx, network, address)
+}
+
+func guardedMetadataTestServer(t *testing.T, handler http.Handler) (*SAMLProviders, string) {
+	t.Helper()
+	server := httptest.NewTLSServer(handler)
+	t.Cleanup(server.Close)
+	roots := x509.NewCertPool()
+	roots.AddCert(server.Certificate())
+	dialer := &net.Dialer{}
+	providers := &SAMLProviders{metadataTransport: metadataTransportPrimitives{
+		resolver: staticMetadataResolver{netip.MustParseAddr("93.184.216.34")},
+		dialer: metadataDialFunc(func(ctx context.Context, network, _ string) (net.Conn, error) {
+			return dialer.DialContext(ctx, network, server.Listener.Addr().String())
+		}),
+		roots: roots,
+	}}
+	return providers, "https://example.com/metadata"
 }
 
 func TestAssessSAMLMetadataReturnsCompleteDiffAndOnlyRequiresNewTrust(t *testing.T) {
@@ -220,16 +246,150 @@ func TestSAMLMetadataURLRequiresHTTPS(t *testing.T) {
 	}
 }
 
+func TestSAMLMetadataGuardedNetworkSeamReturnsInjectedResponse(t *testing.T) {
+	paths := make(chan string, 1)
+	providers, metadataURL := guardedMetadataTestServer(t, http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		paths <- request.URL.Path
+		response.WriteHeader(http.StatusOK)
+		_, _ = response.Write([]byte("<EntityDescriptor/>"))
+	}))
+
+	payload, err := providers.fetchMetadata(t.Context(), metadataURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(payload), "<EntityDescriptor/>"; got != want {
+		t.Fatalf("metadata payload = %q, want %q", got, want)
+	}
+	if got := <-paths; got != "/metadata" {
+		t.Fatalf("metadata path = %q, want /metadata", got)
+	}
+}
+
+func TestSAMLMetadataRedirectPivotIsRejected(t *testing.T) {
+	var requests atomic.Int32
+	providers, metadataURL := guardedMetadataTestServer(t, http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		requests.Add(1)
+		http.Redirect(response, request, "https://attacker.example/metadata", http.StatusFound)
+	}))
+
+	if _, err := providers.fetchMetadata(t.Context(), metadataURL); !errors.Is(err, ErrSAMLMetadataFetch) {
+		t.Fatalf("redirect pivot error = %v, want ErrSAMLMetadataFetch", err)
+	}
+	if got := requests.Load(); got != 1 {
+		t.Fatalf("redirect pivot made %d requests, want 1", got)
+	}
+}
+
+func TestSAMLMetadataRedirectRevalidatesURLShape(t *testing.T) {
+	for _, redirect := range []string{
+		"https://user:password@example.com/metadata",
+		"https://example.com/metadata#credential",
+	} {
+		t.Run(redirect, func(t *testing.T) {
+			var requests atomic.Int32
+			providers, metadataURL := guardedMetadataTestServer(t, http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+				requests.Add(1)
+				http.Redirect(response, request, redirect, http.StatusFound)
+			}))
+
+			if _, err := providers.fetchMetadata(t.Context(), metadataURL); !errors.Is(err, ErrSAMLMetadataFetch) {
+				t.Fatalf("redirect with invalid URL shape error = %v, want ErrSAMLMetadataFetch", err)
+			}
+			if got := requests.Load(); got != 1 {
+				t.Fatalf("redirect with invalid URL shape made %d requests, want 1", got)
+			}
+		})
+	}
+}
+
+func TestSAMLMetadataOversizedResponseIsRejected(t *testing.T) {
+	providers, metadataURL := guardedMetadataTestServer(t, http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		response.WriteHeader(http.StatusOK)
+		_, _ = response.Write([]byte(strings.Repeat("x", samlsp.MaxDocumentBytes+1)))
+	}))
+
+	if _, err := providers.fetchMetadata(t.Context(), metadataURL); !errors.Is(err, ErrSAMLMetadataFetch) {
+		t.Fatalf("oversized response error = %v, want ErrSAMLMetadataFetch", err)
+	}
+}
+
+func TestSAMLMetadataRedirectRevalidatesReboundHost(t *testing.T) {
+	var requests atomic.Int32
+	providers, metadataURL := guardedMetadataTestServer(t, http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		requests.Add(1)
+		if request.URL.Path == "/final" {
+			response.WriteHeader(http.StatusOK)
+			return
+		}
+		http.Redirect(response, request, "/final", http.StatusFound)
+	}))
+	var lookups atomic.Int32
+	providers.metadataTransport.resolver = metadataResolverFunc(func(context.Context, string, string) ([]netip.Addr, error) {
+		if lookups.Add(1) == 1 {
+			return []netip.Addr{netip.MustParseAddr("93.184.216.34")}, nil
+		}
+		return []netip.Addr{netip.MustParseAddr("127.0.0.1")}, nil
+	})
+
+	if _, err := providers.fetchMetadata(t.Context(), metadataURL); !errors.Is(err, ErrSAMLMetadataFetch) {
+		t.Fatalf("rebound redirect error = %v, want ErrSAMLMetadataFetch", err)
+	}
+	if gotLookups, gotRequests := lookups.Load(), requests.Load(); gotLookups != 2 || gotRequests != 1 {
+		t.Fatalf("rebound redirect lookups = %d, requests = %d; want 2, 1", gotLookups, gotRequests)
+	}
+}
+
+func TestSAMLMetadataSlowResponseIsBounded(t *testing.T) {
+	providers, metadataURL := guardedMetadataTestServer(t, http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		<-request.Context().Done()
+	}))
+	providers.metadataTransport.timeout = 25 * time.Millisecond
+	started := time.Now()
+
+	if _, err := providers.fetchMetadata(t.Context(), metadataURL); !errors.Is(err, ErrSAMLMetadataFetch) {
+		t.Fatalf("slow response error = %v, want ErrSAMLMetadataFetch", err)
+	}
+	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
+		t.Fatalf("slow response took %s, want bounded below 500ms", elapsed)
+	}
+}
+
+func TestSAMLProvidersExposeNoHTTPClientOverride(t *testing.T) {
+	if _, exposed := reflect.TypeFor[SAMLProviders]().FieldByName("HTTPClient"); exposed {
+		t.Fatal("SAMLProviders exposes arbitrary HTTPClient replacement")
+	}
+}
+
+func TestNewSAMLProvidersBuildsProductionMetadataPolicy(t *testing.T) {
+	providers := NewSAMLProviders(nil, nil, "https://hikyo.example")
+	if providers.metadataTransport.resolver == nil || providers.metadataTransport.dialer == nil {
+		t.Fatal("production constructor omitted guarded resolver or dialer")
+	}
+	client := publicMetadataHTTPClient(providers.metadataTransport)
+	if client.Timeout != 15*time.Second {
+		t.Fatalf("metadata client timeout = %s, want 15s", client.Timeout)
+	}
+	guard, ok := client.Transport.(*publicMetadataRoundTripper)
+	if !ok {
+		t.Fatalf("metadata transport = %T, want *publicMetadataRoundTripper", client.Transport)
+	}
+	if guard.base.ResponseHeaderTimeout != 10*time.Second {
+		t.Fatalf("metadata response header timeout = %s, want 10s", guard.base.ResponseHeaderTimeout)
+	}
+	if guard.base.TLSClientConfig == nil || guard.base.TLSClientConfig.MinVersion != tls.VersionTLS12 {
+		t.Fatalf("metadata TLS policy = %#v, want TLS 1.2 minimum", guard.base.TLSClientConfig)
+	}
+}
+
 func TestSAMLMetadataURLRefusesPrivateNetworkTargets(t *testing.T) {
-	requests := 0
-	providers := &SAMLProviders{HTTPClient: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
-		requests++
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Body:       io.NopCloser(strings.NewReader("<EntityDescriptor/>")),
-			Header:     make(http.Header),
-		}, nil
-	})}}
+	lookups := 0
+	providers := &SAMLProviders{metadataTransport: metadataTransportPrimitives{
+		resolver: metadataResolverFunc(func(context.Context, string, string) ([]netip.Addr, error) {
+			lookups++
+			return []netip.Addr{netip.MustParseAddr("93.184.216.34")}, nil
+		}),
+	}}
 
 	for _, rawURL := range []string{
 		"https://localhost/metadata",
@@ -244,8 +404,8 @@ func TestSAMLMetadataURLRefusesPrivateNetworkTargets(t *testing.T) {
 			t.Errorf("fetchMetadata(%q) error = %v, want ErrSAMLMetadataFetch", rawURL, err)
 		}
 	}
-	if requests != 0 {
-		t.Fatalf("private metadata URLs made %d outbound requests, want 0", requests)
+	if lookups != 0 {
+		t.Fatalf("private metadata URLs made %d DNS lookups, want 0", lookups)
 	}
 }
 
