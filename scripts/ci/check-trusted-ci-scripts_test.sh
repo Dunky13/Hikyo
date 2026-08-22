@@ -30,6 +30,7 @@ require_line "$workflow" "git show \"\$BASE_SHA:scripts/ci/analysis-shards-go/ma
 require_line "$workflow" 'name: Upload shard fuzz reproducers'
 require_line "$workflow" 'name: Download shard fuzz reproducers'
 require_line "$workflow" 'name: Upload minimized fuzz reproducers'
+require_line "$workflow" "-fuzztime=100000x -timeout=2m"
 # Workflow shell variables below are literal fixture text.
 # shellcheck disable=SC2016
 require_line "$workflow" 'echo "$shellcheck_dir" >>"$GITHUB_PATH"'

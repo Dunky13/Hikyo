@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -407,7 +406,6 @@ func (s *Auth) reauthTOTP(ctx context.Context, presented string, intent ReauthIn
 	}
 	// Phase 1 - read the acting session and confirmed factor.
 	var (
-		acting             authz.Identity
 		account            authz.Account
 		confirmed          authz.TOTPCredential
 		windowEnvironments []string
@@ -417,7 +415,6 @@ func (s *Auth) reauthTOTP(ctx context.Context, presented string, intent ReauthIn
 		if err != nil {
 			return err
 		}
-		acting = id
 		account, err = az.AccountByPrincipal(ctx, id.Principal)
 		if err != nil {
 			return err
@@ -485,13 +482,8 @@ func (s *Auth) reauthTOTP(ctx context.Context, presented string, intent ReauthIn
 
 	// Phase 3 - consume the step, rotate the acting session (every reauth rotates)
 	// and open the window over the environment.
-	value, verifier, err := s.newSessionArtifact(Artifact(acting.Artifact))
-	if err != nil {
-		return nil, err
-	}
 	now := s.now()
-	var out []ReauthResult
-	err = tx.Write(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
+	out, err := writeCommittedReauthResults(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer, out *[]ReauthResult) error {
 		// Re-authenticate inside the write tx: a revoked session may not open a
 		// window (mirrors StepUpTOTP's HIGH-2 fix).
 		live, err := az.Authenticate(ctx, presented, now)
@@ -545,11 +537,10 @@ func (s *Auth) reauthTOTP(ctx context.Context, presented string, intent ReauthIn
 			}
 			return domain.ErrUnauthenticated
 		}
-		factorsJSON, err := json.Marshal(live.Assurance.Factors)
+		completion, err := s.completeSession(ctx, az, RotateSession{
+			session: live, account: account, factors: live.Assurance.Factors,
+		}, now)
 		if err != nil {
-			return err
-		}
-		if err := az.RotateSessionFactors(ctx, live.SessionID, verifier, string(factorsJSON)); err != nil {
 			return err
 		}
 		for _, environmentID := range windowEnvironments {
@@ -573,8 +564,8 @@ func (s *Auth) reauthTOTP(ctx context.Context, presented string, intent ReauthIn
 			}); err != nil {
 				return err
 			}
-			out = append(out, ReauthResult{
-				SessionToken: value, SessionID: live.SessionID, EnvironmentID: environmentID,
+			*out = append(*out, ReauthResult{
+				SessionToken: completion.SessionToken, SessionID: live.SessionID, EnvironmentID: environmentID,
 				SingleDecision: false, WindowExpires: windowExpires,
 			})
 		}

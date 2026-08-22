@@ -304,18 +304,14 @@ func (s *Auth) SAMLACS(ctx context.Context, slug, encodedResponse, relayState, i
 	}
 	raw, responseDecodeErr := base64.StdEncoding.DecodeString(encodedResponse)
 
-	var (
-		result  LoginResult
-		refused error
-	)
-	err = tx.Write(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
+	attempt, err := writeCommittedSessionAttempt(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer, attempt *sessionCompletionAttempt) error {
 		now := s.now()
 		transaction, lookupErr := az.SAMLTransactionByRelayState(ctx, wencrypto.ArtifactVerifier(relayState))
 		if errors.Is(lookupErr, domain.ErrNotFound) {
 			if auditErr := s.stageSAML(ctx, az, audit.OutcomeFailure, "relay-state", "", "", "", "", nil); auditErr != nil {
 				return auditErr
 			}
-			refused = domain.ErrUnauthenticated
+			attempt.refused = sessionRefusedUnauthenticated
 			return nil
 		}
 		if lookupErr != nil {
@@ -378,7 +374,7 @@ func (s *Auth) SAMLACS(ctx context.Context, slug, encodedResponse, relayState, i
 			if auditErr := s.stageSAML(ctx, az, audit.OutcomeFailure, cause, provider.ID, transaction.EntityID, transaction.Purpose, transaction.ID, nil); auditErr != nil {
 				return auditErr
 			}
-			refused = domain.ErrUnauthenticated
+			attempt.refused = sessionRefusedUnauthenticated
 			return nil
 		}
 
@@ -395,7 +391,7 @@ func (s *Auth) SAMLACS(ctx context.Context, slug, encodedResponse, relayState, i
 			if auditErr := s.stageSAML(ctx, az, audit.OutcomeFailure, samlValidationCause(validationErr), provider.ID, transaction.EntityID, transaction.Purpose, transaction.ID, nil); auditErr != nil {
 				return auditErr
 			}
-			refused = domain.ErrUnauthenticated
+			attempt.refused = sessionRefusedUnauthenticated
 			return nil
 		}
 		subject, subjectErr := samlSubject(claims.NameID, provider.AllowEmailNameID)
@@ -403,7 +399,7 @@ func (s *Auth) SAMLACS(ctx context.Context, slug, encodedResponse, relayState, i
 			if auditErr := s.stageSAML(ctx, az, audit.OutcomeFailure, samlValidationCause(subjectErr), provider.ID, transaction.EntityID, transaction.Purpose, transaction.ID, &claims); auditErr != nil {
 				return auditErr
 			}
-			refused = domain.ErrUnauthenticated
+			attempt.refused = sessionRefusedUnauthenticated
 			return nil
 		}
 		if _, gcErr := az.DeleteExpiredSAMLReplay(ctx, now); gcErr != nil {
@@ -420,7 +416,7 @@ func (s *Auth) SAMLACS(ctx context.Context, slug, encodedResponse, relayState, i
 			if auditErr := s.stageSAML(ctx, az, audit.OutcomeFailure, "replayed-assertion", provider.ID, transaction.EntityID, transaction.Purpose, transaction.ID, &claims); auditErr != nil {
 				return auditErr
 			}
-			refused = domain.ErrUnauthenticated
+			attempt.refused = sessionRefusedUnauthenticated
 			return nil
 		}
 		guarded, guardErr := az.GuardSAMLProviderForMint(ctx, provider.ID, provider.RowVersion, provider.EntityID)
@@ -431,25 +427,29 @@ func (s *Auth) SAMLACS(ctx context.Context, slug, encodedResponse, relayState, i
 			if auditErr := s.stageSAML(ctx, az, audit.OutcomeFailure, "provider-reconciliation", provider.ID, transaction.EntityID, transaction.Purpose, transaction.ID, &claims); auditErr != nil {
 				return auditErr
 			}
-			refused = domain.ErrUnauthenticated
+			attempt.refused = sessionRefusedUnauthenticated
 			return nil
 		}
 
 		var completeErr error
 		switch transaction.Purpose {
 		case purposeLogin:
-			result, completeErr = s.completeSAMLLogin(ctx, az, provider, transaction, claims, subject, epoch, now)
+			attempt.result, completeErr = s.completeSAMLLogin(ctx, az, provider, transaction, claims, subject, epoch, now)
 		case purposeLink:
-			result, completeErr = s.completeSAMLLink(ctx, az, provider, transaction, claims, subject, initiating, epoch, now)
+			attempt.result, completeErr = s.completeSAMLLink(ctx, az, provider, transaction, claims, subject, initiating, epoch, now)
 		case purposeReauth:
-			result, completeErr = s.completeSAMLReauth(ctx, az, provider, transaction, claims, subject, initiating, epoch, now)
+			attempt.result, completeErr = s.completeSAMLReauth(ctx, az, provider, transaction, claims, subject, initiating, epoch, now)
 		}
-		if errors.Is(completeErr, domain.ErrUnauthenticated) || errors.Is(completeErr, ErrReauthWindowClosed) {
-			refused = completeErr
+		if errors.Is(completeErr, domain.ErrUnauthenticated) {
+			attempt.refused = sessionRefusedUnauthenticated
+			return nil
+		}
+		if errors.Is(completeErr, ErrReauthWindowClosed) {
+			attempt.refused = sessionRefusedWindowClosed
 			return nil
 		}
 		if errors.Is(completeErr, ErrAlreadyLinked) {
-			refused = completeErr
+			attempt.refused = sessionRefusedAlreadyLinked
 			return nil
 		}
 		return completeErr
@@ -457,10 +457,10 @@ func (s *Auth) SAMLACS(ctx context.Context, slug, encodedResponse, relayState, i
 	if err != nil {
 		return LoginResult{}, err
 	}
-	if refused != nil {
+	if refused := attempt.refused.err(); refused != nil {
 		return LoginResult{}, refused
 	}
-	return result, nil
+	return attempt.result, nil
 }
 
 func validSAMLHandle(value string) bool {
@@ -635,15 +635,14 @@ func (s *Auth) completeSAMLReauth(ctx context.Context, az *authz.TxAuthorizer, p
 		}
 		return LoginResult{}, ErrReauthWindowClosed
 	}
-	factorsJSON, err := json.Marshal(initiating.Assurance.Factors)
+	account, err := az.AccountByID(ctx, identity.AccountID)
 	if err != nil {
 		return LoginResult{}, err
 	}
-	value, verifier, err := s.newSessionArtifact(Artifact(initiating.Artifact))
+	completion, err := s.completeSession(ctx, az, RotateSession{
+		session: initiating, account: account, factors: initiating.Assurance.Factors,
+	}, now)
 	if err != nil {
-		return LoginResult{}, err
-	}
-	if err := az.RotateSessionFactors(ctx, initiating.SessionID, verifier, string(factorsJSON)); err != nil {
 		return LoginResult{}, err
 	}
 	windowID, err := newID("raw")
@@ -678,52 +677,23 @@ func (s *Auth) completeSAMLReauth(ctx context.Context, az *authz.TxAuthorizer, p
 	if err := s.stageSAMLActor(ctx, az, initiating.Principal, audit.OutcomeSuccess, "", provider.ID, transaction.EntityID, transaction.Purpose, transaction.ID, &claims); err != nil {
 		return LoginResult{}, err
 	}
-	return LoginResult{
-		SessionToken: value, SessionID: initiating.SessionID, Artifact: Artifact(initiating.Artifact),
-		CreatedAt: initiating.CreatedAt, IdleExpires: initiating.IdleExpiresAt,
-		AbsExpires: initiating.AbsoluteExpiresAt, Principal: initiating.Principal,
-	}, nil
+	return completion, nil
 }
 
 func (s *Auth) mintSAMLSession(ctx context.Context, az *authz.TxAuthorizer, account authz.Account, provider authz.SAMLProvider, transaction authz.SAMLTransaction, claims samlsp.Claims, mfa bool, now time.Time) (LoginResult, error) {
-	generation, err := az.PrincipalGeneration(ctx, account.PrincipalID)
-	if err != nil {
-		return LoginResult{}, err
-	}
-	epoch, err := az.CredentialEpoch(ctx)
-	if err != nil {
-		return LoginResult{}, err
-	}
-	value, verifier, err := wencrypto.NewArtifact(wencrypto.ArtifactBrowserSession)
-	if err != nil {
-		return LoginResult{}, err
-	}
-	csrfValue, csrfVerifier, err := wencrypto.NewArtifact(wencrypto.ArtifactCSRF)
-	if err != nil {
-		return LoginResult{}, err
-	}
-	sessionID, err := newID("ses")
-	if err != nil {
-		return LoginResult{}, err
-	}
 	factorClasses := samlFactors(mfa)
-	factorsJSON, err := json.Marshal(factorClasses)
+	result, err := s.completeSession(ctx, az, CreateSession{
+		account: account, artifact: ArtifactBrowser,
+		assurance: Assurance{
+			Method: samlMethod(transaction.EntityID), Factors: factorClasses,
+			AuthenticatedAt: claims.Authn.Instant, CeremonyID: transaction.ID,
+		},
+		csrf: sessionWithCSRF,
+	}, now)
 	if err != nil {
 		return LoginResult{}, err
 	}
-	wire := audit.FromContext(ctx)
-	session := authz.NewSession{
-		ID: sessionID, PrincipalID: account.PrincipalID, Verifier: verifier,
-		Artifact: ArtifactBrowser.String(), SessionGeneration: generation, CredentialEpoch: epoch,
-		AuthMethod: samlMethod(transaction.EntityID), Factors: string(factorsJSON),
-		AuthenticatedAt: claims.Authn.Instant, CeremonyID: transaction.ID, CreatedAt: now,
-		IdleExpiresAt: now.Add(BrowserSessionIdle), AbsoluteExpiresAt: now.Add(BrowserSessionAbsolute),
-		SourceIP: wire.SourceIP, UserAgent: wire.UserAgent, CSRFVerifier: csrfVerifier,
-	}
-	if err := az.MintSession(ctx, session); err != nil {
-		return LoginResult{}, err
-	}
-	bound, err := az.BindSessionToSAMLProvider(ctx, sessionID, provider.ID)
+	bound, err := az.BindSessionToSAMLProvider(ctx, result.SessionID, provider.ID)
 	if err != nil {
 		return LoginResult{}, err
 	}
@@ -738,21 +708,15 @@ func (s *Auth) mintSAMLSession(ctx context.Context, az *authz.TxAuthorizer, acco
 		return LoginResult{}, err
 	}
 	event, err := newAuditEvent(ctx, audit.EventAuthSessionCreated, account.PrincipalID,
-		audit.Object{Type: "session", ID: sessionID}, audit.OutcomeSuccess, "",
-		audit.Payload{"session_id": sessionID, "artifact": ArtifactBrowser.String(), "method": samlMethod(transaction.EntityID), "assurance": assuranceLabel})
+		audit.Object{Type: "session", ID: result.SessionID}, audit.OutcomeSuccess, "",
+		audit.Payload{"session_id": result.SessionID, "artifact": ArtifactBrowser.String(), "method": samlMethod(transaction.EntityID), "assurance": assuranceLabel})
 	if err != nil {
 		return LoginResult{}, err
 	}
 	if err := az.RecordAuthEvent(ctx, event); err != nil {
 		return LoginResult{}, err
 	}
-	return LoginResult{
-		SessionToken: value, SessionID: sessionID, Artifact: ArtifactBrowser,
-		CreatedAt: now, IdleExpires: session.IdleExpiresAt, AbsExpires: session.AbsoluteExpiresAt,
-		Principal: account.PrincipalID, AccountID: account.ID, DisplayName: account.DisplayName,
-		Assurance: Assurance{Method: samlMethod(transaction.EntityID), Factors: factorClasses, AuthenticatedAt: claims.Authn.Instant, CeremonyID: transaction.ID},
-		CSRFToken: csrfValue,
-	}, nil
+	return result, nil
 }
 
 func (s *Auth) stageSAML(ctx context.Context, az *authz.TxAuthorizer, outcome audit.Outcome, cause, providerID, entityID, purpose, transactionID string, claims *samlsp.Claims) error {

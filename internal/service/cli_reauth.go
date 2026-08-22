@@ -428,8 +428,7 @@ func (s *Auth) RedeemCLIReauth(ctx context.Context, code, pkceVerifier string) (
 		return CLIReauthRedeemed{}, s.rejectCLIReauthRequest(ctx, "redeem", ErrCLIReauthInvalid)
 	}
 	now := s.now()
-	var out CLIReauthRedeemed
-	err := tx.Write(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
+	out, err := writeCommittedCLIReauth(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer, out *CLIReauthRedeemed) error {
 		h, err := az.CLIReauthHandoffByCode(ctx, crypto.ArtifactVerifier(code))
 		if err != nil {
 			return captureCLIReauthFailure(ctx, az, "redeem", cliReauthAuditContext{}, "invalid_or_expired", ErrCLIReauthInvalid)
@@ -455,10 +454,6 @@ func (s *Auth) RedeemCLIReauth(ctx context.Context, code, pkceVerifier string) (
 		if !claimed {
 			return captureCLIReauthFailure(ctx, az, "redeem", detail, "already_consumed", ErrCLIReauthInvalid)
 		}
-		value, verifier, err := s.newSessionArtifact(ArtifactCLI)
-		if err != nil {
-			return err
-		}
 		epoch, err := az.CredentialEpoch(ctx)
 		if err != nil {
 			return err
@@ -471,11 +466,14 @@ func (s *Auth) RedeemCLIReauth(ctx context.Context, code, pkceVerifier string) (
 		for _, approved := range windows {
 			factorsList = withFactor(factorsList, approved.FactorClass)
 		}
-		factors, err := json.Marshal(factorsList)
+		account, err := az.AccountByPrincipal(ctx, caller.Principal)
 		if err != nil {
 			return err
 		}
-		if err := az.RotateSessionFactors(ctx, caller.SessionID, verifier, string(factors)); err != nil {
+		completion, err := s.completeSession(ctx, az, RotateSession{
+			session: caller, account: account, factors: factorsList,
+		}, now)
+		if err != nil {
 			return err
 		}
 		for _, approved := range windows {
@@ -495,7 +493,7 @@ func (s *Auth) RedeemCLIReauth(ctx context.Context, code, pkceVerifier string) (
 			}
 			out.Windows = append(out.Windows, ReauthResult{SessionID: caller.SessionID, EnvironmentID: approved.EnvironmentID, SingleDecision: approved.SingleDecision, WindowExpires: approved.WindowExpiresAt})
 		}
-		out.SessionToken, out.SessionID = value, caller.SessionID
+		out.SessionToken, out.SessionID = completion.SessionToken, completion.SessionID
 		return recordCLIReauthSuccess(ctx, az, "redeem", detail)
 	})
 	if err != nil {

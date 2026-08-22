@@ -188,45 +188,16 @@ func (s *Auth) reissueSession(ctx context.Context, az *authz.TxAuthorizer, accou
 	if err := az.RevokeAllSessionsFor(ctx, account.PrincipalID); err != nil {
 		return LoginResult{}, err
 	}
-	generation, err := az.PrincipalGeneration(ctx, account.PrincipalID)
-	if err != nil {
-		return LoginResult{}, err
-	}
-	epoch, err := az.CredentialEpoch(ctx)
-	if err != nil {
-		return LoginResult{}, err
-	}
-	value, verifier, err := crypto.NewArtifact(artifact.bearerKind())
-	if err != nil {
-		return LoginResult{}, err
-	}
-	var csrfValue string
-	var csrfVerifier []byte
+	csrf := sessionWithoutCSRF
 	if artifact == ArtifactBrowser {
-		csrfValue, csrfVerifier, err = crypto.NewArtifact(crypto.ArtifactCSRF)
-		if err != nil {
-			return LoginResult{}, err
-		}
+		csrf = sessionWithCSRF
 	}
-	id, err := newID("ses")
+	result, err := s.completeSession(ctx, az, CreateSession{
+		account: account, artifact: artifact,
+		assurance: Assurance{Method: method, Factors: []string{factorClass}, AuthenticatedAt: now},
+		csrf:      csrf,
+	}, now)
 	if err != nil {
-		return LoginResult{}, err
-	}
-	factors, err := json.Marshal([]string{factorClass})
-	if err != nil {
-		return LoginResult{}, err
-	}
-	wire := audit.FromContext(ctx)
-	sess := authz.NewSession{
-		ID: id, PrincipalID: account.PrincipalID, Verifier: verifier,
-		Artifact: artifact.String(), SessionGeneration: generation, CredentialEpoch: epoch,
-		AuthMethod: method, Factors: string(factors),
-		AuthenticatedAt: now, CreatedAt: now,
-		IdleExpiresAt: now.Add(artifact.idle()), AbsoluteExpiresAt: now.Add(artifact.absolute()),
-		SourceIP: wire.SourceIP, UserAgent: wire.UserAgent,
-		CSRFVerifier: csrfVerifier,
-	}
-	if err := az.MintSession(ctx, sess); err != nil {
 		return LoginResult{}, err
 	}
 	assuranceLabel := "single-factor"
@@ -234,9 +205,9 @@ func (s *Auth) reissueSession(ctx context.Context, az *authz.TxAuthorizer, accou
 		assuranceLabel = "multi-factor"
 	}
 	e, err := newAuditEvent(ctx, audit.EventAuthSessionCreated, account.PrincipalID,
-		audit.Object{Type: "session", ID: id}, audit.OutcomeSuccess, "",
+		audit.Object{Type: "session", ID: result.SessionID}, audit.OutcomeSuccess, "",
 		audit.Payload{
-			"session_id": id, "artifact": artifact.String(),
+			"session_id": result.SessionID, "artifact": artifact.String(),
 			"method": method, "assurance": assuranceLabel,
 		})
 	if err != nil {
@@ -245,13 +216,7 @@ func (s *Auth) reissueSession(ctx context.Context, az *authz.TxAuthorizer, accou
 	if err := az.RecordAuthEvent(ctx, e); err != nil {
 		return LoginResult{}, err
 	}
-	return LoginResult{
-		SessionToken: value, SessionID: id, Artifact: artifact,
-		CreatedAt: now, IdleExpires: sess.IdleExpiresAt, AbsExpires: sess.AbsoluteExpiresAt,
-		Principal: account.PrincipalID, AccountID: account.ID, DisplayName: account.DisplayName,
-		Assurance: Assurance{Method: method, Factors: []string{factorClass}, AuthenticatedAt: now},
-		CSRFToken: csrfValue,
-	}, nil
+	return result, nil
 }
 
 // TOTPStatusResult is the caller's own authenticator state: whether a confirmed
@@ -472,8 +437,7 @@ func (s *Auth) EnrolTOTPConfirm(ctx context.Context, presented, code string) (Lo
 	s.Admission.RecordSuccess(account.ID)
 
 	// Phase 3 — write: promote (single-use CAS), then reissue.
-	var result LoginResult
-	err = tx.Write(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
+	result, err := writeCommittedLoginResult(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer, result *LoginResult) error {
 		now := s.now()
 		// Re-authenticate inside the write tx: a session revoked between the
 		// phases (a concurrent recovery or password change) must not be able to
@@ -511,7 +475,7 @@ func (s *Auth) EnrolTOTPConfirm(ctx context.Context, presented, code string) (Lo
 			}
 			return domain.ErrUnauthenticated
 		}
-		result, err = s.reissueSession(ctx, az, account, "password", MethodLocalPassword, Artifact(live.Artifact), now)
+		*result, err = s.reissueSession(ctx, az, account, "password", MethodLocalPassword, Artifact(live.Artifact), now)
 		if err != nil {
 			return err
 		}
@@ -579,8 +543,7 @@ func (s *Auth) RemoveTOTP(ctx context.Context, presented, password string) (Logi
 	s.Admission.RecordSuccess(account.ID)
 
 	// Phase 3 — write.
-	var result LoginResult
-	err = tx.Write(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
+	result, err := writeCommittedLoginResult(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer, result *LoginResult) error {
 		now := s.now()
 		// Re-authenticate inside the write tx: a session revoked between the
 		// phases must not remove a factor and reissue itself (finding HIGH-3).
@@ -608,7 +571,7 @@ func (s *Auth) RemoveTOTP(ctx context.Context, presented, password string) (Logi
 		if err := az.RemoveTOTPForAccount(ctx, account.ID); err != nil {
 			return err
 		}
-		result, err = s.reissueSession(ctx, az, account, "password", MethodLocalPassword, Artifact(live.Artifact), now)
+		*result, err = s.reissueSession(ctx, az, account, "password", MethodLocalPassword, Artifact(live.Artifact), now)
 		if err != nil {
 			return err
 		}
@@ -690,17 +653,8 @@ func (s *Auth) StepUpTOTP(ctx context.Context, presented, code string) (LoginRes
 	// plus a long-lived credential in the DOM. `RotateSessionFactors` leaves
 	// `csrf_verifier` alone, so the synchronizer token stays valid and only
 	// the session cookie needs re-delivery.
-	actingArtifact := Artifact(acting.Artifact)
-	value, verifier, err := crypto.NewArtifact(actingArtifact.bearerKind())
-	if err != nil {
-		return LoginResult{}, err
-	}
 	factors := stepUpFactors(acting.Assurance.Factors, "totp")
-	factorsJSON, err := json.Marshal(factors)
-	if err != nil {
-		return LoginResult{}, err
-	}
-	err = tx.Write(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
+	result, err := writeCommittedLoginResult(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer, result *LoginResult) error {
 		// Re-authenticate inside the write tx: rotating a revoked session would
 		// hand out a token for a row that is gone.
 		live, err := az.Authenticate(ctx, presented, s.now())
@@ -729,7 +683,8 @@ func (s *Auth) StepUpTOTP(ctx context.Context, presented, code string) (LoginRes
 			}
 			return domain.ErrUnauthenticated
 		}
-		if err := az.RotateSessionFactors(ctx, live.SessionID, verifier, string(factorsJSON)); err != nil {
+		*result, err = s.completeSession(ctx, az, RotateSession{session: live, account: account, factors: factors}, s.now())
+		if err != nil {
 			return err
 		}
 		e, err := newAuditEvent(ctx, audit.EventAuthReauthenticated, account.PrincipalID,
@@ -738,20 +693,15 @@ func (s *Auth) StepUpTOTP(ctx context.Context, presented, code string) (LoginRes
 		if err != nil {
 			return err
 		}
-		return az.RecordAuthEvent(ctx, e)
+		if err := az.RecordAuthEvent(ctx, e); err != nil {
+			return err
+		}
+		return nil
 	})
 	if err != nil {
 		return LoginResult{}, err
 	}
-	return LoginResult{
-		SessionToken: value, SessionID: acting.SessionID, Artifact: actingArtifact,
-		CreatedAt: acting.CreatedAt, IdleExpires: acting.IdleExpiresAt, AbsExpires: acting.AbsoluteExpiresAt,
-		Principal: account.PrincipalID, AccountID: account.ID, DisplayName: account.DisplayName,
-		Assurance: Assurance{
-			Method: acting.Assurance.Method, Factors: factors,
-			AuthenticatedAt: acting.Assurance.AuthenticatedAt, CeremonyID: acting.Assurance.CeremonyID,
-		},
-	}, nil
+	return result, nil
 }
 
 // stepUpFactors adds a class to a session's factor set without duplicating it.
@@ -876,8 +826,7 @@ func (s *Auth) GenerateRecoveryCodes(ctx context.Context, presented, proof strin
 	}
 
 	// Phase 3 — write.
-	var result LoginResult
-	err = tx.Write(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
+	result, err := writeCommittedLoginResult(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer, result *LoginResult) error {
 		now := s.now()
 		// Re-authenticate inside the write tx: a session revoked between the
 		// phases must not replace the owner's recovery batch and reissue itself
@@ -950,7 +899,7 @@ func (s *Auth) GenerateRecoveryCodes(ctx context.Context, presented, proof strin
 				return err
 			}
 		}
-		result, err = s.reissueSession(ctx, az, account, proofClass, MethodLocalPassword, Artifact(liveID.Artifact), now)
+		*result, err = s.reissueSession(ctx, az, account, proofClass, MethodLocalPassword, Artifact(liveID.Artifact), now)
 		if err != nil {
 			return err
 		}

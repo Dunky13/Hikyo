@@ -442,12 +442,7 @@ func (s *Auth) revalidateProvider(ctx context.Context, az *authz.TxAuthorizer, s
 // A8) and mints a browser session, provisions via JIT policy, or refuses
 // uniformly. An epoch-inert identity is terminal and never a JIT input.
 func (s *Auth) completeLogin(ctx context.Context, prov authz.OIDCProvider, txn authz.OIDCTransaction, claims oidcrp.Claims) (OIDCCallbackResult, error) {
-	var (
-		result  LoginResult
-		refused error
-	)
-	err := tx.Write(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
-		refused = nil
+	attempt, err := writeCommittedSessionAttempt(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer, attempt *sessionCompletionAttempt) error {
 		now := s.now()
 		if cause, e := s.revalidateProvider(ctx, az, prov); e != nil {
 			return e
@@ -455,7 +450,7 @@ func (s *Auth) completeLogin(ctx context.Context, prov authz.OIDCProvider, txn a
 			if aerr := s.stageOIDCRefuse(ctx, az, cause, prov.ID); aerr != nil {
 				return aerr
 			}
-			refused = domain.ErrUnauthenticated
+			attempt.refused = sessionRefusedUnauthenticated
 			return nil
 		}
 		epoch, e := az.CredentialEpoch(ctx)
@@ -475,7 +470,7 @@ func (s *Auth) completeLogin(ctx context.Context, prov authz.OIDCProvider, txn a
 				if aerr := s.stageOIDCRefuse(ctx, az, cause, prov.ID); aerr != nil {
 					return aerr
 				}
-				refused = domain.ErrUnauthenticated
+				attempt.refused = sessionRefusedUnauthenticated
 				return nil
 			}
 			account = acc
@@ -487,7 +482,7 @@ func (s *Auth) completeLogin(ctx context.Context, prov authz.OIDCProvider, txn a
 				if aerr := s.stageOIDCRefuse(ctx, az, causeEpoch, prov.ID); aerr != nil {
 					return aerr
 				}
-				refused = domain.ErrUnauthenticated
+				attempt.refused = sessionRefusedUnauthenticated
 				return nil
 			}
 			// A3: the recorded provider must be the currently enabled one for
@@ -498,7 +493,7 @@ func (s *Auth) completeLogin(ctx context.Context, prov authz.OIDCProvider, txn a
 				if aerr := s.stageOIDCRefuse(ctx, az, causeReconciliation, prov.ID); aerr != nil {
 					return aerr
 				}
-				refused = domain.ErrUnauthenticated
+				attempt.refused = sessionRefusedUnauthenticated
 				return nil
 			}
 			account, e = az.AccountByID(ctx, identity.AccountID)
@@ -510,16 +505,16 @@ func (s *Auth) completeLogin(ctx context.Context, prov authz.OIDCProvider, txn a
 		if e != nil {
 			return e
 		}
-		result, e = s.mintOIDCSession(ctx, az, account, prov, txn.Issuer, purposeLogin, claims, mfa, now)
+		attempt.result, e = s.mintOIDCSession(ctx, az, account, prov, txn.Issuer, purposeLogin, claims, mfa, now)
 		return e
 	})
 	if err != nil {
 		return OIDCCallbackResult{}, err
 	}
-	if refused != nil {
+	if refused := attempt.refused.err(); refused != nil {
 		return OIDCCallbackResult{}, refused
 	}
-	return OIDCCallbackResult{Login: result, Purpose: purposeLogin}, nil
+	return OIDCCallbackResult{Login: attempt.result, Purpose: purposeLogin}, nil
 }
 
 // jitProvision creates a zero-grant account for an unknown identity when the
@@ -605,12 +600,7 @@ func (s *Auth) jitProvision(ctx context.Context, az *authz.TxAuthorizer, prov au
 // transaction (A6), so here the mutation reissues the acting session from that
 // proof, deleting every prior session.
 func (s *Auth) completeLink(ctx context.Context, prov authz.OIDCProvider, txn authz.OIDCTransaction, claims oidcrp.Claims, presented string) (OIDCCallbackResult, error) {
-	var (
-		result  LoginResult
-		refused error
-	)
-	err := tx.Write(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
-		refused = nil
+	attempt, err := writeCommittedSessionAttempt(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer, attempt *sessionCompletionAttempt) error {
 		now := s.now()
 		if cause, e := s.revalidateProvider(ctx, az, prov); e != nil {
 			return e
@@ -618,7 +608,7 @@ func (s *Auth) completeLink(ctx context.Context, prov authz.OIDCProvider, txn au
 			if aerr := s.stageOIDCRefuse(ctx, az, cause, prov.ID); aerr != nil {
 				return aerr
 			}
-			refused = domain.ErrUnauthenticated
+			attempt.refused = sessionRefusedUnauthenticated
 			return nil
 		}
 		epoch, e := az.CredentialEpoch(ctx)
@@ -657,7 +647,7 @@ func (s *Auth) completeLink(ctx context.Context, prov authz.OIDCProvider, txn au
 		if live.Principal != account.PrincipalID {
 			return domain.ErrUnauthenticated
 		}
-		result, e = s.reissueSession(ctx, az, account, "password", MethodLocalPassword, Artifact(live.Artifact), now)
+		attempt.result, e = s.reissueSession(ctx, az, account, "password", MethodLocalPassword, Artifact(live.Artifact), now)
 		if e != nil {
 			return e
 		}
@@ -672,10 +662,10 @@ func (s *Auth) completeLink(ctx context.Context, prov authz.OIDCProvider, txn au
 	if err != nil {
 		return OIDCCallbackResult{}, err
 	}
-	if refused != nil {
+	if refused := attempt.refused.err(); refused != nil {
 		return OIDCCallbackResult{}, refused
 	}
-	return OIDCCallbackResult{Login: result, Purpose: purposeLink}, nil
+	return OIDCCallbackResult{Login: attempt.result, Purpose: purposeLink}, nil
 }
 
 // completeReauth validates a fresh federated authentication and opens a
@@ -689,18 +679,13 @@ func (s *Auth) completeLink(ctx context.Context, prov authz.OIDCProvider, txn au
 // session it re-authorizes (a downgrade), or when the effective window is 0
 // (only WebAuthn opens a 0-window gate). On success the acting session rotates.
 func (s *Auth) completeReauth(ctx context.Context, prov authz.OIDCProvider, txn authz.OIDCTransaction, claims oidcrp.Claims, presented string) (OIDCCallbackResult, error) {
-	var (
-		result  LoginResult
-		refused error
-	)
-	err := tx.Write(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
-		refused = nil
+	attempt, err := writeCommittedSessionAttempt(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer, attempt *sessionCompletionAttempt) error {
 		now := s.now()
 		reject := func(cause string) error {
 			if aerr := s.stageOIDCRefuse(ctx, az, cause, prov.ID); aerr != nil {
 				return aerr
 			}
-			refused = domain.ErrUnauthenticated
+			attempt.refused = sessionRefusedUnauthenticated
 			return nil
 		}
 		if cause, e := s.revalidateProvider(ctx, az, prov); e != nil {
@@ -774,7 +759,7 @@ func (s *Auth) completeReauth(ctx context.Context, prov authz.OIDCProvider, txn 
 		if effWin <= 0 {
 			// A 0-window gate requires WebAuthn: OIDC cannot bind the enumerated
 			// unit, so it opens nothing here (B18). Refuse naming the remedy.
-			refused = ErrReauthWindowClosed
+			attempt.refused = sessionRefusedWindowClosed
 			if aerr := s.stageOIDCRefuse(ctx, az, causeWindowClosed, prov.ID); aerr != nil {
 				return aerr
 			}
@@ -783,15 +768,14 @@ func (s *Auth) completeReauth(ctx context.Context, prov authz.OIDCProvider, txn 
 
 		// Rotate the acting session token (every reauth rotates) preserving its
 		// factor set, and open the window over the recorded environment.
-		factors, e := json.Marshal(id.Assurance.Factors)
+		account, e := az.AccountByID(ctx, txn.AccountID)
 		if e != nil {
 			return e
 		}
-		value, verifier, e := s.newSessionArtifact(Artifact(id.Artifact))
+		completion, e := s.completeSession(ctx, az, RotateSession{
+			session: id, account: account, factors: id.Assurance.Factors,
+		}, now)
 		if e != nil {
-			return e
-		}
-		if e := az.RotateSessionFactors(ctx, id.SessionID, verifier, string(factors)); e != nil {
 			return e
 		}
 		windowID, e := newID("raw")
@@ -830,29 +814,16 @@ func (s *Auth) completeReauth(ctx context.Context, prov authz.OIDCProvider, txn 
 				return aerr
 			}
 		}
-		result = LoginResult{
-			SessionToken: value, SessionID: id.SessionID, Artifact: Artifact(id.Artifact),
-			CreatedAt: id.CreatedAt, IdleExpires: id.IdleExpiresAt, AbsExpires: id.AbsoluteExpiresAt,
-			Principal: id.Principal,
-		}
+		attempt.result = completion
 		return nil
 	})
 	if err != nil {
 		return OIDCCallbackResult{}, err
 	}
-	if refused != nil {
+	if refused := attempt.refused.err(); refused != nil {
 		return OIDCCallbackResult{}, refused
 	}
-	return OIDCCallbackResult{Login: result, Purpose: purposeReauth}, nil
-}
-
-// newSessionArtifact mints a fresh value+verifier of the same artifact type as
-// the session being rotated.
-func (s *Auth) newSessionArtifact(artifact Artifact) (string, []byte, error) {
-	if artifact == ArtifactBrowser {
-		return crypto.NewArtifact(crypto.ArtifactBrowserSession)
-	}
-	return crypto.NewArtifact(crypto.ArtifactCLISession)
+	return OIDCCallbackResult{Login: attempt.result, Purpose: purposeReauth}, nil
 }
 
 // mintOIDCSession mints a browser session for a federated login, recording the
@@ -861,46 +832,17 @@ func (s *Auth) newSessionArtifact(artifact Artifact) (string, []byte, error) {
 // the provider-change sweep by provider_id keeps a stale evaluation from
 // lingering (A4).
 func (s *Auth) mintOIDCSession(ctx context.Context, az *authz.TxAuthorizer, account authz.Account, prov authz.OIDCProvider, issuer, purpose string, claims oidcrp.Claims, mfa bool, now time.Time) (LoginResult, error) {
-	generation, err := az.PrincipalGeneration(ctx, account.PrincipalID)
-	if err != nil {
-		return LoginResult{}, err
-	}
-	epoch, err := az.CredentialEpoch(ctx)
-	if err != nil {
-		return LoginResult{}, err
-	}
-	value, verifier, err := crypto.NewArtifact(crypto.ArtifactBrowserSession)
-	if err != nil {
-		return LoginResult{}, err
-	}
-	csrfValue, csrfVerifier, err := crypto.NewArtifact(crypto.ArtifactCSRF)
-	if err != nil {
-		return LoginResult{}, err
-	}
-	sessionID, err := newID("ses")
-	if err != nil {
-		return LoginResult{}, err
-	}
 	factorClasses := oidcFactors(mfa)
-	factors, err := json.Marshal(factorClasses)
-	if err != nil {
-		return LoginResult{}, err
-	}
 	assuranceLabel := "single-factor"
 	if mfa {
 		assuranceLabel = "multi-factor"
 	}
-	wire := audit.FromContext(ctx)
-	sess := authz.NewSession{
-		ID: sessionID, PrincipalID: account.PrincipalID, Verifier: verifier,
-		Artifact: ArtifactBrowser.String(), SessionGeneration: generation, CredentialEpoch: epoch,
-		AuthMethod: oidcMethod(issuer), Factors: string(factors),
-		AuthenticatedAt: now, CreatedAt: now,
-		IdleExpiresAt: now.Add(BrowserSessionIdle), AbsoluteExpiresAt: now.Add(BrowserSessionAbsolute),
-		SourceIP: wire.SourceIP, UserAgent: wire.UserAgent,
-		ProviderID: prov.ID, CSRFVerifier: csrfVerifier,
-	}
-	if err := az.MintSession(ctx, sess); err != nil {
+	result, err := s.completeSession(ctx, az, CreateSession{
+		account: account, artifact: ArtifactBrowser,
+		assurance: Assurance{Method: oidcMethod(issuer), Factors: factorClasses, AuthenticatedAt: now},
+		csrf:      sessionWithCSRF, providerID: prov.ID,
+	}, now)
+	if err != nil {
 		return LoginResult{}, err
 	}
 	for _, ev := range []struct {
@@ -913,11 +855,11 @@ func (s *Auth) mintOIDCSession(ctx context.Context, az *authz.TxAuthorizer, acco
 			"amr": joinAMR(claims.AMR), "provider_row_version": int(prov.RowVersion),
 		}},
 		{audit.EventAuthSessionCreated, audit.Payload{
-			"session_id": sessionID, "artifact": ArtifactBrowser.String(),
+			"session_id": result.SessionID, "artifact": ArtifactBrowser.String(),
 			"method": oidcMethod(issuer), "assurance": assuranceLabel,
 		}},
 	} {
-		e, err := newAuditEvent(ctx, ev.typ, account.PrincipalID, audit.Object{Type: "session", ID: sessionID}, audit.OutcomeSuccess, "", ev.payload)
+		e, err := newAuditEvent(ctx, ev.typ, account.PrincipalID, audit.Object{Type: "session", ID: result.SessionID}, audit.OutcomeSuccess, "", ev.payload)
 		if err != nil {
 			return LoginResult{}, err
 		}
@@ -925,13 +867,7 @@ func (s *Auth) mintOIDCSession(ctx context.Context, az *authz.TxAuthorizer, acco
 			return LoginResult{}, err
 		}
 	}
-	return LoginResult{
-		SessionToken: value, SessionID: sessionID, Artifact: ArtifactBrowser,
-		CreatedAt: now, IdleExpires: sess.IdleExpiresAt, AbsExpires: sess.AbsoluteExpiresAt,
-		Principal: account.PrincipalID, AccountID: account.ID, DisplayName: account.DisplayName,
-		Assurance: Assurance{Method: oidcMethod(issuer), Factors: factorClasses, AuthenticatedAt: now},
-		CSRFToken: csrfValue,
-	}, nil
+	return result, nil
 }
 
 // refuseOIDC records an oidc_refused event with its cause and answers the
@@ -1098,8 +1034,7 @@ func (s *Auth) UnlinkIdentity(ctx context.Context, presented, identityID, proof 
 	}
 	s.Admission.RecordSuccess(account.ID)
 
-	var result LoginResult
-	err = tx.Write(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
+	result, err := writeCommittedLoginResult(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer, result *LoginResult) error {
 		now := s.now()
 		live, e := az.Authenticate(ctx, presented, now)
 		if e != nil {
@@ -1124,7 +1059,7 @@ func (s *Auth) UnlinkIdentity(ctx context.Context, presented, identityID, proof 
 		if e := az.RemoveExternalIdentity(ctx, identityID); e != nil {
 			return e
 		}
-		result, e = s.reissueSession(ctx, az, account, "password", MethodLocalPassword, Artifact(live.Artifact), now)
+		*result, e = s.reissueSession(ctx, az, account, "password", MethodLocalPassword, Artifact(live.Artifact), now)
 		if e != nil {
 			return e
 		}
