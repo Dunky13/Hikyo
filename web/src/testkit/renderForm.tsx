@@ -55,6 +55,15 @@ export async function settle(rounds = 10): Promise<void> {
   }
 }
 
+/** Flush promise work that schedules a TanStack/React notification task. */
+export async function settleTask(): Promise<void> {
+  await settle();
+  await act(async () => {
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  });
+  await settle();
+}
+
 /** A 201 JSON response, the shape the create routes answer with. */
 export function created(body: unknown): Response {
   return new Response(JSON.stringify(body), {
