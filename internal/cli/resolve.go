@@ -52,6 +52,75 @@ type Resolved struct {
 	ContextName string
 }
 
+// TenantScopeKind is the closed set of contiguous tenant hierarchy depths.
+type TenantScopeKind uint8
+
+const (
+	TenantScopeInstance TenantScopeKind = iota
+	TenantScopeOrg
+	TenantScopeProject
+	TenantScopeEnvironment
+)
+
+// TenantScope is a validated contiguous tenant hierarchy. Its fields stay
+// private so callers can obtain one only through NewTenantScope, which makes
+// sparse shapes such as org+env impossible to route accidentally.
+type TenantScope struct {
+	kind        TenantScopeKind
+	org         string
+	project     string
+	environment string
+}
+
+// NewTenantScope closes independently resolved dimensions into exactly one
+// hierarchy variant. Resolution may combine flag, environment, pin-file and
+// context values; the resulting tuple must still contain every parent.
+func NewTenantScope(resolved Resolved) (TenantScope, error) {
+	org := resolved.Get(DimOrg)
+	project := resolved.Get(DimProject)
+	environment := resolved.Get(DimEnv)
+
+	if project != "" && org == "" {
+		return TenantScope{}, failf(ExitUsage,
+			"project %q resolved without an org; refusing sparse tenant scope", project)
+	}
+	if environment != "" && project == "" {
+		return TenantScope{}, failf(ExitUsage,
+			"environment %q resolved without a project; refusing sparse tenant scope", environment)
+	}
+
+	scope := TenantScope{org: org, project: project, environment: environment}
+	switch {
+	case environment != "":
+		scope.kind = TenantScopeEnvironment
+	case project != "":
+		scope.kind = TenantScopeProject
+	case org != "":
+		scope.kind = TenantScopeOrg
+	default:
+		scope.kind = TenantScopeInstance
+	}
+	return scope, nil
+}
+
+// Kind returns the validated hierarchy depth.
+func (s TenantScope) Kind() TenantScopeKind { return s.kind }
+
+// Get returns the value at one tenant dimension. A successful constructor
+// guarantees every parent of a returned value is present.
+func (s TenantScope) Get(d Dimension) string {
+	switch d {
+	case DimOrg:
+		return s.org
+	case DimProject:
+		return s.project
+	case DimEnv:
+		return s.environment
+	default:
+		return ""
+	}
+}
+
 // Get returns a dimension's value.
 func (r Resolved) Get(d Dimension) string { return r.Values[d] }
 

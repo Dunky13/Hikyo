@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -201,6 +202,42 @@ func TestRunConfigResolveDisagreement(t *testing.T) {
 		t.Fatalf("message must name both sources: %s", stderr)
 	}
 	_ = st
+}
+
+func TestResolveMachineTargetRejectsSparseConfigBeforeTrustLookup(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		cfg  compose.Config
+		want string
+	}{
+		{
+			name: "project without org",
+			cfg:  compose.Config{Instance: "https://untrusted.example", Project: "project_one", Environment: "env_one"},
+			want: "project",
+		},
+		{
+			name: "environment without project",
+			cfg:  compose.Config{Instance: "https://untrusted.example", Org: "org_one", Environment: "env_one"},
+			want: "environment",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stateDir := t.TempDir()
+			ios, _, _ := composeIO(stateDir, t.TempDir(), "", nil)
+			st := &State{dir: stateDir}
+			_, _, _, _, err := resolveMachineTarget(st, ios, commonFlags{}, &tc.cfg, "hikyo-compose.yaml", "compose")
+			if err == nil {
+				t.Fatal("sparse config was accepted")
+			}
+			var cliErr *Error
+			if !errors.As(err, &cliErr) || cliErr.Code != ExitUsage {
+				t.Fatalf("error = %v, want ExitUsage", err)
+			}
+			if !strings.Contains(err.Error(), tc.want) || strings.Contains(err.Error(), "trust store") {
+				t.Fatalf("config was not rejected before trust lookup: %v", err)
+			}
+		})
+	}
 }
 
 func TestRunArgMaxRefusal(t *testing.T) {
