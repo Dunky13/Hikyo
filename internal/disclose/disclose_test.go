@@ -23,9 +23,23 @@ func (f *fakeTTY) Close() error {
 	return nil
 }
 
+func mustTerminalSession(t *testing.T, terminal io.WriteCloser) *TerminalSession {
+	t.Helper()
+	session, err := NewTerminalSession(terminal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := session.Close(); err != nil {
+			t.Errorf("close terminal session: %v", err)
+		}
+	})
+	return session
+}
+
 func TestPreparedFileReservesDestinationAndWritesExactlyOnce(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "token")
-	sink, err := Prepare(Options{OutputFile: path})
+	sink, err := Prepare(Options{OutputFile: path}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,8 +84,8 @@ func TestPreparedFileReservesDestinationAndWritesExactlyOnce(t *testing.T) {
 }
 
 func TestPreparedTerminalClosesAfterWriteAndRefusesSecondWrite(t *testing.T) {
-	tty := &fakeTTY{}
-	sink, err := Prepare(Options{OpenTerminal: func() (io.WriteCloser, error) { return tty, nil }})
+	tty, session := scripted(t, "y\n")
+	sink, err := Prepare(Options{}, session)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,19 +107,142 @@ func TestPreparedTerminalClosesAfterWriteAndRefusesSecondWrite(t *testing.T) {
 	}
 }
 
+func TestPreparedTerminalDeclineClosesWithoutDisclosing(t *testing.T) {
+	tty, session := scripted(t, "n\n")
+	sink, err := Prepare(Options{}, session)
+	if !errors.Is(err, ErrDisclosureDeclined) {
+		t.Fatalf("prepare error = %v, want ErrDisclosureDeclined", err)
+	}
+	if sink != nil {
+		t.Fatal("declined preparation returned a sink")
+	}
+	if strings.Contains(tty.out.String(), "hik_1_bs_secret") {
+		t.Fatalf("declined disclosure reached terminal: %q", tty.out.String())
+	}
+	if tty.closeCount != 1 {
+		t.Fatalf("terminal close count = %d, want 1", tty.closeCount)
+	}
+}
+
 type failingTTY struct {
+	in         *strings.Reader
+	writes     int
 	closeCount int
 }
 
-func (*failingTTY) Write([]byte) (int, error) { return 0, errors.New("terminal disappeared") }
+func (f *failingTTY) Read(p []byte) (int, error) { return f.in.Read(p) }
+func (f *failingTTY) Write(p []byte) (int, error) {
+	f.writes++
+	if f.writes > 1 {
+		return 0, errors.New("terminal disappeared")
+	}
+	return len(p), nil
+}
 func (f *failingTTY) Close() error {
 	f.closeCount++
 	return nil
 }
 
+type writeOnlyTTY struct {
+	out        bytes.Buffer
+	closeCount int
+}
+
+func (f *writeOnlyTTY) Write(p []byte) (int, error) { return f.out.Write(p) }
+func (f *writeOnlyTTY) Close() error {
+	f.closeCount++
+	return nil
+}
+
+func TestTerminalSessionValidatesCapabilitiesAtConstruction(t *testing.T) {
+	tty := &writeOnlyTTY{}
+	session, err := NewTerminalSession(tty)
+	if !errors.Is(err, ErrTerminalCapabilities) {
+		t.Fatalf("constructor error = %v, want ErrTerminalCapabilities", err)
+	}
+	if session != nil {
+		t.Fatal("constructor returned a session for a non-readable terminal")
+	}
+	if tty.closeCount != 1 {
+		t.Fatalf("terminal close count = %d, want 1", tty.closeCount)
+	}
+}
+
+func TestTerminalSessionOwnsConfirmationAndDisclosure(t *testing.T) {
+	tty := &scriptedTTY{in: strings.NewReader("y\ny\n")}
+	session, err := NewTerminalSession(tty)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink, err := Prepare(Options{}, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ok, err := session.ConfirmEnumerated("Inject LOG_LEVEL into env_70?")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("enumerated confirmation was declined")
+	}
+	if _, err := sink.WriteOnce("Token", "hik_1_bs_secret"); err != nil {
+		t.Fatal(err)
+	}
+	if tty.closeCount != 1 {
+		t.Fatalf("terminal close count = %d, want 1", tty.closeCount)
+	}
+	output := tty.out.String()
+	if !strings.Contains(output, "Inject LOG_LEVEL into env_70?") {
+		t.Fatalf("confirmation did not use session terminal: %q", output)
+	}
+	if !strings.Contains(output, "hik_1_bs_secret") {
+		t.Fatalf("disclosure did not use session terminal: %q", output)
+	}
+}
+
+func TestTerminalSessionClosesOnOverlongInput(t *testing.T) {
+	tty := &scriptedTTY{in: strings.NewReader("definitely-not\n")}
+	session, err := NewTerminalSession(tty)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session.Confirm("continue?"); !errors.Is(err, ErrTerminalInputTooLong) {
+		t.Fatalf("confirmation error = %v, want ErrTerminalInputTooLong", err)
+	}
+	if tty.closeCount != 1 {
+		t.Fatalf("terminal close count = %d, want 1", tty.closeCount)
+	}
+}
+
+type disappearingTTY struct {
+	bytes.Buffer
+	closeCount int
+}
+
+func (*disappearingTTY) Read([]byte) (int, error) { return 0, errors.New("terminal disappeared") }
+func (f *disappearingTTY) Close() error {
+	f.closeCount++
+	return nil
+}
+
+func TestTerminalSessionClosesWhenTerminalDisappears(t *testing.T) {
+	tty := &disappearingTTY{}
+	session, err := NewTerminalSession(tty)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session.Confirm("continue?"); err == nil || !strings.Contains(err.Error(), "terminal disappeared") {
+		t.Fatalf("confirmation error = %v, want terminal disappearance", err)
+	}
+	if tty.closeCount != 1 {
+		t.Fatalf("terminal close count = %d, want 1", tty.closeCount)
+	}
+}
+
 func TestPreparedTerminalClosesAfterWriteFailure(t *testing.T) {
-	tty := &failingTTY{}
-	sink, err := Prepare(Options{OpenTerminal: func() (io.WriteCloser, error) { return tty, nil }})
+	tty := &failingTTY{in: strings.NewReader("y\n")}
+	sink, err := Prepare(Options{}, mustTerminalSession(t, tty))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,9 +257,9 @@ func TestPreparedTerminalClosesAfterWriteFailure(t *testing.T) {
 	}
 }
 
-func TestPreparedTerminalAbortClosesWithoutWriting(t *testing.T) {
-	tty := &fakeTTY{}
-	sink, err := Prepare(Options{OpenTerminal: func() (io.WriteCloser, error) { return tty, nil }})
+func TestPreparedTerminalAbortClosesWithoutDisclosing(t *testing.T) {
+	tty, session := scripted(t, "y\n")
+	sink, err := Prepare(Options{}, session)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,8 +269,8 @@ func TestPreparedTerminalAbortClosesWithoutWriting(t *testing.T) {
 	if tty.closeCount != 1 {
 		t.Fatalf("terminal close count = %d, want 1", tty.closeCount)
 	}
-	if tty.Len() != 0 {
-		t.Fatalf("abort wrote to terminal: %q", tty.String())
+	if strings.Contains(tty.out.String(), "This value is shown once") {
+		t.Fatalf("abort disclosed to terminal: %q", tty.out.String())
 	}
 	if err := sink.Abort(); err != nil {
 		t.Fatalf("second abort = %v, want idempotent success", err)
@@ -146,7 +283,7 @@ func TestPreparedTerminalAbortClosesWithoutWriting(t *testing.T) {
 func TestAbortRemovesOnlyOwnedEmptyReservation(t *testing.T) {
 	t.Run("empty reservation", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "token")
-		sink, err := Prepare(Options{OutputFile: path})
+		sink, err := Prepare(Options{OutputFile: path}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -164,7 +301,7 @@ func TestAbortRemovesOnlyOwnedEmptyReservation(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Run("non-empty reservation", func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "token")
-			sink, err := Prepare(Options{OutputFile: path})
+			sink, err := Prepare(Options{OutputFile: path}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -185,7 +322,7 @@ func TestAbortRemovesOnlyOwnedEmptyReservation(t *testing.T) {
 
 		t.Run("replaced reservation", func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "token")
-			sink, err := Prepare(Options{OutputFile: path})
+			sink, err := Prepare(Options{OutputFile: path}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -214,7 +351,7 @@ func TestAbortOnReturnPreservesOperationAndCleanupErrors(t *testing.T) {
 		t.Skip("Windows denies competing writes while the reservation handle is open")
 	}
 	path := filepath.Join(t.TempDir(), "token")
-	sink, err := Prepare(Options{OutputFile: path})
+	sink, err := Prepare(Options{OutputFile: path}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,10 +374,7 @@ func TestNonTTYWithNoFlagIsRefused(t *testing.T) {
 	// explicit destination, the value is refused rather than downgraded to
 	// stdout, where a log shipper would collect it.
 	var out bytes.Buffer
-	sink, err := Prepare(Options{
-		Stdout:       &out,
-		OpenTerminal: func() (io.WriteCloser, error) { return nil, errors.New("no controlling terminal") },
-	})
+	sink, err := Prepare(Options{Stdout: &out}, nil)
 	if !errors.Is(err, ErrNoDestination) {
 		t.Fatalf("err = %v, want ErrNoDestination", err)
 	}
@@ -257,11 +391,8 @@ func TestNonTTYWithNoFlagIsRefused(t *testing.T) {
 
 func TestTerminalPathNeverTouchesStdout(t *testing.T) {
 	var out bytes.Buffer
-	tty := &fakeTTY{}
-	sink, err := Prepare(Options{
-		Stdout:       &out,
-		OpenTerminal: func() (io.WriteCloser, error) { return tty, nil },
-	})
+	tty, session := scripted(t, "y\n")
+	sink, err := Prepare(Options{Stdout: &out}, session)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,10 +406,10 @@ func TestTerminalPathNeverTouchesStdout(t *testing.T) {
 	if out.Len() != 0 {
 		t.Fatalf("plaintext went to stdout on the interactive path: %q", out.String())
 	}
-	if !strings.Contains(tty.String(), "hik_1_bs_secret") {
+	if !strings.Contains(tty.out.String(), "hik_1_bs_secret") {
 		t.Fatal("the value did not reach the controlling terminal")
 	}
-	if !tty.closed {
+	if tty.closeCount != 1 {
 		t.Fatal("the terminal handle was leaked")
 	}
 }
@@ -288,10 +419,7 @@ func TestDangerouslyPrintIsTheOnlyStdoutPath(t *testing.T) {
 	sink, err := Prepare(Options{
 		Stdout:           &out,
 		DangerouslyPrint: true,
-		// A terminal IS available; the explicit flag still wins, because the
-		// caller asked for the machine-readable path on purpose.
-		OpenTerminal: func() (io.WriteCloser, error) { return &fakeTTY{}, nil },
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -308,7 +436,7 @@ func TestDangerouslyPrintIsTheOnlyStdoutPath(t *testing.T) {
 }
 
 func TestTwoDestinationsIsARefusal(t *testing.T) {
-	_, err := Prepare(Options{OutputFile: filepath.Join(t.TempDir(), "t"), DangerouslyPrint: true})
+	_, err := Prepare(Options{OutputFile: filepath.Join(t.TempDir(), "t"), DangerouslyPrint: true}, nil)
 	if err == nil {
 		t.Fatal("naming two destinations was accepted")
 	}
@@ -316,7 +444,7 @@ func TestTwoDestinationsIsARefusal(t *testing.T) {
 
 func TestOutputFileIsCreatedFreshAt0600(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "token")
-	sink, err := Prepare(Options{OutputFile: path})
+	sink, err := Prepare(Options{OutputFile: path}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -350,7 +478,7 @@ func TestOutputFileIsNeverOverwritten(t *testing.T) {
 	if err := os.WriteFile(path, []byte("previous"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Prepare(Options{OutputFile: path}); !errors.Is(err, ErrFileExists) {
+	if _, err := Prepare(Options{OutputFile: path}, nil); !errors.Is(err, ErrFileExists) {
 		t.Fatalf("err = %v, want ErrFileExists", err)
 	}
 	body, _ := os.ReadFile(path)
@@ -372,7 +500,7 @@ func TestOutputFileRefusesASymlinkedTarget(t *testing.T) {
 	if err := os.Symlink(real, link); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Prepare(Options{OutputFile: link}); err == nil {
+	if _, err := Prepare(Options{OutputFile: link}, nil); err == nil {
 		t.Fatal("a symlinked target was written through")
 	}
 	body, _ := os.ReadFile(real)
@@ -393,7 +521,7 @@ func TestOutputFileRefusesAWorldWritableParent(t *testing.T) {
 	if err := os.Chmod(dir, 0o777); err != nil {
 		t.Fatal(err)
 	}
-	_, err := Prepare(Options{OutputFile: filepath.Join(dir, "token")})
+	_, err := Prepare(Options{OutputFile: filepath.Join(dir, "token")}, nil)
 	if err == nil {
 		t.Fatal("a world-writable parent was accepted — someone else could win the create race")
 	}
@@ -407,18 +535,25 @@ func TestPrepareReservesBeforeAnythingIsMinted(t *testing.T) {
 	// display-once secret and only then finds it has nowhere to put it has
 	// destroyed the secret and performed the side effect. Prepare refuses or
 	// reserves before `admin create` creates an administrator.
-	noTerminal := func() (io.WriteCloser, error) { return nil, errors.New("no controlling terminal") }
-	if _, err := Prepare(Options{OpenTerminal: noTerminal}); !errors.Is(err, ErrNoDestination) {
+	if _, err := Prepare(Options{}, nil); !errors.Is(err, ErrNoDestination) {
 		t.Fatalf("err = %v, want ErrNoDestination", err)
 	}
-	stdoutSink, err := Prepare(Options{DangerouslyPrint: true, OpenTerminal: noTerminal})
+	stdoutSink, err := Prepare(Options{DangerouslyPrint: true}, nil)
 	if err != nil {
 		t.Fatalf("--dangerously-print refused: %v", err)
 	}
 	if err := stdoutSink.Abort(); err != nil {
 		t.Fatal(err)
 	}
-	terminalSink, err := Prepare(Options{OpenTerminal: func() (io.WriteCloser, error) { return &fakeTTY{}, nil }})
+	declinedTTY, declinedSession := scripted(t, "n\n")
+	if sink, err := Prepare(Options{}, declinedSession); !errors.Is(err, ErrDisclosureDeclined) || sink != nil {
+		t.Fatalf("declined terminal preparation: sink=%v err=%v", sink, err)
+	}
+	if declinedTTY.closeCount != 1 {
+		t.Fatalf("declined terminal close count = %d, want 1", declinedTTY.closeCount)
+	}
+	_, terminalSession := scripted(t, "y\n")
+	terminalSink, err := Prepare(Options{}, terminalSession)
 	if err != nil {
 		t.Fatalf("an available terminal refused: %v", err)
 	}
@@ -428,7 +563,7 @@ func TestPrepareReservesBeforeAnythingIsMinted(t *testing.T) {
 
 	dir := t.TempDir()
 	fresh := filepath.Join(dir, "fresh")
-	fileSink, err := Prepare(Options{OutputFile: fresh, OpenTerminal: noTerminal})
+	fileSink, err := Prepare(Options{OutputFile: fresh}, nil)
 	if err != nil {
 		t.Fatalf("a free path refused: %v", err)
 	}
@@ -449,10 +584,10 @@ func TestPrepareReservesBeforeAnythingIsMinted(t *testing.T) {
 	if err := os.WriteFile(taken, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Prepare(Options{OutputFile: taken, OpenTerminal: noTerminal}); !errors.Is(err, ErrFileExists) {
+	if _, err := Prepare(Options{OutputFile: taken}, nil); !errors.Is(err, ErrFileExists) {
 		t.Fatalf("an occupied path passed preparation: %v", err)
 	}
-	if _, err := Prepare(Options{OutputFile: fresh, DangerouslyPrint: true}); err == nil {
+	if _, err := Prepare(Options{OutputFile: fresh, DangerouslyPrint: true}, nil); err == nil {
 		t.Fatal("two destinations passed preparation")
 	}
 }
@@ -461,17 +596,22 @@ func TestPrepareReservesBeforeAnythingIsMinted(t *testing.T) {
 // somewhere else, which is what a real terminal is. fakeTTY cannot serve here:
 // it reads back its own prompt.
 type scriptedTTY struct {
-	in  *strings.Reader
-	out bytes.Buffer
+	in         *strings.Reader
+	out        bytes.Buffer
+	closeCount int
 }
 
 func (s *scriptedTTY) Read(p []byte) (int, error)  { return s.in.Read(p) }
 func (s *scriptedTTY) Write(p []byte) (int, error) { return s.out.Write(p) }
-func (s *scriptedTTY) Close() error                { return nil }
+func (s *scriptedTTY) Close() error {
+	s.closeCount++
+	return nil
+}
 
-func scripted(answer string) (*scriptedTTY, Options) {
+func scripted(t *testing.T, answer string) (*scriptedTTY, *TerminalSession) {
+	t.Helper()
 	tty := &scriptedTTY{in: strings.NewReader(answer)}
-	return tty, Options{OpenTerminal: func() (io.WriteCloser, error) { return tty, nil }}
+	return tty, mustTerminalSession(t, tty)
 }
 
 func TestConfirmReadsTheTerminal(t *testing.T) {
@@ -479,8 +619,8 @@ func TestConfirmReadsTheTerminal(t *testing.T) {
 		answer string
 		want   bool
 	}{{"y\n", true}, {"yes\n", true}, {"\n", false}, {"n\n", false}, {"nope\n", false}} {
-		tty, o := scripted(c.answer)
-		got, err := Confirm("destroy it?", o)
+		tty, session := scripted(t, c.answer)
+		got, err := session.Confirm("destroy it?")
 		if err != nil {
 			t.Fatalf("%q: %v", c.answer, err)
 		}
@@ -508,8 +648,8 @@ func TestConfirmNameRequiresTheExactName(t *testing.T) {
 		{"y\n", false},
 		{"\n", false},
 	} {
-		tty, o := scripted(c.answer)
-		got, err := ConfirmName("removing it destroys the credential.", name, o)
+		tty, session := scripted(t, c.answer)
+		got, err := session.ConfirmName("removing it destroys the credential.", name)
 		if err != nil {
 			t.Fatalf("%q: %v", c.answer, err)
 		}
@@ -523,9 +663,8 @@ func TestConfirmNameRequiresTheExactName(t *testing.T) {
 }
 
 func TestConfirmNameRefusesWithoutATerminal(t *testing.T) {
-	ok, err := ConfirmName("remove it?", "peer-b", Options{
-		OpenTerminal: func() (io.WriteCloser, error) { return nil, errors.New("no controlling terminal") },
-	})
+	var session *TerminalSession
+	ok, err := session.ConfirmName("remove it?", "peer-b")
 	if !errors.Is(err, ErrNoDestination) {
 		t.Fatalf("err = %v, want ErrNoDestination", err)
 	}

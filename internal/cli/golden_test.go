@@ -177,7 +177,7 @@ func TestExitCodeMatrix(t *testing.T) {
 		// The import path (#68). Its usage boundary is pinned like every other
 		// verb family's, and the first case is the one the ADR states outright:
 		// `import` with no source arguments and no terminal is a HARD ERROR,
-		// never a hung prompt. testIO injects no OpenTerminal, so these run in
+		// never a hung prompt. testIO injects no TerminalSession, so these run in
 		// exactly that state.
 		{"import without a source or a mapping", []string{"import"}, cli.ExitUsage},
 		{"import with both a source and a mapping", []string{"import", "--from", "k8s", "--mapping", "m.json"}, cli.ExitUsage},

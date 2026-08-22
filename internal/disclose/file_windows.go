@@ -16,6 +16,31 @@ type preparedFile struct {
 	path string
 }
 
+// windowsTerminal presents the console's separate input and output handles as
+// one owned read/write/close handle. Windows cannot use one CONOUT$ descriptor
+// for both directions; TerminalSession keeps that platform fact private.
+type windowsTerminal struct {
+	input  io.ReadCloser
+	output io.WriteCloser
+}
+
+func newWindowsTerminal(input io.ReadCloser, output io.WriteCloser) io.WriteCloser {
+	return &windowsTerminal{input: input, output: output}
+}
+
+func (t *windowsTerminal) Read(p []byte) (int, error)  { return t.input.Read(p) }
+func (t *windowsTerminal) Write(p []byte) (int, error) { return t.output.Write(p) }
+func (t *windowsTerminal) terminalPasswordFD() int {
+	input, ok := t.input.(*os.File)
+	if !ok {
+		return -1
+	}
+	return int(input.Fd())
+}
+func (t *windowsTerminal) Close() error {
+	return errors.Join(t.input.Close(), t.output.Close())
+}
+
 // prepareFile uses CREATE_NEW with no sharing, so the reserved handle cannot
 // be reopened, replaced, or deleted before WriteOnce/Abort consumes it. The
 // owner-only DACL and dirfd-relative parent checks used on Unix still have no
@@ -78,8 +103,17 @@ func (p *preparedFile) abort() error {
 	return err
 }
 
-// openControllingTerminal opens the console output device, the Windows
-// counterpart of /dev/tty: a redirected stdout does not reach it.
+// openControllingTerminal owns both Windows console handles behind one
+// session handle: CONIN$ for confirmations and CONOUT$ for prompts and
+// disclosures. Redirected stdin/stdout never receive either direction.
 func openControllingTerminal() (io.WriteCloser, error) {
-	return os.OpenFile("CONOUT$", os.O_RDWR, 0)
+	input, err := os.OpenFile("CONIN$", os.O_RDONLY, 0)
+	if err != nil {
+		return nil, err
+	}
+	output, err := os.OpenFile("CONOUT$", os.O_WRONLY, 0)
+	if err != nil {
+		return nil, errors.Join(err, input.Close())
+	}
+	return newWindowsTerminal(input, output), nil
 }

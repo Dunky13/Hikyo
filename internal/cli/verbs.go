@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -40,8 +41,12 @@ type IO struct {
 	// ReadPassword reads a secret from the controlling terminal with echo
 	// off. Injected for tests; nil means the real terminal.
 	ReadPassword func(prompt string) (string, error)
-	// OpenTerminal backs the print triad's interactive leg.
-	OpenTerminal func() (io.WriteCloser, error)
+	// TerminalSession is the command-scoped controlling terminal. Platform
+	// code constructs it once; Run closes it on every return path.
+	TerminalSession *disclose.TerminalSession
+	// TerminalError preserves a failed platform construction until a command
+	// actually needs the terminal; non-interactive commands remain usable.
+	TerminalError error
 	// StderrIsTerminal reports whether Stderr is a TTY. `run
 	// --use-human-session` requires it (api-cli-surface ADR: "stderr-is-a-TTY
 	// (an additional refusal, never the control)"). Nil means false.
@@ -77,8 +82,28 @@ func (ios IO) exec(argv0 string, argv, env []string) error {
 	return execRun(argv0, argv, env)
 }
 
+func (ios IO) terminalSession() (*disclose.TerminalSession, error) {
+	if ios.TerminalSession != nil {
+		return ios.TerminalSession, nil
+	}
+	return nil, errors.Join(disclose.ErrNoDestination, ios.TerminalError)
+}
+
+func (ios IO) prepareDisclosure(options disclose.Options) (*disclose.PreparedSink, error) {
+	var session *disclose.TerminalSession
+	if options.OutputFile == "" && !options.DangerouslyPrint {
+		var err error
+		session, err = ios.terminalSession()
+		if err != nil {
+			return nil, err
+		}
+	}
+	return disclose.Prepare(options, session)
+}
+
 // Run dispatches one invocation and returns its exit code.
 func Run(ctx context.Context, io IO, args []string) int {
+	defer io.TerminalSession.Close()
 	if len(args) == 0 {
 		Usage(io.Stderr)
 		return ExitUsage
@@ -572,7 +597,12 @@ func establish(ios IO, st *State, target, name, trustFile string) (TrustEntry, e
 	prompt := fmt.Sprintf(
 		"Establish trust for a new instance?\n\n    origin:      %s\n    certificate: %s\n\nRecord it",
 		origin, shortPin(pin))
-	ok, err := disclose.Confirm(prompt, disclose.Options{OpenTerminal: ios.OpenTerminal})
+	session, err := ios.terminalSession()
+	if err != nil {
+		return TrustEntry{}, failf(ExitRefused,
+			"establishing an instance requires an interactive terminal so a human can confirm the certificate identity: %v", err)
+	}
+	ok, err := session.Confirm(prompt)
 	if err != nil {
 		return TrustEntry{}, failf(ExitRefused,
 			"establishing an instance requires an interactive terminal so a human can confirm the certificate identity. "+
@@ -730,8 +760,8 @@ func runResetCredential(ctx context.Context, ios IO, args []string) (returnErr e
 	if err != nil {
 		return err
 	}
-	deliver := disclose.Options{OutputFile: outputFile, DangerouslyPrint: dangerous, Stdout: ios.Stdout, OpenTerminal: ios.OpenTerminal}
-	sink, err := disclose.Prepare(deliver)
+	deliver := disclose.Options{OutputFile: outputFile, DangerouslyPrint: dangerous, Stdout: ios.Stdout}
+	sink, err := ios.prepareDisclosure(deliver)
 	if err != nil {
 		return failf(ExitRefused, "the reset authority has nowhere to go: %v", err)
 	}
@@ -884,8 +914,8 @@ func runFactorEnrolTOTP(ctx context.Context, ios IO, args []string) (returnErr e
 	if err != nil {
 		return err
 	}
-	deliver := disclose.Options{OutputFile: outputFile, DangerouslyPrint: dangerous, Stdout: ios.Stdout, OpenTerminal: ios.OpenTerminal}
-	sink, err := disclose.Prepare(deliver)
+	deliver := disclose.Options{OutputFile: outputFile, DangerouslyPrint: dangerous, Stdout: ios.Stdout}
+	sink, err := ios.prepareDisclosure(deliver)
 	if err != nil {
 		return failf(ExitRefused, "the otpauth URI has nowhere to go: %v", err)
 	}
@@ -976,8 +1006,8 @@ func runRecoveryCodes(ctx context.Context, ios IO, args []string) (returnErr err
 	if err != nil {
 		return err
 	}
-	deliver := disclose.Options{OutputFile: outputFile, DangerouslyPrint: dangerous, Stdout: ios.Stdout, OpenTerminal: ios.OpenTerminal}
-	sink, err := disclose.Prepare(deliver)
+	deliver := disclose.Options{OutputFile: outputFile, DangerouslyPrint: dangerous, Stdout: ios.Stdout}
+	sink, err := ios.prepareDisclosure(deliver)
 	if err != nil {
 		return failf(ExitRefused, "the recovery codes have nowhere to go: %v", err)
 	}
@@ -1036,8 +1066,8 @@ func runRecovery(ctx context.Context, ios IO, args []string) (returnErr error) {
 	if target == "" {
 		return failf(ExitUsage, "--instance <url|ref> is required")
 	}
-	deliver := disclose.Options{OutputFile: outputFile, DangerouslyPrint: dangerous, Stdout: ios.Stdout, OpenTerminal: ios.OpenTerminal}
-	sink, err := disclose.Prepare(deliver)
+	deliver := disclose.Options{OutputFile: outputFile, DangerouslyPrint: dangerous, Stdout: ios.Stdout}
+	sink, err := ios.prepareDisclosure(deliver)
 	if err != nil {
 		return failf(ExitRefused, "the authority has nowhere to go: %v", err)
 	}
@@ -1530,7 +1560,17 @@ func (ios IO) readPassword(prompt string) (string, error) {
 	if ios.ReadPassword != nil {
 		return ios.ReadPassword(prompt)
 	}
-	return readTerminalPassword(prompt)
+	session, err := ios.terminalSession()
+	if err != nil {
+		return "", failf(ExitRefused,
+			"a password can only be read from an interactive terminal, and this process has none. "+
+				"There is no --password flag: a secret on argv is visible in `ps`, /proc/*/cmdline and shell history: %v", err)
+	}
+	password, err := session.ReadPassword(prompt)
+	if err != nil {
+		return "", failf(ExitRefused, "reading the password: %v", err)
+	}
+	return password, nil
 }
 
 func first(vs []string) string {

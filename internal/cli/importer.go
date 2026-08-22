@@ -344,10 +344,10 @@ func writeArtifacts(ios IO, outDir, envID string, plan *importer.Plan) (valuesPa
 	// The values file is reserved BEFORE anything is written: a run that
 	// emits a bundle and then discovers it has nowhere to put the plaintext has
 	// left half a migration on disk.
-	deliver := disclose.Options{OutputFile: valuesPath, Stdout: ios.Stdout, OpenTerminal: ios.OpenTerminal}
+	deliver := disclose.Options{OutputFile: valuesPath, Stdout: ios.Stdout}
 	var sink *disclose.PreparedSink
 	if valuesPath != "" {
-		prepared, err := disclose.Prepare(deliver)
+		prepared, err := ios.prepareDisclosure(deliver)
 		if err != nil {
 			return "", failf(ExitRefused, "the values file has nowhere to go: %v", err)
 		}
@@ -498,16 +498,7 @@ func quoteImportNames(names []string) string {
 // question disclose asks, asked the same way: stdout being a TTY proves
 // neither presence nor intent, and /dev/tty is a different file.
 func onTerminal(ios IO) bool {
-	open := ios.OpenTerminal
-	if open == nil {
-		return false
-	}
-	tty, err := open()
-	if err != nil {
-		return false
-	}
-	_ = tty.Close()
-	return true
+	return ios.TerminalSession != nil
 }
 
 // ---------------------------------------------------------------------------

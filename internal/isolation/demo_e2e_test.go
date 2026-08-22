@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Hikyo-Org/hikyo/internal/cli"
+	"github.com/Hikyo-Org/hikyo/internal/disclose"
 	"github.com/Hikyo-Org/hikyo/internal/server"
 	"github.com/Hikyo-Org/hikyo/internal/service"
 	"github.com/Hikyo-Org/hikyo/internal/store"
@@ -143,6 +144,10 @@ func runDemoFlow(t *testing.T, db *store.DB) {
 	prompts := map[string]string{}
 	ios := func() cli.IO {
 		var confirmed fakeTerminal
+		terminalSession, err := disclose.NewTerminalSession(&confirmed)
+		if err != nil {
+			t.Fatal(err)
+		}
 		return cli.IO{
 			Stdout:  io.Discard,
 			Stderr:  io.Discard,
@@ -162,7 +167,7 @@ func runDemoFlow(t *testing.T, db *store.DB) {
 				t.Fatalf("unexpected prompt: %q", prompt)
 				return "", nil
 			},
-			OpenTerminal: func() (io.WriteCloser, error) { return &confirmed, nil },
+			TerminalSession: terminalSession,
 		}
 	}
 
@@ -359,18 +364,18 @@ func runDemoFlow(t *testing.T, db *store.DB) {
 // pre-made, because a test process has no terminal to make it at.
 type fakeTerminal struct {
 	written strings.Builder
-	read    bool
+	read    int
 }
 
 func (f *fakeTerminal) Write(p []byte) (int, error) { return f.written.Write(p) }
 
 func (f *fakeTerminal) Read(p []byte) (int, error) {
-	if f.read {
-		return 0, io.EOF
+	if len(p) == 0 {
+		return 0, nil
 	}
-	f.read = true
-	n := copy(p, "y\n")
-	return n, nil
+	p[0] = "y\n"[f.read%2]
+	f.read++
+	return 1, nil
 }
 
 func (f *fakeTerminal) Close() error { return nil }

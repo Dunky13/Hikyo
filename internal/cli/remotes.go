@@ -93,11 +93,14 @@ func runRemote(ctx context.Context, ios IO, args []string) error {
 		// A TYPED-NAME confirmation (ADR § Parity), because removal destroys
 		// the stored credential and the snapshot with the entry, and re-adding
 		// costs the whole ceremony again on both instances.
-		ok, err := disclose.ConfirmName(
+		session, err := ios.terminalSession()
+		if err != nil {
+			return failf(ExitRefused, "confirming the removal: %v", err)
+		}
+		ok, err := session.ConfirmName(
 			fmt.Sprintf("removing remote %q destroys its stored credential and its snapshot.\n"+
 				"the URL and pin are immutable, so re-adding means the full ceremony again.", positional[0]),
-			positional[0],
-			disclose.Options{Stdout: ios.Stdout, OpenTerminal: ios.OpenTerminal})
+			positional[0])
 		if err != nil {
 			return failf(ExitRefused, "confirming the removal: %v", err)
 		}
@@ -145,8 +148,6 @@ func addRemote(ctx context.Context, ios IO, st *State, flags commonFlags, f Form
 			"    the directory channel is TLS with a pinned key; there is no fingerprint to "+
 			"confirm without it, and the credential would cross an unencrypted wire.", rawURL)
 	}
-	deliver := disclose.Options{Stdout: ios.Stdout, OpenTerminal: ios.OpenTerminal}
-
 	pin, err := FetchIdentity(origin)
 	if err != nil {
 		return failf(ExitRefused, "hikyo remote add: connecting to %s: %v", origin, err)
@@ -160,8 +161,12 @@ func addRemote(ctx context.Context, ios IO, st *State, flags commonFlags, f Form
 	// The fingerprint goes to the TERMINAL and the answer comes back from it,
 	// so a log-capturing pipe sees neither the key being trusted nor the
 	// intent to trust it.
-	ok, err := disclose.Confirm(
-		fmt.Sprintf("%s presents key fingerprint\n    %s\ntrust it?", origin, pin), deliver)
+	session, err := ios.terminalSession()
+	if err != nil {
+		return failf(ExitRefused, "hikyo remote add: %v (this command is interactive-only)", err)
+	}
+	ok, err := session.Confirm(
+		fmt.Sprintf("%s presents key fingerprint\n    %s\ntrust it?", origin, pin))
 	if err != nil {
 		return failf(ExitRefused, "hikyo remote add: %v (this command is interactive-only)", err)
 	}
@@ -297,11 +302,11 @@ func runRemoteCredential(ctx context.Context, ios IO, args []string) (returnErr 
 	// this display-once value again.
 	deliver := disclose.Options{
 		OutputFile: outputFile, DangerouslyPrint: dangerous,
-		Stdout: ios.Stdout, OpenTerminal: ios.OpenTerminal,
+		Stdout: ios.Stdout,
 	}
 	var sink *disclose.PreparedSink
 	if sub == "create" {
-		sink, err = disclose.Prepare(deliver)
+		sink, err = ios.prepareDisclosure(deliver)
 		if err != nil {
 			return failf(ExitRefused, "the credential has nowhere to go: %v", err)
 		}

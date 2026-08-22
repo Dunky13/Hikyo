@@ -16,6 +16,7 @@ import (
 	"github.com/Hikyo-Org/hikyo/internal/cli"
 	"github.com/Hikyo-Org/hikyo/internal/config"
 	"github.com/Hikyo-Org/hikyo/internal/crypto"
+	"github.com/Hikyo-Org/hikyo/internal/disclose"
 	"github.com/Hikyo-Org/hikyo/internal/domain"
 	"github.com/Hikyo-Org/hikyo/internal/service"
 	"github.com/Hikyo-Org/hikyo/internal/store"
@@ -101,6 +102,10 @@ func runRetentionCLIStartupSweep(t *testing.T, engine store.Engine) {
 	}
 	ios := func() cli.IO {
 		var terminal fakeTerminal
+		terminalSession, err := disclose.NewTerminalSession(&terminal)
+		if err != nil {
+			t.Fatal(err)
+		}
 		return cli.IO{
 			Stdout: io.Discard, Stderr: io.Discard, Workdir: workDir,
 			Env: cli.Env{Getenv: func(key string) string {
@@ -118,7 +123,7 @@ func runRetentionCLIStartupSweep(t *testing.T, engine store.Engine) {
 				t.Fatalf("unexpected prompt: %q", prompt)
 				return "", nil
 			},
-			OpenTerminal: func() (io.WriteCloser, error) { return &terminal, nil },
+			TerminalSession: terminalSession,
 		}
 	}
 	runCLI := func(want int, args ...string) (string, string) {

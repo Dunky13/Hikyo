@@ -399,7 +399,7 @@ func drillLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard
 func exportArchive(t *testing.T, target drillTarget) string {
 	t.Helper()
 	before := archiveFiles(t, target.cfg.BackupDir)
-	if err := app.RunBackup(t.Context(), target.cfg, drillLogger(), []string{"export"}, io.Discard); err != nil {
+	if err := app.RunBackup(t.Context(), target.cfg, drillLogger(), []string{"export"}, io.Discard, nil, nil); err != nil {
 		t.Fatalf("backup export: %v", err)
 	}
 	after := archiveFiles(t, target.cfg.BackupDir)
@@ -505,7 +505,7 @@ func runBackupRestoreDrill(t *testing.T, target drillTarget, c custody) {
 				target.destroy(t)
 				err := app.RunRestore(t.Context(), target.cfg, drillLogger(),
 					[]string{"run", "--from", truncated, "--identity-file", c.identityFile()},
-					io.Discard)
+					io.Discard, nil, nil)
 				if err == nil {
 					t.Fatal("a truncated archive restored")
 				}
@@ -550,7 +550,7 @@ func runBackupRestoreDrill(t *testing.T, target drillTarget, c custody) {
 	}
 	if err := app.RunRestore(t.Context(), target.cfg, drillLogger(),
 		[]string{"run", "--from", archive, "--identity-file", c.identityFile()},
-		io.Discard); err != nil {
+		io.Discard, nil, nil); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
 	restored := target.open(t)
@@ -1011,7 +1011,7 @@ func TestNoBulkAcceptInTheAPISurface(t *testing.T) {
 		{"reconcile", "--all"},
 		{"reconcile", "--principals", "usr_a,usr_b"},
 	} {
-		if err := app.RunRestore(t.Context(), cfg, drillLogger(), args, io.Discard); err == nil {
+		if err := app.RunRestore(t.Context(), cfg, drillLogger(), args, io.Discard, nil, nil); err == nil {
 			t.Errorf("`hikyo restore %s` was accepted", strings.Join(args, " "))
 		}
 	}
@@ -1159,7 +1159,7 @@ func TestRestoreRefusesImplausibleEpochStamps(t *testing.T) {
 	target.destroy(t)
 	err := app.RunRestore(t.Context(), target.cfg, drillLogger(),
 		[]string{"run", "--from", archive, "--identity-file", c.identityFile()},
-		io.Discard)
+		io.Discard, nil, nil)
 	if err == nil || !strings.Contains(err.Error(), "outside the sane range") {
 		t.Fatalf("a MaxInt64 epoch stamp was not refused by name: %v", err)
 	}
@@ -1214,7 +1214,7 @@ func runRestoreEpochForgery(t *testing.T, target drillTarget, c custody) {
 	target.destroy(t)
 	if err := app.RunRestore(t.Context(), target.cfg, drillLogger(),
 		[]string{"run", "--from", archive, "--identity-file", c.identityFile()},
-		io.Discard); err != nil {
+		io.Discard, nil, nil); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
 	restored := target.open(t)

@@ -27,7 +27,6 @@ import (
 	"github.com/Hikyo-Org/hikyo/api/apigen"
 	"github.com/Hikyo-Org/hikyo/internal/compose"
 	"github.com/Hikyo-Org/hikyo/internal/crypto"
-	"github.com/Hikyo-Org/hikyo/internal/disclose"
 )
 
 // The Compose delivery verbs (compose-integration ADR; #63): `hikyo run --`
@@ -263,9 +262,10 @@ func runHumanSession(ctx context.Context, ios IO, st *State, flags commonFlags, 
 	// halves are required by name: a controlling terminal (the confirmation and
 	// the code are read there) AND stderr being a TTY (the locked condition -
 	// a human session driving a process whose stderr is captured is refused).
-	if !onTerminal(ios) {
+	terminalSession, terminalErr := ios.terminalSession()
+	if terminalErr != nil {
 		return failf(ExitRefused,
-			"hikyo run --use-human-session requires a controlling terminal for the confirmation and reauth ceremony; there is none")
+			"hikyo run --use-human-session requires a controlling terminal for the confirmation and reauth ceremony: %v", terminalErr)
 	}
 	if ios.StderrIsTerminal == nil || !ios.StderrIsTerminal() {
 		return failf(ExitRefused,
@@ -332,7 +332,7 @@ func runHumanSession(ctx context.Context, ios IO, st *State, flags commonFlags, 
 	sort.Strings(names)
 	prompt := fmt.Sprintf("About to inject %d value(s) into environment %s and exec %q:\n  %s\nProceed",
 		len(names), env, childArgs[0], strings.Join(names, "\n  "))
-	ok, err := disclose.Confirm(prompt, disclose.Options{OpenTerminal: ios.OpenTerminal})
+	ok, err := terminalSession.ConfirmEnumerated(prompt)
 	if err != nil {
 		return failf(ExitRefused, "reading the confirmation: %v", err)
 	}

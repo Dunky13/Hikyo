@@ -107,7 +107,9 @@ still waiting.
 }
 
 // RunBackup dispatches the export verb group.
-func RunBackup(ctx context.Context, cfg *config.Config, log *slog.Logger, args []string, stderr io.Writer) error {
+func RunBackup(ctx context.Context, cfg *config.Config, log *slog.Logger, args []string, stderr io.Writer,
+	terminalSession *disclose.TerminalSession, terminalError error,
+) error {
 	if len(args) == 0 {
 		BackupUsage(stderr)
 		return errors.New("usage: hikyo backup export | hikyo backup keygen")
@@ -116,7 +118,7 @@ func RunBackup(ctx context.Context, cfg *config.Config, log *slog.Logger, args [
 	case "export":
 		return runBackupExport(ctx, cfg, log, args, stderr)
 	case "keygen":
-		return runBackupKeygen(args, stderr)
+		return runBackupKeygen(args, stderr, terminalSession, terminalError)
 	default:
 		BackupUsage(stderr)
 		return fmt.Errorf("hikyo backup: unknown subcommand %q", args[0])
@@ -211,7 +213,7 @@ func readSecretFile(path string) (string, error) {
 	return v, nil
 }
 
-func runBackupKeygen(args []string, stderr io.Writer) (returnErr error) {
+func runBackupKeygen(args []string, stderr io.Writer, terminalSession *disclose.TerminalSession, terminalError error) (returnErr error) {
 	fs := flag.NewFlagSet("backup keygen", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	outputFile := fs.String("output-file", "", "write the identity to a file this command creates (0600)")
@@ -225,7 +227,7 @@ func runBackupKeygen(args []string, stderr io.Writer) (returnErr error) {
 	opts := disclose.Options{OutputFile: *outputFile, DangerouslyPrint: *dangerous}
 	// Reserve the destination BEFORE the identity exists: minting a key that
 	// has nowhere to go is minting a key nobody has.
-	sink, err := disclose.Prepare(opts)
+	sink, err := prepareDisclosure(opts, terminalSession, terminalError)
 	if err != nil {
 		return err
 	}
@@ -245,7 +247,9 @@ func runBackupKeygen(args []string, stderr io.Writer) (returnErr error) {
 }
 
 // RunRestore dispatches the restore verb group.
-func RunRestore(ctx context.Context, cfg *config.Config, log *slog.Logger, args []string, stderr io.Writer) error {
+func RunRestore(ctx context.Context, cfg *config.Config, log *slog.Logger, args []string, stderr io.Writer,
+	_ *disclose.TerminalSession, _ error,
+) error {
 	if len(args) == 0 {
 		RestoreUsage(stderr)
 		return errors.New("usage: hikyo restore run --from ARCHIVE | hikyo restore status | hikyo restore reconcile --principal ID")

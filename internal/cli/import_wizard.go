@@ -337,8 +337,8 @@ func writeProjectArtifacts(ios IO, outDir string, plan *importer.ProjectPlan) (v
 	// reservation or artifact fails, deferred aborts remove unused empty files.
 	for i := range valuesTargets {
 		vt := &valuesTargets[i]
-		deliver := disclose.Options{OutputFile: vt.path, Stdout: ios.Stdout, OpenTerminal: ios.OpenTerminal}
-		sink, err := disclose.Prepare(deliver)
+		deliver := disclose.Options{OutputFile: vt.path, Stdout: ios.Stdout}
+		sink, err := ios.prepareDisclosure(deliver)
 		if err != nil {
 			return nil, failf(ExitRefused, "the values file for %s has nowhere to go: %v", vt.envRef, err)
 		}

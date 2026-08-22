@@ -186,11 +186,11 @@ func runServiceAccountCredential(ctx context.Context, ios IO, args []string) (re
 	// The reserved destination is the exact destination later written.
 	deliver := disclose.Options{
 		OutputFile: outputFile, DangerouslyPrint: dangerous,
-		Stdout: ios.Stdout, OpenTerminal: ios.OpenTerminal,
+		Stdout: ios.Stdout,
 	}
 	var sink *disclose.PreparedSink
 	if sub == "mint" || sub == "rotate" {
-		sink, err = disclose.Prepare(deliver)
+		sink, err = ios.prepareDisclosure(deliver)
 		if err != nil {
 			return failf(ExitRefused, "the credential has nowhere to go: %v", err)
 		}
