@@ -18,6 +18,8 @@ esac
 corepack enable
 corepack install --global "$package_manager"
 pnpm --dir "$repo_root/docs/site" install --frozen-lockfile
+node "$repo_root/scripts/ci/check-doc-status.mjs" --check --root "$repo_root"
+"$repo_root/scripts/ci/check-doc-status_test.sh"
 pnpm --dir "$repo_root/docs/site" peers check
 if [ -n "${CI:-}" ]; then
 	pnpm --dir "$repo_root/docs/site" exec playwright install --with-deps chromium

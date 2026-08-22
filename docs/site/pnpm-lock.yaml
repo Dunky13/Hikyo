@@ -53,6 +53,9 @@ importers:
       takumi-js:
         specifier: 2.5.11
         version: 2.5.11(csstype@3.2.3)(react@19.2.8)
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
     devDependencies:
       '@astrojs/check':
         specifier: 0.9.10
