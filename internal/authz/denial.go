@@ -89,7 +89,7 @@ const (
 // trail with the addressed identifiers as bounded, sanitized caller-asserted
 // claims. Instance-operation refusals are resolvable grant refusals with no
 // tenant object, so they take the instance trail too.
-func (a *TxAuthorizer) captureDenial(ctx context.Context, principal domain.PrincipalID, op Operation, spec opSpec, resolution string, resolvedChain domain.Scope, claimed domain.Scope) {
+func (a *TxAuthorizer) captureDenial(ctx context.Context, principal domain.PrincipalID, op Operation, spec authorizationSpec, resolution string, resolvedChain domain.Scope, claimed domain.Scope) {
 	id, err := audit.NewEventID()
 	if err != nil {
 		// Cannot mint an id (entropy exhaustion): nothing writable exists,
