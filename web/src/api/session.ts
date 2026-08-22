@@ -2,14 +2,14 @@ import {
   listMyOrgsOp,
   localLoginOp,
   logoutOp,
-  whoamiOp,
 } from '@hikyo/operations';
-import { zLoginResult, zMyOrgList, zWhoAmI } from '@hikyo/zod';
-import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
+import { zLoginResult, zMyOrgList } from '@hikyo/zod';
+import { useMutation, useQuery, type UseQueryResult } from '@tanstack/react-query';
 import type { z } from 'zod';
 
 import { ApiError, ok, parsed } from './client.ts';
 import { useTransport } from './transport.tsx';
+import { useAuth } from '../app/AuthProvider.tsx';
 
 /**
  * loginFailureText turns a login failure into something true.
@@ -36,35 +36,11 @@ export function loginFailureText(error: unknown): string {
   return 'Sign-in could not be completed: the server could not be reached, or it answered something this client does not understand.';
 }
 
-export type WhoAmI = z.infer<typeof zWhoAmI>;
+export type { WhoAmI } from '../app/AuthProvider.tsx';
 export type LoginResult = z.infer<typeof zLoginResult>;
 export type MyOrgList = z.infer<typeof zMyOrgList>;
 
-export const sessionKey = ['session'] as const;
 export const orgsKey = ['orgs'] as const;
-
-/**
- * useSession is the SPA's boot question: is there a live session behind the
- * cookie? A 401 is an ANSWER (no), not a failure, so it resolves to null
- * rather than throwing into an error boundary — the login page is the
- * rendering of that answer.
- */
-export function useSession(): UseQueryResult<WhoAmI | null> {
-  return useQuery({
-    queryKey: sessionKey,
-    queryFn: async () => {
-      try {
-        return await parsed(whoamiOp, {});
-      } catch (err) {
-        if (err instanceof ApiError && err.status === 401) {
-          return null;
-        }
-        throw err;
-      }
-    },
-    retry: false,
-  });
-}
 
 /**
  * useOrgs is the rail's data source: the organisations the caller's OWN grants
@@ -93,13 +69,14 @@ export function useOrgs(enabled: boolean): UseQueryResult<MyOrgList> {
 /**
  * useLogin asks for a BROWSER artifact explicitly. The server then delivers
  * the session token only on the HttpOnly cookie and its synchronizer token on
- * the readable companion — nothing lands in JavaScript's hands, which is why
- * the response body is discarded here and the session is re-read through
- * whoami.
+ * the readable companion — nothing replayable lands in JavaScript's hands.
+ * The parsed response lets the root auth owner bind its cache epoch to the
+ * returned session id without another request.
  */
 export function useLogin() {
-  const queries = useQueryClient();
+  const auth = useAuth();
   return useMutation({
+    onMutate: auth.captureTransition,
     mutationFn: async (input: { username: string; password: string }) => {
       // Parsed, not discarded. The session itself arrives on cookies, but the
       // response body is still contract-bearing — a server that answered a
@@ -117,19 +94,15 @@ export function useLogin() {
       }
       return result;
     },
-    onSuccess: () => queries.invalidateQueries(),
+    onSuccess: (identity, _input, guard) => auth.acceptSession(identity, guard),
   });
 }
 
 export function useLogout() {
-  const queries = useQueryClient();
+  const auth = useAuth();
   return useMutation({
+    onMutate: auth.captureTransition,
     mutationFn: () => ok(logoutOp, {}),
-    // The server clears both cookies; the client discards every cached
-    // answer, because every one of them was scoped to the session that just
-    // ended. `resetQueries`, not `clear`: clearing empties the cache but
-    // leaves mounted observers holding their last result, so the chrome would
-    // keep rendering a signed-out principal until something else refetched.
-    onSuccess: () => queries.resetQueries(),
+    onSuccess: (_result, _input, guard) => auth.endSession(guard),
   });
 }

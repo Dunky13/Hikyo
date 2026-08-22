@@ -7,7 +7,7 @@ import {
   loadCLIReauthTransaction,
 } from '../api/cliReauth.ts';
 import { useTotpStatus } from '../api/account.ts';
-import { useSession } from '../api/session.ts';
+import { useAuth } from '../app/AuthProvider.tsx';
 import {
   runAdapterPasskeyCeremony,
   runAdapterTOTPCeremony,
@@ -18,7 +18,7 @@ import { Login } from './Login.tsx';
 
 /** Browser half of the CLI's state + PKCE reauthentication handoff. */
 export function CLIReauth() {
-  const session = useSession();
+  const auth = useAuth();
   const [state] = useState(
     () => new URLSearchParams(globalThis.location.search).get('transaction') ?? '',
   );
@@ -27,7 +27,7 @@ export function CLIReauth() {
   const transaction = useQuery({
     queryKey: ['cli-reauth', state] as const,
     queryFn: () => loadCLIReauthTransaction(state),
-    enabled: state !== '' && session.data !== null,
+    enabled: state !== '' && auth.state.status === 'authenticated',
     retry: false,
   });
   const approve = useMutation({
@@ -79,10 +79,10 @@ export function CLIReauth() {
   if (state === '') {
     return <CLIReauthMessage title="Nothing to authorize" text="This page has no CLI transaction. Return to the terminal and start again." />;
   }
-  if (session.isPending) {
+  if (auth.state.status === 'checking' || auth.state.status === 'transitioning') {
     return <p className="login" role="status">Loading…</p>;
   }
-  if (session.isSuccess && session.data === null) {
+  if (auth.state.status === 'anonymous') {
     return <Login />;
   }
 
