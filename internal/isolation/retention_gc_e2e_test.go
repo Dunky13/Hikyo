@@ -39,6 +39,14 @@ func TestRetentionFailedSweepAuditPostgres(t *testing.T) {
 	runRetentionFailedSweepAudit(t, seededDB(t, openPostgres))
 }
 
+func TestRetentionFailedSweepCountsObservedCandidatesSQLite(t *testing.T) {
+	runRetentionFailedSweepCountsObservedCandidates(t, seededDB(t, openSQLite))
+}
+
+func TestRetentionFailedSweepCountsObservedCandidatesPostgres(t *testing.T) {
+	runRetentionFailedSweepCountsObservedCandidates(t, seededDB(t, openPostgres))
+}
+
 func runRetentionFailedSweepAudit(t *testing.T, db *store.DB) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(t.Context())
@@ -53,6 +61,31 @@ func runRetentionFailedSweepAudit(t *testing.T, db *store.DB) {
         WHERE type = 'retention.prune_run' AND outcome = 'failure'
           AND actor_class = 'system' AND payload LIKE '%"error_class":"canceled"%'`); n != 1 {
 		t.Fatalf("failed prune-run audit events = %d, want 1", n)
+	}
+}
+
+func runRetentionFailedSweepCountsObservedCandidates(t *testing.T, db *store.DB) {
+	t.Helper()
+	now := time.Date(2026, 8, 15, 12, 0, 0, 0, time.UTC)
+	retention := &service.Retention{DB: db, Now: func() time.Time { return now }}
+	if _, err := retention.SetProject(t.Context(), service.LocalPrincipal(orgAdmin),
+		scopeProject(orgA, prjA1), &service.RetentionPolicy{MaxAge: 20 * 24 * time.Hour, LastRevisions: 2}); err != nil {
+		t.Fatalf("set project retention: %v", err)
+	}
+	seedRetentionCorpus(t, db)
+
+	// Eligible reads only snapshot lineage. Removing the payload table makes the
+	// chunk fail after it has observed both eligible candidates but before commit.
+	execRaw(t, db, "DROP TABLE snapshot_entries")
+	if _, err := retention.Sweep(t.Context()); err == nil {
+		t.Fatal("sweep succeeded after payload table removal")
+	}
+	if n := queryInt(t, db, `SELECT COUNT(*) FROM audit_instance_events
+        WHERE type = 'retention.prune_run' AND outcome = 'failure'
+          AND payload LIKE '%"candidates":2%'`); n != 1 {
+		payloads := queryStrings(t, db, `SELECT payload FROM audit_instance_events
+            WHERE type = 'retention.prune_run' AND outcome = 'failure'`)
+		t.Fatalf("failed prune-run events with two observed candidates = %d, want 1; payloads=%s", n, payloads)
 	}
 }
 

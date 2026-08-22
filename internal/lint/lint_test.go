@@ -44,6 +44,16 @@ func TestProofForgeryRepo(t *testing.T) {
 	}
 }
 
+func TestTransactionResultsRepo(t *testing.T) {
+	pkgs, err := LoadRepo()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range CheckTransactionResults(pkgs) {
+		t.Error(f)
+	}
+}
+
 func TestFenceCompletenessRepo(t *testing.T) {
 	pkgs, err := LoadRepo()
 	if err != nil {
@@ -245,6 +255,19 @@ func TestProofForgeryCatchesViolations(t *testing.T) {
 	if nilCount < 3 {
 		t.Errorf("nil-proof literals caught = %d, want 3 (return, var, call arg):\n%s", nilCount, strings.Join(findings, "\n"))
 	}
+}
+
+func TestTransactionResultsCatchAttemptOwnedTypes(t *testing.T) {
+	pkgs, err := Load("./testdata/badtxresult")
+	if err != nil {
+		t.Fatal(err)
+	}
+	findings := CheckTransactionResults(pkgs)
+	assertFindings(t, findings, []string{
+		"store.Repos",
+		"interface values can retain attempt-owned authority",
+		"function values can capture attempt-owned authority",
+	})
 }
 
 // The forgery guard's exemption must be an exact path match: a neighbouring

@@ -285,6 +285,16 @@ func TestInvariant09ForgeryGuard(t *testing.T) {
 	}
 }
 
+func TestInvariant09bTransactionResultsAreDetached(t *testing.T) {
+	pkgs, err := lint.LoadRepo()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range lint.CheckTransactionResults(pkgs) {
+		t.Error(f)
+	}
+}
+
 // TestInvariant11SystemProofEnumeration: the mint-site set is exactly
 // {boot, migration, recovery-mode reconciliation, break-glass, scheduler}.
 // Boot and scheduler carry exactly their reviewed store surfaces; growth of
