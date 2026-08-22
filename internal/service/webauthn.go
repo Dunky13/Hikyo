@@ -685,42 +685,20 @@ func (s *Auth) StepUpPasskeyFinish(ctx context.Context, presented string, respon
 // ReauthPasskeyStart opens a reauth ceremony bound to the enumerated unit
 // (purpose + environment + sorted key ids), so the challenge authorizes exactly
 // that decision and no other with the same shape.
-func (s *Auth) ReauthPasskeyStart(ctx context.Context, presented string, purpose ReauthPurpose,
-	environmentID string, keyIDs []string) ([]byte, error) {
-	if environmentID == "" {
-		return nil, ErrNoWebAuthnCeremony
-	}
-	binding, err := operationBinding(purpose, environmentID, keyIDs)
+func (s *Auth) ReauthPasskeyStart(ctx context.Context, presented string, intent ReauthIntent) ([]byte, error) {
+	unbound, err := intent.isUnbound()
 	if err != nil {
 		return nil, err
 	}
-	return s.beginAccountCeremony(ctx, presented, "reauth", binding, environmentID, []string{environmentID})
-}
-
-// ReauthAdapterPasskeyStart opens one signed WebAuthn ceremony for one
-// effective-zero environment, with the adapter purpose, concrete operation and
-// complete adapter environment set all inside the signed challenge binding.
-// A mixed-policy act calls this once per zero-window environment.
-func (s *Auth) ReauthAdapterPasskeyStart(ctx context.Context, presented string, operation authz.Operation,
-	environmentID string, environmentIDs []string) ([]byte, error) {
-	if !adapterReauthOperation(operation) || environmentID == "" {
+	if unbound {
 		return nil, ErrReauthUnitMismatch
 	}
-	environmentIDs = adapterEnvironmentSet(environmentIDs)
-	if !slices.Contains(environmentIDs, environmentID) {
-		return nil, ErrReauthUnitMismatch
-	}
-	binding, err := adapterOperationBinding(operation, environmentID, environmentIDs)
+	binding, err := intent.bindingFor(intent.environmentID)
 	if err != nil {
 		return nil, err
 	}
-	return s.beginAccountCeremony(ctx, presented, "reauth", binding, environmentID, environmentIDs)
-}
-
-// ReauthAdapterPasskeyStartWire keeps the transport boundary free of authz
-// package types while preserving the same closed operation validation here.
-func (s *Auth) ReauthAdapterPasskeyStartWire(ctx context.Context, presented, operation, environmentID string, environmentIDs []string) ([]byte, error) {
-	return s.ReauthAdapterPasskeyStart(ctx, presented, authz.Operation(operation), environmentID, environmentIDs)
+	return s.beginAccountCeremony(ctx, presented, "reauth", binding.challengeBinding,
+		binding.environmentID, intent.EnvironmentIDs())
 }
 
 // ReauthPasskeyFinish validates the assertion and opens a reauthentication
@@ -765,12 +743,21 @@ func (s *Auth) ReauthPasskeyFinish(ctx context.Context, presented string, respon
 		if binding, ok, err := parseAdapterOperationBinding(ceremony.OperationBinding); err != nil {
 			return err
 		} else if ok {
-			if binding.EnvironmentID != ceremony.EnvironmentID || !adapterReauthOperation(authz.Operation(binding.Operation)) {
+			intent, err := NewAdapterReauthIntent(binding.Operation, binding.EnvironmentIDs)
+			if err != nil {
 				return ErrReauthUnitMismatch
 			}
-			window.BoundPurpose = string(PurposeAdapter)
-			window.BoundOperation = binding.Operation
-			window.BoundEnvironmentSet = CanonicalEnvironmentSet(binding.EnvironmentIDs)
+			target, err := intent.ForEnvironment(binding.EnvironmentID)
+			if err != nil {
+				return ErrReauthUnitMismatch
+			}
+			derived, err := target.bindingFor(binding.EnvironmentID)
+			if err != nil || binding.EnvironmentID != ceremony.EnvironmentID || derived.challengeBinding != ceremony.OperationBinding {
+				return ErrReauthUnitMismatch
+			}
+			window.BoundPurpose = string(derived.purpose)
+			window.BoundOperation = string(derived.operation)
+			window.BoundEnvironmentSet = derived.environmentSet
 		}
 		if err := az.OpenReauthWindow(ctx, window); err != nil {
 			return err

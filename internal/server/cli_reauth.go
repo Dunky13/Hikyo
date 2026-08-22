@@ -2,8 +2,10 @@ package server
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/Hikyo-Org/hikyo/api/apigen"
+	"github.com/Hikyo-Org/hikyo/internal/domain"
 	"github.com/Hikyo-Org/hikyo/internal/service"
 )
 
@@ -18,7 +20,27 @@ func (a *API) StartCLIReauth(ctx context.Context, req apigen.StartCLIReauthReque
 			keyIDs = append(keyIDs, string(keyID))
 		}
 	}
-	result, err := a.Auth.StartCLIReauth(ctx, bearer(ctx), string(req.Body.Purpose), string(req.Body.Operation), environments, keyIDs, req.Body.PkceChallenge, req.Body.RedirectUri)
+	var intent service.ReauthIntent
+	var err error
+	if req.Body.Purpose == apigen.CLIReauthStartRequestPurposeAdapter {
+		if len(keyIDs) != 0 {
+			return nil, fmt.Errorf("%w: adapter reauthentication does not carry key ids", domain.ErrInvalid)
+		}
+		intent, err = service.NewAdapterReauthIntent(string(req.Body.Operation), environments)
+	} else {
+		intent, err = service.NewDisclosureReauthIntent(service.ReauthPurpose(req.Body.Purpose), environments, keyIDs)
+		if err == nil {
+			operation, operationErr := intent.Operation()
+			err = operationErr
+			if operationErr == nil && string(operation) != string(req.Body.Operation) {
+				err = fmt.Errorf("%w: reauthentication purpose and operation disagree", domain.ErrInvalid)
+			}
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+	result, err := a.Auth.StartCLIReauth(ctx, bearer(ctx), intent, req.Body.PkceChallenge, req.Body.RedirectUri)
 	if err != nil {
 		return nil, err
 	}

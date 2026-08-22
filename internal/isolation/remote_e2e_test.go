@@ -198,11 +198,14 @@ func runRemoteLifecycle(t *testing.T, db *store.DB) {
 	// remote.workspace_handoff_read. Only START + READ here — the elevation
 	// itself needs the reauthentication seam this lifecycle deliberately leaves
 	// unwired; the read does not, and it is the audited act under test.
+	intent, err := service.NewRevealReauthIntent("env_lifecycle", []string{"key_x"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	stepUp, err := workspace.StartHandoff(ctx, service.HandoffRequest{
 		Origin: "https://shell.example", RedirectURI: "https://shell.example/workspace/callback",
 		PKCEChallenge: challenge, Purpose: authn.HandoffStepUp,
-		SessionID: ws.SessionID, Operation: string(authz.OpValueReveal),
-		EnvID: "env_lifecycle", KeySet: "key_x",
+		SessionID: ws.SessionID, ReauthIntent: &intent,
 	})
 	if err != nil {
 		t.Fatalf("start step-up handoff: %v", err)

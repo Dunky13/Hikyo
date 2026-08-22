@@ -2,11 +2,12 @@ package server
 
 import (
 	"context"
-	"strings"
+	"fmt"
 	"time"
 
 	"github.com/Hikyo-Org/hikyo/api/apigen"
 	"github.com/Hikyo-Org/hikyo/internal/audit"
+	"github.com/Hikyo-Org/hikyo/internal/domain"
 	"github.com/Hikyo-Org/hikyo/internal/remotefetch"
 	"github.com/Hikyo-Org/hikyo/internal/service"
 )
@@ -158,17 +159,27 @@ func (a *API) StartWorkspaceHandoff(ctx context.Context, req apigen.StartWorkspa
 	if req.Body.Session != nil {
 		r.SessionID = *req.Body.Session
 	}
-	if req.Body.Operation != nil {
-		r.Operation = *req.Body.Operation
-	}
-	if req.Body.Environment != nil {
-		r.EnvID = *req.Body.Environment
-	}
-	if req.Body.KeySet != nil {
-		// A display and binding value, never parsed back into authority: the
-		// transaction binds WHAT the consent covered, and the operation
-		// re-derives its own key set.
-		r.KeySet = strings.Join(*req.Body.KeySet, "\n")
+	if r.Purpose == service.HandoffEstablishment {
+		if req.Body.Session != nil || req.Body.Operation != nil || req.Body.Environment != nil || req.Body.KeySet != nil {
+			return nil, fmt.Errorf("%w: an establishment carries no step-up binding", domain.ErrInvalid)
+		}
+	} else if r.Purpose == service.HandoffStepUp {
+		if req.Body.Session == nil || req.Body.Operation == nil || req.Body.Environment == nil {
+			return nil, fmt.Errorf("%w: a step-up requires session, operation and environment", domain.ErrInvalid)
+		}
+		var keyIDs []string
+		if req.Body.KeySet != nil {
+			keyIDs = append(keyIDs, (*req.Body.KeySet)...)
+		}
+		intent, intentErr := service.NewDisclosureReauthIntent(service.ReauthPurpose(*req.Body.Operation), []string{*req.Body.Environment}, keyIDs)
+		if intentErr != nil {
+			return nil, fmt.Errorf("%w: invalid workspace step-up intent", domain.ErrInvalid)
+		}
+		purpose, purposeErr := intent.Purpose()
+		if purposeErr != nil || purpose == service.PurposeMint {
+			return nil, fmt.Errorf("%w: invalid workspace step-up intent", domain.ErrInvalid)
+		}
+		r.ReauthIntent = &intent
 	}
 	started, err := a.Workspace.StartHandoff(ctx, r)
 	if err != nil {

@@ -396,7 +396,7 @@ func runWebAuthnStepUpReauth(t *testing.T, db *store.DB) {
 
 	// Reauth over an enumerated unit opens a single-decision window (default
 	// effective window is 0, so only WebAuthn can gate it).
-	ropts, err := auth.ReauthPasskeyStart(ctx, token, service.PurposeReveal, "env_prod", []string{"key_b", "key_a"})
+	ropts, err := auth.ReauthPasskeyStart(ctx, token, disclosureReauthIntent(t, service.PurposeReveal, "env_prod", []string{"key_b", "key_a"}))
 	if err != nil {
 		t.Fatalf("reauth start: %v", err)
 	}
@@ -445,7 +445,7 @@ func runWebAuthnReauthBindingMismatch(t *testing.T, db *store.DB) {
 	dev := webauthntest.New(waRPID, waOrigin)
 	token = enrolPasskey(t, auth, ctx, token, waPassword, dev)
 
-	ropts, err := auth.ReauthPasskeyStart(ctx, token, service.PurposeReveal, "env_prod", []string{"key_a"})
+	ropts, err := auth.ReauthPasskeyStart(ctx, token, disclosureReauthIntent(t, service.PurposeReveal, "env_prod", []string{"key_a"}))
 	if err != nil {
 		t.Fatalf("reauth start: %v", err)
 	}

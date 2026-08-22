@@ -63,8 +63,19 @@ var (
 // designed with. The asymmetry is the point: a consent that named an operation
 // must not become a consent for whatever the holder asks next.
 func (s *Auth) ConsumeReauthWindow(ctx context.Context, az *authz.TxAuthorizer, sessionID string,
-	purpose ReauthPurpose, environmentID, operation string, keyIDs []string, now time.Time) error {
-	return s.consumeReauthWindow(ctx, az, sessionID, purpose, environmentID, operation, keyIDs, nil, now)
+	intent ReauthIntent, now time.Time) error {
+	adapter, err := intent.isAdapter()
+	if err != nil {
+		return err
+	}
+	if adapter {
+		return ErrReauthUnitMismatch
+	}
+	binding, err := intent.bindingFor("")
+	if err != nil {
+		return err
+	}
+	return s.consumeReauthWindow(ctx, az, sessionID, binding, now)
 }
 
 // ConsumeAdapterReauthWindow consumes one environment's share of an adapter
@@ -72,29 +83,24 @@ func (s *Auth) ConsumeReauthWindow(ctx context.Context, az *authz.TxAuthorizer, 
 // operation, so independently consumed per-environment windows cannot be mixed
 // across adapter acts or assembled from partial ceremonies.
 func (s *Auth) ConsumeAdapterReauthWindow(ctx context.Context, az *authz.TxAuthorizer, sessionID, environmentID string,
-	operation authz.Operation, environmentIDs []string, now time.Time) error {
-	if !adapterReauthOperation(operation) || environmentID == "" || len(environmentIDs) == 0 {
+	intent ReauthIntent, now time.Time) error {
+	adapter, err := intent.isAdapter()
+	if err != nil {
+		return err
+	}
+	if !adapter {
 		return ErrReauthUnitMismatch
 	}
-	found := false
-	for _, candidate := range environmentIDs {
-		if candidate == "" {
-			return ErrReauthUnitMismatch
-		}
-		if candidate == environmentID {
-			found = true
-		}
+	binding, err := intent.bindingFor(environmentID)
+	if err != nil {
+		return err
 	}
-	if !found {
-		return ErrReauthUnitMismatch
-	}
-	return s.consumeReauthWindow(ctx, az, sessionID, PurposeAdapter, environmentID,
-		string(operation), nil, environmentIDs, now)
+	return s.consumeReauthWindow(ctx, az, sessionID, binding, now)
 }
 
 func (s *Auth) consumeReauthWindow(ctx context.Context, az *authz.TxAuthorizer, sessionID string,
-	purpose ReauthPurpose, environmentID, operation string, keyIDs, environmentIDs []string, now time.Time) error {
-	w, err := az.ReauthWindowFor(ctx, sessionID, environmentID)
+	binding reauthIntentBinding, now time.Time) error {
+	w, err := az.ReauthWindowFor(ctx, sessionID, binding.environmentID)
 	if errors.Is(err, domain.ErrNotFound) {
 		return ErrNoReauthWindow
 	}
@@ -115,13 +121,12 @@ func (s *Auth) consumeReauthWindow(ctx context.Context, az *authz.TxAuthorizer, 
 	// present) can never equal a bound one, so a bound window fails closed for
 	// it rather than being treated as unbound.
 	if w.BoundPurpose != "" || w.BoundEnvironmentSet != "" {
-		if w.BoundPurpose != string(purpose) || operation != w.BoundOperation ||
-			w.BoundKeySet != CanonicalKeySet(keyIDs) ||
-			w.BoundEnvironmentSet != CanonicalEnvironmentSet(environmentIDs) {
+		if w.BoundPurpose != string(binding.purpose) || string(binding.operation) != w.BoundOperation ||
+			w.BoundKeySet != binding.keySet || w.BoundEnvironmentSet != binding.environmentSet {
 			return ErrReauthUnitMismatch
 		}
 	} else if w.BoundOperation != "" {
-		if operation != w.BoundOperation || w.BoundKeySet != CanonicalKeySet(keyIDs) {
+		if string(binding.operation) != w.BoundOperation || w.BoundKeySet != binding.keySet {
 			return ErrReauthUnitMismatch
 		}
 	}
@@ -134,16 +139,7 @@ func (s *Auth) consumeReauthWindow(ctx context.Context, az *authz.TxAuthorizer, 
 		if err != nil {
 			return err
 		}
-		var want string
-		if purpose == PurposeAdapter {
-			want, err = adapterOperationBinding(authz.Operation(operation), environmentID, environmentIDs)
-		} else {
-			want, err = operationBinding(purpose, environmentID, keyIDs)
-		}
-		if err != nil {
-			return err
-		}
-		if ceremony.OperationBinding != want {
+		if ceremony.OperationBinding != binding.challengeBinding {
 			return ErrReauthUnitMismatch
 		}
 		claimed, err := az.ConsumeSingleDecisionWindow(ctx, w.ID, now)
@@ -162,7 +158,7 @@ func (s *Auth) consumeReauthWindow(ctx context.Context, az *authz.TxAuthorizer, 
 	// sliding window is not extendable at all: the only valid 0-window is a
 	// single_decision WebAuthn one, which is consumed above, not slid — so fail
 	// closed rather than sliding it into the future.
-	effWin, err := s.effectiveReauthWindow(ctx, az, environmentID)
+	effWin, err := s.effectiveReauthWindow(ctx, az, binding.environmentID)
 	if err != nil {
 		return err
 	}
@@ -358,8 +354,15 @@ func (s *Auth) hardCap() time.Duration {
 // It ships as a service method exercised by fixtures: the HTTP endpoint the
 // design lists (POST /auth/reauth/totp) waits on the reveal surface (#50/#58),
 // since there is no disclosure yet for a TOTP window to gate.
-func (s *Auth) ReauthTOTP(ctx context.Context, presented, environmentID, code string) (ReauthResult, error) {
-	results, err := s.reauthTOTP(ctx, presented, []string{environmentID}, "", "", code)
+func (s *Auth) ReauthTOTP(ctx context.Context, presented string, intent ReauthIntent, code string) (ReauthResult, error) {
+	unbound, err := intent.isUnbound()
+	if err != nil {
+		return ReauthResult{}, err
+	}
+	if !unbound {
+		return ReauthResult{}, ErrReauthUnitMismatch
+	}
+	results, err := s.reauthTOTP(ctx, presented, intent, code)
 	if err != nil {
 		return ReauthResult{}, err
 	}
@@ -371,25 +374,36 @@ func (s *Auth) ReauthTOTP(ctx context.Context, presented, environmentID, code st
 // effective window is non-zero. Effective-zero environments are deliberately
 // omitted: each needs its own signed WebAuthn assertion, but every resulting
 // window is still bound to this exact full environment set.
-func (s *Auth) ReauthAdapterTOTP(ctx context.Context, presented, operation string, environmentIDs []string, code string) ([]ReauthResult, error) {
-	op := authz.Operation(operation)
-	if !adapterReauthOperation(op) {
+func (s *Auth) ReauthAdapterTOTP(ctx context.Context, presented string, intent ReauthIntent, code string) ([]ReauthResult, error) {
+	adapter, err := intent.isAdapter()
+	if err != nil {
+		return nil, err
+	}
+	if !adapter {
 		return nil, ErrReauthUnitMismatch
 	}
-	return s.reauthTOTP(ctx, presented, environmentIDs, PurposeAdapter, op, code)
+	return s.reauthTOTP(ctx, presented, intent, code)
 }
 
-func (s *Auth) reauthTOTP(ctx context.Context, presented string, environmentIDs []string, purpose ReauthPurpose, operation authz.Operation, code string) ([]ReauthResult, error) {
-	environmentIDs = adapterEnvironmentSet(environmentIDs)
-	if len(environmentIDs) == 0 || (purpose == "" && len(environmentIDs) != 1) {
+func (s *Auth) reauthTOTP(ctx context.Context, presented string, intent ReauthIntent, code string) ([]ReauthResult, error) {
+	environmentIDs := intent.EnvironmentIDs()
+	unbound, err := intent.isUnbound()
+	if err != nil {
+		return nil, err
+	}
+	if len(environmentIDs) == 0 || (unbound && len(environmentIDs) != 1) {
 		return nil, ErrNoReauthWindow
 	}
-	boundEnvironmentSet := ""
-	if purpose != "" {
-		if purpose != PurposeAdapter || !adapterReauthOperation(operation) {
-			return nil, ErrReauthUnitMismatch
-		}
-		boundEnvironmentSet = CanonicalEnvironmentSet(environmentIDs)
+	adapter, err := intent.isAdapter()
+	if err != nil {
+		return nil, err
+	}
+	if !unbound && !adapter {
+		return nil, ErrReauthUnitMismatch
+	}
+	binding, err := intent.bindingFor(environmentIDs[0])
+	if err != nil {
+		return nil, err
 	}
 	// Phase 1 - read the acting session and confirmed factor.
 	var (
@@ -398,7 +412,7 @@ func (s *Auth) reauthTOTP(ctx context.Context, presented string, environmentIDs 
 		confirmed          authz.TOTPCredential
 		windowEnvironments []string
 	)
-	err := tx.Read(ctx, s.DB, func(ctx context.Context, _ store.ReadRepos, az *authz.TxAuthorizer) error {
+	err = tx.Read(ctx, s.DB, func(ctx context.Context, _ store.ReadRepos, az *authz.TxAuthorizer) error {
 		id, err := az.Authenticate(ctx, presented, s.now())
 		if err != nil {
 			return err
@@ -429,7 +443,7 @@ func (s *Auth) reauthTOTP(ctx context.Context, presented string, environmentIDs 
 				return err
 			}
 			if effWin <= 0 {
-				if purpose == "" {
+				if unbound {
 					return ErrReauthWindowClosed
 				}
 				continue
@@ -500,7 +514,7 @@ func (s *Auth) reauthTOTP(ctx context.Context, presented string, environmentIDs 
 				return err
 			}
 			if effWin <= 0 {
-				if purpose == "" {
+				if unbound {
 					return ErrReauthWindowClosed
 				}
 				continue
@@ -554,8 +568,8 @@ func (s *Auth) reauthTOTP(ctx context.Context, presented string, environmentIDs 
 				ID: windowID, SessionID: live.SessionID, EnvironmentID: environmentID,
 				CeremonyID: confirmed.ID, FactorClass: "totp", SingleDecision: false,
 				AuthenticatedAt: now, WindowExpiresAt: windowExpires, HardExpiresAt: hardExpires,
-				CredentialEpoch: epoch, CreatedAt: now, BoundPurpose: string(purpose),
-				BoundOperation: string(operation), BoundEnvironmentSet: boundEnvironmentSet,
+				CredentialEpoch: epoch, CreatedAt: now, BoundPurpose: string(binding.purpose),
+				BoundOperation: string(binding.operation), BoundEnvironmentSet: binding.environmentSet,
 			}); err != nil {
 				return err
 			}

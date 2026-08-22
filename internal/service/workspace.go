@@ -642,9 +642,7 @@ type HandoffRequest struct {
 	PKCEChallenge string
 	Purpose       HandoffPurpose
 	SessionID     string
-	Operation     string
-	EnvID         string
-	KeySet        string
+	ReauthIntent  *ReauthIntent
 }
 
 // HandoffStart is what the shell needs to open the popup: the transaction's
@@ -674,27 +672,36 @@ func (s *Workspace) StartHandoff(ctx context.Context, req HandoffRequest) (Hando
 	if !strings.HasPrefix(req.RedirectURI, canonical+"/") && req.RedirectURI != canonical {
 		return HandoffStart{}, fmt.Errorf("%w: the callback must live at the allowlisted origin", domain.ErrInvalid)
 	}
+	var operation, envID, keySet string
 	switch req.Purpose {
 	case authz.HandoffEstablishment:
-		if req.SessionID != "" || req.Operation != "" {
+		if req.SessionID != "" || req.ReauthIntent != nil {
 			return HandoffStart{}, fmt.Errorf("%w: an establishment binds no session and no operation", domain.ErrInvalid)
 		}
 	case authz.HandoffStepUp:
-		if req.SessionID == "" || req.Operation == "" {
+		if req.SessionID == "" || req.ReauthIntent == nil {
 			return HandoffStart{}, fmt.Errorf("%w: a step-up binds the initiating session and the exact operation", domain.ErrInvalid)
 		}
-		if req.EnvID == "" {
-			// Refused HERE rather than at redemption: the only elevation
-			// mechanism this product has is a per-environment reauthentication
-			// window, so a step-up naming no environment can never be approved
-			// and there is no reason to open a transaction that cannot.
-			return HandoffStart{}, fmt.Errorf("%w: a step-up binds the environment its consent covers", domain.ErrInvalid)
+		intent := *req.ReauthIntent
+		adapter, err := intent.isAdapter()
+		if err != nil {
+			return HandoffStart{}, err
 		}
-		// One spelling of the key set, at the boundary, so the consent stored
-		// here and the disclosure presented later compare as SETS. Canonicalize
-		// once at the edge rather than at every comparison: two spellings of one
-		// consent is two consents.
-		req.KeySet = CanonicalKeySet(splitKeySet(req.KeySet))
+		unbound, err := intent.isUnbound()
+		if err != nil {
+			return HandoffStart{}, err
+		}
+		if adapter || unbound || len(intent.EnvironmentIDs()) != 1 {
+			return HandoffStart{}, fmt.Errorf("%w: a workspace step-up requires one disclosure intent", domain.ErrInvalid)
+		}
+		binding, err := intent.bindingFor("")
+		if err != nil {
+			return HandoffStart{}, err
+		}
+		if binding.purpose == PurposeMint {
+			return HandoffStart{}, fmt.Errorf("%w: a workspace step-up requires reveal, copy, or publish", domain.ErrInvalid)
+		}
+		operation, envID, keySet = string(binding.operation), binding.environmentID, binding.keySet
 	default:
 		return HandoffStart{}, fmt.Errorf("%w: unknown handoff purpose %q", domain.ErrInvalid, req.Purpose)
 	}
@@ -740,8 +747,8 @@ func (s *Workspace) StartHandoff(ctx context.Context, req HandoffRequest) (Hando
 		return az.CreateWorkspaceHandoff(ctx, authz.NewWorkspaceHandoff{
 			ID: id, StateVerifier: stateVerifier, Origin: canonical,
 			RedirectURI: req.RedirectURI, PKCEChallenge: req.PKCEChallenge,
-			Purpose: req.Purpose, SessionID: req.SessionID, Operation: req.Operation,
-			EnvID: req.EnvID, KeySet: req.KeySet, CreatedAt: now, ExpiresAt: expires,
+			Purpose: req.Purpose, SessionID: req.SessionID, Operation: operation,
+			EnvID: envID, KeySet: keySet, CreatedAt: now, ExpiresAt: expires,
 		})
 	})
 	if err != nil {
@@ -915,9 +922,17 @@ func (s *Workspace) ShowHandoff(ctx context.Context, actor Actor, state string) 
 		if !owned {
 			return ErrHandoffInvalid
 		}
+		intent, err := newReauthIntentForOperation(authz.Operation(h.Operation), h.EnvID, splitKeySet(h.KeySet))
+		if err != nil {
+			return ErrHandoffInvalid
+		}
+		binding, err := intent.bindingFor("")
+		if err != nil || string(binding.operation) != h.Operation || binding.keySet != h.KeySet {
+			return ErrHandoffInvalid
+		}
 		out = HandoffView{
 			Purpose:   h.Purpose,
-			Operation: h.Operation,
+			Operation: string(binding.purpose),
 			EnvID:     h.EnvID,
 			KeySet:    []string{},
 			ExpiresAt: h.ExpiresAt,
@@ -1180,6 +1195,14 @@ func (s *Workspace) elevate(
 		// into a window nobody can consume.
 		return fail("step-up-not-environment-scoped")
 	}
+	intent, err := newReauthIntentForOperation(authz.Operation(h.Operation), h.EnvID, splitKeySet(h.KeySet))
+	if err != nil {
+		return fail("step-up-binding-invalid")
+	}
+	binding, err := intent.bindingFor("")
+	if err != nil || string(binding.operation) != h.Operation || binding.keySet != h.KeySet {
+		return fail("step-up-binding-invalid")
+	}
 	var factors []string
 	if err := json.Unmarshal([]byte(h.Factors), &factors); err != nil {
 		return fail("step-up-assurance-unreadable")
@@ -1274,7 +1297,7 @@ func (s *Workspace) elevate(
 		CeremonyID: h.ID, FactorClass: class, SingleDecision: false,
 		AuthenticatedAt: now, WindowExpiresAt: windowExpires, HardExpiresAt: hardExpires,
 		CredentialEpoch: epoch, CreatedAt: now,
-		BoundOperation: h.Operation, BoundKeySet: h.KeySet,
+		BoundOperation: string(binding.operation), BoundKeySet: binding.keySet,
 	}); err != nil {
 		return WorkspaceSession{}, err
 	}

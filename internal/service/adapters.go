@@ -210,6 +210,10 @@ func (s *Adapters) providerGate(actor Actor, operation authz.Operation, projectS
 }
 
 func (s *Adapters) requireAdapterCeremony(ctx context.Context, az *authz.TxAuthorizer, caller authz.Identity, projectScope domain.Scope, environmentIDs []string, operation authz.Operation, now time.Time) error {
+	intent, err := newReauthIntentForAdapterOperation(operation, environmentIDs)
+	if err != nil {
+		return err
+	}
 	for _, environmentID := range environmentIDs {
 		envScope := domain.Scope{Org: projectScope.Org, Project: projectScope.Project, Env: domain.EnvID(environmentID)}
 		if _, err := az.Authorize(ctx, caller, authz.OpAdapterPush, envScope); err != nil {
@@ -221,7 +225,7 @@ func (s *Adapters) requireAdapterCeremony(ctx context.Context, az *authz.TxAutho
 		if s.Auth == nil {
 			return ErrNoCeremonySeam
 		}
-		if err := s.Auth.ConsumeAdapterReauthWindow(ctx, az, caller.SessionID, environmentID, operation, environmentIDs, now); err != nil {
+		if err := s.Auth.ConsumeAdapterReauthWindow(ctx, az, caller.SessionID, environmentID, intent, now); err != nil {
 			return fmt.Errorf("%w (%s)", ErrReauthRequired, environmentID)
 		}
 	}
@@ -1124,6 +1128,10 @@ func (s *Adapters) SyncTarget(ctx context.Context, actor Actor, scope domain.Sco
 			if err != nil {
 				return err
 			}
+			intent, err := NewAdapterSyncReauthIntent(environments)
+			if err != nil {
+				return err
+			}
 			for _, environmentID := range environments {
 				envScope := domain.Scope{Org: scope.Org, Project: scope.Project, Env: domain.EnvID(environmentID)}
 				if _, err := az.Authorize(ctx, caller, authz.OpAdapterPush, envScope); err != nil {
@@ -1133,7 +1141,7 @@ func (s *Adapters) SyncTarget(ctx context.Context, actor Actor, scope domain.Sco
 					if s.Auth == nil {
 						return ErrNoCeremonySeam
 					}
-					if err := s.Auth.ConsumeAdapterReauthWindow(ctx, az, caller.SessionID, environmentID, authz.OpAdapterSync, environments, now); err != nil {
+					if err := s.Auth.ConsumeAdapterReauthWindow(ctx, az, caller.SessionID, environmentID, intent, now); err != nil {
 						return fmt.Errorf("%w (%s)", ErrReauthRequired, environmentID)
 					}
 				}
@@ -1300,6 +1308,10 @@ func (s *Adapters) ReplaceCredential(ctx context.Context, actor Actor, scope dom
 			if len(environments) == 0 {
 				return store.AdapterCredentialResult{}, ErrAdapterBootstrapCeremonyUnspecified
 			}
+			intent, err := NewAdapterCredentialSetReauthIntent(environments)
+			if err != nil {
+				return store.AdapterCredentialResult{}, err
+			}
 			for _, environmentID := range environments {
 				envScope := domain.Scope{Org: scope.Org, Project: scope.Project, Env: domain.EnvID(environmentID)}
 				if _, err := az.Authorize(ctx, caller, authz.OpAdapterPush, envScope); err != nil {
@@ -1311,7 +1323,7 @@ func (s *Adapters) ReplaceCredential(ctx context.Context, actor Actor, scope dom
 				if s.Auth == nil {
 					return store.AdapterCredentialResult{}, ErrNoCeremonySeam
 				}
-				if err := s.Auth.ConsumeAdapterReauthWindow(ctx, az, caller.SessionID, environmentID, authz.OpAdapterCredentialSet, environments, now); err != nil {
+				if err := s.Auth.ConsumeAdapterReauthWindow(ctx, az, caller.SessionID, environmentID, intent, now); err != nil {
 					return store.AdapterCredentialResult{}, fmt.Errorf("%w (%s)", ErrReauthRequired, environmentID)
 				}
 			}
@@ -1623,6 +1635,10 @@ func (s *Adapters) Adopt(ctx context.Context, actor Actor, scope domain.Scope, r
 		if len(environments) == 0 {
 			return domain.ErrNotFound
 		}
+		intent, err := NewAdapterAdoptReauthIntent(environments)
+		if err != nil {
+			return err
+		}
 		for _, environmentID := range environments {
 			envScope := domain.Scope{Org: scope.Org, Project: scope.Project, Env: domain.EnvID(environmentID)}
 			if _, err := az.Authorize(ctx, caller, authz.OpAdapterPush, envScope); err != nil {
@@ -1634,7 +1650,7 @@ func (s *Adapters) Adopt(ctx context.Context, actor Actor, scope domain.Scope, r
 			if s.Auth == nil {
 				return ErrNoCeremonySeam
 			}
-			err := s.Auth.ConsumeAdapterReauthWindow(ctx, az, caller.SessionID, environmentID, authz.OpAdapterAdopt, environments, now)
+			err := s.Auth.ConsumeAdapterReauthWindow(ctx, az, caller.SessionID, environmentID, intent, now)
 			switch {
 			case err == nil:
 			case errors.Is(err, ErrNoReauthWindow), errors.Is(err, ErrReauthWindowExpired), errors.Is(err, ErrReauthUnitMismatch), errors.Is(err, ErrReauthWindowSpent):
