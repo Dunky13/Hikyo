@@ -2,7 +2,7 @@
 
 Issue: https://github.com/Hikyo-Org/Hikyo/issues/234 (subissue of #204;
 programme #203; audit `BE17-B`). Implemented from fresh `origin/main` at
-`709b2b0ca32b906b95a9ae7149664328ca823b97`.
+`6dbb07bc4a8407ffbbfe08c7979da4d978df76fe`.
 
 ## Contract
 
