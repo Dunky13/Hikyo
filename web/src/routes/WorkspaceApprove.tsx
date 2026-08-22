@@ -3,7 +3,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { useState, type FormEvent } from 'react';
 
 import { parsed } from '../api/client.ts';
-import { useSession } from '../api/session.ts';
+import { useAuth } from '../app/AuthProvider.tsx';
 import { ceremonyRefusalText, runPasskeyCeremony, runTOTPCeremony } from '../api/values.ts';
 import { Login } from './Login.tsx';
 
@@ -46,7 +46,7 @@ import { Login } from './Login.tsx';
  *     open redirector with a fresh authorization code attached.
  */
 export function WorkspaceApprove() {
-  const session = useSession();
+  const auth = useAuth();
   const [query] = useState(() => new URLSearchParams(globalThis.location.search));
   const state = query.get('state') ?? '';
   const isStepUp = query.get('purpose') === 'step-up';
@@ -60,7 +60,7 @@ export function WorkspaceApprove() {
   const transaction = useQuery({
     queryKey: ['workspace-handoff', state],
     queryFn: () => parsed(showWorkspaceHandoffOp, { path: { state } }),
-    enabled: isStepUp && state !== '' && session.data != null,
+    enabled: isStepUp && state !== '' && auth.state.status === 'authenticated',
     retry: false,
   });
 
@@ -95,7 +95,7 @@ export function WorkspaceApprove() {
     );
   }
 
-  if (session.isPending) {
+  if (auth.state.status === 'checking' || auth.state.status === 'transitioning') {
     return (
       <p className="login" role="status">
         Loading…
@@ -105,11 +105,11 @@ export function WorkspaceApprove() {
 
   // No session on THIS instance: authenticate here, on this origin, with this
   // instance's own ceremonies. The URL — and with it the state — survives.
-  if (session.isSuccess && session.data === null) {
+  if (auth.state.status === 'anonymous') {
     return <Login />;
   }
 
-  const name = session.data?.principal.display_name ?? session.data?.principal.id ?? '';
+  const name = auth.identity?.principal.display_name ?? auth.identity?.principal.id ?? '';
 
   return (
     <main className="login">
