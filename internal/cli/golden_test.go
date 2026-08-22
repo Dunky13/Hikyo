@@ -754,6 +754,30 @@ func TestDefinitionsRefusalExitMappings(t *testing.T) {
 	}
 }
 
+func TestPinReleasePrintsServerRetentionConsequence(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete || r.URL.Path != "/api/v1/orgs/org_70/projects/prj_70/environments/env_70/pins/mch_workload" {
+			t.Fatalf("pin release request = %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"revision":3,"retention_consequence":"collection_eligible"}`))
+	})
+	ios, stdout, _ := definitionsTestIO(t, handler)
+	if got := cli.Run(t.Context(), ios, []string{
+		"pin", "release", "mch_workload", "-o", "json",
+		"--instance", "local", "--org", "org_70", "--project", "prj_70", "--env", "env_70",
+	}); got != cli.ExitOK {
+		t.Fatalf("pin release exit = %d, want 0", got)
+	}
+	var result apigen.RevisionPinReleaseResult
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("decode pin release output: %v", err)
+	}
+	if result.Revision != 3 || result.RetentionConsequence != apigen.CollectionEligible {
+		t.Fatalf("pin release output = %+v", result)
+	}
+}
+
 func definitionsTestIO(t *testing.T, handler http.Handler) (cli.IO, *bytes.Buffer, *bytes.Buffer) {
 	t.Helper()
 	server := httptest.NewServer(handler)

@@ -12,7 +12,7 @@ import { createRoot } from 'react-dom/client';
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
 /** Mount a node under a fresh, retry-free QueryClient in the happy-dom document. */
-export async function renderForm(node: ReactNode): Promise<{ container: HTMLElement }> {
+export async function renderForm(node: ReactNode): Promise<{ container: HTMLElement; client: QueryClient }> {
   const container = document.createElement('div');
   document.body.appendChild(container);
   const client = new QueryClient({
@@ -22,7 +22,7 @@ export async function renderForm(node: ReactNode): Promise<{ container: HTMLElem
   await act(async () => {
     root.render(<QueryClientProvider client={client}>{node}</QueryClientProvider>);
   });
-  return { container };
+  return { container, client };
 }
 
 /** Write a controlled input's value the way React's synthetic onChange observes. */

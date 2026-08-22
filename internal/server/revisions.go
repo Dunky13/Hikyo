@@ -52,7 +52,7 @@ type RevisionService interface {
 type PinService interface {
 	Set(ctx context.Context, actor service.Actor, scope domain.Scope, request service.SetPinRequest) (service.SetPinResult, error)
 	List(ctx context.Context, actor service.Actor, scope domain.Scope) ([]service.PinView, error)
-	Release(ctx context.Context, actor service.Actor, scope domain.Scope, workloadPrincipalID domain.PrincipalID) error
+	Release(ctx context.Context, actor service.Actor, scope domain.Scope, workloadPrincipalID domain.PrincipalID) (service.ReleasePinResult, error)
 }
 
 func (a *API) PublishPendingChanges(ctx context.Context, req apigen.PublishPendingChangesRequestObject) (apigen.PublishPendingChangesResponseObject, error) {
@@ -161,6 +161,7 @@ func wirePin(pin service.PinView) apigen.RevisionPin {
 		ExpiresAt: pin.ExpiresAt, CreatedAt: pin.CreatedAt, AuthorizedAt: pin.AuthorizedAt,
 		HistoryAuthorized: pin.HistoryAuthorized,
 		SchemaOverride:    pin.SchemaOverride, Expired: pin.Expired,
+		ReleaseRetentionConsequence: apigen.RetentionConsequence(pin.ReleaseRetentionConsequence),
 	}
 }
 
@@ -195,11 +196,15 @@ func (a *API) ListRevisionPins(ctx context.Context, req apigen.ListRevisionPinsR
 }
 
 func (a *API) ReleaseRevisionPin(ctx context.Context, req apigen.ReleaseRevisionPinRequestObject) (apigen.ReleaseRevisionPinResponseObject, error) {
-	if err := a.Pins.Release(ctx, service.Bearer(bearer(ctx)),
-		envScope(req.Org, req.Project, req.Environment), domain.PrincipalID(req.WorkloadPrincipal)); err != nil {
+	result, err := a.Pins.Release(ctx, service.Bearer(bearer(ctx)),
+		envScope(req.Org, req.Project, req.Environment), domain.PrincipalID(req.WorkloadPrincipal))
+	if err != nil {
 		return nil, err
 	}
-	return apigen.ReleaseRevisionPin204Response{}, nil
+	return apigen.ReleaseRevisionPin200JSONResponse(apigen.RevisionPinReleaseResult{
+		Revision:             result.Revision,
+		RetentionConsequence: apigen.RetentionConsequence(result.RetentionConsequence),
+	}), nil
 }
 
 func wireChangedKeys(changes []service.ChangedKey) []apigen.ChangedKey {

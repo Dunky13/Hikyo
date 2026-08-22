@@ -16,15 +16,9 @@ import {
   restoreCeremonyUnit,
   restorePreviewSummary,
   retentionLine,
-  SOLE_KEEPER_RELEASE_BUTTON,
-  SOLE_KEEPER_RELEASE_TITLE,
-  soleKeeperReleaseConsequences,
-  soleKeeperPinIds,
   toHistoryRetention,
   workloadLabel,
-  type HistoryPin,
   type PinLatestValue,
-  type HistoryRetention,
   type HistoryRevision,
   type HistorySnapshotKey,
 } from './history-state.ts';
@@ -216,92 +210,6 @@ describe('pinExpiry', () => {
   });
 });
 
-describe('soleKeeperPinIds', () => {
-  const now = new Date('2026-08-19T12:00:00Z');
-  const keepIfEither: HistoryRetention = {
-    mode: 'keep-if-either',
-    maxAgeSeconds: 90 * 24 * 60 * 60,
-    lastRevisions: 2,
-  };
-  // r5 newest → rank 1, r4 → 2, r3 → 3 (past the last-2 window), and r3 is
-  // also older than the 90-day age window, so only a pin holds it.
-  const history: readonly HistoryRevision[] = [
-    revision({ revision: 5n, publishedAt: '2026-08-18T12:00:00Z' }),
-    revision({ revision: 4n, publishedAt: '2026-08-17T12:00:00Z' }),
-    revision({ revision: 3n, publishedAt: '2026-01-01T12:00:00Z' }),
-  ];
-
-  function pin(overrides: Partial<HistoryPin> = {}): HistoryPin {
-    return {
-      id: 'pin_a',
-      workloadPrincipalId: 'prn_workload_a',
-      revision: 3n,
-      expiresAt: '2026-11-19T12:00:00Z',
-      expired: false,
-      schemaOverride: false,
-      ...overrides,
-    };
-  }
-
-  it('finds the pin that is the only thing keeping a past-retention payload', () => {
-    expect([...soleKeeperPinIds({ pins: [pin()], revisions: history, policy: keepIfEither, now })])
-      .toEqual(['pin_a']);
-  });
-
-  it('holds nobody sole when a second live pin keeps the same revision', () => {
-    const pins = [pin(), pin({ id: 'pin_b', workloadPrincipalId: 'prn_workload_b' })];
-    expect(soleKeeperPinIds({ pins, revisions: history, policy: keepIfEither, now }).size).toBe(0);
-  });
-
-  it('exempts a revision still inside the last-N window', () => {
-    const pins = [pin({ revision: 4n })];
-    expect(soleKeeperPinIds({ pins, revisions: history, policy: keepIfEither, now }).size).toBe(0);
-  });
-
-  it('exempts a revision still inside the age window even when it is past last-N', () => {
-    const young: readonly HistoryRevision[] = [
-      revision({ revision: 5n, publishedAt: '2026-08-18T12:00:00Z' }),
-      revision({ revision: 4n, publishedAt: '2026-08-17T12:00:00Z' }),
-      revision({ revision: 3n, publishedAt: '2026-08-16T12:00:00Z' }),
-    ];
-    expect(soleKeeperPinIds({ pins: [pin()], revisions: young, policy: keepIfEither, now }).size).toBe(0);
-  });
-
-  it('holds nobody sole under an unlimited policy, where no payload is ever collected', () => {
-    const unlimited: HistoryRetention = {
-      mode: 'unlimited',
-      maxAgeSeconds: null,
-      lastRevisions: null,
-    };
-    expect(soleKeeperPinIds({ pins: [pin()], revisions: history, policy: unlimited, now }).size).toBe(0);
-  });
-
-  it('does not call an EXPIRED pin a sole keeper — it no longer holds the payload back', () => {
-    const pins = [pin({ expired: true, expiresAt: '2026-08-01T12:00:00Z' })];
-    expect(soleKeeperPinIds({ pins, revisions: history, policy: keepIfEither, now }).size).toBe(0);
-  });
-
-  it('uses expiresAt rather than the fetch-time expired display flag', () => {
-    expect([...soleKeeperPinIds({ pins: [pin({ expired: true })], revisions: history, policy: keepIfEither, now })])
-      .toEqual(['pin_a']);
-    expect(soleKeeperPinIds({
-      pins: [pin({ expired: false, expiresAt: '2026-08-19T11:59:59.999Z' })],
-      revisions: history,
-      policy: keepIfEither,
-      now,
-    }).size).toBe(0);
-  });
-
-  it('does not call a pin on an ALREADY collected revision a sole keeper', () => {
-    const collected: readonly HistoryRevision[] = [
-      revision({ revision: 5n, publishedAt: '2026-08-18T12:00:00Z' }),
-      revision({ revision: 4n, publishedAt: '2026-08-17T12:00:00Z' }),
-      collectedRevision({ revision: 3n, publishedAt: '2026-01-01T12:00:00Z' }),
-    ];
-    expect(soleKeeperPinIds({ pins: [pin()], revisions: collected, policy: keepIfEither, now }).size).toBe(0);
-  });
-});
-
 describe('restorePreviewSummary', () => {
   it('counts the two staged operations separately', () => {
     const summary = restorePreviewSummary([
@@ -481,16 +389,6 @@ describe('defaultPinExpiry', () => {
 
   it('refuses an impossible date input loudly', () => {
     expect(() => pinExpiryInstant('2026-02-30')).toThrow('Invalid pin expiry date: 2026-02-30');
-  });
-});
-
-describe('sole-keeper release copy', () => {
-  it('states collection eligibility rather than immediate deletion', () => {
-    expect(SOLE_KEEPER_RELEASE_TITLE).toBe('Release sole-keeper pin');
-    expect(SOLE_KEEPER_RELEASE_BUTTON).toBe('Release pin — values become eligible for collection');
-    expect(soleKeeperReleaseConsequences(3n)).toBe(
-      "Releasing makes r3's values eligible for collection at the next retention sweep — they will then be deleted permanently.",
-    );
   });
 });
 
