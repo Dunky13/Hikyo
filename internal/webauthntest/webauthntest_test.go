@@ -84,7 +84,7 @@ func enrolled(t *testing.T, userHandle string) *Device {
 // test never passes for the wrong reason.
 func TestAssertBeforeEnrol(t *testing.T) {
 	d := New(testRPID, testOrigin)
-	resp, err := d.Assert(assertionOptionsJSON())
+	resp, err := d.Assert([]byte("not assertion options"))
 	if !errors.Is(err, ErrNotEnrolled) {
 		t.Fatalf("assert before enrol: got %v, want ErrNotEnrolled", err)
 	}

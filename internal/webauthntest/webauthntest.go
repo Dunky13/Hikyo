@@ -62,18 +62,14 @@ func (d *Device) SuppressCredProps() { d.opts.ClientExtensionResults = nil }
 // Enrolment records the counter as it stands at Enrol. It panics with
 // ErrNotEnrolled before enrolment.
 func (d *Device) SetCounter(c uint32) {
-	if !d.enrolled {
-		panic(ErrNotEnrolled)
-	}
+	d.mustBeEnrolled()
 	d.cred.Counter = c
 }
 
 // Counter reports the current sign counter. It panics with ErrNotEnrolled before
 // enrolment.
 func (d *Device) Counter() uint32 {
-	if !d.enrolled {
-		panic(ErrNotEnrolled)
-	}
+	d.mustBeEnrolled()
 	return d.cred.Counter
 }
 
@@ -81,10 +77,14 @@ func (d *Device) Counter() uint32 {
 // server's, this is the raw bytes). It panics with ErrNotEnrolled before
 // enrolment.
 func (d *Device) CredentialID() []byte {
+	d.mustBeEnrolled()
+	return d.cred.ID
+}
+
+func (d *Device) mustBeEnrolled() {
 	if !d.enrolled {
 		panic(ErrNotEnrolled)
 	}
-	return d.cred.ID
 }
 
 // Enrol turns registration options from the server into an attestation response.
