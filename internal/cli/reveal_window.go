@@ -73,14 +73,18 @@ type disclosure struct {
 // browser's purpose-bound passkey ceremony (handoff) where it does not. The
 // attempt comes first so a live window costs no extra round trip and a
 // config-only copy never prompts.
-func withRevealCeremony(ctx context.Context, client *Client, st *State, ios IO, artifact SessionArtifact,
+func withRevealCeremony(ctx context.Context, client *Client, st *State, ios IO, artifact AuthArtifact,
 	projectBase string, envs []string, d disclosure, attempt func() error) error {
 	err := attempt()
 	if err == nil || !forbidden(err) {
 		return err
 	}
+	session, sessionErr := requireHumanSession("CLI reauthentication", artifact)
+	if sessionErr != nil {
+		return sessionErr
+	}
 	for _, env := range envs {
-		if cerr := ensureRevealWindow(ctx, client, st, ios, &artifact, projectBase, env, d, err); cerr != nil {
+		if cerr := ensureRevealWindow(ctx, client, st, ios, &session, projectBase, env, d, err); cerr != nil {
 			return cerr
 		}
 	}

@@ -124,6 +124,10 @@ func runRun(ctx context.Context, ios IO, args []string) error {
 	// reauth ceremony hold. `render` and `sync` have no human path, so this branch
 	// lives here rather than in resolveMachineTarget.
 	if useHumanSession {
+		if flags.Auth == "machine" {
+			return failf(ExitRefused, "hikyo run --use-human-session conflicts with --auth=machine")
+		}
+		flags.Auth = "human"
 		return runHumanSession(ctx, ios, st, flags, cfg, childArgs, configOnly, allowOverride)
 	}
 	client, entry, resolved, token, err := resolveMachineTarget(st, ios, flags, cfg, cfgDir, "run")
@@ -273,7 +277,11 @@ func runHumanSession(ctx context.Context, ios IO, st *State, flags commonFlags, 
 			"hikyo run --use-human-session requires stderr to be a terminal; a captured stderr means a non-interactive process, which the human-session exception refuses")
 	}
 
-	client, session, resolved, err := authenticatedTarget(st, ios, flags)
+	client, artifact, resolved, err := authenticatedTarget(st, ios, flags)
+	if err != nil {
+		return err
+	}
+	session, err := requireHumanSession("hikyo run --use-human-session", artifact)
 	if err != nil {
 		return err
 	}
@@ -1164,6 +1172,20 @@ func resolveMachineTarget(st *State, ios IO, flags commonFlags, cfg *compose.Con
 	}
 	if _, err := NewTenantScope(resolved); err != nil {
 		return nil, TrustEntry{}, Resolved{}, "", err
+	}
+	kinds, err := authKindsFor(flags.operation)
+	if err != nil {
+		return nil, TrustEntry{}, Resolved{}, "", err
+	}
+	if !kinds.Allows(AuthKindMachineCredential) {
+		return nil, TrustEntry{}, Resolved{}, "", failf(ExitRefused, "hikyo %s does not accept machine credentials", flags.operation)
+	}
+	if flags.Auth == "human" {
+		hint := "this operation requires a machine credential"
+		if flags.operation == "run" {
+			hint = "pass --use-human-session for run's gated human-session exception"
+		}
+		return nil, TrustEntry{}, Resolved{}, "", failf(ExitRefused, "hikyo %s cannot use --auth=human: %s", flags.operation, hint)
 	}
 
 	entry, err := machineEntry(st, resolved, cfg)
