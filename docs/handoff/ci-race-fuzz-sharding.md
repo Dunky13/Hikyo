@@ -21,6 +21,12 @@ binary. Its standalone workflow was removed, eliminating a second cold module
 download and Go compile. The probe remains a named, fail-closed job in the
 base-controlled validation graph and is explicitly included in `ci-required`.
 
+The artifact name is stable across workflow attempts. GitHub copies successful
+dependency results when only failed jobs are rerun, so an attempt-number suffix
+made the rerun request an artifact that no job had uploaded. Full reruns replace
+the run-scoped artifact after rebuilding it; failed-job reruns reuse the exact
+successful build from the same run and commit.
+
 ## Coverage and trust model
 
 - Race assigns all 56 Go packages except `internal/isolation` exactly once.

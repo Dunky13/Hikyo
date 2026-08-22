@@ -32,14 +32,22 @@ printf '%s\n' "$app_block" | grep -F 'run: ./scripts/ci/build-spa.sh --verify' >
 	fail 'app-build does not verify and build the SPA through the shared script'
 printf '%s\n' "$app_block" | grep -F 'go build -tags ui -o ci-artifacts/hikyo-ui ./cmd/hikyo' >/dev/null ||
 	fail 'app-build does not produce the release-shaped CI binary'
-printf '%s\n' "$app_block" | grep -F 'name: hikyo-app-${{ github.run_id }}-${{ github.run_attempt }}' >/dev/null ||
-	fail 'app-build artifact is not scoped to this run attempt'
+printf '%s\n' "$app_block" | grep -F 'name: hikyo-app-${{ github.run_id }}' >/dev/null ||
+	fail 'app-build artifact is not scoped to this run'
+if printf '%s\n' "$app_block" | grep -F 'github.run_attempt' >/dev/null; then
+	fail 'app-build artifact name changes when failed jobs are rerun'
+fi
+printf '%s\n' "$app_block" | grep -F 'overwrite: true' >/dev/null ||
+	fail 'app-build artifact cannot be replaced by a full workflow rerun'
 
 [ -n "$no_egress_block" ] || fail 'no-egress job is missing'
 printf '%s\n' "$no_egress_block" | grep -F 'needs: [changes, app-build]' >/dev/null ||
 	fail 'no-egress does not depend on app-build'
-printf '%s\n' "$no_egress_block" | grep -F 'name: hikyo-app-${{ github.run_id }}-${{ github.run_attempt }}' >/dev/null ||
+printf '%s\n' "$no_egress_block" | grep -F 'name: hikyo-app-${{ github.run_id }}' >/dev/null ||
 	fail 'no-egress does not consume the exact app-build artifact'
+if printf '%s\n' "$no_egress_block" | grep -F 'github.run_attempt' >/dev/null; then
+	fail 'no-egress changes artifact names when failed jobs are rerun'
+fi
 printf '%s\n' "$no_egress_block" | grep -F 'actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1' >/dev/null ||
 	fail 'no-egress does not use the repository-pinned download-artifact action'
 printf '%s\n' "$no_egress_block" | grep -F 'run: chmod +x ci-artifacts/hikyo-ui' >/dev/null ||
@@ -53,8 +61,11 @@ fi
 
 printf '%s\n' "$web_block" | grep -F 'needs: [changes, app-build]' >/dev/null ||
 	fail 'web does not depend on app-build'
-printf '%s\n' "$web_block" | grep -F 'name: hikyo-app-${{ github.run_id }}-${{ github.run_attempt }}' >/dev/null ||
+printf '%s\n' "$web_block" | grep -F 'name: hikyo-app-${{ github.run_id }}' >/dev/null ||
 	fail 'web does not consume the exact app-build artifact'
+if printf '%s\n' "$web_block" | grep -F 'github.run_attempt' >/dev/null; then
+	fail 'web changes artifact names when failed jobs are rerun'
+fi
 printf '%s\n' "$web_block" | grep -F 'actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1' >/dev/null ||
 	fail 'web does not use the repository-pinned download-artifact action'
 printf '%s\n' "$web_block" | grep -F 'run: chmod +x ci-artifacts/hikyo-ui' >/dev/null ||
