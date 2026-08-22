@@ -446,10 +446,6 @@ func (e sweepEnv) call(t *testing.T, method, path string, body any) (int, []byte
 func (e sweepEnv) runCLI(t *testing.T, args ...string) (string, string) {
 	t.Helper()
 	var stdout, stderr strings.Builder
-	tokenFile := filepath.Join(t.TempDir(), "token")
-	if err := os.WriteFile(tokenFile, []byte(e.token+"\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	ios := cli.IO{
 		Stdout:  &stdout,
 		Stderr:  &stderr,
@@ -461,6 +457,15 @@ func (e sweepEnv) runCLI(t *testing.T, args ...string) (string, string) {
 			return ""
 		}},
 	}
-	cli.Run(t.Context(), ios, append(args, "--token-file", tokenFile))
+	state, err := cli.NewState(ios.Env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := state.PutSession(cli.SessionArtifact{
+		Instance: "local", Origin: e.srv.URL, Token: e.token, Principal: string(e.admin),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	cli.Run(t.Context(), ios, args)
 	return stdout.String(), stderr.String()
 }

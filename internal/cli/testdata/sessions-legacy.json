@@ -1,0 +1,10 @@
+{
+  "local": {
+    "instance": "local",
+    "origin": "https://hikyo.example",
+    "token": "hik_1_legacy",
+    "session_id": "ses_legacy",
+    "principal": "usr_legacy",
+    "expires_at": "2030-01-01T00:00:00Z"
+  }
+}

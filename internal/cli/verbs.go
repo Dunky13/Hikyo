@@ -352,6 +352,8 @@ machine identities:
   a minted credential is shown ONCE. It reaches a workload through
   --token-file <path> or HIKYO_TOKEN, never a --token flag: a secret in argv
   is visible in ps, in /proc, and in shell history.
+  When both eligible artifact kinds are available, pass --auth=human or
+  --auth=machine; Hikyo refuses to guess.
 
 oidc federation:
   hikyo instance-config federation-issuer list [-o table|json]
@@ -657,20 +659,24 @@ func runLogout(ctx context.Context, ios IO, args []string) error {
 	if err != nil {
 		return err
 	}
+	session, err := requireHumanSession("hikyo logout", artifact)
+	if err != nil {
+		return err
+	}
 	if err := client.Do(ctx, http.MethodPost, api.PathPrefix+"/auth/logout", nil, nil); err != nil {
 		// A session the server has already forgotten is still worth clearing
 		// locally: leaving a dead artifact on disk is how "logged out" becomes
 		// a lie the next command tells.
 		var ce *Error
 		if asCLIError(err, &ce) && ce.Code == ExitAuth {
-			_ = st.DeleteSession(artifact.Instance)
+			_ = st.DeleteSession(session.Instance)
 		}
 		return err
 	}
-	if err := st.DeleteSession(artifact.Instance); err != nil {
+	if err := st.DeleteSession(session.Instance); err != nil {
 		return err
 	}
-	fmt.Fprintf(ios.Stderr, "logged out of %s\n", artifact.Origin)
+	fmt.Fprintf(ios.Stderr, "logged out of %s\n", session.Origin)
 	return nil
 }
 
@@ -950,6 +956,10 @@ func runFactorConfirmTOTP(ctx context.Context, ios IO, args []string) error {
 	if err != nil {
 		return err
 	}
+	session, err := requireHumanSession("hikyo account factor confirm-totp", artifact)
+	if err != nil {
+		return err
+	}
 	code, err := ios.readPassword("Enter the code from your authenticator to confirm: ")
 	if err != nil {
 		return err
@@ -959,7 +969,7 @@ func runFactorConfirmTOTP(ctx context.Context, ios IO, args []string) error {
 		apigen.TotpCodeRequest{Code: code}, &result); err != nil {
 		return err
 	}
-	if err := persistRotatedSession(st, artifact, result); err != nil {
+	if err := persistRotatedSession(st, session, result); err != nil {
 		return err
 	}
 	fmt.Fprintf(ios.Stderr, "TOTP enrolled. Step up to present it with\n    hikyo account factor step-up\n")
@@ -976,6 +986,10 @@ func runFactorStepUp(ctx context.Context, ios IO, args []string) error {
 	if err != nil {
 		return err
 	}
+	session, err := requireHumanSession("hikyo account factor step-up", artifact)
+	if err != nil {
+		return err
+	}
 	code, err := ios.readPassword("Enter the code from your authenticator: ")
 	if err != nil {
 		return err
@@ -985,7 +999,7 @@ func runFactorStepUp(ctx context.Context, ios IO, args []string) error {
 		apigen.TotpCodeRequest{Code: code}, &result); err != nil {
 		return err
 	}
-	if err := persistRotatedSession(st, artifact, result); err != nil {
+	if err := persistRotatedSession(st, session, result); err != nil {
 		return err
 	}
 	fmt.Fprintf(ios.Stderr, "session elevated: factors now %s\n",
@@ -1016,6 +1030,10 @@ func runRecoveryCodes(ctx context.Context, ios IO, args []string) (returnErr err
 	if err != nil {
 		return err
 	}
+	session, err := requireHumanSession("hikyo account recovery-codes regenerate", artifact)
+	if err != nil {
+		return err
+	}
 	proof, err := ios.readPassword("Account-security proof (your TOTP code, or password if no factor): ")
 	if err != nil {
 		return err
@@ -1028,7 +1046,7 @@ func runRecoveryCodes(ctx context.Context, ios IO, args []string) (returnErr err
 	if _, err := sink.WriteOnce("recovery codes (single-use)", strings.Join(result.RecoveryCodes, "\n")); err != nil {
 		return failf(ExitRefused, "disclosing the recovery codes: %v", err)
 	}
-	if err := persistRotatedSession(st, artifact, result.Login); err != nil {
+	if err := persistRotatedSession(st, session, result.Login); err != nil {
 		return err
 	}
 	fmt.Fprintf(ios.Stderr, "recovery codes regenerated; the previous batch is now void\n")
@@ -1385,6 +1403,8 @@ func runOrg(ctx context.Context, ios IO, args []string) error {
 
 type commonFlags struct {
 	Flags
+	operation AuthOperation
+	Auth      string
 	// TokenFile is the machine-credential channel (#61). There is
 	// deliberately no `--token` flag beside it: a secret in argv is visible
 	// in `ps`, in /proc/<pid>/cmdline and in shell history, and the property
@@ -1445,12 +1465,14 @@ func parseCommon(name string, ios IO, args []string, extra func(*flag.FlagSet)) 
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(ios.Stderr)
 	var c commonFlags
+	c.operation = AuthOperation(name)
 	fs.StringVar(&c.Context, "context", "", "named context to select for this invocation")
 	fs.StringVar(&c.Instance, "instance", "", "instance reference")
 	fs.StringVar(&c.Org, "org", "", "organisation")
 	fs.StringVar(&c.Project, "project", "", "project")
 	fs.StringVar(&c.Env, "env", "", "environment")
 	fs.StringVar(&c.TokenFile, "token-file", "", "read a machine credential from this file (never --token: argv is public)")
+	fs.StringVar(&c.Auth, "auth", "", "select human or machine authentication when both are available")
 	if extra != nil {
 		extra(fs)
 	}
@@ -1459,6 +1481,9 @@ func parseCommon(name string, ios IO, args []string, extra func(*flag.FlagSet)) 
 		return nil, commonFlags{}, err
 	}
 	c.positionals = positional
+	if c.Auth != "" && c.Auth != "human" && c.Auth != "machine" {
+		return nil, commonFlags{}, failf(ExitUsage, "--auth must be human or machine, got %q", c.Auth)
+	}
 	st, err := NewState(ios.Env)
 	if err != nil {
 		return nil, commonFlags{}, err
@@ -1471,7 +1496,7 @@ func parseCommon(name string, ios IO, args []string, extra func(*flag.FlagSet)) 
 // The artifact is presented only to the origin it was established against —
 // the record carries that origin, and a mismatch is a hard refusal rather
 // than a best-effort send.
-func authenticatedClient(st *State, ios IO, flags commonFlags) (*Client, SessionArtifact, error) {
+func authenticatedClient(st *State, ios IO, flags commonFlags) (*Client, AuthArtifact, error) {
 	client, artifact, _, err := authenticatedTarget(st, ios, flags)
 	return client, artifact, err
 }
@@ -1480,10 +1505,10 @@ func authenticatedClient(st *State, ios IO, flags commonFlags) (*Client, Session
 // verbs that address a scope rather than the instance. The resolution is the
 // same one either way — the hierarchy verbs must not invent a second
 // precedence chain.
-func authenticatedTarget(st *State, ios IO, flags commonFlags) (*Client, SessionArtifact, Resolved, error) {
+func authenticatedTarget(st *State, ios IO, flags commonFlags) (*Client, AuthArtifact, Resolved, error) {
 	resolved, err := Resolve(st, ios.Env, flags.Flags, ios.Workdir)
 	if err != nil {
-		return nil, SessionArtifact{}, Resolved{}, err
+		return nil, nil, Resolved{}, err
 	}
 	instance, err := resolved.Require(DimInstance)
 	if err != nil {
@@ -1498,10 +1523,10 @@ func authenticatedTarget(st *State, ios IO, flags commonFlags) (*Client, Session
 		// script deciding whether to re-authenticate.
 		entries, serr := st.Trust().Load()
 		if serr != nil {
-			return nil, SessionArtifact{}, Resolved{}, serr
+			return nil, nil, Resolved{}, serr
 		}
 		if len(entries) != 1 {
-			return nil, SessionArtifact{}, Resolved{}, err
+			return nil, nil, Resolved{}, err
 		}
 		for k := range entries {
 			instance = k
@@ -1509,51 +1534,55 @@ func authenticatedTarget(st *State, ios IO, flags commonFlags) (*Client, Session
 	}
 	entry, err := st.Trust().Lookup(instance)
 	if err != nil {
-		return nil, SessionArtifact{}, Resolved{}, err
+		return nil, nil, Resolved{}, err
 	}
 	sessions, err := st.Sessions()
 	if err != nil {
-		return nil, SessionArtifact{}, Resolved{}, err
+		return nil, nil, Resolved{}, err
 	}
-	// A MACHINE credential, when one is presented, is used INSTEAD of the
-	// stored human session — it is a distinct artifact type with its own
-	// lifetime and revocation surface, and a workload host has no session
-	// file at all. It reaches this process through exactly two channels
-	// (`--token-file` and HIKYO_TOKEN) and never through a flag that would put
-	// it in argv.
-	if token, err := machineToken(ios, flags.TokenFile); err != nil {
-		return nil, SessionArtifact{}, Resolved{}, err
-	} else if token != "" {
+	kinds, err := authKindsFor(flags.operation)
+	if err != nil {
+		return nil, nil, Resolved{}, err
+	}
+	humanSession, humanPresent := sessions[instance]
+	machinePresent := flags.TokenFile != "" || ios.Env.Getenv("HIKYO_TOKEN") != ""
+	selected, err := selectAuthKind(flags.operation, kinds, flags.Auth, humanPresent, machinePresent)
+	if err != nil {
+		return nil, nil, Resolved{}, err
+	}
+
+	if selected == AuthKindMachineCredential {
+		token, err := machineToken(ios, flags.TokenFile)
+		if err != nil {
+			return nil, nil, Resolved{}, err
+		}
+		artifact := MachineCredential{Origin: entry.Origin, CredentialRef: credentialRef(flags.TokenFile)}
 		client, err := NewClient(entry, token)
 		if err != nil {
-			return nil, SessionArtifact{}, Resolved{}, err
+			return nil, nil, Resolved{}, err
 		}
 		if echo := resolved.Echo(); echo != "" {
 			fmt.Fprintf(ios.Stderr, "target: %s [origin %s, artifact machine-credential]\n", echo, entry.Origin)
 		}
-		return client, SessionArtifact{Origin: entry.Origin}, resolved, nil
+		return client, artifact, resolved, nil
 	}
-	artifact, ok := sessions[instance]
-	if !ok {
-		return nil, SessionArtifact{}, Resolved{}, failf(ExitAuth,
-			"no session for instance %q: run `hikyo login <url> --local --as <user>`", instance)
-	}
-	if artifact.Origin != entry.Origin {
-		return nil, SessionArtifact{}, Resolved{}, failf(ExitRefused,
+	if humanSession.Origin != entry.Origin {
+		return nil, nil, Resolved{}, failf(ExitRefused,
 			"the stored session for %q was established against %s, but the trust store now records %s; log in again",
-			instance, artifact.Origin, entry.Origin)
+			instance, humanSession.Origin, entry.Origin)
 	}
-	client, err := NewClient(entry, artifact.Token)
+	human := HumanSession{SessionArtifact: humanSession}
+	client, err := NewClient(entry, humanSession.Token)
 	if err != nil {
-		return nil, SessionArtifact{}, Resolved{}, err
+		return nil, nil, Resolved{}, err
 	}
 	// The disclosure echo: the fully resolved target, to stderr, before
 	// acting — including which precedence level supplied each dimension.
 	if echo := resolved.Echo(); echo != "" {
 		fmt.Fprintf(ios.Stderr, "target: %s [origin %s, artifact human-session %s]\n",
-			echo, entry.Origin, artifact.Principal)
+			echo, entry.Origin, humanSession.Principal)
 	}
-	return client, artifact, resolved, nil
+	return client, human, resolved, nil
 }
 
 func (ios IO) readPassword(prompt string) (string, error) {
