@@ -12,36 +12,138 @@
  * login page is reached by not being signed in, never by choosing it).
  */
 
-export type SurfaceId =
-  | 'login'
-  | 'overview'
-  | 'projects'
-  | 'members'
-  | 'org-settings'
-  | 'project-settings'
-  | 'instance-admin'
-  | 'settings'
-  | 'matrix'
-  | 'history'
-  | 'values'
-  | 'machine-access'
-  | 'remotes'
-  | 'cli-reauth'
-  | 'workspace-approve'
-  | 'workspace-callback';
+export type RouteMode = 'public' | 'ceremony' | 'authenticated';
+export type ChromeMode = 'none' | 'shell';
+export type CeremonySessionPolicy = 'establish-or-reuse' | 'required';
 
-export type Surface = {
-  readonly id: SurfaceId;
+type SurfaceBase = {
+  readonly id: string;
   readonly path: string;
   readonly label: string;
   readonly section: string | null;
 };
 
-export const SURFACES: readonly Surface[] = [
-  { id: 'login', path: '/login', label: 'Sign in', section: null },
-  { id: 'overview', path: '/', label: 'Overview', section: 'Organisation' },
-  { id: 'projects', path: '/projects', label: 'Projects', section: 'Organisation' },
-  { id: 'remotes', path: '/remotes', label: 'Remotes', section: 'Organisation' },
+export type RouteDefinition = SurfaceBase &
+  (
+    | { readonly mode: 'public'; readonly chrome: 'none' }
+    | {
+        readonly mode: 'ceremony';
+        readonly chrome: 'none';
+        readonly session: CeremonySessionPolicy;
+      }
+    | { readonly mode: 'authenticated'; readonly chrome: 'shell' }
+  );
+
+export type RouteCandidate = SurfaceBase & {
+  readonly mode: string;
+  readonly chrome: string;
+  readonly session?: string;
+};
+
+/** Returns every invalid or ambiguous route-policy declaration. */
+export function routeRegistryViolations(routes: readonly RouteCandidate[]): string[] {
+  const problems: string[] = [];
+  const ids = new Set<string>();
+  const paths = new Set<string>();
+
+  for (const route of routes) {
+    if (ids.has(route.id)) {
+      problems.push(`route id "${route.id}" is declared more than once`);
+    }
+    ids.add(route.id);
+    if (paths.has(route.path)) {
+      problems.push(`route path "${route.path}" is declared more than once`);
+    }
+    paths.add(route.path);
+
+    if (route.chrome === 'none' && route.section !== null) {
+      problems.push(
+        `route "${route.id}" has no chrome but appears in section "${route.section}"`,
+      );
+    }
+
+    switch (route.mode) {
+      case 'public':
+        if (route.chrome !== 'none') {
+          problems.push(`route "${route.id}" is public but uses shell chrome`);
+        }
+        if (route.session !== undefined) {
+          problems.push(
+            `route "${route.id}" declares a ceremony session policy outside ceremony mode`,
+          );
+        }
+        break;
+      case 'ceremony':
+        if (route.chrome !== 'none') {
+          problems.push(`route "${route.id}" is a ceremony but uses shell chrome`);
+        }
+        if (route.session !== 'establish-or-reuse' && route.session !== 'required') {
+          problems.push(
+            `route "${route.id}" is a ceremony without an explicit session policy`,
+          );
+        }
+        break;
+      case 'authenticated':
+        if (route.chrome !== 'shell') {
+          problems.push(`route "${route.id}" is authenticated but has no shell chrome`);
+        }
+        if (route.session !== undefined) {
+          problems.push(
+            `route "${route.id}" declares a ceremony session policy outside ceremony mode`,
+          );
+        }
+        break;
+      default:
+        problems.push(`route "${route.id}" has unknown access mode "${route.mode}"`);
+    }
+  }
+
+  return problems;
+}
+
+function defineSurfaceRegistry<const Routes extends readonly RouteDefinition[]>(
+  routes: Routes,
+): Routes {
+  const problems = routeRegistryViolations(routes);
+  if (problems.length !== 0) {
+    throw new Error(`invalid route registry:\n${problems.join('\n')}`);
+  }
+  return routes;
+}
+
+export const SURFACES = defineSurfaceRegistry([
+  {
+    id: 'login',
+    path: '/login',
+    label: 'Sign in',
+    section: null,
+    mode: 'public',
+    chrome: 'none',
+  },
+  {
+    id: 'overview',
+    path: '/',
+    label: 'Overview',
+    section: 'Organisation',
+    mode: 'authenticated',
+    chrome: 'shell',
+  },
+  {
+    id: 'projects',
+    path: '/projects',
+    label: 'Projects',
+    section: 'Organisation',
+    mode: 'authenticated',
+    chrome: 'shell',
+  },
+  {
+    id: 'remotes',
+    path: '/remotes',
+    label: 'Remotes',
+    section: 'Organisation',
+    mode: 'authenticated',
+    chrome: 'shell',
+  },
   // The two org-scoped chrome surfaces (#60). Their org is ROUTE DATA, not
   // chrome state: a members page and a settings page each administer ONE
   // organisation, and a path that did not name it would make a deep link, a
@@ -50,12 +152,21 @@ export const SURFACES: readonly Surface[] = [
   // is what fills the parameter, and the entry is absent while there is no
   // organisation to fill it with, which is the honest rendering of the
   // zero-organisation state rather than a link that resolves to nothing.
-  { id: 'members', path: '/orgs/:org/members', label: 'Members', section: 'Organisation' },
+  {
+    id: 'members',
+    path: '/orgs/:org/members',
+    label: 'Members',
+    section: 'Organisation',
+    mode: 'authenticated',
+    chrome: 'shell',
+  },
   {
     id: 'org-settings',
     path: '/orgs/:org/settings',
     label: 'Organisation settings',
     section: 'Organisation',
+    mode: 'authenticated',
+    chrome: 'shell',
   },
   // Project settings addresses ONE project, exactly like the matrix, so no
   // static sidebar entry could know which one to mean. It is reached from the
@@ -65,14 +176,25 @@ export const SURFACES: readonly Surface[] = [
     path: '/orgs/:org/projects/:project/settings',
     label: 'Project settings',
     section: null,
+    mode: 'authenticated',
+    chrome: 'shell',
   },
   {
     id: 'instance-admin',
     path: '/instance',
     label: 'Instance administration',
     section: 'Instance',
+    mode: 'authenticated',
+    chrome: 'shell',
   },
-  { id: 'settings', path: '/settings', label: 'Account & security', section: 'Account' },
+  {
+    id: 'settings',
+    path: '/settings',
+    label: 'Account & security',
+    section: 'Account',
+    mode: 'authenticated',
+    chrome: 'shell',
+  },
   // The environment matrix addresses one whole project. Like the
   // environment-scoped value surface, its org and project are route data, so
   // no static sidebar destination can point at it honestly.
@@ -81,6 +203,8 @@ export const SURFACES: readonly Surface[] = [
     path: '/orgs/:org/projects/:project/matrix',
     label: 'Environment matrix',
     section: null,
+    mode: 'authenticated',
+    chrome: 'shell',
   },
   // The revision-history drawer (#59). It is the matrix WITH its history drawer
   // open — the locked prototype's list+detail panes render over the matrix, not
@@ -93,6 +217,8 @@ export const SURFACES: readonly Surface[] = [
     path: '/orgs/:org/projects/:project/matrix/history',
     label: 'Revision history',
     section: null,
+    mode: 'authenticated',
+    chrome: 'shell',
   },
   // The reveal / copy / write-only-edit surface (#58). `section: null` because
   // it is not a navigation destination: it addresses one environment of one
@@ -103,6 +229,8 @@ export const SURFACES: readonly Surface[] = [
     path: '/orgs/:org/projects/:project/environments/:environment/values',
     label: 'Values',
     section: null,
+    mode: 'authenticated',
+    chrome: 'shell',
   },
   // The machine-access surface (#67). `section: null` for the same reason
   // `values` is: it addresses ONE project, and a static sidebar entry could not
@@ -114,13 +242,23 @@ export const SURFACES: readonly Surface[] = [
     path: '/orgs/:org/projects/:project/machine-access',
     label: 'Machine access',
     section: null,
+    mode: 'authenticated',
+    chrome: 'shell',
   },
   // Browser half of the CLI's purpose-bound reauthentication handoff. The
   // opaque transaction state stays in the query string so login can render on
   // this same route without losing it.
-  { id: 'cli-reauth', path: '/reauth/cli', label: 'Authorize CLI', section: null },
-  // The two ceremony pages. Neither is a navigation destination and neither
-  // wears the chrome: they are the two ends of the workspace handoff's front
+  {
+    id: 'cli-reauth',
+    path: '/reauth/cli',
+    label: 'Authorize CLI',
+    section: null,
+    mode: 'ceremony',
+    chrome: 'none',
+    session: 'establish-or-reuse',
+  },
+  // The two workspace handoff pages. Neither is a navigation destination and
+  // neither wears the chrome: they are the two ends of the handoff's front
   // channel, and both are reached by a redirect, never by choosing them.
   //
   // `workspace-approve` is served by the SERVING instance and is where the
@@ -129,9 +267,27 @@ export const SURFACES: readonly Surface[] = [
   // in one route. `workspace-callback` is served by the VIEWING instance and
   // is the same-origin return path that exists because the popup is opened
   // with `noopener` and therefore has no `window.opener` to talk back through.
-  { id: 'workspace-approve', path: '/workspace/approve', label: 'Authorize workspace', section: null },
-  { id: 'workspace-callback', path: '/workspace/callback', label: 'Returning', section: null },
-];
+  {
+    id: 'workspace-approve',
+    path: '/workspace/approve',
+    label: 'Authorize workspace',
+    section: null,
+    mode: 'ceremony',
+    chrome: 'none',
+    session: 'establish-or-reuse',
+  },
+  {
+    id: 'workspace-callback',
+    path: '/workspace/callback',
+    label: 'Returning',
+    section: null,
+    mode: 'public',
+    chrome: 'none',
+  },
+]);
+
+export type Surface = (typeof SURFACES)[number];
+export type SurfaceId = Surface['id'];
 
 type Section = {
   readonly title: string;
@@ -141,43 +297,26 @@ type Section = {
 /** SECTIONS is the sidebar, derived so it cannot drift from the surface list. */
 export const SECTIONS: readonly Section[] = Object.entries(
   SURFACES.filter((s) => s.section !== null).reduce<Record<string, Surface[]>>((acc, surface) => {
-    if (surface.section === null) {
-      throw new Error(`navigation surface ${surface.id} lost its section`);
-    }
     const key = surface.section;
     (acc[key] ??= []).push(surface);
     return acc;
   }, {}),
 ).map(([title, items]) => ({ title, items }));
 
-/**
- * CHROMELESS is every surface that renders WITHOUT the application chrome AND
- * without a session — the login page and the two workspace ceremony pages.
- *
- * DECLARED, not derived from `section === null`, and the counterexample is
- * `values`: it is not a navigation destination either (it addresses one
- * environment of one project, so it is reached from the matrix, never from a
- * static sidebar entry), yet it is a signed-in surface that wears the chrome
- * like any other. Deriving this set from `section` would have made the reveal
- * surface publicly routable the moment both tickets met — the two properties
- * look alike and are not the same property.
- *
- * A popup 520px wide showing an org rail would be chrome around a consent
- * decision, which is why the ceremony pages are here; and the approve page in
- * particular must render for a caller with NO session at all, or a first
- * establishment would be bounced to `/login` and lose the `state` the whole
- * transaction is addressed by.
- */
-const CHROMELESS_IDS: readonly SurfaceId[] = [
-  'login',
-  'cli-reauth',
-  'workspace-approve',
-  'workspace-callback',
-];
-
-export const CHROMELESS: readonly Surface[] = SURFACES.filter((s) =>
-  CHROMELESS_IDS.includes(s.id),
-);
+/** Whether a route may render before the SPA has a live session. */
+export function allowsAnonymousSession(surface: RouteDefinition): boolean {
+  switch (surface.mode) {
+    case 'public':
+      return true;
+    case 'ceremony':
+      // Establishing ceremonies render Login in place. This preserves their
+      // state-bearing URL; required-session ceremonies instead follow the
+      // ordinary anonymous fallback to /login.
+      return surface.session === 'establish-or-reuse';
+    case 'authenticated':
+      return false;
+  }
+}
 
 /**
  * needsOrg reports whether a surface's path carries the active organisation.
