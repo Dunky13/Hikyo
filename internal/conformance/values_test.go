@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 
+	"github.com/Hikyo-Org/hikyo/internal/authz"
 	"github.com/Hikyo-Org/hikyo/internal/crypto"
 	"github.com/Hikyo-Org/hikyo/internal/domain"
 	"github.com/Hikyo-Org/hikyo/internal/schema"
@@ -365,8 +367,11 @@ func scenarioValueCopyFormula(t *testing.T, db *store.DB) {
 	dev := mustEnv(t, envs, actor, scope, "dev")
 	prod := mustEnv(t, envs, actor, scope, "prod")
 	mustKey(t, keys, actor, scope, "TOKEN", string(schema.Secret), schema.DefaultPresenceRules())
+	mustKey(t, keys, actor, scope, "SECOND_TOKEN", string(schema.Secret), schema.DefaultPresenceRules())
 	mustKey(t, keys, actor, scope, "REGION", string(schema.Config), schema.DefaultPresenceRules())
-	for name, value := range map[string]string{"TOKEN": "s3cret-material", "REGION": "eu-west"} {
+	for name, value := range map[string]string{
+		"TOKEN": "s3cret-material", "SECOND_TOKEN": "second-material", "REGION": "eu-west",
+	} {
 		publishValue(t, db, values, actor, dev, name, value)
 	}
 
@@ -397,6 +402,35 @@ func scenarioValueCopyFormula(t *testing.T, db *store.DB) {
 	if _, err := values.Copy(t.Context(), service.LocalPrincipal(noDestPublish), scope, req); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("copy without publish(destination) was not refused uniformly: %v", err)
 	}
+	// Destination refusal is load-bearing preflight: corrupt source ciphertext
+	// proves the refusal path never attempts a decrypt, while the audit count
+	// proves it writes no source disclosure event.
+	restoreToken := corruptValueCiphertext(t, db, string(dev.Env), keyIDByName(t, keys, actor, scope, "TOKEN"))
+	disclosuresBeforeRefusal := disclosureEvents(t, db, string(dev.Env))
+	if _, err := values.Copy(t.Context(), service.LocalPrincipal(noDestReveal), scope, req); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("destination refusal over corrupted source material = %v, want destination ErrNotFound", err)
+	}
+	if after := disclosureEvents(t, db, string(dev.Env)); after != disclosuresBeforeRefusal {
+		t.Fatalf("destination refusal wrote %d source disclosure row(s), want 0", after-disclosuresBeforeRefusal)
+	}
+	// Source authorization is itself durably audited on denial. A caller that
+	// lacks BOTH source and destination authority must reach only destination
+	// preflight: planning must not capture a source denial for a source step the
+	// operation never reached.
+	noSourceOrDestReveal := newPrincipal(t, db, "usr_copy_noreveal_"+string(scope.Project), append(append([]grantSpec{}, base...),
+		grantSpec{"publish", prod}))
+	sourceDenialsBefore := auditOperationCount(t, db, noSourceOrDestReveal, authz.OpValueCopySource)
+	destDenialsBefore := auditOperationCount(t, db, noSourceOrDestReveal, authz.OpValueCopyDestination)
+	if _, err := values.Copy(t.Context(), service.LocalPrincipal(noSourceOrDestReveal), scope, req); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("copy denied at both source and destination = %v, want destination ErrNotFound", err)
+	}
+	if got := auditOperationCount(t, db, noSourceOrDestReveal, authz.OpValueCopySource); got != sourceDenialsBefore {
+		t.Fatalf("destination refusal captured %d source authorization denial(s), want 0", got-sourceDenialsBefore)
+	}
+	if got := auditOperationCount(t, db, noSourceOrDestReveal, authz.OpValueCopyDestination); got != destDenialsBefore+1 {
+		t.Fatalf("destination refusal captured %d destination denial(s), want 1", got-destDenialsBefore)
+	}
+	restoreToken()
 	// Nothing landed under any of the three refusals.
 	if cell, err := values.Get(t.Context(), actor, prod, "TOKEN", true); err != nil || cell.Set {
 		t.Fatalf("a refused copy left material behind: %+v, %v", cell, err)
@@ -431,6 +465,34 @@ func scenarioValueCopyFormula(t *testing.T, db *store.DB) {
 	}
 	if _, ok := exportedValue(t, db, actor, prod, "TOKEN"); !ok {
 		t.Fatal("secret copy did not reach the committed snapshot")
+	}
+	// Mixed bulk copy keeps the established config-first result order and the
+	// request-relative order of source secret disclosures. The one retained
+	// source plan must not reorder either surface.
+	disclosureSeq := latestAuditSeq(t, db)
+	bulk, err := values.Copy(t.Context(), actor, scope, service.CopyRequest{
+		SourceEnvironmentID:       string(dev.Env),
+		KeyNames:                  []string{"SECOND_TOKEN", "REGION", "TOKEN"},
+		DestinationEnvironmentIDs: []string{string(prod.Env)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantCopied := []string{"REGION", "SECOND_TOKEN", "TOKEN"}
+	if len(bulk.Copied) != len(wantCopied) {
+		t.Fatalf("mixed copy result = %+v, want key order %v", bulk.Copied, wantCopied)
+	}
+	for i, want := range wantCopied {
+		if bulk.Copied[i].KeyName != want {
+			t.Fatalf("mixed copy result[%d] = %q, want %q", i, bulk.Copied[i].KeyName, want)
+		}
+	}
+	wantDisclosed := []string{
+		keyIDByName(t, keys, actor, scope, "SECOND_TOKEN"),
+		keyIDByName(t, keys, actor, scope, "TOKEN"),
+	}
+	if got := disclosureObjectIDsSince(t, db, string(dev.Env), disclosureSeq); !slices.Equal(got, wantDisclosed) {
+		t.Fatalf("mixed copy source disclosure order = %v, want %v", got, wantDisclosed)
 	}
 	publishValue(t, db, values, actor, dev, "TOKEN", "rotated")
 	after, err := values.Get(t.Context(), actor, prod, "TOKEN", true)
@@ -567,6 +629,9 @@ func scenarioValueClone(t *testing.T, db *store.DB) {
 		result.UncopiedSecrets[0] != "OPTIONAL_TOKEN" || result.UncopiedSecrets[1] != "REQUIRED_TOKEN" {
 		t.Fatalf("uncopied secrets not enumerated by name: %+v", result)
 	}
+	if !slices.Equal(result.Copied, []string{"REGION"}) {
+		t.Fatalf("partial clone copied = %v, want [REGION]", result.Copied)
+	}
 	partial := scope
 	partial.Env = domain.EnvID(env.ID)
 	if cell, err := values.Get(t.Context(), actor, partial, "REGION", false); err != nil || cell.Value != "eu-west" {
@@ -584,7 +649,8 @@ func scenarioValueClone(t *testing.T, db *store.DB) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.UncopiedSecrets) != 0 || len(result.Copied) != 3 {
+	if len(result.UncopiedSecrets) != 0 ||
+		!slices.Equal(result.Copied, []string{"REGION", "OPTIONAL_TOKEN", "REQUIRED_TOKEN"}) {
 		t.Fatalf("full clone: %+v", result)
 	}
 	fullScope := scope
@@ -767,6 +833,65 @@ func disclosureEvents(t *testing.T, db *store.DB, envID string) int64 {
 	return auditEventCount(t, db, envID, "disclosure.value_revealed")
 }
 
+func latestAuditSeq(t *testing.T, db *store.DB) int64 {
+	t.Helper()
+	q := "SELECT COALESCE(MAX(seq), 0) FROM audit_tenant_events"
+	var out int64
+	var err error
+	if db.Engine() == store.EnginePostgres {
+		err = db.PG().QueryRow(t.Context(), q).Scan(&out)
+	} else {
+		err = db.SQLiteRead().QueryRowContext(t.Context(), q).Scan(&out)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func disclosureObjectIDsSince(t *testing.T, db *store.DB, envID string, after int64) []string {
+	t.Helper()
+	q := `SELECT object_id FROM audit_tenant_events
+	      WHERE type = $1 AND env_id = $2 AND seq > $3 ORDER BY seq`
+	var out []string
+	if db.Engine() == store.EnginePostgres {
+		rows, err := db.PG().Query(t.Context(), q, "disclosure.value_revealed", envID, after)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, id)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	rows, err := db.SQLiteRead().QueryContext(t.Context(),
+		strings.NewReplacer("$1", "?", "$2", "?", "$3", "?").Replace(q),
+		"disclosure.value_revealed", envID, after)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, id)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
 func exportedValue(t *testing.T, db *store.DB, actor service.Actor, scope domain.Scope, name string) (string, bool) {
 	t.Helper()
 	values, _, err := revisionSvc(t, db).Export(t.Context(), actor, scope, 0, false)
@@ -792,6 +917,29 @@ func auditEventCount(t *testing.T, db *store.DB, envID, eventType string) int64 
 	} else {
 		err = db.SQLiteRead().QueryRowContext(t.Context(),
 			strings.NewReplacer("$1", "?", "$2", "?").Replace(q), eventType, envID).Scan(&out)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func auditOperationCount(t *testing.T, db *store.DB, actor domain.PrincipalID, op authz.Operation) int64 {
+	t.Helper()
+	var (
+		out int64
+		err error
+	)
+	if db.Engine() == store.EnginePostgres {
+		err = db.PG().QueryRow(t.Context(),
+			`SELECT COUNT(*) FROM audit_tenant_events
+			 WHERE type = 'grant.denied' AND actor_id = $1 AND payload->>'operation' = $2`,
+			actor, string(op)).Scan(&out)
+	} else {
+		err = db.SQLiteRead().QueryRowContext(t.Context(),
+			`SELECT COUNT(*) FROM audit_tenant_events
+			 WHERE type = 'grant.denied' AND actor_id = ? AND json_extract(payload, '$.operation') = ?`,
+			actor, string(op)).Scan(&out)
 	}
 	if err != nil {
 		t.Fatal(err)
