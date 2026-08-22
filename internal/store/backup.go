@@ -435,7 +435,7 @@ func openArchive(archive io.Reader) (*tar.Reader, Manifest, error) {
 
 // RestoreSQLite writes the archive's snapshot to path, which must not exist.
 // The file is fully written and fsynced under a temporary name and then
-// renamed into place, so a crash mid-restore cannot leave a half-written
+// linked into place, so a crash mid-restore cannot leave a half-written
 // database where a complete one is expected.
 //
 // mutate runs against the restored file BEFORE it is published, which is
@@ -443,6 +443,32 @@ func openArchive(archive io.Reader) (*tar.Reader, Manifest, error) {
 // reachable, even for an instant, in a state where its pre-restore bearer
 // credentials still authenticate.
 func RestoreSQLite(ctx context.Context, archive io.Reader, path string, mutate func(ctx context.Context, db *DB) error) (Manifest, error) {
+	return restoreSQLite(ctx, archive, path, mutate, defaultSQLiteRestoreOperations())
+}
+
+type sqliteRestoreOperations struct {
+	createTemp    func(string, string) (*os.File, error)
+	closeFile     func(*os.File) error
+	openDatabase  func(context.Context, Config) (*DB, error)
+	closeDatabase func(*DB) error
+	fsyncFile     func(string) error
+	link          func(string, string) error
+	remove        func(string) error
+}
+
+func defaultSQLiteRestoreOperations() sqliteRestoreOperations {
+	return sqliteRestoreOperations{
+		createTemp:    os.CreateTemp,
+		closeFile:     func(file *os.File) error { return file.Close() },
+		openDatabase:  Open,
+		closeDatabase: func(db *DB) error { return db.Close() },
+		fsyncFile:     fsyncFile,
+		link:          os.Link,
+		remove:        os.Remove,
+	}
+}
+
+func restoreSQLite(ctx context.Context, archive io.Reader, path string, mutate func(ctx context.Context, db *DB) error, operations sqliteRestoreOperations) (manifest Manifest, restoreErr error) {
 	tr, m, err := openArchive(archive)
 	if err != nil {
 		return Manifest{}, err
@@ -456,32 +482,29 @@ func RestoreSQLite(ctx context.Context, archive io.Reader, path string, mutate f
 		return Manifest{}, fmt.Errorf("store: check restore target: %w", err)
 	}
 
-	// The staging name is unique per restore attempt: a fixed `<path>.restoring`
-	// would let two concurrent restores write the same file and publish each
-	// other's bytes.
-	staging := fmt.Sprintf("%s.restoring-%d", path, os.Getpid())
-	if err := os.Remove(staging); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return Manifest{}, fmt.Errorf("store: clear restore staging file: %w", err)
-	}
-	if err := extractMemberTo(tr, sqliteMember, staging); err != nil {
+	staging, err := createSQLiteRestoreStaging(path, operations)
+	if err != nil {
 		return Manifest{}, err
 	}
-	// sqlite checkpoints and deletes the -wal on last close, but a crash can
-	// leave the sidecars behind, and a stale one beside the staging name would
-	// outlive the restore.
 	defer func() {
-		for _, suffix := range []string{"", "-wal", "-shm"} {
-			os.Remove(staging + suffix)
+		if cleanupErr := staging.cleanup(); cleanupErr != nil {
+			restoreErr = errors.Join(restoreErr, cleanupErr)
 		}
 	}()
+	if err := extractMemberTo(tr, sqliteMember, staging.file, staging.database); err != nil {
+		return Manifest{}, err
+	}
+	if err := staging.close(); err != nil {
+		return Manifest{}, fmt.Errorf("store: write %s: %w", staging.database, err)
+	}
 
 	if mutate != nil {
-		db, err := Open(ctx, Config{Engine: EngineSQLite, Path: staging})
+		db, err := operations.openDatabase(ctx, Config{Engine: EngineSQLite, Path: staging.database})
 		if err != nil {
 			return Manifest{}, fmt.Errorf("store: open restored snapshot: %w", err)
 		}
 		mutateErr := mutate(ctx, db)
-		closeErr := db.Close()
+		closeErr := operations.closeDatabase(db)
 		if mutateErr != nil {
 			return Manifest{}, mutateErr
 		}
@@ -489,7 +512,7 @@ func RestoreSQLite(ctx context.Context, archive io.Reader, path string, mutate f
 			return Manifest{}, fmt.Errorf("store: close restored snapshot: %w", closeErr)
 		}
 	}
-	if err := fsyncFile(staging); err != nil {
+	if err := operations.fsyncFile(staging.database); err != nil {
 		return Manifest{}, err
 	}
 	// link(2), not rename(2): the not-exists check above raced everything that
@@ -497,7 +520,7 @@ func RestoreSQLite(ctx context.Context, archive io.Reader, path string, mutate f
 	// in the meantime. Link fails on an existing target, which re-asserts
 	// "must not exist" at the moment of publication. The staging name is
 	// removed by the deferred cleanup.
-	if err := os.Link(staging, path); err != nil {
+	if err := operations.link(staging.database, path); err != nil {
 		if errors.Is(err, os.ErrExist) {
 			return Manifest{}, fmt.Errorf("%w: %s appeared during the restore", ErrTargetNotEmpty, path)
 		}
@@ -506,9 +529,67 @@ func RestoreSQLite(ctx context.Context, archive io.Reader, path string, mutate f
 	return m, nil
 }
 
+// sqliteRestoreStaging is one restore attempt's exclusively owned resource.
+// Keeping the database and its SQLite sidecars together prevents cleanup from
+// ever deriving or deleting another attempt's paths.
+type sqliteRestoreStaging struct {
+	database  string
+	wal       string
+	shm       string
+	file      *os.File
+	closeFile func(*os.File) error
+	remove    func(string) error
+}
+
+func createSQLiteRestoreStaging(target string, operations sqliteRestoreOperations) (*sqliteRestoreStaging, error) {
+	directory := filepath.Dir(target)
+	pattern := filepath.Base(target) + ".restoring-*"
+	f, err := operations.createTemp(directory, pattern)
+	if err != nil {
+		return nil, fmt.Errorf("store: create restore staging file: %w", err)
+	}
+	staging := &sqliteRestoreStaging{
+		database:  f.Name(),
+		wal:       f.Name() + "-wal",
+		shm:       f.Name() + "-shm",
+		file:      f,
+		closeFile: operations.closeFile,
+		remove:    operations.remove,
+	}
+	return staging, nil
+}
+
+func (s *sqliteRestoreStaging) close() error {
+	if s.file == nil {
+		return nil
+	}
+	file := s.file
+	s.file = nil
+	return s.closeFile(file)
+}
+
+// cleanup removes only paths derived from the exact file CreateTemp returned.
+// SQLite normally checkpoints and removes its sidecars on close; explicit
+// removal also covers failed opens and interrupted mutation attempts.
+func (s *sqliteRestoreStaging) cleanup() error {
+	var cleanupErrors []error
+	if err := s.close(); err != nil {
+		cleanupErrors = append(cleanupErrors, fmt.Errorf("close %s: %w", s.database, err))
+	}
+	for _, path := range []string{s.database, s.wal, s.shm} {
+		if err := s.remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			cleanupErrors = append(cleanupErrors, fmt.Errorf("remove %s: %w", path, err))
+		}
+	}
+	if err := errors.Join(cleanupErrors...); err != nil {
+		return fmt.Errorf("store: clean restore staging: %w", err)
+	}
+	return nil
+}
+
 // extractMemberTo walks the archive (already positioned past the manifest)
 // to the named member and writes it out.
-func extractMemberTo(tr *tar.Reader, member, path string) error {
+func extractMemberTo(tr *tar.Reader, member string, destination io.Writer, destinationPath string) error {
 	for {
 		hdr, err := tr.Next()
 		if errors.Is(err, io.EOF) {
@@ -520,17 +601,8 @@ func extractMemberTo(tr *tar.Reader, member, path string) error {
 		if hdr.Name != member {
 			continue
 		}
-		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-		if err != nil {
-			return fmt.Errorf("store: create %s: %w", path, err)
-		}
-		_, copyErr := io.Copy(f, tr)
-		closeErr := f.Close()
-		if copyErr != nil {
-			return fmt.Errorf("store: write %s: %w", path, copyErr)
-		}
-		if closeErr != nil {
-			return fmt.Errorf("store: write %s: %w", path, closeErr)
+		if _, err := io.Copy(destination, tr); err != nil {
+			return fmt.Errorf("store: write %s: %w", destinationPath, err)
 		}
 		return nil
 	}
