@@ -366,11 +366,11 @@ func runSCIMCredential(ctx context.Context, ios IO, args []string) (returnErr er
 	// never created and then dropped on the floor.
 	deliver := disclose.Options{
 		OutputFile: outputFile, DangerouslyPrint: dangerous,
-		Stdout: ios.Stdout, OpenTerminal: ios.OpenTerminal,
+		Stdout: ios.Stdout,
 	}
 	var sink *disclose.PreparedSink
 	if sub == "mint" {
-		sink, err = disclose.Prepare(deliver)
+		sink, err = ios.prepareDisclosure(deliver)
 		if err != nil {
 			return failf(ExitRefused, "the provisioning credential has nowhere to go: %v", err)
 		}

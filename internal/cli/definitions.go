@@ -110,7 +110,7 @@ func runDefinitionsVerb(ctx context.Context, ios IO, sub string, args []string) 
 	}
 	var sink *disclose.PreparedSink
 	if sub == "export" && outputFile != "" {
-		sink, err = disclose.Prepare(disclose.Options{OutputFile: outputFile})
+		sink, err = disclose.Prepare(disclose.Options{OutputFile: outputFile}, nil)
 		if err != nil {
 			return failf(ExitRefused, "writing the definitions bundle: %v", err)
 		}

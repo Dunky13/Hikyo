@@ -194,11 +194,11 @@ func runValues(ctx context.Context, ios IO, args []string) (returnErr error) {
 	// separate the two, so they guard the whole output up front.)
 	deliver := disclose.Options{
 		OutputFile: outputFile, DangerouslyPrint: dangerous,
-		Stdout: ios.Stdout, OpenTerminal: ios.OpenTerminal,
+		Stdout: ios.Stdout,
 	}
 	var sink *disclose.PreparedSink
 	if reveal && (sub == "list" || sub == "diff" || sub == "export") {
-		sink, err = disclose.Prepare(deliver)
+		sink, err = ios.prepareDisclosure(deliver)
 		if err != nil {
 			return failf(ExitRefused, "the values have nowhere to go: %v", err)
 		}
@@ -604,10 +604,8 @@ func readValue(ios IO, stdin bool, valueFile, keyName string) (string, error) {
 			return "", fmt.Errorf("reading the value from %s: %w", valueFile, err)
 		}
 		return strings.TrimSuffix(string(raw), "\n"), nil
-	case ios.ReadPassword == nil:
-		return "", failf(ExitUsage, valuesSetUsage)
 	default:
-		value, err := ios.ReadPassword(fmt.Sprintf("value for %s: ", keyName))
+		value, err := ios.readPassword(fmt.Sprintf("value for %s: ", keyName))
 		if err != nil {
 			return "", fmt.Errorf("reading the value: %w", err)
 		}
@@ -706,9 +704,9 @@ func renderCell(ios IO, f Format, cell apigen.ValueCell, outputFile string, dang
 	}
 	deliver := disclose.Options{
 		OutputFile: outputFile, DangerouslyPrint: dangerous,
-		Stdout: ios.Stdout, OpenTerminal: ios.OpenTerminal,
+		Stdout: ios.Stdout,
 	}
-	sink, err := disclose.Prepare(deliver)
+	sink, err := ios.prepareDisclosure(deliver)
 	if err != nil {
 		return failf(ExitRefused, "the value has nowhere to go: %v", err)
 	}

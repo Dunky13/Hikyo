@@ -10,14 +10,15 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Hikyo-Org/hikyo/internal/disclose"
 	"github.com/Hikyo-Org/hikyo/internal/importer"
 )
 
-// nopWriteCloser backs an injected OpenTerminal: its existence is what
-// onTerminal checks, nothing is written to it.
-type nopWriteCloser struct{ io.Writer }
+// nopTerminal backs an injected TerminalSession: its existence is what
+// onTerminal checks, nothing is read from or written to it.
+type nopTerminal struct{ io.ReadWriter }
 
-func (nopWriteCloser) Close() error { return nil }
+func (nopTerminal) Close() error { return nil }
 
 // TestImportOnTerminalEntersWizard is acceptance criterion 3's TTY half: `import`
 // with no source arguments on a terminal enters the wizard rather than printing
@@ -26,16 +27,18 @@ func (nopWriteCloser) Close() error { return nil }
 // no-arguments usage refusal.
 func TestImportOnTerminalEntersWizard(t *testing.T) {
 	var stderr bytes.Buffer
-	ios := IO{
-		Stdin:  strings.NewReader(""),
-		Stdout: &bytes.Buffer{},
-		Stderr: &stderr,
-		Env:    Env{Getenv: func(string) string { return "" }},
-		OpenTerminal: func() (io.WriteCloser, error) {
-			return nopWriteCloser{io.Discard}, nil
-		},
+	session, err := disclose.NewTerminalSession(nopTerminal{ReadWriter: &bytes.Buffer{}})
+	if err != nil {
+		t.Fatal(err)
 	}
-	err := runImport(context.Background(), ios, nil)
+	ios := IO{
+		Stdin:           strings.NewReader(""),
+		Stdout:          &bytes.Buffer{},
+		Stderr:          &stderr,
+		Env:             Env{Getenv: func(string) string { return "" }},
+		TerminalSession: session,
+	}
+	err = runImport(context.Background(), ios, nil)
 	if err == nil {
 		t.Fatal("the wizard entry returned no error despite no resolvable target")
 	}

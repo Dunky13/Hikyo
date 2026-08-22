@@ -72,16 +72,18 @@ the root key, so 'kubectl logs' would hand a remote reader the authority.
 }
 
 // RunAdmin dispatches the local-admin verb group.
-func RunAdmin(ctx context.Context, cfg *config.Config, log *slog.Logger, args []string, stderr io.Writer) error {
+func RunAdmin(ctx context.Context, cfg *config.Config, log *slog.Logger, args []string, stderr io.Writer,
+	terminalSession *disclose.TerminalSession, terminalError error,
+) error {
 	if len(args) == 0 {
 		AdminUsage(stderr)
 		return errors.New("usage: hikyo admin create --username USER | hikyo admin reset-credential --principal ID | hikyo admin grant --principal ID --capability CAP")
 	}
 	switch args[0] {
 	case "create":
-		return runAdminCreate(ctx, cfg, log, args, stderr)
+		return runAdminCreate(ctx, cfg, log, args, stderr, terminalSession, terminalError)
 	case "reset-credential":
-		return runAdminReset(ctx, cfg, log, args, stderr)
+		return runAdminReset(ctx, cfg, log, args, stderr, terminalSession, terminalError)
 	case "grant":
 		return runAdminGrant(ctx, cfg, log, args, stderr)
 	default:
@@ -90,7 +92,16 @@ func RunAdmin(ctx context.Context, cfg *config.Config, log *slog.Logger, args []
 	}
 }
 
-func runAdminCreate(ctx context.Context, cfg *config.Config, log *slog.Logger, args []string, stderr io.Writer) (returnErr error) {
+func prepareDisclosure(options disclose.Options, terminalSession *disclose.TerminalSession, terminalError error) (*disclose.PreparedSink, error) {
+	if options.OutputFile == "" && !options.DangerouslyPrint && terminalSession == nil {
+		return nil, errors.Join(disclose.ErrNoDestination, terminalError)
+	}
+	return disclose.Prepare(options, terminalSession)
+}
+
+func runAdminCreate(ctx context.Context, cfg *config.Config, log *slog.Logger, args []string, stderr io.Writer,
+	terminalSession *disclose.TerminalSession, terminalError error,
+) (returnErr error) {
 	fs := flag.NewFlagSet("admin create", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	username := fs.String("username", "", "the first administrator's login handle")
@@ -107,7 +118,7 @@ func runAdminCreate(ctx context.Context, cfg *config.Config, log *slog.Logger, a
 	// Reserve the destination BEFORE anything is created. Minting first would
 	// leave the instance bootstrapped with an authority nobody ever saw.
 	deliveryOpts := disclose.Options{OutputFile: *outputFile, DangerouslyPrint: *dangerous}
-	sink, err := disclose.Prepare(deliveryOpts)
+	sink, err := prepareDisclosure(deliveryOpts, terminalSession, terminalError)
 	if err != nil {
 		return err
 	}
@@ -194,7 +205,9 @@ func adminAuth(ctx context.Context, cfg *config.Config, log *slog.Logger) (*serv
 // — on the server's own host under local authority, with no network route. The
 // classification-totality invariant keeps that true: `cli:admin` is ClassSystem,
 // whose probe contract is network unreachability.
-func runAdminReset(ctx context.Context, cfg *config.Config, log *slog.Logger, args []string, stderr io.Writer) (returnErr error) {
+func runAdminReset(ctx context.Context, cfg *config.Config, log *slog.Logger, args []string, stderr io.Writer,
+	terminalSession *disclose.TerminalSession, terminalError error,
+) (returnErr error) {
 	fs := flag.NewFlagSet("admin reset-credential", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	principal := fs.String("principal", "", "the target principal id to reset")
@@ -208,7 +221,7 @@ func runAdminReset(ctx context.Context, cfg *config.Config, log *slog.Logger, ar
 	}
 
 	deliveryOpts := disclose.Options{OutputFile: *outputFile, DangerouslyPrint: *dangerous}
-	sink, err := disclose.Prepare(deliveryOpts)
+	sink, err := prepareDisclosure(deliveryOpts, terminalSession, terminalError)
 	if err != nil {
 		return err
 	}

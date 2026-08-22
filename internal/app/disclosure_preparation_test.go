@@ -24,20 +24,20 @@ func TestLocalMintPreparationFailurePrecedesStateAccess(t *testing.T) {
 			name: "admin create",
 			run: func() error {
 				return runAdminCreate(t.Context(), nil, nil,
-					[]string{"create", "--username", "alice", "--output-file", path}, io.Discard)
+					[]string{"create", "--username", "alice", "--output-file", path}, io.Discard, nil, nil)
 			},
 		},
 		{
 			name: "admin reset",
 			run: func() error {
 				return runAdminReset(t.Context(), nil, nil,
-					[]string{"reset-credential", "--principal", "usr_1", "--output-file", path}, io.Discard)
+					[]string{"reset-credential", "--principal", "usr_1", "--output-file", path}, io.Discard, nil, nil)
 			},
 		},
 		{
 			name: "backup keygen",
 			run: func() error {
-				return runBackupKeygen([]string{"keygen", "--output-file", path}, io.Discard)
+				return runBackupKeygen([]string{"keygen", "--output-file", path}, io.Discard, nil, nil)
 			},
 		},
 	} {
