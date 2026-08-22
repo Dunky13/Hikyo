@@ -54,11 +54,13 @@ var authnImporters = map[string]bool{
 }
 
 // protocolImportConfinements checks the actual third-party libraries, not the
-// Hikyo wrappers that consume them. Exceptions are exact package paths:
-// oidcfed verifies workload OIDC tokens directly, while samltest is the signed
-// IdP fixture harness. Generated files receive no exception; go list includes
-// their production imports, and allImports adds both internal and external test
-// imports to the same check.
+// Hikyo wrappers that consume them. The human-auth ADR owns OIDC, OAuth2, and
+// WebAuthn confinement; the machine-identities ADR owns oidcfed's direct OIDC
+// verifier; the saml-sp ADR owns SAML/XML-DSIG; and the import-paths ADR owns
+// SOPS. Exceptions are exact package paths: oidcfed verifies workload OIDC
+// tokens directly, while samltest is the signed IdP fixture harness. Generated
+// files receive no exception; go list includes their production imports, and
+// allImports adds both internal and external test imports to the same check.
 var protocolImportConfinements = []ImportConfinement{
 	{
 		Name:               "OIDC",
@@ -214,18 +216,24 @@ func TestProtocolImportConfinementMatchers(t *testing.T) {
 			for _, dependencyPrefix := range confinement.DependencyPrefixes {
 				t.Run(dependencyPrefix, func(t *testing.T) {
 					allowedImporter := confinement.AllowedImporters[0]
+					forbiddenSubpackageImporter := forbiddenImporter + "/subpackage"
+					forbiddenSubpackage := dependencyPrefix + "/subpkg"
 					packages := []pkg{
 						{ImportPath: forbiddenImporter, Imports: []string{dependencyPrefix}},
-						{ImportPath: allowedImporter, TestImports: []string{dependencyPrefix + "/subpkg"}},
+						{ImportPath: forbiddenSubpackageImporter, TestImports: []string{forbiddenSubpackage}},
+						{ImportPath: allowedImporter, XTestImports: []string{forbiddenSubpackage}},
 						{ImportPath: forbiddenImporter, XTestImports: []string{dependencyPrefix + "-unrelated/subpkg"}},
 					}
 
 					violations := confinementViolations(confinement, packages)
-					if len(violations) != 1 {
-						t.Fatalf("got %d violations, want 1: %v", len(violations), violations)
+					if len(violations) != 2 {
+						t.Fatalf("got %d violations, want 2: %v", len(violations), violations)
 					}
 					if violations[0].Importer != forbiddenImporter || violations[0].Dependency != dependencyPrefix {
 						t.Fatalf("got violation %+v, want importer %s and dependency %s", violations[0], forbiddenImporter, dependencyPrefix)
+					}
+					if violations[1].Importer != forbiddenSubpackageImporter || violations[1].Dependency != forbiddenSubpackage {
+						t.Fatalf("got violation %+v, want importer %s and dependency %s", violations[1], forbiddenSubpackageImporter, forbiddenSubpackage)
 					}
 				})
 			}
@@ -236,7 +244,7 @@ func TestProtocolImportConfinementMatchers(t *testing.T) {
 func TestStoreImportAllowlist(t *testing.T) {
 	for _, p := range loadPackages(t) {
 		for _, imp := range allImports(p) {
-			if imp == module+"/internal/store" || strings.HasPrefix(imp, module+"/internal/store/") {
+			if matchesDependencyPrefix(imp, module+"/internal/store") {
 				if !storeImporters[p.ImportPath] {
 					t.Errorf("%s imports %s: not on the store-importer allowlist", p.ImportPath, imp)
 				}
@@ -253,7 +261,7 @@ func TestCryptoChokepoint(t *testing.T) {
 					t.Errorf("%s imports %s: cryptographic primitives are confined to internal/crypto", p.ImportPath, imp)
 				}
 			}
-			if (imp == "filippo.io/age" || strings.HasPrefix(imp, "filippo.io/age/")) && !ageImporters[p.ImportPath] {
+			if matchesDependencyPrefix(imp, "filippo.io/age") && !ageImporters[p.ImportPath] {
 				t.Errorf("%s imports %s: age is confined to internal/crypto/backup", p.ImportPath, imp)
 			}
 		}
