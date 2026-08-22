@@ -170,6 +170,11 @@ func runAccessGrant(ctx context.Context, ios IO, args []string) error {
 	case "add":
 		var res apigen.GrantResult
 		body := apigen.CreateGrantRequest{Principal: principal, Capability: capability}
+		if capability == "reveal" {
+			if _, err := requireHumanSession("hikyo access grant add --capability reveal", artifact); err != nil {
+				return err
+			}
+		}
 		// A grant that makes machine plaintext reachable (reveal on a machine
 		// principal) consumes the grantor's reauthentication window over the
 		// environments it reaches. For an environment-scoped grant that is
@@ -480,9 +485,14 @@ func runMachineReveal(ctx context.Context, ios IO, args []string) error {
 			return failf(ExitUsage, "usage: hikyo project-settings machine-reveal set --enabled true|false")
 		}
 	}
-	client, _, resolved, err := authenticatedTarget(st, ios, flags)
+	client, artifact, resolved, err := authenticatedTarget(st, ios, flags)
 	if err != nil {
 		return err
+	}
+	if sub == "set" {
+		if _, err := requireHumanSession("hikyo project-settings machine-reveal set", artifact); err != nil {
+			return err
+		}
 	}
 	base, err := projectBase(resolved)
 	if err != nil {
