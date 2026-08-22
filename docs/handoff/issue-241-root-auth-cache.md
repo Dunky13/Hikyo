@@ -1,7 +1,7 @@
 # Handoff: #241 root auth and session-owned browser cache
 
 Issue: https://github.com/Hikyo-Org/Hikyo/issues/241 (parent #205; programme
-#203; audit ID `FE01-B`). Base: `4522f5f5fc7f30bcd79460f3ff11cb6352ec6e07`.
+#203; audit ID `FE01-B`). Base: `27621dd81afce0d706193db74f2e992a0dcb8e79`.
 
 ## Contract
 
@@ -31,7 +31,8 @@ Issue: https://github.com/Hikyo-Org/Hikyo/issues/241 (parent #205; programme
   focus replacement, and stale-mutation reconciliation.
 - `shell.spec.ts` drives two tabs through one real browser-cookie login and
   logout, proving both tabs leave the obsolete route/cache epoch.
-- Post-merge validation: 253 Vitest tests, TypeScript, production build, full
-  desktop browser run (135 unaffected passes plus repaired settings 20/20),
-  mobile shell 16/16, and mobile settings 20/20.
+- Post-merge validation: 260 Vitest tests, TypeScript, production build, shell
+  34/34 across desktop and mobile, and settings 20/20 on each viewport. The
+  initial full desktop run reached 135 passes and exposed the two settings races
+  fixed before those complete focused reruns.
 - Generated outputs: none.

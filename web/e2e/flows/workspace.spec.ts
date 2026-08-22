@@ -69,6 +69,24 @@ function card(page: Page) {
 test.describe('multi-instance', () => {
   test.use({ storageState: STORAGE_STATE });
 
+  test('keeps anonymous ceremony URLs intact and outside shell chrome', async ({ page, context }) => {
+    await context.clearCookies();
+
+    for (const path of [
+      '/reauth/cli?transaction=hik_1_test',
+      '/workspace/approve?state=hik_1_test',
+    ]) {
+      await page.goto(path);
+      await expect(page).toHaveURL(new RegExp(`${path.replace('?', '\\?')}$`));
+      await expect(page.getByRole('heading', { name: 'Sign in to Hikyo' })).toBeVisible();
+      await expect(page.getByRole('navigation', { name: 'Organisations' })).toHaveCount(0);
+    }
+
+    await page.goto('/workspace/callback');
+    await expect(page.getByRole('heading', { name: 'Returning to your workspace' })).toBeVisible();
+    await expect(page.getByRole('navigation', { name: 'Organisations' })).toHaveCount(0);
+  });
+
   test('the directory card carries state, identity and the last-known listing', async ({ page }) => {
     await page.goto('/remotes');
     const entry = card(page);

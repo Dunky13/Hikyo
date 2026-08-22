@@ -226,7 +226,10 @@ export function Shell({ session }: { session: WhoAmI }) {
             </span>
           </p>
         ) : null}
-        <main className="content" id="content" tabIndex={-1}>
+        {/* This is the app's scroll container. `tabIndex=0` both gives the skip
+            link a focus target and lets keyboard users operate the region when
+            its content overflows on a phone. */}
+        <main className="content" id="content" tabIndex={0}>
           <StepUpBanner session={session} />
           <Outlet context={{ activeOrgId }} />
         </main>
