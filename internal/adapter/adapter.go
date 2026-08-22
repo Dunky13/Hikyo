@@ -277,10 +277,14 @@ func ValidateGitHubActionsManifest(prefix string, entries []ManifestEntry, value
 }
 
 func ValidateProviderManifest(provider, prefix string, entries []ManifestEntry, values bool) error {
-	switch provider {
-	case "github-actions":
+	kind, err := ParseProvider(provider)
+	if err != nil {
+		return err
+	}
+	switch kind {
+	case GitHubActionsProvider:
 		return ValidateGitHubActionsManifest(prefix, entries, values)
-	case "forgejo", "":
+	case ForgejoProvider:
 		return ValidateManifest(prefix, entries)
 	default:
 		return fmt.Errorf("adapter: unknown provider %q", provider)
