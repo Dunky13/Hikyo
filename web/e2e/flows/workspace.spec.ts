@@ -47,6 +47,20 @@ async function onB(page: Page, path: string): Promise<void> {
   await page.goto(BASE_URL_B + path);
 }
 
+/** Ensure consent only after the initial read can no longer overwrite a mutation. */
+async function allowOrigin(page: Page): Promise<void> {
+  const allowed = page.getByText(VIEWING_ORIGIN, { exact: true });
+  const empty = page.getByText(
+    'No origins allowlisted. No browser can operate this instance remotely.',
+  );
+  await expect(allowed.or(empty)).toBeVisible();
+  if (await allowed.isVisible()) return;
+
+  await page.getByRole('textbox', { name: 'Origin' }).fill(VIEWING_ORIGIN);
+  await page.getByRole('button', { name: 'Allow origin' }).click();
+  await expect(allowed).toBeVisible();
+}
+
 /** card is the directory card for the seeded remote entry. */
 function card(page: Page) {
   return page.locator('.remote').filter({ hasText: REMOTE_NAME });
@@ -82,9 +96,7 @@ test.describe('multi-instance', () => {
     // --- consent, through the serving instance's own UI ---------------------
     const b = await context.newPage();
     await onB(b, '/remotes');
-    await b.getByRole('textbox', { name: 'Origin' }).fill(VIEWING_ORIGIN);
-    await b.getByRole('button', { name: 'Allow origin' }).click();
-    await expect(b.getByText(VIEWING_ORIGIN, { exact: true })).toBeVisible();
+    await allowOrigin(b);
 
     // --- the ceremony -------------------------------------------------------
     await page.goto('/remotes');
@@ -211,9 +223,7 @@ test.describe('multi-instance', () => {
 
     // --- kill switch 2: revoked from the remote's active-session list -------
     await onB(b, '/remotes');
-    await b.getByRole('textbox', { name: 'Origin' }).fill(VIEWING_ORIGIN);
-    await b.getByRole('button', { name: 'Allow origin' }).click();
-    await expect(b.getByText(VIEWING_ORIGIN, { exact: true })).toBeVisible();
+    await allowOrigin(b);
 
     await entry.getByRole('button', { name: 'Open workspace' }).click();
     const proceedAgain = entry.getByRole('button', { name: /^Continue to / });
@@ -255,9 +265,7 @@ test.describe('multi-instance', () => {
     // Consent, through B's own UI.
     const bPage = await context.newPage();
     await onB(bPage, '/remotes');
-    await bPage.getByRole('textbox', { name: 'Origin' }).fill(VIEWING_ORIGIN);
-    await bPage.getByRole('button', { name: 'Allow origin' }).click();
-    await expect(bPage.getByText(VIEWING_ORIGIN, { exact: true })).toBeVisible();
+    await allowOrigin(bPage);
     await bPage.close();
 
     // Open the workspace with the popup ceremony.
@@ -340,9 +348,7 @@ test.describe('multi-instance', () => {
   }) => {
     const b = await context.newPage();
     await onB(b, '/remotes');
-    await b.getByRole('textbox', { name: 'Origin' }).fill(VIEWING_ORIGIN);
-    await b.getByRole('button', { name: 'Allow origin' }).click();
-    await expect(b.getByText(VIEWING_ORIGIN, { exact: true })).toBeVisible();
+    await allowOrigin(b);
     await b.close();
 
     // Sign the context OUT of the SERVING instance only. The viewing shell must
