@@ -1,25 +1,36 @@
-# Hikyo — Post-spec open items (synthesis, 2026-08-06)
+# Hikyo — post-spec obligations (synthesis, 2026-08-06)
 
-The map's fog sweep, discharged: everything still unspecified at synthesis is recorded here explicitly. **None of these is a foundational question** — an implementing team is not blocked by any row; each names its owner and its resolution moment. The post-v1 feature register (with dispositions and reopen triggers) is [mvp-boundary.md](../adr/mvp-boundary.md) §4 and is *not* duplicated here.
+This document preserves obligations left by the specification synthesis. It does
+not report current implementation state. Stable IDs connect each immutable
+obligation to the machine-checked [implementation-status ledger](../status/README.md),
+which is the sole current-status authority. ADRs own contracts; historical
+handoffs remain evidence.
 
-## Resolved-at-implementation (pinned moments, contracts already fixed)
+## Implementation-pinned evidence
 
-| Item | Contract lives in | Resolves |
-|---|---|---|
-| *(measured)* values: operator resources (50m/64Mi–200m/128Mi), scan p99 ≤5 ms, scanner boot compile ≤2 s/≤32 MiB | [ops-spec.md](../adr/ops-spec.md), [secret-scanning.md](../adr/secret-scanning.md) | **Scanning values discharged** (#74): `cmd/bench-scan/pi-result.json` is the committed Pi-class artifact and `internal/scanning.TestPiBenchArtifact` gates p99 ≤ 5 ms / boot compile ≤ 2 s / item bytes = 64 KiB against it, so the scanning envelope cannot drift silently. **Operator resources**: the chart's operator deployment requests/limits are pinned at the ops-spec envelope (`chart/hikyo/values.yaml`: 50m/64Mi request, 200m/128Mi limit); the empirical Pi-class fit (the operator reconciling within the 128 MiB limit under load) is the one remaining `bench-scan`-style measurement, gated on arm64 CI + cgroup derating per the floor decision, hardware runs a bonus. |
-| Import connector fixtures (adversarial parsers, hostile-provider errors, per-source captures); Infisical exporter command + minimum version; canonical `json`-conversion serialization | [import-paths.md](../adr/import-paths.md) | Fixture-pinned when connectors are built |
-| Forgejo + GitHub PAT minimal-scope exact spellings; GitHub expiry header pin; contract-test fixtures (POST-409 oracle, sealed-box vectors); non-UTF-8 disposition | [deployment-adapter.md](../adr/deployment-adapter.md), [github-adapter.md](../adr/github-adapter.md) | Implementation, against fixture evidence |
-| Exact pinned CI action SHAs, pipeline steps | [oss-mechanics.md](../adr/oss-mechanics.md), [system-architecture.md](../adr/system-architecture.md) | Implementation under #22's pinning rules |
-| Golden-snapshot CLI scenario matrix; S3 closed flow registry enumeration | [api-cli-surface.md](../adr/api-cli-surface.md), [mvp-boundary.md](../adr/mvp-boundary.md) | First CI wiring; gate exists before any build |
-| Repository transfer to `Hikyo-Org/Hikyo` | [oss-mechanics.md](../adr/oss-mechanics.md) | Fixed implementation step |
+| ID | Immutable obligation | Contract |
+| --- | --- | --- |
+| `OBL-SCAN-PERFORMANCE` | Commit Pi-class evidence that gates scan p99 ≤ 5 ms, scanner boot compile ≤ 2 s, and scanner boot memory ≤ 32 MiB. | [ops-spec.md](../adr/ops-spec.md), [secret-scanning.md](../adr/secret-scanning.md) |
+| `OBL-OPERATOR-PI-FIT` | Record an arm64 cgroup run showing the operator reconciles within its 128 MiB limit under load. | [ops-spec.md](../adr/ops-spec.md) |
+| `OBL-IMPORT-FIXTURES` | Pin adversarial import fixtures, sanitized hostile-provider errors, the Infisical exporter floor, and canonical JSON conversion. | [import-paths.md](../adr/import-paths.md) |
+| `OBL-ADAPTER-FIXTURES` | Pin minimal-scope credential spellings, expiry behavior, conflict/sealed-box fixtures, and non-UTF-8 disposition. | [deployment-adapter.md](../adr/deployment-adapter.md), [github-adapter.md](../adr/github-adapter.md) |
+| `OBL-CI-ACTION-PINS` | Pin exact CI action SHAs and release pipeline steps under the supply-chain rules. | [oss-mechanics.md](../adr/oss-mechanics.md), [system-architecture.md](../adr/system-architecture.md) |
+| `OBL-CLI-GOLDENS` | Keep the CLI scenario matrix and closed-flow registry executable before accepting a build. | [api-cli-surface.md](../adr/api-cli-surface.md), [mvp-boundary.md](../adr/mvp-boundary.md) |
+| `OBL-REPOSITORY-TRANSFER` | Host the canonical repository and its organization controls under `Hikyo-Org/Hikyo`. | [oss-mechanics.md](../adr/oss-mechanics.md) |
 
-## Open items proper (no owner-locked answer yet; none foundational)
+## Product and editorial obligations
 
-1. **UI polish for key-declaration/schema-editing refinements** — behaviors are specified textually in [ui-spec.md](./ui-spec.md) § Key declaration; **no visual prototype was run for them** (the map's remaining-prototypes fog; all five foundational surfaces have locked references, this batch is dialog-level refinement on #20/#21's surfaces). If visual iteration is wanted, run it against the frozen prototypes before the S3 flow registry is enumerated; otherwise implementation designs within DESIGN.md.
-2. **ops-spec §13/§14 supersession hygiene** — oss-mechanics's release-range key validity supersedes ops-spec's earlier one-release-overlap sketch, and release cadence/support window now live in oss-mechanics; ops-spec's banner records this, no value conflict remains. Purely editorial follow-up if ops-spec is ever re-issued as a standalone operator handbook.
-3. **Docs site** — deferred artifact, ships with 1.0 ([oss-mechanics.md](../adr/oss-mechanics.md)); its information architecture is unconstrained by this spec beyond carrying O4–O6 artifacts and opening the Forgejo adapter docs with the federation-vs-push gradient sentence (carried in [product-requirements.md](./product-requirements.md) § Delivery overview).
-4. **ops-spec inventory row-numbering collision** (two rows numbered 15) — reported in [ops-catalogue.md](./ops-catalogue.md); renumbering is an editorial amendment under the oss-mechanics procedure whenever ops-spec is next reopened. Rows are referenced by name; nothing is ambiguous meanwhile.
+| ID | Immutable obligation | Contract |
+| --- | --- | --- |
+| `OBL-UI-SCHEMA-POLISH` | Refine key-declaration and schema-editing dialogs within the frozen surface contracts. | [ui-spec.md](./ui-spec.md) |
+| `OBL-OPS-SUPERSESSION` | On the next standalone ops-spec reissue, consolidate the release-range key-validity wording governed by oss-mechanics. | [ops-spec.md](../adr/ops-spec.md), [oss-mechanics.md](../adr/oss-mechanics.md) |
+| `OBL-DOCS-SITE` | Publish the 1.0 documentation information architecture with O4-O6 artifacts and the required federation-vs-push guidance. | [oss-mechanics.md](../adr/oss-mechanics.md), [product-requirements.md](./product-requirements.md) |
+| `OBL-OPS-ROW-NUMBERING` | Renumber the duplicate inventory row on the next editorial amendment without changing name-based references. | [ops-catalogue.md](./ops-catalogue.md) |
 
-## Accepted residuals (restated once, not open)
+## Accepted residual boundary
 
-Engine microtiming; dismissal-probe oracle; workspace-channel CA/DNS-compromise MITM + XSS bearer extraction; adapter dispatch-capture window; never-reconnecting Compose box; clock rollback; retained-old-backup decryptability after root-key theft; operator tamper capability on the audit trail. Each is documented in its owning ADR with its revisit trigger; none reopens at synthesis.
+`OBL-ACCEPTED-RESIDUALS` preserves the named residuals and their owning-ADR
+reopen triggers: engine microtiming; dismissal-probe oracle; workspace-channel
+CA/DNS-compromise MITM plus XSS bearer extraction; adapter dispatch-capture
+window; never-reconnecting Compose host; clock rollback; retained-old-backup
+decryptability after root-key theft; and operator audit-trail tampering.

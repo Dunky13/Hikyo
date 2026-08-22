@@ -25,7 +25,8 @@
     "react-dom": "19.2.8",
     "sharp": "0.35.3",
     "tailwindcss": "4.3.3",
-    "takumi-js": "2.5.11"
+    "takumi-js": "2.5.11",
+    "zod": "4.4.3"
   },
   "devDependencies": {
     "@astrojs/check": "0.9.10",
