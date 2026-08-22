@@ -103,11 +103,16 @@ func runPin(ctx context.Context, ios IO, args []string) error {
 			Columns: []string{"WORKLOAD", "REVISION", "EXPIRES", "EXPIRED"}, Rows: rows, JSON: out,
 		})
 	case "release":
+		var out apigen.RevisionPinReleaseResult
 		if err := client.Do(ctx, http.MethodDelete,
-			base+"/pins/"+url.PathEscape(flags.positional()), nil, nil); err != nil {
+			base+"/pins/"+url.PathEscape(flags.positional()), nil, &out); err != nil {
 			return err
 		}
-		return nil
+		return Render(ios.Stdout, f, Table{
+			Columns: []string{"REVISION", "RETENTION"},
+			Rows:    [][]string{{strconv.FormatInt(out.Revision, 10), string(out.RetentionConsequence)}},
+			JSON:    out,
+		})
 	}
 	return failf(ExitInternal, "hikyo pin: unhandled subverb %q", sub)
 }

@@ -896,11 +896,32 @@ export type RevisionPin = {
     history_authorized: boolean;
     schema_override: boolean;
     expired: boolean;
+    /**
+     * Server-derived preview of releasing this pin. It controls the
+     * existing collection-risk confirmation, but may become stale; the
+     * release response is authoritative transaction-time truth.
+     *
+     */
+    release_retention_consequence: RetentionConsequence;
 };
 
 export type RevisionPinResult = {
     action: 'created' | 'reassigned' | 'renewed';
     pin: RevisionPin;
+};
+
+/**
+ * Transaction-time payload state after a pin release. retained means the
+ * effective policy or another live pin still keeps the payload;
+ * collection_eligible means a sweep may collect it immediately;
+ * already_collected means GC committed collection before this result.
+ *
+ */
+export type RetentionConsequence = 'retained' | 'collection_eligible' | 'already_collected';
+
+export type RevisionPinReleaseResult = {
+    revision: number;
+    retention_consequence: RetentionConsequence;
 };
 
 export type RevisionPinList = {
@@ -17080,9 +17101,9 @@ export type ReleaseRevisionPinError = ReleaseRevisionPinErrors[keyof ReleaseRevi
 
 export type ReleaseRevisionPinResponses = {
     /**
-     * Released.
+     * Released, with the server-derived retention consequence.
      */
-    204: void;
+    200: RevisionPinReleaseResult;
 };
 
 export type ReleaseRevisionPinResponse = ReleaseRevisionPinResponses[keyof ReleaseRevisionPinResponses];

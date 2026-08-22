@@ -31,6 +31,22 @@ func TestRetentionPinSubsecondBoundaryPostgres(t *testing.T) {
 	runRetentionPinSubsecondBoundary(t, seededDB(t, openPostgres))
 }
 
+func TestPinReleaseRetentionConsequenceSQLite(t *testing.T) {
+	runPinReleaseRetentionConsequence(t, seededDB(t, openSQLite))
+}
+
+func TestPinReleaseRetentionConsequencePostgres(t *testing.T) {
+	runPinReleaseRetentionConsequence(t, seededDB(t, openPostgres))
+}
+
+func TestPinReleaseConcurrentGCPostgres(t *testing.T) {
+	runPinReleaseConcurrentGC(t, seededDB(t, openPostgres))
+}
+
+func TestPinReleaseConcurrentGCSQLite(t *testing.T) {
+	runPinReleaseConcurrentGC(t, seededDB(t, openSQLite))
+}
+
 func TestRetentionFailedSweepAuditSQLite(t *testing.T) {
 	runRetentionFailedSweepAudit(t, seededDB(t, openSQLite))
 }
@@ -152,6 +168,325 @@ func runRetentionPinSubsecondBoundary(t *testing.T, db *store.DB) {
 	}
 	if n := queryInt(t, db, "SELECT COUNT(*) FROM snapshots WHERE id = 'snp_pin_boundary_1' AND payload_present = TRUE"); n != 1 {
 		t.Fatal("future-pinned snapshot payload was collected")
+	}
+}
+
+func runPinReleaseRetentionConsequence(t *testing.T, db *store.DB) {
+	t.Helper()
+	now := time.Date(2026, 8, 15, 12, 0, 0, 0, time.UTC)
+	retention := &service.Retention{DB: db, Now: func() time.Time { return now }}
+	policy := service.RetentionPolicy{MaxAge: 20 * 24 * time.Hour, LastRevisions: 2}
+	if _, err := retention.SetProject(t.Context(), service.LocalPrincipal(orgAdmin),
+		scopeProject(orgA, prjA1), &policy); err != nil {
+		t.Fatalf("set project retention: %v", err)
+	}
+	seedRetentionCorpus(t, db)
+
+	pins := &service.Pins{DB: db, Now: func() time.Time { return now }}
+	preview, err := pins.List(t.Context(), service.LocalPrincipal(orgAdmin),
+		scopeEnv(orgA, prjA1, domain.EnvID("env_gc")))
+	if err != nil || len(preview) != 1 || preview[0].ReleaseRetentionConsequence != service.RetentionCollectionEligible {
+		t.Fatalf("sole-keeper release preview = %+v, %v; want collection_eligible", preview, err)
+	}
+	result, err := pins.Release(t.Context(), service.LocalPrincipal(orgAdmin),
+		scopeEnv(orgA, prjA1, domain.EnvID("env_gc")), mchWork)
+	if err != nil {
+		t.Fatalf("release old sole pin: %v", err)
+	}
+	if result.RetentionConsequence != service.RetentionCollectionEligible {
+		t.Fatalf("release consequence = %q, want %q", result.RetentionConsequence, service.RetentionCollectionEligible)
+	}
+
+	collected, err := retention.Sweep(t.Context())
+	if err != nil {
+		t.Fatalf("immediate retention sweep: %v", err)
+	}
+	if collected == 0 || queryInt(t, db,
+		"SELECT COUNT(*) FROM snapshots WHERE id = 'snp_env_gc_2' AND payload_present = FALSE") != 1 {
+		t.Fatalf("release result was not transaction-time truth before immediate GC: collected=%d", collected)
+	}
+
+	boundaryPolicy := service.RetentionPolicy{MaxAge: time.Hour, LastRevisions: 1}
+	if _, err := retention.SetProject(t.Context(), service.LocalPrincipal(orgAdmin),
+		scopeProject(orgA, prjA1), &boundaryPolicy); err != nil {
+		t.Fatalf("set boundary retention: %v", err)
+	}
+	execRaw(t, db, `INSERT INTO principals (id, kind, class, created_at)
+        VALUES ('mch_release_keeper', 'machine', 'workload', `+ts+`)`)
+	execRaw(t, db, `INSERT INTO service_accounts
+        (id, principal_id, org_id, project_id, name, kind, created_at, created_by)
+        VALUES ('svc_release_keeper', 'mch_release_keeper', 'org_a', 'prj_a1',
+                'release-keeper', 'workload', `+ts+`, 'usr_orgadmin')`)
+
+	seedPinReleaseFixture(t, db, "env_release_boundary", now.Add(-time.Hour), false)
+	boundary, err := pins.Release(t.Context(), service.LocalPrincipal(orgAdmin),
+		scopeEnv(orgA, prjA1, domain.EnvID("env_release_boundary")), mchWork)
+	if err != nil || boundary.RetentionConsequence != service.RetentionRetained {
+		t.Fatalf("exact age boundary release = %+v, %v; want retained (pins=%d snapshots=%d)", boundary, err,
+			queryInt(t, db, "SELECT COUNT(*) FROM revision_pins WHERE environment_id = 'env_release_boundary'"),
+			queryInt(t, db, "SELECT COUNT(*) FROM snapshots WHERE environment_id = 'env_release_boundary'"))
+	}
+	if _, err := retention.Sweep(t.Context()); err != nil {
+		t.Fatalf("sweep at exact age boundary: %v", err)
+	}
+	if queryInt(t, db, "SELECT COUNT(*) FROM snapshots WHERE id = 'snp_env_release_boundary_1' AND payload_present = TRUE") != 1 {
+		t.Fatal("exact age boundary disagreed with GC predicate")
+	}
+
+	for _, boundary := range []struct {
+		name      string
+		published time.Time
+		want      service.RetentionConsequence
+		present   int64
+	}{
+		{name: "just_inside_age", published: now.Add(-time.Hour + time.Second), want: service.RetentionRetained, present: 1},
+		{name: "just_outside_age", published: now.Add(-time.Hour - time.Second), want: service.RetentionCollectionEligible, present: 0},
+	} {
+		envID := "env_release_" + boundary.name
+		seedPinReleaseFixture(t, db, envID, boundary.published, false)
+		got, err := pins.Release(t.Context(), service.LocalPrincipal(orgAdmin),
+			scopeEnv(orgA, prjA1, domain.EnvID(envID)), mchWork)
+		if err != nil || got.RetentionConsequence != boundary.want {
+			t.Fatalf("%s release = %+v, %v; want %q", boundary.name, got, err, boundary.want)
+		}
+		if _, err := retention.Sweep(t.Context()); err != nil {
+			t.Fatalf("%s equivalence sweep: %v", boundary.name, err)
+		}
+		if present := queryInt(t, db, fmt.Sprintf(
+			"SELECT COUNT(*) FROM snapshots WHERE id = 'snp_%s_1' AND payload_present = TRUE", envID)); present != boundary.present {
+			t.Fatalf("%s consequence disagreed with GC: payload-present rows = %d, want %d", boundary.name, present, boundary.present)
+		}
+	}
+
+	countBoundaryPolicy := service.RetentionPolicy{MaxAge: time.Hour, LastRevisions: 2}
+	if _, err := retention.SetProject(t.Context(), service.LocalPrincipal(orgAdmin),
+		scopeProject(orgA, prjA1), &countBoundaryPolicy); err != nil {
+		t.Fatalf("set revision-count boundary retention: %v", err)
+	}
+	seedPinReleaseFixture(t, db, "env_release_count_boundary", now.Add(-2*time.Hour), false)
+	countBoundary, err := pins.Release(t.Context(), service.LocalPrincipal(orgAdmin),
+		scopeEnv(orgA, prjA1, domain.EnvID("env_release_count_boundary")), mchWork)
+	if err != nil || countBoundary.RetentionConsequence != service.RetentionRetained {
+		t.Fatalf("revision-count cutoff release = %+v, %v; want retained", countBoundary, err)
+	}
+	if _, err := retention.Sweep(t.Context()); err != nil {
+		t.Fatalf("revision-count equivalence sweep: %v", err)
+	}
+	if queryInt(t, db, "SELECT COUNT(*) FROM snapshots WHERE id = 'snp_env_release_count_boundary_1' AND payload_present = TRUE") != 1 {
+		t.Fatal("revision-count cutoff consequence disagreed with GC")
+	}
+	if _, err := retention.SetProject(t.Context(), service.LocalPrincipal(orgAdmin),
+		scopeProject(orgA, prjA1), &boundaryPolicy); err != nil {
+		t.Fatalf("restore boundary retention: %v", err)
+	}
+
+	seedPinReleaseFixture(t, db, "env_release_decision_clock", now.Add(-time.Hour), false)
+	clockReads := 0
+	decisionClockPins := &service.Pins{DB: db, Now: func() time.Time {
+		clockReads++
+		if clockReads == 1 {
+			return now.Add(-time.Second)
+		}
+		return now.Add(time.Second)
+	}}
+	decisionClock, err := decisionClockPins.Release(t.Context(), service.LocalPrincipal(orgAdmin),
+		scopeEnv(orgA, prjA1, domain.EnvID("env_release_decision_clock")), mchWork)
+	if err != nil || decisionClock.RetentionConsequence != service.RetentionCollectionEligible {
+		t.Fatalf("post-lock decision clock release = %+v, %v; want collection_eligible", decisionClock, err)
+	}
+
+	seedPinReleaseFixture(t, db, "env_release_collected", now.Add(-2*time.Hour), false)
+	execRaw(t, db, "UPDATE revision_pins SET expires_at = '2026-08-15T12:00:00Z' WHERE id = 'pin_env_release_collected_primary'")
+	if _, err := retention.Sweep(t.Context()); err != nil {
+		t.Fatalf("GC-before-release sweep: %v", err)
+	}
+	alreadyCollected, err := pins.Release(t.Context(), service.LocalPrincipal(orgAdmin),
+		scopeEnv(orgA, prjA1, domain.EnvID("env_release_collected")), mchWork)
+	if err != nil || alreadyCollected.RetentionConsequence != service.RetentionAlreadyCollected {
+		t.Fatalf("GC-before-release result = %+v, %v; want already_collected", alreadyCollected, err)
+	}
+
+	seedPinReleaseFixture(t, db, "env_release_other_pin", now.Add(-2*time.Hour), true)
+	otherPinPreview, err := pins.List(t.Context(), service.LocalPrincipal(orgAdmin),
+		scopeEnv(orgA, prjA1, domain.EnvID("env_release_other_pin")))
+	if err != nil || len(otherPinPreview) != 2 {
+		t.Fatalf("other-pin release previews = %+v, %v", otherPinPreview, err)
+	}
+	for _, pin := range otherPinPreview {
+		if pin.ReleaseRetentionConsequence != service.RetentionRetained {
+			t.Fatalf("other-pin release preview for %s = %q, want retained", pin.ID, pin.ReleaseRetentionConsequence)
+		}
+	}
+	otherPin, err := pins.Release(t.Context(), service.LocalPrincipal(orgAdmin),
+		scopeEnv(orgA, prjA1, domain.EnvID("env_release_other_pin")), mchWork)
+	if err != nil || otherPin.RetentionConsequence != service.RetentionRetained {
+		t.Fatalf("release with another live pin = %+v, %v; want retained", otherPin, err)
+	}
+	if _, err := retention.Sweep(t.Context()); err != nil {
+		t.Fatalf("other-pin equivalence sweep: %v", err)
+	}
+	if queryInt(t, db, "SELECT COUNT(*) FROM snapshots WHERE id = 'snp_env_release_other_pin_1' AND payload_present = TRUE") != 1 {
+		t.Fatal("other-live-pin consequence disagreed with GC")
+	}
+
+	seedPinReleaseFixture(t, db, "env_release_pin_expiry", now.Add(-2*time.Hour), true)
+	execRaw(t, db, "UPDATE revision_pins SET expires_at = '2026-08-15T12:00:00Z' WHERE id = 'pin_env_release_pin_expiry_keeper'")
+	exactExpiry, err := pins.Release(t.Context(), service.LocalPrincipal(orgAdmin),
+		scopeEnv(orgA, prjA1, domain.EnvID("env_release_pin_expiry")), mchWork)
+	if err != nil || exactExpiry.RetentionConsequence != service.RetentionCollectionEligible {
+		t.Fatalf("exact pin-expiry cutoff release = %+v, %v; want collection_eligible", exactExpiry, err)
+	}
+
+	widePolicy := service.RetentionPolicy{MaxAge: 90 * 24 * time.Hour, LastRevisions: 1}
+	if _, err := retention.SetProject(t.Context(), service.LocalPrincipal(orgAdmin),
+		scopeProject(orgA, prjA1), &widePolicy); err != nil {
+		t.Fatalf("set pre-change retention: %v", err)
+	}
+	seedPinReleaseFixture(t, db, "env_release_policy_change", now.Add(-2*time.Hour), false)
+	if _, err := retention.SetProject(t.Context(), service.LocalPrincipal(orgAdmin),
+		scopeProject(orgA, prjA1), &boundaryPolicy); err != nil {
+		t.Fatalf("tighten retention before release: %v", err)
+	}
+	afterPolicyChange, err := pins.Release(t.Context(), service.LocalPrincipal(orgAdmin),
+		scopeEnv(orgA, prjA1, domain.EnvID("env_release_policy_change")), mchWork)
+	if err != nil || afterPolicyChange.RetentionConsequence != service.RetentionCollectionEligible {
+		t.Fatalf("post-policy-change release = %+v, %v; want collection_eligible", afterPolicyChange, err)
+	}
+	if _, err := retention.Sweep(t.Context()); err != nil {
+		t.Fatalf("policy-change equivalence sweep: %v", err)
+	}
+	if queryInt(t, db, "SELECT COUNT(*) FROM snapshots WHERE id = 'snp_env_release_policy_change_1' AND payload_present = FALSE") != 1 {
+		t.Fatal("policy-change consequence disagreed with GC")
+	}
+}
+
+// runPinReleaseConcurrentGC forces the GC-first lock order on both engines.
+// SQLite serializes writers at transaction start; Postgres holds the snapshot
+// row update lock. In either case release waits, then observes already_collected
+// after GC commits instead of reporting stale collection_eligible truth.
+type pinReleaseRaceResult struct {
+	result service.ReleasePinResult
+	err    error
+}
+
+func runPinReleaseConcurrentGC(t *testing.T, db *store.DB) {
+	t.Helper()
+	now := time.Date(2026, 8, 15, 12, 0, 0, 0, time.UTC)
+	retention := &service.Retention{DB: db, Now: func() time.Time { return now }}
+	policy := service.RetentionPolicy{MaxAge: time.Hour, LastRevisions: 1}
+	if _, err := retention.SetProject(t.Context(), service.LocalPrincipal(orgAdmin),
+		scopeProject(orgA, prjA1), &policy); err != nil {
+		t.Fatalf("set concurrent retention: %v", err)
+	}
+	seedPinReleaseFixture(t, db, "env_release_gc_race", now.Add(-2*time.Hour), false)
+	execRaw(t, db, "UPDATE revision_pins SET expires_at = '2026-08-15T12:00:00Z' WHERE id = 'pin_env_release_gc_race_primary'")
+
+	marked := make(chan struct{})
+	allowGCCommit := make(chan struct{})
+	retention.AfterMarkCollected = func(ctx context.Context, snapshotID string) error {
+		if snapshotID != "snp_env_release_gc_race_1" {
+			return nil
+		}
+		close(marked)
+		select {
+		case <-allowGCCommit:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	gcDone := make(chan error, 1)
+	go func() {
+		_, err := retention.Sweep(t.Context())
+		gcDone <- err
+	}()
+	<-marked
+
+	releaseDone := make(chan pinReleaseRaceResult, 1)
+	sqliteWaits := int64(0)
+	if db.Engine() == store.EngineSQLite {
+		sqliteWaits = db.SQLiteWrite().Stats().WaitCount
+	}
+	go func() {
+		pins := &service.Pins{DB: db, Now: func() time.Time { return now }}
+		result, err := pins.Release(t.Context(), service.LocalPrincipal(orgAdmin),
+			scopeEnv(orgA, prjA1, domain.EnvID("env_release_gc_race")), mchWork)
+		releaseDone <- pinReleaseRaceResult{result: result, err: err}
+	}()
+	waitForPinReleaseContention(t, db, sqliteWaits, releaseDone)
+	close(allowGCCommit)
+	if err := <-gcDone; err != nil {
+		t.Fatalf("concurrent GC: %v", err)
+	}
+	released := <-releaseDone
+	if released.err != nil || released.result.RetentionConsequence != service.RetentionAlreadyCollected {
+		t.Fatalf("GC-first concurrent release = %+v, %v; want already_collected", released.result, released.err)
+	}
+}
+
+func waitForPinReleaseContention(t *testing.T, db *store.DB, sqliteWaits int64,
+	releaseDone <-chan pinReleaseRaceResult) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		select {
+		case released := <-releaseDone:
+			t.Fatalf("release finished before contending with GC = %+v, %v", released.result, released.err)
+		default:
+		}
+		switch db.Engine() {
+		case store.EngineSQLite:
+			if db.SQLiteWrite().Stats().WaitCount > sqliteWaits {
+				return
+			}
+		case store.EnginePostgres:
+			var waiting int
+			if err := db.PG().QueryRow(t.Context(), `SELECT COUNT(*) FROM pg_stat_activity
+                    WHERE datname = current_database() AND wait_event_type = 'Lock'`).Scan(&waiting); err != nil {
+				t.Fatalf("observe release lock contention: %v", err)
+			}
+			if waiting > 0 {
+				return
+			}
+		default:
+			t.Fatalf("unknown engine %q", db.Engine())
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("release never visibly contended with the in-flight GC transaction")
+}
+
+func seedPinReleaseFixture(t *testing.T, db *store.DB, envID string, publishedAt time.Time, otherLivePin bool) {
+	t.Helper()
+	execRaw(t, db, fmt.Sprintf(`INSERT INTO environments
+        (id, org_id, project_id, name, note, created_at, display_order)
+        VALUES ('%s', 'org_a', 'prj_a1', '%s', '', %s, 20)`, envID, envID, ts))
+	execRaw(t, db, fmt.Sprintf(`INSERT INTO grants
+        (id, principal_id, capability, org_id, project_id, env_id, created_at)
+        VALUES ('grt_%s_pin', 'usr_orgadmin', 'pin', 'org_a', 'prj_a1', '%s', %s)`, envID, envID, ts))
+	for revision, at := range []time.Time{publishedAt, publishedAt.Add(time.Minute)} {
+		revision++
+		snapshotID := fmt.Sprintf("snp_%s_%d", envID, revision)
+		execRaw(t, db, fmt.Sprintf(`INSERT INTO snapshots
+            (id, org_id, project_id, environment_id, revision, schema_revision, published_by, published_at)
+            VALUES ('%s', 'org_a', 'prj_a1', '%s', %d, 1, 'usr_orgadmin', '%s')`,
+			snapshotID, envID, revision, store.CanonTime(at).Format(time.RFC3339Nano)))
+	}
+	execRaw(t, db, fmt.Sprintf(`INSERT INTO revision_pins
+        (id, org_id, project_id, environment_id, workload_principal_id,
+         snapshot_id, revision, authority_principal_id, expires_at, created_at,
+         authorized_at, history_authorized, schema_override)
+        VALUES ('pin_%s_primary', 'org_a', 'prj_a1', '%s', 'mch_workload',
+                'snp_%s_1', 1, 'usr_orgadmin', '2026-08-16T12:00:00Z',
+                '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z', TRUE, FALSE)`, envID, envID, envID))
+	if otherLivePin {
+		execRaw(t, db, fmt.Sprintf(`INSERT INTO revision_pins
+            (id, org_id, project_id, environment_id, workload_principal_id,
+             snapshot_id, revision, authority_principal_id, expires_at, created_at,
+             authorized_at, history_authorized, schema_override)
+            VALUES ('pin_%s_keeper', 'org_a', 'prj_a1', '%s', 'mch_release_keeper',
+                    'snp_%s_1', 1, 'usr_orgadmin', '2026-08-16T12:00:00Z',
+                    '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z', TRUE, FALSE)`, envID, envID, envID))
 	}
 }
 

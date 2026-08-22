@@ -1177,6 +1177,27 @@ func (e ResumeAdapterTargetMoveRequestVisibility) Valid() bool {
 	}
 }
 
+// Defines values for RetentionConsequence.
+const (
+	AlreadyCollected   RetentionConsequence = "already_collected"
+	CollectionEligible RetentionConsequence = "collection_eligible"
+	Retained           RetentionConsequence = "retained"
+)
+
+// Valid indicates whether the value is a known member of the RetentionConsequence enum.
+func (e RetentionConsequence) Valid() bool {
+	switch e {
+	case AlreadyCollected:
+		return true
+	case CollectionEligible:
+		return true
+	case Retained:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RetentionHealthStaleAfterSeconds.
 const (
 	N86400 RetentionHealthStaleAfterSeconds = 86400
@@ -4733,6 +4754,12 @@ type ResumeAdapterTargetMoveRequest struct {
 // ResumeAdapterTargetMoveRequestVisibility defines model for ResumeAdapterTargetMoveRequest.Visibility.
 type ResumeAdapterTargetMoveRequestVisibility string
 
+// RetentionConsequence Transaction-time payload state after a pin release. retained means the
+// effective policy or another live pin still keeps the payload;
+// collection_eligible means a sweep may collect it immediately;
+// already_collected means GC committed collection before this result.
+type RetentionConsequence string
+
 // RetentionHealth defines model for RetentionHealth.
 type RetentionHealth struct {
 	LastPruneSuccess *time.Time `json:"last_prune_success"`
@@ -4873,9 +4900,14 @@ type RevisionPin struct {
 	HistoryAuthorized bool      `json:"history_authorized"`
 
 	// Id A prefixed UUIDv7, e.g. `org_0198…`.
-	Id             ID    `json:"id"`
-	Revision       int64 `json:"revision"`
-	SchemaOverride bool  `json:"schema_override"`
+	Id ID `json:"id"`
+
+	// ReleaseRetentionConsequence Server-derived preview of releasing this pin. It controls the
+	// existing collection-risk confirmation, but may become stale; the
+	// release response is authoritative transaction-time truth.
+	ReleaseRetentionConsequence RetentionConsequence `json:"release_retention_consequence"`
+	Revision                    int64                `json:"revision"`
+	SchemaOverride              bool                 `json:"schema_override"`
 
 	// WorkloadPrincipalId A prefixed UUIDv7, e.g. `org_0198…`.
 	WorkloadPrincipalId ID `json:"workload_principal_id"`
@@ -4885,6 +4917,16 @@ type RevisionPin struct {
 type RevisionPinList struct {
 	Count int           `json:"count"`
 	Items []RevisionPin `json:"items"`
+}
+
+// RevisionPinReleaseResult defines model for RevisionPinReleaseResult.
+type RevisionPinReleaseResult struct {
+	// RetentionConsequence Transaction-time payload state after a pin release. retained means the
+	// effective policy or another live pin still keeps the payload;
+	// collection_eligible means a sweep may collect it immediately;
+	// already_collected means GC committed collection before this result.
+	RetentionConsequence RetentionConsequence `json:"retention_consequence"`
+	Revision             int64                `json:"revision"`
 }
 
 // RevisionPinRequest defines model for RevisionPinRequest.
@@ -31124,12 +31166,18 @@ type ReleaseRevisionPinResponseObject interface {
 	VisitReleaseRevisionPinResponse(w http.ResponseWriter) error
 }
 
-type ReleaseRevisionPin204Response struct {
-}
+type ReleaseRevisionPin200JSONResponse RevisionPinReleaseResult
 
-func (response ReleaseRevisionPin204Response) VisitReleaseRevisionPinResponse(w http.ResponseWriter) error {
-	w.WriteHeader(204)
-	return nil
+func (response ReleaseRevisionPin200JSONResponse) VisitReleaseRevisionPinResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
 }
 
 type ReleaseRevisionPin401JSONResponse struct{ UnauthenticatedJSONResponse }

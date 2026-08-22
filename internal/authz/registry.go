@@ -741,6 +741,7 @@ const (
 	StorePinsDeleteEnvironment StoreOp = "pins.DeleteEnvironment"
 
 	StoreRetentionEligible       StoreOp = "retention.Eligible"
+	StoreRetentionSnapshotLock   StoreOp = "retention.LockSnapshot"
 	StoreRetentionMarkCollected  StoreOp = "retention.MarkCollected"
 	StoreRetentionDeleteEntries  StoreOp = "retention.DeleteCollectedEntries"
 	StoreRetentionLastSuccess    StoreOp = "retention.LastPruneSuccess"
@@ -956,7 +957,7 @@ var storeOpCatalogue = map[StoreOp]bool{
 	StoreRemoteSnapshotsFail: true, StoreRemoteSnapshotsGet: true, StoreRemoteSnapshotsList: true, StoreRemoteSnapshotsWrite: true,
 	StoreRemotesCount: true, StoreRemotesCreate: true, StoreRemotesDelete: true, StoreRemotesGet: true,
 	StoreRemotesGetByName: true, StoreRemotesList: true, StoreRemotesRename: true, StoreRemotesSealed: true,
-	StoreRetentionDeleteEntries: true, StoreRetentionEligible: true, StoreRetentionLastSuccess: true, StoreRetentionMarkCollected: true,
+	StoreRetentionSnapshotLock: true, StoreRetentionDeleteEntries: true, StoreRetentionEligible: true, StoreRetentionLastSuccess: true, StoreRetentionMarkCollected: true,
 	StoreRetentionSetLastSuccess: true, StoreSCIMAddGroupMember: true, StoreSCIMAttention: true, StoreSCIMBinding: true,
 	StoreSCIMBindings: true, StoreSCIMClearAttention: true, StoreSCIMClearGroupMembers: true, StoreSCIMCreateBinding: true,
 	StoreSCIMCreateCredential: true, StoreSCIMCreateGroup: true, StoreSCIMCreateMapping: true, StoreSCIMCreateUser: true,
@@ -2611,12 +2612,12 @@ var operationTable = map[Operation]opSpec{
 			{Cap: domain.CapPublish, At: domain.LevelEnv},
 		},
 		storeOps: map[StoreOp]bool{
-			StoreProjectsLock: true, StoreCatalogueList: true,
+			StoreOrgsGet: true, StoreProjectsGet: true, StoreProjectsLock: true, StoreCatalogueList: true,
 			StoreCataloguePresenceList: true, StoreSnapshotsLatest: true,
-			StoreSnapshotsAtRevision: true, StoreSnapshotsEntries: true,
+			StoreSnapshotsAtRevision: true, StoreSnapshotsEntries: true, StoreSnapshotsList: true,
 			StoreSnapshotsSecretValueOccurrenceIDs: true,
 			StorePinsGetForWorkload:                true, StorePinsCountProject: true,
-			StorePinsInsert: true, StorePinsDelete: true, StoreAuditTenantInsert: true,
+			StorePinsInsert: true, StorePinsDelete: true, StorePinsList: true, StoreAuditTenantInsert: true,
 		},
 		events: []audit.EventType{
 			audit.EventPinCreated, audit.EventPinReassigned, audit.EventPinRenewed,
@@ -2633,10 +2634,12 @@ var operationTable = map[Operation]opSpec{
 		},
 	},
 	OpPinList: {
-		class:       ClassTenant,
-		level:       domain.LevelEnv,
-		formula:     Formula{{Cap: domain.CapRead, At: domain.LevelEnv}},
-		storeOps:    map[StoreOp]bool{StorePinsList: true},
+		class:   ClassTenant,
+		level:   domain.LevelEnv,
+		formula: Formula{{Cap: domain.CapRead, At: domain.LevelEnv}},
+		storeOps: map[StoreOp]bool{
+			StoreOrgsGet: true, StoreProjectsGet: true, StoreSnapshotsList: true, StorePinsList: true,
+		},
 		auditedNone: true,
 	},
 	OpPinRelease: {
@@ -2644,8 +2647,10 @@ var operationTable = map[Operation]opSpec{
 		level:   domain.LevelEnv,
 		formula: Formula{{Cap: domain.CapPin, At: domain.LevelEnv}},
 		storeOps: map[StoreOp]bool{
-			StoreProjectsLock: true, StorePinsGetForWorkload: true, StorePinsDelete: true,
-			StoreAuditTenantInsert: true,
+			StoreOrgsGet: true, StoreOrgsLock: true, StoreProjectsGet: true, StoreProjectsLock: true,
+			StoreSnapshotsList: true, StorePinsGetForWorkload: true, StorePinsList: true, StorePinsDelete: true,
+			StoreRetentionSnapshotLock: true,
+			StoreAuditTenantInsert:     true,
 		},
 		events: []audit.EventType{audit.EventPinReleased},
 	},

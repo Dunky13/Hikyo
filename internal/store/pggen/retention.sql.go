@@ -43,7 +43,6 @@ func (q *Queries) GetLastPruneSuccess(ctx context.Context) (pgtype.Timestamptz, 
 }
 
 const listEligibleSnapshotPayloads = `-- name: ListEligibleSnapshotPayloads :many
-
 WITH ranked AS (
     SELECT s.id, s.org_id, s.project_id, s.environment_id, s.revision,
            s.published_at, s.payload_present,
@@ -94,9 +93,6 @@ type ListEligibleSnapshotPayloadsRow struct {
 	RevisionCount int64
 }
 
-// Retention/GC (#53). Scheduler statements are cross-tenant by definition and
-// run only under the scheduler system-proof site. Tenant policy and pin reads
-// carry the ordinary proof-bound chain conjuncts.
 // hikyo:instance-scoped
 func (q *Queries) ListEligibleSnapshotPayloads(ctx context.Context, arg ListEligibleSnapshotPayloadsParams) ([]ListEligibleSnapshotPayloadsRow, error) {
 	rows, err := q.db.Query(ctx, listEligibleSnapshotPayloads, arg.Now, arg.BatchLimit)
@@ -124,6 +120,38 @@ func (q *Queries) ListEligibleSnapshotPayloads(ctx context.Context, arg ListElig
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockSnapshotForRetentionConsequence = `-- name: LockSnapshotForRetentionConsequence :one
+
+SELECT id FROM snapshots
+WHERE org_id = $1
+  AND project_id = $2
+  AND environment_id = $3
+  AND id = $4
+FOR UPDATE
+`
+
+type LockSnapshotForRetentionConsequenceParams struct {
+	ChainOrgID     string
+	ChainProjectID string
+	ChainEnvID     string
+	SnapshotID     string
+}
+
+// Retention/GC (#53). Scheduler statements are cross-tenant by definition and
+// run only under the scheduler system-proof site. Tenant policy and pin reads
+// carry the ordinary proof-bound chain conjuncts.
+func (q *Queries) LockSnapshotForRetentionConsequence(ctx context.Context, arg LockSnapshotForRetentionConsequenceParams) (string, error) {
+	row := q.db.QueryRow(ctx, lockSnapshotForRetentionConsequence,
+		arg.ChainOrgID,
+		arg.ChainProjectID,
+		arg.ChainEnvID,
+		arg.SnapshotID,
+	)
+	var id string
+	err := row.Scan(&id)
+	return id, err
 }
 
 const markSnapshotCollected = `-- name: MarkSnapshotCollected :execrows

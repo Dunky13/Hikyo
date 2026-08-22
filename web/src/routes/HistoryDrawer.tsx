@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
+import type { RetentionConsequence } from '@hikyo/client';
 import { exportValuesOp } from '@hikyo/operations';
 import { zExportedValues } from '@hikyo/zod';
 import { useMutation } from '@tanstack/react-query';
@@ -49,10 +50,6 @@ import {
   retentionLine,
   revisionActionGate,
   revisionsForKeyFilter,
-  soleKeeperPinIds,
-  soleKeeperReleaseConsequences,
-  SOLE_KEEPER_RELEASE_BUTTON,
-  SOLE_KEEPER_RELEASE_TITLE,
   toHistoryRetention,
   workloadLabel,
   type CeremonyKey,
@@ -171,7 +168,7 @@ export function HistoryDrawer({
   const guard = useProtectedPublishCeremony(refData);
 
   const [sheet, setSheet] = useState<Sheet | null>(null);
-  const [outcome, setOutcome] = useState<string | null>(null);
+  const [outcome, setOutcome] = useState<ReactNode>(null);
   const [refusal, setRefusal] = useState<string | null>(null);
   const [mobileDetail, setMobileDetail] = useState(false);
   const drawerHeading = useRef<HTMLHeadingElement>(null);
@@ -206,27 +203,6 @@ export function HistoryDrawer({
     () => (pins.data?.items ?? []).map(toHistoryPin),
     [pins.data],
   );
-  const soleKeepers = useMemo(
-    () =>
-      retention.data === undefined
-        ? new Set<string>()
-        : soleKeeperPinIds({
-            pins: pinRows,
-            revisions,
-            policy: toHistoryRetention({
-              mode: retention.data.mode,
-              ...(retention.data.max_age_seconds == null
-                ? {}
-                : { max_age_seconds: retention.data.max_age_seconds }),
-              ...(retention.data.last_revisions == null
-                ? {}
-                : { last_revisions: retention.data.last_revisions }),
-            }),
-            now,
-          }),
-    [now, pinRows, retention.data, revisions],
-  );
-
   const workloads = (accounts.data?.items ?? []).filter((account) => account.kind === 'workload');
   // A pin binds a WORKLOAD, and a workload does resolve to a name — through the
   // project's service accounts. (A human publisher does not: nothing in this
@@ -456,12 +432,13 @@ export function HistoryDrawer({
   const runRelease = (pin: HistoryPin) => {
     setRefusal(null);
     releasePin.mutate(pin.workloadPrincipalId, {
-      onSuccess: () => {
+      onSuccess: (result) => {
         setSheet(null);
         setOutcome(
-          soleKeepers.has(pin.id)
-            ? `Pin released. ${soleKeeperReleaseConsequences(pin.revision)} The workload resumes latest on its next fetch.`
-            : `Pin released — the workload resumes latest (r${String(currentRevision)}) on its next fetch. r${String(pin.revision)}'s values stay inside the retention window.`,
+          <PinReleaseOutcome
+            consequence={result.retention_consequence}
+            revision={result.revision}
+          />,
         );
       },
       onError: (error) => setRefusal(historyRefusalText(error, 'release')),
@@ -585,7 +562,7 @@ export function HistoryDrawer({
         {retention.isError ? (
           <p id="history-retention-error" className="alert" role="alert">
             <span className="alert__glyph" aria-hidden="true">!</span>
-            <span>Retention policy could not be read. Pin release is disabled until it succeeds.</span>
+            <span>Retention policy could not be read. Pin release consequences still come from the server.</span>
           </p>
         ) : null}
 
@@ -661,13 +638,6 @@ export function HistoryDrawer({
                   currentRevision={currentRevision}
                   pins={pinRows}
                   workloadNames={workloadNames}
-                  soleKeepers={soleKeepers}
-                  releaseAvailable={retention.isSuccess}
-                  releaseUnavailableReason={
-                    retention.isError
-                      ? 'Release disabled: retention policy could not be read.'
-                      : 'Release disabled until the retention policy has loaded.'
-                  }
                   secretByKeyId={secretByKeyId}
                   now={now}
                   keyFilter={keyFilter}
@@ -716,11 +686,11 @@ export function HistoryDrawer({
                   }}
                   onRelease={(pin) => {
                     setRefusal(null);
-                    if (soleKeepers.has(pin.id)) {
+                    if (pin.releaseRetentionConsequence === 'collection_eligible') {
                       setSheet({ kind: 'release', pin });
-                    } else {
-                      runRelease(pin);
+                      return;
                     }
+                    runRelease(pin);
                   }}
                 />
               )}
@@ -756,14 +726,10 @@ export function HistoryDrawer({
           revision={sheet.revision}
           isCurrent={sheet.revision === currentRevision}
           currentRevision={currentRevision}
-          soleKeepers={soleKeepers}
-          retentionReady={retention.isSuccess}
           workloads={workloads.map((account) => ({
             principalID: account.principal_id,
             name: account.name,
-            pinnedRevision: pinRows.find((pin) => pin.workloadPrincipalId === account.principal_id)
-              ?.revision,
-            pinID: pinRows.find((pin) => pin.workloadPrincipalId === account.principal_id)?.id,
+            existingPin: pinRows.find((pin) => pin.workloadPrincipalId === account.principal_id),
           }))}
           state={sheet}
           busy={setPin.isPending}
@@ -821,7 +787,6 @@ export function HistoryDrawer({
             workloadLabel(sheet.pin.workloadPrincipalId, workloadNames)
           }
           busy={releasePin.isPending}
-          releaseAllowed={retention.isSuccess}
           onRelease={() => runRelease(sheet.pin)}
           onClose={() => setSheet(null)}
         />
@@ -886,9 +851,6 @@ function RevisionDetail({
   currentRevision,
   pins,
   workloadNames,
-  soleKeepers,
-  releaseAvailable,
-  releaseUnavailableReason,
   secretByKeyId,
   now,
   keyFilter,
@@ -905,9 +867,6 @@ function RevisionDetail({
   currentRevision: bigint;
   pins: readonly HistoryPin[];
   workloadNames: ReadonlyMap<string, string>;
-  soleKeepers: ReadonlySet<string>;
-  releaseAvailable: boolean;
-  releaseUnavailableReason: string;
   secretByKeyId: ReadonlyMap<string, boolean>;
   now: Date;
   keyFilter: string | null;
@@ -1038,22 +997,12 @@ function RevisionDetail({
         A pinned workload stops following latest — it keeps receiving exactly the pinned
         revision&apos;s values, restarts included, until the pin is released or expires.
       </p>
-      {releaseAvailable ? null : (
-        <p
-          id="history-release-disabled"
-          className="history__gate"
-          role={releaseUnavailableReason.includes('could not') ? 'alert' : 'status'}
-        >
-          {releaseUnavailableReason}
-        </p>
-      )}
       {pins.length === 0 ? (
         <p className="history__empty">{`No pins — every workload here follows latest (r${String(currentRevision)}).`}</p>
       ) : (
         <ul className="history__pins">
           {pins.map((pin) => {
             const expiry = pinExpiry(pin.expiresAt, now);
-            const sole = soleKeepers.has(pin.id);
             const workload = workloadLabel(pin.workloadPrincipalId, workloadNames);
             const publishesBehind = revisions.filter(
               (entry) => entry.revision > pin.revision,
@@ -1073,24 +1022,19 @@ function RevisionDetail({
                     : expiry.text}
                 </span>
                 <span className="history__pin-gap">{gap}</span>
-                {sole ? (
-                  <span
-                    className="history__warn"
-                    title={soleKeeperReleaseConsequences(pin.revision)}
-                  >
-                    ⚠ sole keeper
-                  </span>
-                ) : null}
                 {pin.schemaOverride ? (
                   <span className="history__warn" title="Pinned despite a current-schema failure, recorded as an explicit override. Pinned delivery is verbatim.">
                     Δ schema drift
                   </span>
                 ) : null}
+                {pin.releaseRetentionConsequence === 'collection_eligible' ? (
+                  <span className="history__warn">
+                    This pin currently keeps r{String(pin.revision)}&apos;s values retained.
+                  </span>
+                ) : null}
                 <button
                   type="button"
                   className="btn"
-                  disabled={!releaseAvailable}
-                  aria-describedby={releaseAvailable ? undefined : 'history-release-disabled'}
                   onClick={() => onRelease(pin)}
                 >
                   Release
@@ -1261,8 +1205,6 @@ function PinSheet({
   isCurrent,
   currentRevision,
   workloads,
-  soleKeepers,
-  retentionReady,
   state,
   busy,
   refusal,
@@ -1281,11 +1223,8 @@ function PinSheet({
   workloads: readonly {
     readonly principalID: string;
     readonly name: string;
-    readonly pinnedRevision: bigint | undefined;
-    readonly pinID: string | undefined;
+    readonly existingPin: HistoryPin | undefined;
   }[];
-  soleKeepers: ReadonlySet<string>;
-  retentionReady: boolean;
   state: {
     readonly workloadPrincipalID: string;
     readonly expiresAt: string;
@@ -1304,8 +1243,9 @@ function PinSheet({
 }) {
   const dialog = useModalDialog();
   const chosen = workloads.find((workload) => workload.principalID === state.workloadPrincipalID);
-  const plan = pinAction(chosen?.pinnedRevision, revision);
-  const moveNeedsRetention = plan.kind === 'move' && !retentionReady;
+  const plan = pinAction(chosen?.existingPin?.revision, revision);
+  const moveMayCollect =
+    plan.kind === 'move' && chosen?.existingPin?.releaseRetentionConsequence === 'collection_eligible';
 
   return (
     <dialog className="matrix-editor history-sheet" ref={dialog} onClose={onClose}>
@@ -1365,27 +1305,22 @@ function PinSheet({
         {workloads.length === 0 ? <option value="">No workloads in this project</option> : null}
         {workloads.map((workload) => (
           <option key={workload.principalID} value={workload.principalID}>
-            {`${workload.name} — ${workload.pinnedRevision === undefined ? 'follows latest' : `pinned to r${String(workload.pinnedRevision)}`}`}
+            {`${workload.name} — ${workload.existingPin === undefined ? 'follows latest' : `pinned to r${String(workload.existingPin.revision)}`}`}
           </option>
         ))}
       </select>
 
-      {plan.kind === 'move' && chosen?.pinnedRevision !== undefined ? (
+      {plan.kind === 'move' && chosen?.existingPin !== undefined ? (
         <>
           <p className="history__gate" role="status">
-            {`${chosen.name} is currently pinned to r${String(chosen.pinnedRevision)} — one pin per workload, so this MOVES it to r${String(revision)} and replaces the old pin atomically.`}
+            {`${chosen.name} is currently pinned to r${String(chosen.existingPin.revision)} — one pin per workload, so this MOVES it to r${String(revision)} and replaces the old pin atomically.`}
           </p>
-          {chosen.pinID !== undefined && soleKeepers.has(chosen.pinID) ? (
+          {moveMayCollect ? (
             <p id="history-pin-move-collection-warning" className="history__gate" role="alert">
-              {soleKeeperReleaseConsequences(chosen.pinnedRevision)}
+              Moving this pin may make r{String(chosen.existingPin.revision)}&apos;s values eligible for immediate collection. The server will re-evaluate atomically.
             </p>
           ) : null}
         </>
-      ) : null}
-      {moveNeedsRetention ? (
-        <p className="history__gate" role="status" id="history-pin-retention-wait">
-          Move disabled until the retention policy has loaded, so the old revision&apos;s collection consequence can be checked.
-        </p>
       ) : null}
       {plan.kind === 'renew' ? (
         <p className="history__gate" role="status">
@@ -1461,11 +1396,10 @@ function PinSheet({
           id="history-pin-submit"
           type="button"
           className="btn btn--primary"
-          disabled={busy || state.workloadPrincipalID === '' || moveNeedsRetention}
-          aria-describedby={moveNeedsRetention ? 'history-pin-retention-wait' : undefined}
+          disabled={busy || state.workloadPrincipalID === ''}
           onClick={onSubmit}
         >
-          {busy ? 'Pinning…' : plan.label}
+          {busy ? 'Pinning…' : moveMayCollect ? `${plan.label} — old values may be collected` : plan.label}
         </button>
         <button type="button" className="btn" onClick={onClose}>
           Cancel
@@ -1476,13 +1410,12 @@ function PinSheet({
   );
 }
 
-/** The sole-keeper release confirmation: three consequences and a danger label. */
+/** Neutral confirmation: retention truth exists only after the locked release. */
 function ReleaseSheet({
   pin,
   currentRevision,
   workloadName,
   busy,
-  releaseAllowed,
   onRelease,
   onClose,
 }: {
@@ -1490,7 +1423,6 @@ function ReleaseSheet({
   currentRevision: bigint;
   workloadName: string;
   busy: boolean;
-  releaseAllowed: boolean;
   onRelease: () => void;
   onClose: () => void;
 }) {
@@ -1499,34 +1431,27 @@ function ReleaseSheet({
     <dialog className="matrix-editor history-sheet" ref={dialog} onClose={onClose}>
       <div className="matrix-editor__head">
         <div>
-          <h2>{SOLE_KEEPER_RELEASE_TITLE}</h2>
-          <p id="history-release-consequence" role="alert">{soleKeeperReleaseConsequences(pin.revision)}</p>
+          <h2>Release pin</h2>
+          <p>The server will report r{String(pin.revision)}&apos;s retention consequence after release.</p>
         </div>
         <button type="button" className="btn matrix-editor__close" aria-label="Close release confirmation" onClick={onClose}>
           ✕
         </button>
       </div>
       <ul className="history__consequences">
-        <li>{`r${String(pin.revision)} is past normal retention — this pin is the only thing keeping its values.`}</li>
-        <li>If a retention sweep collects the values, restore, reveal, and export stop; the lineage entry stays.</li>
         <li>{`${workloadName} resumes latest (r${String(currentRevision)}) on its next fetch.`}</li>
+        <li>The values may remain retained, become collection-eligible, or already be collected.</li>
+        <li>The lineage entry stays in every case.</li>
       </ul>
-      {releaseAllowed ? null : (
-        <p className="alert" role="alert" id="history-release-sheet-disabled">
-          <span className="alert__glyph" aria-hidden="true">!</span>
-          <span>Release disabled because the retention policy is no longer available.</span>
-        </p>
-      )}
       <div className="matrix-editor__actions">
         <button
           id="history-release-confirm"
           type="button"
           className="btn btn--danger"
-          disabled={busy || !releaseAllowed}
-          aria-describedby={releaseAllowed ? undefined : 'history-release-sheet-disabled'}
+          disabled={busy}
           onClick={onRelease}
         >
-          {busy ? 'Releasing…' : SOLE_KEEPER_RELEASE_BUTTON}
+          {busy ? 'Releasing…' : 'Release pin'}
         </button>
         <button type="button" className="btn" onClick={onClose}>
           Keep the pin
@@ -1534,6 +1459,32 @@ function ReleaseSheet({
       </div>
     </dialog>
   );
+}
+
+export function PinReleaseOutcome({
+  consequence,
+  revision,
+}: {
+  consequence: RetentionConsequence;
+  revision: bigint;
+}) {
+  let retention: string;
+  switch (consequence) {
+    case 'retained':
+      retention = `r${String(revision)}'s values remain retained by current policy or another live pin.`;
+      break;
+    case 'collection_eligible':
+      retention = `At release time, r${String(revision)}'s values became eligible for collection. A sweep may collect them immediately; lineage stays.`;
+      break;
+    case 'already_collected':
+      retention = `r${String(revision)}'s values were already collected before release completed; lineage stays.`;
+      break;
+    default: {
+      const exhaustive: never = consequence;
+      return exhaustive;
+    }
+  }
+  return <>{`Pin released — workload resumes latest on its next fetch. ${retention}`}</>;
 }
 
 function toHistoryRevision(item: HistoryRevisionItem): HistoryRevision {
@@ -1610,6 +1561,7 @@ function toHistoryPin(pin: RevisionPinItem): HistoryPin {
     expiresAt: pin.expires_at,
     expired: pin.expired,
     schemaOverride: pin.schema_override,
+    releaseRetentionConsequence: pin.release_retention_consequence,
   };
 }
 
