@@ -462,7 +462,7 @@ func (s *Values) Import(ctx context.Context, actor Actor, scope domain.Scope, re
 		// than exposing value_entries that no committed snapshot contains.
 		if len(result.Imported) > 0 {
 			published, err = republish(ctx, r, az, caller, sealer, s.Keyring, scope,
-				store.CanonTime(time.Now()), "import")
+				store.CanonTime(time.Now()), "import", &groupIndexPhase{})
 			if err != nil {
 				return err
 			}

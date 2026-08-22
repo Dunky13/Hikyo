@@ -89,6 +89,7 @@ var corpus = []scenario{
 	{"secret_rule_change_needs_reveal", scenarioSecretRuleChangeNeedsReveal},
 	{"presence_rules_and_environment_cascade", scenarioPresenceRules},
 	{"key_groups_declaration_side", scenarioKeyGroups},
+	{"group_membership_rebuilds_publish_index", scenarioGroupMembershipRebuildsPublishIndex},
 	{"concurrent_writes_all_succeed", scenarioConcurrent},
 }
 
