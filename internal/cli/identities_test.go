@@ -1,9 +1,12 @@
 package cli_test
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/Hikyo-Org/hikyo/internal/cli"
@@ -13,7 +16,7 @@ import (
 // and the grammar rules the ADR states as absences.
 
 // TestMintDeliveryRefusalMatrix is the closed output-channel set, refusal
-// side. Every case here runs BEFORE any network call, because the preflight
+// side. Every case here runs BEFORE any network call, because preparation
 // deliberately precedes target resolution: a credential minted with nowhere
 // to put it has already been destroyed, and the server will never hand it
 // back.
@@ -83,8 +86,53 @@ func TestMintDeliveryRefusalMatrix(t *testing.T) {
 	}
 }
 
+func TestDisclosurePreparationFailureMakesNoRequest(t *testing.T) {
+	var requests atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		requests.Add(1)
+	}))
+	defer server.Close()
+
+	taken := filepath.Join(t.TempDir(), "already-reserved")
+	if err := os.WriteFile(taken, []byte("owned"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{"service-account mint", []string{"sa", "credential", "mint", "--sa", "sa_1"}},
+		{"account reset", []string{"account", "reset-credential", "usr_1"}},
+		{"TOTP enrolment", []string{"account", "factor", "enrol-totp"}},
+		{"recovery codes", []string{"account", "recovery-codes", "regenerate"}},
+		{"recovery begin", []string{"account", "recovery", "begin", "--as", "alice"}},
+		{"SCIM credential", []string{"scim", "credential", "mint", "scb_1"}},
+		{"remote credential", []string{"remote-credential", "create", "--label", "peer"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			requests.Store(0)
+			ios, _, stderr := testIO(t, nil)
+			args := append(tc.args,
+				"--output-file", taken,
+				"--instance", server.URL,
+			)
+			got := cli.Run(t.Context(), ios, args)
+			if got != cli.ExitRefused {
+				t.Fatalf("exit %d, want ExitRefused (%d); stderr: %s", got, cli.ExitRefused, stderr)
+			}
+			if requests.Load() != 0 {
+				t.Fatalf("destination preparation failed after %d request(s); want no request", requests.Load())
+			}
+			body, err := os.ReadFile(taken)
+			if err != nil || string(body) != "owned" {
+				t.Fatalf("existing destination changed: body=%q err=%v", body, err)
+			}
+		})
+	}
+}
+
 // TestMintDeliveryAcceptedChannels is the positive side: each permitted
-// destination gets PAST the preflight and fails later, on the network, which
+// destination gets past preparation and fails later, on the network, which
 // is how we know the channel itself was accepted. `--dangerously-print` and
 // `--output-file` are checkable without a terminal; the controlling-terminal
 // leg is the one the refusal matrix above proves by its absence.
@@ -103,14 +151,14 @@ func TestMintDeliveryAcceptedChannels(t *testing.T) {
 			ios, _, stderr := testIO(t, nil)
 			cli.Run(t.Context(), ios, tc.args)
 			if strings.Contains(stderr.String(), "nowhere to go") {
-				t.Fatalf("a permitted destination was refused by the preflight: %s", stderr)
+				t.Fatalf("a permitted destination was refused by preparation: %s", stderr)
 			}
 		})
 	}
-	// The accepted file leg must not have created anything: the preflight
-	// creates nothing, so a failed mint leaves no half-written credential.
+	// Preparation reserves the file, then deferred Abort removes the still-empty
+	// reservation when target resolution fails before the mint.
 	if _, err := os.Lstat(filepath.Join(dir, "token")); !os.IsNotExist(err) {
-		t.Fatalf("the preflight created the output file: %v", err)
+		t.Fatalf("the unused prepared output file remains: %v", err)
 	}
 }
 

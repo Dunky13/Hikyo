@@ -202,7 +202,7 @@ artifact, and `cli:definitions` stays `ClassStub`.
 ### Values file (new, minimal, versioned)
 
 `{"format_version":1,"project":…,"environment":…,"entries":[{"key":…,"value":…}]}`.
-Written through `disclose.Emit`'s file leg — the repo's existing secret-file
+Written through `disclose.PreparedSink.WriteOnce`'s file leg — the repo's secret-file
 discipline (dirfd-parent-checked, `O_EXCL`, `0600`, umask-independent). Nothing
 was reimplemented.
 

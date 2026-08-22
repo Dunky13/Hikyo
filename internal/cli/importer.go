@@ -316,7 +316,7 @@ func wireImportCandidates(in []importer.PlannedCandidate) []apigen.ValueOccurren
 // ordinary files; the values file is NOT committable and goes through the print
 // triad's file leg — dirfd-parent-checked, O_EXCL, 0600 — which is the same
 // discipline every other plaintext-bearing file in this CLI uses.
-func writeArtifacts(ios IO, outDir, envID string, plan *importer.Plan) (string, error) {
+func writeArtifacts(ios IO, outDir, envID string, plan *importer.Plan) (valuesPathResult string, returnErr error) {
 	if err := os.MkdirAll(outDir, 0o700); err != nil {
 		return "", failf(ExitRefused, "preparing the output directory: %v", err)
 	}
@@ -341,14 +341,18 @@ func writeArtifacts(ios IO, outDir, envID string, plan *importer.Plan) (string, 
 		}
 	}
 
-	// The values file is preflighted BEFORE anything is written: a run that
+	// The values file is reserved BEFORE anything is written: a run that
 	// emits a bundle and then discovers it has nowhere to put the plaintext has
 	// left half a migration on disk.
 	deliver := disclose.Options{OutputFile: valuesPath, Stdout: ios.Stdout, OpenTerminal: ios.OpenTerminal}
+	var sink *disclose.PreparedSink
 	if valuesPath != "" {
-		if err := disclose.Preflight(deliver); err != nil {
+		prepared, err := disclose.Prepare(deliver)
+		if err != nil {
 			return "", failf(ExitRefused, "the values file has nowhere to go: %v", err)
 		}
+		sink = prepared
+		defer sink.AbortOnReturn(&returnErr)
 	}
 
 	// The committable artifacts are created O_EXCL, not Lstat-then-write. The
@@ -408,7 +412,7 @@ func writeArtifacts(ios IO, outDir, envID string, plan *importer.Plan) (string, 
 	if valuesPath == "" {
 		return "", nil
 	}
-	if _, err := disclose.Emit("values for "+envID, strings.TrimRight(string(valuesBody), "\n"), deliver); err != nil {
+	if _, err := sink.WriteOnce("values for "+envID, strings.TrimRight(string(valuesBody), "\n")); err != nil {
 		cleanup()
 		return "", failf(ExitRefused, "writing the values file: %v", err)
 	}

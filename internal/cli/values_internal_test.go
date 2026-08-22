@@ -17,7 +17,7 @@ import (
 // it is refused by the print triad BEFORE the request goes out — never
 // downgraded to stdout, and never after a round-trip that has already disclosed.
 //
-// It reaches no server: the refusal is the "nowhere to go" preflight, which runs
+// It reaches no server: the refusal is destination preparation, which runs
 // ahead of target resolution, so an OpenTerminal that fails (no controlling
 // terminal) is enough to prove the ordering.
 func TestRevealingDiffIsRefusedBeforeAnyRequestWithoutASink(t *testing.T) {
@@ -68,8 +68,8 @@ func TestRollbackTableShowsFullImpactPreview(t *testing.T) {
 	}
 }
 
-// statePathFor gives NewState a writable state dir so the test reaches the
-// preflight rather than failing to open state first.
+// statePathFor gives NewState a writable state dir so the test reaches
+// destination preparation rather than failing to open state first.
 func statePathFor(t *testing.T, key string) string {
 	if key == "HIKYO_STATE_DIR" {
 		return t.TempDir()

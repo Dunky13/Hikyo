@@ -716,7 +716,7 @@ func runAccount(ctx context.Context, ios IO, args []string) error {
 // and transmitted out of band. An instance-capability target has no network path
 // and is refused uniformly (like a nonexistent target, B2) - break-glass only,
 // via `hikyo admin reset-credential` on the host.
-func runResetCredential(ctx context.Context, ios IO, args []string) error {
+func runResetCredential(ctx context.Context, ios IO, args []string) (returnErr error) {
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
 		return failf(ExitUsage, "usage: hikyo account reset-credential <principal> [--output-file PATH | --dangerously-print]")
 	}
@@ -731,9 +731,11 @@ func runResetCredential(ctx context.Context, ios IO, args []string) error {
 		return err
 	}
 	deliver := disclose.Options{OutputFile: outputFile, DangerouslyPrint: dangerous, Stdout: ios.Stdout, OpenTerminal: ios.OpenTerminal}
-	if err := disclose.Preflight(deliver); err != nil {
+	sink, err := disclose.Prepare(deliver)
+	if err != nil {
 		return failf(ExitRefused, "the reset authority has nowhere to go: %v", err)
 	}
+	defer sink.AbortOnReturn(&returnErr)
 	client, _, err := authenticatedClient(st, ios, flags)
 	if err != nil {
 		return err
@@ -743,9 +745,9 @@ func runResetCredential(ctx context.Context, ios IO, args []string) error {
 		api.PathPrefix+"/accounts/"+url.PathEscape(principal)+"/credential-reset", nil, &result); err != nil {
 		return err
 	}
-	if _, err := disclose.Emit(
+	if _, err := sink.WriteOnce(
 		fmt.Sprintf("credential-establishment authority for %s (single-use)", principal),
-		result.Authority, deliver); err != nil {
+		result.Authority); err != nil {
 		return failf(ExitRefused, "disclosing the reset authority: %v", err)
 	}
 	fmt.Fprintf(ios.Stderr,
@@ -872,7 +874,7 @@ func runFactor(ctx context.Context, ios IO, args []string) error {
 // runFactorEnrolTOTP stages a pending enrolment and discloses the otpauth URI
 // once through the print triad. It does not reissue the session — confirm-totp
 // does — so it persists no token.
-func runFactorEnrolTOTP(ctx context.Context, ios IO, args []string) error {
+func runFactorEnrolTOTP(ctx context.Context, ios IO, args []string) (returnErr error) {
 	var outputFile string
 	var dangerous bool
 	st, flags, err := parseCommon("account factor enrol-totp", ios, args, func(fs *flag.FlagSet) {
@@ -883,9 +885,11 @@ func runFactorEnrolTOTP(ctx context.Context, ios IO, args []string) error {
 		return err
 	}
 	deliver := disclose.Options{OutputFile: outputFile, DangerouslyPrint: dangerous, Stdout: ios.Stdout, OpenTerminal: ios.OpenTerminal}
-	if err := disclose.Preflight(deliver); err != nil {
+	sink, err := disclose.Prepare(deliver)
+	if err != nil {
 		return failf(ExitRefused, "the otpauth URI has nowhere to go: %v", err)
 	}
+	defer sink.AbortOnReturn(&returnErr)
 	client, _, err := authenticatedClient(st, ios, flags)
 	if err != nil {
 		return err
@@ -899,7 +903,7 @@ func runFactorEnrolTOTP(ctx context.Context, ios IO, args []string) error {
 		apigen.TotpEnrolStartRequest{Password: password}, &start); err != nil {
 		return err
 	}
-	if _, err := disclose.Emit("otpauth provisioning URI", start.OtpauthUri, deliver); err != nil {
+	if _, err := sink.WriteOnce("otpauth provisioning URI", start.OtpauthUri); err != nil {
 		return failf(ExitRefused, "disclosing the otpauth URI: %v", err)
 	}
 	fmt.Fprintf(ios.Stderr, "TOTP enrolment staged. Scan the URI, then confirm with\n    hikyo account factor confirm-totp\n")
@@ -959,7 +963,7 @@ func runFactorStepUp(ctx context.Context, ios IO, args []string) error {
 	return nil
 }
 
-func runRecoveryCodes(ctx context.Context, ios IO, args []string) error {
+func runRecoveryCodes(ctx context.Context, ios IO, args []string) (returnErr error) {
 	if len(args) == 0 || args[0] != "regenerate" {
 		return failf(ExitUsage, "usage: hikyo account recovery-codes regenerate")
 	}
@@ -973,9 +977,11 @@ func runRecoveryCodes(ctx context.Context, ios IO, args []string) error {
 		return err
 	}
 	deliver := disclose.Options{OutputFile: outputFile, DangerouslyPrint: dangerous, Stdout: ios.Stdout, OpenTerminal: ios.OpenTerminal}
-	if err := disclose.Preflight(deliver); err != nil {
+	sink, err := disclose.Prepare(deliver)
+	if err != nil {
 		return failf(ExitRefused, "the recovery codes have nowhere to go: %v", err)
 	}
+	defer sink.AbortOnReturn(&returnErr)
 	client, artifact, err := authenticatedClient(st, ios, flags)
 	if err != nil {
 		return err
@@ -989,7 +995,7 @@ func runRecoveryCodes(ctx context.Context, ios IO, args []string) error {
 		apigen.RecoveryProofRequest{Proof: proof}, &result); err != nil {
 		return err
 	}
-	if _, err := disclose.Emit("recovery codes (single-use)", strings.Join(result.RecoveryCodes, "\n"), deliver); err != nil {
+	if _, err := sink.WriteOnce("recovery codes (single-use)", strings.Join(result.RecoveryCodes, "\n")); err != nil {
 		return failf(ExitRefused, "disclosing the recovery codes: %v", err)
 	}
 	if err := persistRotatedSession(st, artifact, result.Login); err != nil {
@@ -1001,7 +1007,7 @@ func runRecoveryCodes(ctx context.Context, ios IO, args []string) error {
 
 // runRecovery is the pre-auth break-in-glass path: consume a code for a
 // credential-establishment authority, then establish a new password with it.
-func runRecovery(ctx context.Context, ios IO, args []string) error {
+func runRecovery(ctx context.Context, ios IO, args []string) (returnErr error) {
 	if len(args) == 0 || args[0] != "begin" {
 		return failf(ExitUsage, "usage: hikyo account recovery begin --instance <url|ref> --as <username>")
 	}
@@ -1031,9 +1037,11 @@ func runRecovery(ctx context.Context, ios IO, args []string) error {
 		return failf(ExitUsage, "--instance <url|ref> is required")
 	}
 	deliver := disclose.Options{OutputFile: outputFile, DangerouslyPrint: dangerous, Stdout: ios.Stdout, OpenTerminal: ios.OpenTerminal}
-	if err := disclose.Preflight(deliver); err != nil {
+	sink, err := disclose.Prepare(deliver)
+	if err != nil {
 		return failf(ExitRefused, "the authority has nowhere to go: %v", err)
 	}
+	defer sink.AbortOnReturn(&returnErr)
 	entry, err := establish(ios, st, target, "", trustFile)
 	if err != nil {
 		return err
@@ -1051,7 +1059,7 @@ func runRecovery(ctx context.Context, ios IO, args []string) error {
 		apigen.RecoveryBeginRequest{Username: as, Code: code}, &result); err != nil {
 		return err
 	}
-	if _, err := disclose.Emit("credential-establishment authority", result.Authority, deliver); err != nil {
+	if _, err := sink.WriteOnce("credential-establishment authority", result.Authority); err != nil {
 		return failf(ExitRefused, "disclosing the authority: %v", err)
 	}
 	fmt.Fprintf(ios.Stderr,

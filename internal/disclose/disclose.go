@@ -22,6 +22,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 )
 
 // ErrNoDestination is the refusal. It names all three options because a
@@ -36,6 +37,16 @@ var ErrNoDestination = errors.New(
 // The file is never overwritten: an existing path may be a symlink into
 // somewhere else, and O_EXCL is what makes that unarguable.
 var ErrFileExists = errors.New("refusing to disclose: --output-file already exists (it is never overwritten)")
+
+// ErrSinkConsumed reports that a prepared destination has already been used
+// or aborted. A prepared sink is deliberately single-use: display-once
+// material must have exactly one disclosure attempt.
+var ErrSinkConsumed = errors.New("refusing to disclose: prepared destination was already consumed")
+
+// ErrReservationChanged reports that Abort found a file reservation that was
+// no longer both empty and the exact file Prepare created. Abort leaves that
+// path untouched rather than risking deletion of somebody else's file.
+var ErrReservationChanged = errors.New("refusing to disclose: prepared file reservation changed; leaving it untouched")
 
 // Options selects the destination.
 type Options struct {
@@ -65,64 +76,60 @@ const (
 	DestStdout   Destination = "stdout"
 )
 
-// Preflight checks that a destination is usable WITHOUT writing anything.
-//
-// It exists because of an ordering hazard the print triad creates on its own:
-// a caller that mints a display-once secret and only then discovers it has
-// nowhere to put it has destroyed the secret and performed the side effect.
-// `admin create` is the sharp case — it would leave an instance bootstrapped
-// with an administrator whose establishment authority nobody ever saw, and
-// re-running it refuses because the instance now has an account.
-//
-// Preflight is necessarily approximate for the file leg: it cannot create the
-// file (that would consume the O_EXCL that makes the real write safe), so it
-// reports what it can — the path is free and the parent is acceptable — and a
-// race between the check and the write still lands on Emit's refusal. It
-// closes the common failure, not every failure, and says so.
-func Preflight(o Options) error {
-	switch {
-	case o.OutputFile != "" && o.DangerouslyPrint:
-		return errors.New("refusing to disclose: --output-file and --dangerously-print name two destinations; choose one")
-	case o.DangerouslyPrint:
-		return nil
-	case o.OutputFile != "":
-		return preflightFile(o.OutputFile)
-	}
-	open := o.OpenTerminal
-	if open == nil {
-		open = openControllingTerminal
-	}
-	tty, err := open()
-	if err != nil {
-		return ErrNoDestination
-	}
-	return tty.Close()
+// PreparedSink owns one already-selected disclosure destination from Prepare
+// until either WriteOnce or Abort consumes it. Keeping the open terminal or
+// exclusively-created file here closes the former check-then-reopen window.
+type PreparedSink struct {
+	mu          sync.Mutex
+	destination Destination
+	consumed    bool
+	write       func(label, value string) error
+	abort       func() error
 }
 
-// Emit writes value to exactly one permitted destination and reports which.
-// label is the human-facing description printed alongside on the interactive
-// path; it is never written to the file, which contains the value and a
-// trailing newline and nothing else, so a script can read it directly.
-func Emit(label, value string, o Options) (Destination, error) {
+// Destination identifies the reserved delivery mode before minting, so audit
+// records can describe the exact sink that will receive the value.
+func (s *PreparedSink) Destination() Destination {
+	if s == nil {
+		return ""
+	}
+	return s.destination
+}
+
+// Prepare selects and reserves exactly one destination before display-once
+// material is minted. File destinations are created exclusively at 0600;
+// terminal destinations are opened now and retained for the eventual write.
+func Prepare(o Options) (*PreparedSink, error) {
 	switch {
 	case o.OutputFile != "" && o.DangerouslyPrint:
-		return "", errors.New("refusing to disclose: --output-file and --dangerously-print name two destinations; choose one")
+		return nil, errors.New("refusing to disclose: --output-file and --dangerously-print name two destinations; choose one")
 
 	case o.OutputFile != "":
-		if err := writeExclusive(o.OutputFile, value+"\n"); err != nil {
-			return "", err
+		file, err := prepareFile(o.OutputFile)
+		if err != nil {
+			return nil, err
 		}
-		return DestFile, nil
+		return &PreparedSink{
+			destination: DestFile,
+			write: func(_ string, value string) error {
+				return file.write(value + "\n")
+			},
+			abort: file.abort,
+		}, nil
 
 	case o.DangerouslyPrint:
 		w := o.Stdout
 		if w == nil {
 			w = os.Stdout
 		}
-		if _, err := fmt.Fprintln(w, value); err != nil {
-			return "", err
-		}
-		return DestStdout, nil
+		return &PreparedSink{
+			destination: DestStdout,
+			write: func(_ string, value string) error {
+				_, err := fmt.Fprintln(w, value)
+				return err
+			},
+			abort: func() error { return nil },
+		}, nil
 	}
 
 	open := o.OpenTerminal
@@ -131,16 +138,64 @@ func Emit(label, value string, o Options) (Destination, error) {
 	}
 	tty, err := open()
 	if err != nil {
-		// No controlling terminal: this is the non-TTY case, and it is
-		// refused rather than downgraded to stdout.
-		return "", ErrNoDestination
+		return nil, ErrNoDestination
 	}
-	defer tty.Close()
-	if _, err := fmt.Fprintf(tty, "\n%s:\n\n    %s\n\nThis value is shown once and is not retrievable afterwards.\n\n",
-		label, value); err != nil {
+	return &PreparedSink{
+		destination: DestTerminal,
+		write: func(label, value string) (writeErr error) {
+			defer func() { writeErr = errors.Join(writeErr, tty.Close()) }()
+			_, writeErr = fmt.Fprintf(tty, "\n%s:\n\n    %s\n\nThis value is shown once and is not retrievable afterwards.\n\n",
+				label, value)
+			return writeErr
+		},
+		abort: tty.Close,
+	}, nil
+}
+
+// WriteOnce consumes the prepared destination even when the write fails. A
+// retry could duplicate a partially-delivered secret, so callers must treat a
+// failed attempt as unrecoverable and mint a replacement where supported.
+func (s *PreparedSink) WriteOnce(label, value string) (Destination, error) {
+	if s == nil {
+		return "", ErrSinkConsumed
+	}
+	s.mu.Lock()
+	if s.consumed {
+		s.mu.Unlock()
+		return "", ErrSinkConsumed
+	}
+	s.consumed = true
+	write := s.write
+	destination := s.destination
+	s.mu.Unlock()
+
+	if err := write(label, value); err != nil {
 		return "", err
 	}
-	return DestTerminal, nil
+	return destination, nil
+}
+
+// Abort closes an unused sink. For a file sink it removes the reservation only
+// when the path still names the exact empty file Prepare created.
+func (s *PreparedSink) Abort() error {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	if s.consumed {
+		s.mu.Unlock()
+		return nil
+	}
+	s.consumed = true
+	abort := s.abort
+	s.mu.Unlock()
+	return abort()
+}
+
+// AbortOnReturn lets callers defer cleanup without losing an Abort failure.
+// result must point at the caller's named error result.
+func (s *PreparedSink) AbortOnReturn(result *error) {
+	*result = errors.Join(*result, s.Abort())
 }
 
 // Redact renders a value for a log or an error message: never the value.

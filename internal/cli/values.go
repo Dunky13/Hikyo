@@ -46,7 +46,7 @@ const valuesSetUsage = "usage: hikyo values set <KEY> (--stdin | --value-file PA
 var valueColumns = []string{"KEY", "CLASS", "PRESENCE", "VALUE"}
 
 // runValues is the `values` family.
-func runValues(ctx context.Context, ios IO, args []string) error {
+func runValues(ctx context.Context, ios IO, args []string) (returnErr error) {
 	sub, rest, err := subverb("values", args,
 		"list", "get", "set", "declare", "diff", "copy", "import", "publish", "export", "pending")
 	if err != nil {
@@ -187,20 +187,22 @@ func runValues(ctx context.Context, ios IO, args []string) error {
 	}
 
 	// A revealing list or diff discloses its ENTIRE rendered output (it may carry
-	// revealed secrets), so the print triad is checked BEFORE the request goes
+	// revealed secrets), so the print-triad destination is reserved BEFORE the request goes
 	// out: a caller with nowhere to put the plaintext is refused before the
-	// server ever reveals it, never after — the same pre-act preflight the
-	// display-once ceremonies use. (`get` preflights per cell after the response,
+	// server ever reveals it. (`get` prepares per cell after the response,
 	// because a config cell prints without the triad; list and diff cannot cheaply
 	// separate the two, so they guard the whole output up front.)
 	deliver := disclose.Options{
 		OutputFile: outputFile, DangerouslyPrint: dangerous,
 		Stdout: ios.Stdout, OpenTerminal: ios.OpenTerminal,
 	}
+	var sink *disclose.PreparedSink
 	if reveal && (sub == "list" || sub == "diff" || sub == "export") {
-		if err := disclose.Preflight(deliver); err != nil {
+		sink, err = disclose.Prepare(deliver)
+		if err != nil {
 			return failf(ExitRefused, "the values have nowhere to go: %v", err)
 		}
+		defer sink.AbortOnReturn(&returnErr)
 	}
 
 	client, artifact, resolved, err := authenticatedTarget(st, ios, flags)
@@ -245,7 +247,7 @@ func runValues(ctx context.Context, ios IO, args []string) error {
 			return err
 		}
 		if reveal {
-			return emitRendered(f, valueTable(list), "revealed values", deliver)
+			return emitRendered(f, valueTable(list), "revealed values", sink)
 		}
 		return Render(ios.Stdout, f, valueTable(list))
 
@@ -320,7 +322,7 @@ func runValues(ctx context.Context, ios IO, args []string) error {
 			return err
 		}
 		if reveal {
-			return emitRendered(f, diffTable(out), "revealed value diff", deliver)
+			return emitRendered(f, diffTable(out), "revealed value diff", sink)
 		}
 		return Render(ios.Stdout, f, diffTable(out))
 
@@ -417,10 +419,10 @@ func runValues(ctx context.Context, ios IO, args []string) error {
 			return err
 		}
 		if dotenvExport {
-			return exportDotenv(ios, out, reveal, deliver)
+			return exportDotenv(ios, out, reveal, sink)
 		}
 		if reveal {
-			return emitRendered(f, exportTable(out), "exported values", deliver)
+			return emitRendered(f, exportTable(out), "exported values", sink)
 		}
 		return Render(ios.Stdout, f, exportTable(out))
 	}
@@ -436,7 +438,7 @@ func runValues(ctx context.Context, ios IO, args []string) error {
 // is omitted and their count is reported on stderr. Values are written through
 // internal/dotenv's quoting encoder, so what `values import --from-dotenv`
 // reads back is byte-exact (surrounding whitespace, quotes, `#`, newlines).
-func exportDotenv(ios IO, out apigen.ExportedValues, reveal bool, deliver disclose.Options) error {
+func exportDotenv(ios IO, out apigen.ExportedValues, reveal bool, sink *disclose.PreparedSink) error {
 	var rows []dotenv.Entry
 	omitted := 0
 	for _, item := range out.Items {
@@ -465,7 +467,7 @@ func exportDotenv(ios IO, out apigen.ExportedValues, reveal bool, deliver disclo
 	}
 	body := strings.TrimRight(string(content), "\n")
 	if reveal {
-		if _, err := disclose.Emit("exported values (dotenv)", body, deliver); err != nil {
+		if _, err := sink.WriteOnce("exported values (dotenv)", body); err != nil {
 			return failf(ExitRefused, "disclosing the values: %v", err)
 		}
 	} else if _, err := ios.Stdout.Write(content); err != nil {
@@ -681,15 +683,15 @@ func diffTable(d apigen.ValueDiff) Table {
 
 // emitRendered delivers output that may contain revealed `secret` plaintext
 // through the print triad: it renders to a buffer and hands the whole thing to
-// disclose.Emit, so a revealing list or diff never reaches stdout except under
-// the triad's own rules. Preflight has already run before the request, so a
-// refusal here is the rare check/write race, not the common case.
-func emitRendered(f Format, t Table, label string, deliver disclose.Options) error {
+// PreparedSink.WriteOnce, so a revealing list or diff never reaches stdout
+// except under the triad's own rules. The destination was reserved before the
+// request, so this writes to exactly the destination that admitted the act.
+func emitRendered(f Format, t Table, label string, sink *disclose.PreparedSink) error {
 	var buf bytes.Buffer
 	if err := Render(&buf, f, t); err != nil {
 		return err
 	}
-	if _, err := disclose.Emit(label, strings.TrimRight(buf.String(), "\n"), deliver); err != nil {
+	if _, err := sink.WriteOnce(label, strings.TrimRight(buf.String(), "\n")); err != nil {
 		return failf(ExitRefused, "disclosing the values: %v", err)
 	}
 	return nil
@@ -697,7 +699,7 @@ func emitRendered(f Format, t Table, label string, deliver disclose.Options) err
 
 // renderCell prints one cell. A revealed `secret` goes through the print
 // triad; everything else is ordinary output.
-func renderCell(ios IO, f Format, cell apigen.ValueCell, outputFile string, dangerous bool) error {
+func renderCell(ios IO, f Format, cell apigen.ValueCell, outputFile string, dangerous bool) (returnErr error) {
 	secret := cell.Classification == apigen.KeyClassificationSecret
 	if !secret || !cell.Revealed {
 		return Render(ios.Stdout, f, valueTable(apigen.ValueList{Items: []apigen.ValueCell{cell}, Count: 1}))
@@ -706,10 +708,12 @@ func renderCell(ios IO, f Format, cell apigen.ValueCell, outputFile string, dang
 		OutputFile: outputFile, DangerouslyPrint: dangerous,
 		Stdout: ios.Stdout, OpenTerminal: ios.OpenTerminal,
 	}
-	if err := disclose.Preflight(deliver); err != nil {
+	sink, err := disclose.Prepare(deliver)
+	if err != nil {
 		return failf(ExitRefused, "the value has nowhere to go: %v", err)
 	}
-	if _, err := disclose.Emit("value of "+cell.Name, cellValue(cell), deliver); err != nil {
+	defer sink.AbortOnReturn(&returnErr)
+	if _, err := sink.WriteOnce("value of "+cell.Name, cellValue(cell)); err != nil {
 		return failf(ExitRefused, "disclosing the value: %v", err)
 	}
 	return nil
