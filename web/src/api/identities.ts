@@ -162,8 +162,8 @@ const zMinted = mintMachineCredentialOp.response.pick({ value: true, clamped: tr
  * collection, so a mint run through it would leave the plaintext credential
  * reachable from the query client long after the dialog that showed it closed —
  * a second copy of a value whose whole contract is that there is one. A plain
- * async call leaves the value in exactly one place: the component that renders
- * it once.
+ * async call leaves the value in exactly one place: the ephemeral
+ * `MachineAccess` lifecycle that renders it once.
  */
 export async function mintCredential(
   p: ProjectRef,
@@ -381,35 +381,6 @@ export function parseClaimNumber(raw: string): number | null {
   }
   const value = Number(raw.trim());
   return Number.isSafeInteger(value) ? value : null;
-}
-
-/**
- * dismissDecision is what a dismissal attempt on the mint dialog does.
- *
- * Three outcomes, and the first is the one that is easy to miss: **while the
- * mint is in flight there is no dismissal at all.** Escape reaches a native
- * `<dialog>` even when the Cancel button is disabled, and unmounting mid-flight
- * would let a value the server DID commit arrive at a component that no longer
- * exists — losing it exactly as thoroughly as never minting it, while leaving a
- * live credential behind. After that, a shown value holds the dialog open until
- * the operator confirms they stored it, because there is no second look.
- *
- * It is a function rather than three `if`s in a handler so the rule can be
- * checked without a DOM: the failure it guards against is invisible in a
- * screenshot.
- */
-export function dismissDecision(input: {
-  busy: boolean;
-  hasValue: boolean;
-  stored: boolean;
-}): 'ignore' | 'hold-back' | 'close' {
-  if (input.busy) {
-    return 'ignore';
-  }
-  if (input.hasValue && !input.stored) {
-    return 'hold-back';
-  }
-  return 'close';
 }
 
 /** isoDay renders an instant as the calendar day, which is all these surfaces show. */

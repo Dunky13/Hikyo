@@ -117,6 +117,17 @@ function text(container: HTMLElement, testId: string): string {
   return container.querySelector(`[data-testid="${testId}"]`)?.textContent ?? '';
 }
 
+async function expectTextEventually(
+  container: HTMLElement,
+  testId: string,
+  expected: string,
+): Promise<void> {
+  await vi.waitFor(async () => {
+    await settle();
+    expect(text(container, testId)).toContain(expected);
+  });
+}
+
 const unmounts: Array<() => Promise<void>> = [];
 
 async function renderAuth(node: ReactNode) {
@@ -227,11 +238,7 @@ describe('AuthProvider', () => {
         <Probe />
       </AuthProvider>,
     );
-    await settle();
-    // TanStack Query publishes resolved observer data from a scheduled task,
-    // after the microtask-only auth settle has completed.
-    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
-    expect(text(container, 'private')).toContain(id('ses', '00'));
+    await expectTextEventually(container, 'private', id('ses', '00'));
 
     await act(async () => globalThis.dispatchEvent(new Event('focus')));
     expect(text(container, 'state')).toBe('transitioning');

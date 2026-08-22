@@ -238,6 +238,18 @@ test.describe('machine access', () => {
     expect(value.startsWith(hint), 'the row shows a prefix of the minted value').toBe(true);
     expect(hint.length, 'the hint is far shorter than the value').toBeLessThan(value.length / 2);
 
+    // Reopening creates a fresh reviewing lifecycle. The disclosed component
+    // above was unmounted, and its old plaintext cannot be revived by the new
+    // review before another credential is deliberately submitted.
+    await expansion
+      .getByRole('button', { name: `Mint credential for ${seed.machine.mintable}` })
+      .click();
+    const freshDialog = page.getByRole('dialog');
+    await expect(freshDialog).toBeVisible();
+    await expect(freshDialog.getByText(value, { exact: true })).toHaveCount(0);
+    await freshDialog.getByRole('button', { name: 'Cancel' }).click();
+    await expect(freshDialog).toBeHidden();
+
     // Revoking is the other half of rotation, and it bites at the next request
     // rather than at expiry.
     await revokeMinted(page);
