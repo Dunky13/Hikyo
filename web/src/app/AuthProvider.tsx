@@ -13,6 +13,7 @@ import {
 import type { z } from 'zod';
 
 import { ApiError, parsed } from '../api/client.ts';
+import { transitionWorkspaceOwner } from '../api/workspace.ts';
 import { makeQueryClient } from './queryClient.ts';
 
 export type WhoAmI = z.infer<typeof zWhoAmI>;
@@ -139,6 +140,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (identityVersion(identity) !== identityVersion(current.identity)) {
         transitionRevisionRef.current += 1;
       }
+      transitionWorkspaceOwner(identity?.session.id);
 
       if (sameSession) {
         commit({

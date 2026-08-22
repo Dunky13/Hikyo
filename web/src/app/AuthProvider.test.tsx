@@ -3,7 +3,13 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { act, useState, type ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { renderForm, settle } from '../testkit/renderForm.tsx';
+import {
+  forgetWorkspace,
+  rememberWorkspace,
+  workspaceBearer,
+  type WorkspaceBearer,
+} from '../api/workspace.ts';
+import { renderForm, settle, settleTask } from '../testkit/renderForm.tsx';
 import { AuthProvider, useAuth, type WhoAmI } from './AuthProvider.tsx';
 
 type Deferred<T> = {
@@ -23,6 +29,14 @@ function deferred<T>(): Deferred<T> {
 
 const id = (prefix: string, suffix: string) =>
   `${prefix}_123e4567-e89b-12d3-a456-4266141740${suffix}`;
+
+const workspace: WorkspaceBearer = {
+  origin: 'https://peer.example',
+  value: 'hik_ws_value',
+  session: 'ses_workspace',
+  idleExpiresAt: '2099-08-22T10:30:00Z',
+  absoluteExpiresAt: '2099-08-22T18:00:00Z',
+};
 
 function identity(
   sessionSuffix: string,
@@ -139,6 +153,7 @@ async function renderAuth(node: ReactNode) {
 afterEach(async () => {
   await Promise.all(unmounts.splice(0).map((unmount) => unmount()));
   vi.unstubAllGlobals();
+  forgetWorkspace(workspace.origin);
 });
 
 describe('AuthProvider', () => {
@@ -158,6 +173,8 @@ describe('AuthProvider', () => {
     );
     await settle();
     expect(text(container, 'state')).toContain(`authenticated:${id('ses', '00')}`);
+    rememberWorkspace(workspace);
+    expect(workspaceBearer(workspace.origin)).toBe(workspace);
 
     const buttons = container.querySelectorAll('button');
     await act(async () => buttons[1]?.click());
@@ -167,9 +184,10 @@ describe('AuthProvider', () => {
     expect(text(container, 'private')).toBe('');
 
     await act(async () => replacement.resolve(json(identity('01', '11'))));
-    await settle(30);
+    await settleTask();
     expect(text(container, 'state')).toContain(`authenticated:${id('ses', '01')}`);
     expect(text(container, 'marker')).toBe('');
+    expect(workspaceBearer(workspace.origin)).toBeUndefined();
 
     oldResult.resolve('old-session-secret');
     await settle();
@@ -194,12 +212,14 @@ describe('AuthProvider', () => {
 
     const buttons = container.querySelectorAll('button');
     await act(async () => buttons[1]?.click());
+    rememberWorkspace(workspace);
     expect(text(container, 'marker')).toBe('owned');
     await act(async () => buttons[0]?.click());
     await settle();
 
     expect(text(container, 'state')).toContain(`authenticated:${id('ses', '00')}`);
     expect(text(container, 'marker')).toBe('owned');
+    expect(workspaceBearer(workspace.origin)).toBe(workspace);
   });
 
   it('moves an expired session to anonymous and discards its cache', async () => {
@@ -218,11 +238,13 @@ describe('AuthProvider', () => {
 
     const buttons = container.querySelectorAll('button');
     await act(async () => buttons[1]?.click());
+    rememberWorkspace(workspace);
     await act(async () => buttons[0]?.click());
     await settle();
 
     expect(text(container, 'state')).toBe('anonymous');
     expect(text(container, 'marker')).toBe('');
+    expect(workspaceBearer(workspace.origin)).toBeUndefined();
   });
 
   it('suspends authenticated routes while focus discovers a replacement session', async () => {
