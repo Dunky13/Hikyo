@@ -165,7 +165,10 @@ export function HistoryDrawer({
         }),
       ),
   });
-  const guard = useProtectedPublishCeremony(refData);
+  const guard = useProtectedPublishCeremony(
+    refData,
+    [environmentId, params.toString()],
+  );
 
   const [sheet, setSheet] = useState<Sheet | null>(null);
   const [outcome, setOutcome] = useState<ReactNode>(null);
@@ -794,6 +797,7 @@ export function HistoryDrawer({
 
       {guard.request === null ? null : (
         <Ceremony
+          key={guard.requestKey}
           request={guard.request}
           onAuthorised={guard.onAuthorised}
           onCancel={guard.onCancel}

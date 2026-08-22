@@ -89,7 +89,15 @@ export function MatrixRowEditor({
   const [copyOpen, setCopyOpen] = useState(false);
   const [destinations, setDestinations] = useState<readonly string[]>([]);
   const [protectedCopyConfirmed, setProtectedCopyConfirmed] = useState(false);
-  const protectedGuard = useProtectedPublishCeremony(refData);
+  const protectedGuard = useProtectedPublishCeremony(
+    refData,
+    [
+      environment.id,
+      keyRecord.id,
+      destinations,
+      protectedEnvironmentIds,
+    ],
+  );
 
   const valuesPath = generatePath(surfaceById('values').path, {
     org: refData.org,
@@ -401,6 +409,7 @@ export function MatrixRowEditor({
       </dialog>
       {protectedGuard.request === null ? null : (
         <Ceremony
+          key={protectedGuard.requestKey}
           request={protectedGuard.request}
           onAuthorised={protectedGuard.onAuthorised}
           onCancel={protectedGuard.onCancel}

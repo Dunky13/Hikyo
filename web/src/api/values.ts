@@ -98,10 +98,12 @@ export async function fetchRevealWindow(
   // caller (a hook that CAN) passes it. Undefined means this instance's own
   // server; a workspace client means the remote's window, over the bearer.
   client?: Client,
+  signal?: AbortSignal,
 ): Promise<RevealWindow> {
   return parsed(getRevealWindowOp, {
       path: { org: env.org, project: env.project, environment: env.environment },
       client,
+      signal,
     });
 }
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router';
 
 import {
@@ -16,7 +16,8 @@ import {
   type ValueCell,
 } from '../api/values.ts';
 import { useTransport } from '../api/transport.tsx';
-import { Ceremony, type CeremonyPurpose, type CeremonyRequest } from './Ceremony.tsx';
+import { Ceremony, type CeremonyPurpose } from './Ceremony.tsx';
+import { useCeremonyTask, type CeremonyTask } from './useCeremonyTask.ts';
 
 /**
  * The reveal / copy / write-only-edit surface (#58, locked prototype #21).
@@ -98,10 +99,14 @@ export function Values() {
   const [refusal, setRefusal] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [audit, setAudit] = useState<string[]>([]);
-  const [pending, setPending] = useState<CeremonyRequest | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [destination, setDestination] = useState('');
-  const resume = useRef<(() => void) | null>(null);
+  const ceremony = useCeremonyTask([
+    env.org,
+    env.project,
+    env.environment,
+    destination,
+  ]);
 
   // NAVIGATION RE-MASKS. React Router reuses this component when only the
   // route parameters change, so without this a value disclosed in development
@@ -111,12 +116,10 @@ export function Values() {
   // clipboard notice, none of which mean anything in a different environment.
   useEffect(() => {
     setDisclosed({});
-    setPending(null);
     setEditing(null);
     setRefusal(null);
     setNotice(null);
     setAudit([]);
-    resume.current = null;
   }, [env.org, env.project, env.environment]);
 
   // One ticker drives every countdown on the surface: the remask timers and
@@ -175,44 +178,68 @@ export function Values() {
   const withCeremony = useCallback(
     async (
       keys: ReadonlyArray<{ id: string; name: string }>,
-      act: () => Promise<void>,
+      act: (task: CeremonyTask) => Promise<void>,
       targets: ReadonlyArray<{ id: string; name: string; purpose: CeremonyPurpose }>,
     ) => {
+      const operationKey = [
+        keys.map((key) => key.id),
+        targets.map((target) => [target.purpose, target.id]),
+      ];
+      const task = ceremony.begin(operationKey);
       setRefusal(null);
-      for (let i = 0; i < targets.length; i++) {
-        const target = targets[i];
+
+      const advance = async (
+        remaining: ReadonlyArray<{ id: string; name: string; purpose: CeremonyPurpose }>,
+      ): Promise<void> => {
+        if (!ceremony.isCurrent(task)) return;
+        const target = remaining[0];
         if (target === undefined) {
-          continue;
-        }
-        let state: RevealWindow;
-        try {
-          state = await fetchRevealWindow({ ...env, environment: target.id }, transport.client);
-        } catch {
-          setRefusal('The reveal window could not be read, so nothing was disclosed.');
+          try {
+            await act(task);
+          } finally {
+            ceremony.finish(task);
+          }
           return;
         }
-        if (state.live && !state.single_decision) {
-          continue;
+
+        let state: RevealWindow;
+        try {
+          state = await fetchRevealWindow(
+            { ...env, environment: target.id },
+            transport.client,
+            task.signal,
+          );
+        } catch {
+          if (ceremony.commit(task, () => {
+            setRefusal('The reveal window could not be read, so nothing was disclosed.');
+          })) {
+            ceremony.finish(task);
+          }
+          return;
         }
-        // This target needs a decision. Stage it, and resume with the targets
-        // this loop has not reached yet — so a two-ceremony act asks twice and
-        // never runs on one answer.
-        const remaining = targets.slice(i + 1);
-        resume.current = () => {
-          void withCeremony(keys, act, remaining);
-        };
-        setPending({
-          purpose: target.purpose,
-          environmentId: target.id,
-          environmentName: target.name,
-          keys,
-          window: state,
-        });
-        return;
-      }
-      await act();
+        if (!ceremony.isCurrent(task)) return;
+        if (state.live && !state.single_decision) {
+          await advance(remaining.slice(1));
+          return;
+        }
+        // This target needs a decision. The task owns exactly one continuation
+        // and keeps its generation through every remaining target.
+        ceremony.stage(
+          task,
+          {
+            purpose: target.purpose,
+            environmentId: target.id,
+            environmentName: target.name,
+            keys,
+            window: state,
+          },
+          () => void advance(remaining.slice(1)),
+        );
+      };
+
+      await advance(targets);
     },
-    [env, transport.client],
+    [ceremony, env, transport.client],
   );
 
   const noteDisclosure = useCallback((names: string[]) => {
@@ -240,17 +267,21 @@ export function Values() {
   const doRevealOne = (cell: ValueCell) =>
     void withCeremony(
       [{ id: cell.key_id, name: cell.name }],
-      async () => {
+      async (task) => {
         try {
           const fresh = await revealOne.mutateAsync(cell.name);
-          if (fresh.value === undefined) {
-            setRefusal('The server disclosed no value for that key.');
-            return;
-          }
-          show([{ id: fresh.key_id, name: fresh.name, value: fresh.value }]);
+          ceremony.commit(task, () => {
+            if (fresh.value === undefined) {
+              setRefusal('The server disclosed no value for that key.');
+              return;
+            }
+            show([{ id: fresh.key_id, name: fresh.name, value: fresh.value }]);
+          });
         } catch (err) {
-          setDisclosed({});
-          setRefusal(disclosureRefusalText(err));
+          ceremony.commit(task, () => {
+            setDisclosed({});
+            setRefusal(disclosureRefusalText(err));
+          });
         }
       },
       [{ id: env.environment, name: environmentName, purpose: 'reveal' }],
@@ -259,17 +290,21 @@ export function Values() {
   const doRevealAll = () =>
     void withCeremony(
       secretsSet.map((c) => ({ id: c.key_id, name: c.name })),
-      async () => {
+      async (task) => {
         try {
           const fresh = await revealAll.mutateAsync();
-          show(
-            fresh.items
-              .filter((c) => c.classification === 'secret' && c.value !== undefined)
-              .map((c) => ({ id: c.key_id, name: c.name, value: c.value ?? '' })),
-          );
+          ceremony.commit(task, () => {
+            show(
+              fresh.items
+                .filter((c) => c.classification === 'secret' && c.value !== undefined)
+                .map((c) => ({ id: c.key_id, name: c.name, value: c.value ?? '' })),
+            );
+          });
         } catch (err) {
-          setDisclosed({});
-          setRefusal(disclosureRefusalText(err));
+          ceremony.commit(task, () => {
+            setDisclosed({});
+            setRefusal(disclosureRefusalText(err));
+          });
         }
       },
       [{ id: env.environment, name: environmentName, purpose: 'reveal' }],
@@ -290,17 +325,23 @@ export function Values() {
     }
     void withCeremony(
       [{ id: cell.key_id, name: cell.name }],
-      async () => {
+      async (task) => {
         try {
           const fresh = await revealOne.mutateAsync(cell.name);
           if (fresh.value === undefined) {
-            setRefusal('The server disclosed no value for that key.');
+            ceremony.commit(task, () => {
+              setRefusal('The server disclosed no value for that key.');
+            });
             return;
           }
-          noteDisclosure([fresh.name]);
-          await writeClipboard(fresh.value, setNotice, true);
+          ceremony.commit(task, () => noteDisclosure([fresh.name]));
+          await writeClipboard(
+            fresh.value,
+            (text) => ceremony.commit(task, () => setNotice(text)),
+            true,
+          );
         } catch (err) {
-          setRefusal(disclosureRefusalText(err));
+          ceremony.commit(task, () => setRefusal(disclosureRefusalText(err)));
         }
       },
       [{ id: env.environment, name: environmentName, purpose: 'clipboard' }],
@@ -313,20 +354,22 @@ export function Values() {
     }
     void withCeremony(
       secretsSet.map((c) => ({ id: c.key_id, name: c.name })),
-      async () => {
+      async (task) => {
         try {
           await copy.mutateAsync({
             keys: secretsSet.map((c) => c.name),
             destinations: [destination],
           });
-          setAudit((prev) =>
-            [...secretsSet.map((c) => `Copied into ${destination} · ${c.name}`), ...prev].slice(
-              0,
-              12,
-            ),
-          );
+          ceremony.commit(task, () => {
+            setAudit((prev) =>
+              [...secretsSet.map((c) => `Copied into ${destination} · ${c.name}`), ...prev].slice(
+                0,
+                12,
+              ),
+            );
+          });
         } catch (err) {
-          setRefusal(disclosureRefusalText(err));
+          ceremony.commit(task, () => setRefusal(disclosureRefusalText(err)));
         }
       },
       // TWO decisions, in the order the server judges them: the material leaves
@@ -529,19 +572,12 @@ export function Values() {
         )}
       </section>
 
-      {pending !== null ? (
+      {ceremony.request !== null ? (
         <Ceremony
-          request={pending}
-          onAuthorised={() => {
-            setPending(null);
-            const run = resume.current;
-            resume.current = null;
-            run?.();
-          }}
-          onCancel={() => {
-            setPending(null);
-            resume.current = null;
-          }}
+          key={ceremony.requestKey}
+          request={ceremony.request}
+          onAuthorised={ceremony.onAuthorised}
+          onCancel={ceremony.onCancel}
         />
       ) : null}
     </section>
