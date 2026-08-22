@@ -783,7 +783,7 @@ func (s *Values) read(ctx context.Context, actor Actor, scope domain.Scope, keyN
 				return nil, err
 			}
 			cells, err := readCells(ctx, r.Catalogue(), r.Values(), p, sealer, keyName, true,
-				ceremonyGate(ctx, s.Auth, az, caller, PurposeReveal, string(scope.Env)))
+				ceremonyGate(ctx, s.Auth, az, caller, revealIntentBuilder(string(scope.Env))))
 			if err != nil {
 				return nil, err
 			}
@@ -979,7 +979,7 @@ func (s *Values) Diff(ctx context.Context, actor Actor, scope domain.Scope, left
 			// per-environment: a window open on staging authorizes nothing in
 			// production, which is the whole point of capping production at 0.
 			cells, err := readCells(ctx, cat, vals, p, sealer, "", reveal,
-				ceremonyGate(ctx, s.Auth, az, caller, PurposeReveal, envID))
+				ceremonyGate(ctx, s.Auth, az, caller, revealIntentBuilder(envID)))
 			if err != nil {
 				return nil, err
 			}
@@ -1136,7 +1136,7 @@ func (s *Values) Copy(ctx context.Context, actor Actor, scope domain.Scope, req 
 			destScope := domain.Scope{Org: scope.Org, Project: scope.Project, Env: domain.EnvID(destID)}
 			if err := authorizeDestination(ctx, r, az, caller, destScope,
 				req.ConfirmProtected, hasConfig, len(secretKeyIDs) > 0, allKeyIDs,
-				ceremonyGate(ctx, s.Auth, az, caller, PurposePublish, destID)); err != nil {
+				ceremonyGate(ctx, s.Auth, az, caller, publishIntentBuilder(destID))); err != nil {
 				return copyWriteResult{}, err
 			}
 		}
@@ -1146,7 +1146,7 @@ func (s *Values) Copy(ctx context.Context, actor Actor, scope domain.Scope, req 
 		// destination rather than to a screen and is a disclosure either way.
 		material, _, err := readSourceMaterial(ctx, r, az, caller, sealer, scope,
 			req.SourceEnvironmentID, req.KeyNames, false, copyOpCopy,
-			ceremonyGate(ctx, s.Auth, az, caller, PurposeCopy, req.SourceEnvironmentID))
+			ceremonyGate(ctx, s.Auth, az, caller, copyIntentBuilder(req.SourceEnvironmentID)))
 		if err != nil {
 			return copyWriteResult{}, err
 		}

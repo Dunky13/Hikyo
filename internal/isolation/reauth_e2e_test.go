@@ -80,21 +80,65 @@ func consumeWindow(t *testing.T, auth *service.Auth, db *store.DB, sessionID, en
 // workspace step-up binds to one.
 func consumeWindowFor(t *testing.T, auth *service.Auth, db *store.DB, sessionID, env, operation string, keys []string, now time.Time) error {
 	t.Helper()
+	intent := disclosureReauthIntent(t, service.PurposeReveal, env, keys)
+	if operation == string(authz.OpValueCopySource) {
+		intent = disclosureReauthIntent(t, service.PurposeCopy, env, keys)
+	} else if operation == string(authz.OpValueCopyDestination) {
+		intent = disclosureReauthIntent(t, service.PurposePublish, env, keys)
+	}
 	return tx.Write(t.Context(), db, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
 		// PurposeReveal is the disclosure consumption these helpers model (#58);
 		// it is only consulted on the single-decision leg, where it is matched
 		// byte-exact against the ceremony's binding. The workspace step-up
 		// windows these helpers also drive are sliding, so the purpose is inert
 		// for them and the OPERATION is what their binding turns on.
-		return auth.ConsumeReauthWindow(ctx, az, sessionID, service.PurposeReveal, env, operation, keys, now)
+		return auth.ConsumeReauthWindow(ctx, az, sessionID, intent, now)
 	})
 }
 
 func consumeAdapterWindowFor(t *testing.T, auth *service.Auth, db *store.DB, sessionID, env string, operation authz.Operation, environmentIDs []string, now time.Time) error {
 	t.Helper()
+	intent := adapterReauthIntent(t, operation, environmentIDs)
 	return tx.Write(t.Context(), db, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
-		return auth.ConsumeAdapterReauthWindow(ctx, az, sessionID, env, operation, environmentIDs, now)
+		return auth.ConsumeAdapterReauthWindow(ctx, az, sessionID, env, intent, now)
 	})
+}
+
+func unboundReauthIntent(t *testing.T, environmentID string) service.ReauthIntent {
+	t.Helper()
+	intent, err := service.NewUnboundReauthIntent(environmentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return intent
+}
+
+func disclosureReauthIntent(t *testing.T, purpose service.ReauthPurpose, environmentID string, keyIDs []string) service.ReauthIntent {
+	t.Helper()
+	intent, err := service.NewDisclosureReauthIntent(purpose, []string{environmentID}, keyIDs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return intent
+}
+
+func adapterReauthIntent(t *testing.T, operation authz.Operation, environmentIDs []string) service.ReauthIntent {
+	t.Helper()
+	intent, err := service.NewAdapterReauthIntent(string(operation), environmentIDs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return intent
+}
+
+func targetedAdapterReauthIntent(t *testing.T, operation authz.Operation, environmentID string, environmentIDs []string) service.ReauthIntent {
+	t.Helper()
+	intent := adapterReauthIntent(t, operation, environmentIDs)
+	intent, err := intent.ForEnvironment(environmentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return intent
 }
 
 func TestAdapterReauthWindowExactBindingSQLite(t *testing.T) {
@@ -157,7 +201,8 @@ func runCLIAdapterReauthHandoff(t *testing.T, db *store.DB) {
 		t.Fatal(err)
 	}
 	clock = base.Add(time.Minute)
-	browserWindows, err := auth.ReauthAdapterTOTP(t.Context(), browser.SessionToken, string(authz.OpAdapterSync), []string{"env_prod"}, totpCode(t, uri, clock))
+	adapterIntent := adapterReauthIntent(t, authz.OpAdapterSync, []string{"env_prod"})
+	browserWindows, err := auth.ReauthAdapterTOTP(t.Context(), browser.SessionToken, adapterIntent, totpCode(t, uri, clock))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +216,7 @@ func runCLIAdapterReauthHandoff(t *testing.T, db *store.DB) {
 	if got := queryString(t, db, "SELECT principal_id FROM sessions WHERE id = '"+cliConfirmed.SessionID+"'"); got != string(boot.PrincipalID) {
 		t.Fatalf("CLI principal = %q, bootstrap = %q", got, boot.PrincipalID)
 	}
-	start, err := auth.StartCLIReauth(t.Context(), cliConfirmed.SessionToken, string(service.PurposeAdapter), string(authz.OpAdapterSync), []string{"env_prod"}, nil, challenge, "http://127.0.0.1:40123/callback")
+	start, err := auth.StartCLIReauth(t.Context(), cliConfirmed.SessionToken, adapterIntent, challenge, "http://127.0.0.1:40123/callback")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -273,7 +318,7 @@ func runAdapterReauthWebAuthnBindsFullEnvironmentSet(t *testing.T, db *store.DB)
 	token = stepUpPasskey(t, auth, ctx, token, device)
 	execRaw(t, db, `INSERT INTO environments (id, org_id, project_id, name, note, protected, reauth_window_seconds, created_at, display_order) VALUES ('env_adapter_zero', 'org_a', 'prj_a1', 'adapter-zero', '', TRUE, 0, `+ts+`, 2)`)
 	environments := []string{"env_prod", "env_adapter_zero"}
-	options, err := auth.ReauthAdapterPasskeyStart(ctx, token, authz.OpAdapterConfigure, "env_adapter_zero", environments)
+	options, err := auth.ReauthPasskeyStart(ctx, token, targetedAdapterReauthIntent(t, authz.OpAdapterConfigure, "env_adapter_zero", environments))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -322,7 +367,7 @@ func runAdapterReauthTOTPMixedPolicy(t *testing.T, db *store.DB) {
 	execRaw(t, db, `INSERT INTO environments (id, org_id, project_id, name, note, protected, reauth_window_seconds, created_at, display_order) VALUES ('env_adapter_zero', 'org_a', 'prj_a1', 'adapter-zero', '', TRUE, 0, `+ts+`, 2)`)
 	environments := []string{"env_prod", "env_adapter_zero"}
 	clock = base.Add(time.Minute)
-	results, err := auth.ReauthAdapterTOTP(t.Context(), confirmed.SessionToken, string(authz.OpAdapterSync), environments, totpCode(t, uri, clock))
+	results, err := auth.ReauthAdapterTOTP(t.Context(), confirmed.SessionToken, adapterReauthIntent(t, authz.OpAdapterSync, environments), totpCode(t, uri, clock))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -417,7 +462,7 @@ func runReauthConsumeSingleDecision(t *testing.T, db *store.DB) {
 	stepped := stepUpPasskey(t, auth, ctx, token, dev)
 	token = stepped
 
-	ropts, err := auth.ReauthPasskeyStart(ctx, token, service.PurposeReveal, "env_prod", []string{"key_b", "key_a"})
+	ropts, err := auth.ReauthPasskeyStart(ctx, token, disclosureReauthIntent(t, service.PurposeReveal, "env_prod", []string{"key_b", "key_a"}))
 	if err != nil {
 		t.Fatalf("reauth start: %v", err)
 	}
@@ -477,7 +522,7 @@ func runReauthConsumeSlidingHardCap(t *testing.T, db *store.DB) {
 	token = enrolPasskey(t, auth, ctx, token, waPassword, dev)
 	token = stepUpPasskey(t, auth, ctx, token, dev)
 
-	ropts, err := auth.ReauthPasskeyStart(ctx, token, service.PurposeReveal, "env_prod", []string{"key_a"})
+	ropts, err := auth.ReauthPasskeyStart(ctx, token, disclosureReauthIntent(t, service.PurposeReveal, "env_prod", []string{"key_a"}))
 	if err != nil {
 		t.Fatalf("reauth start: %v", err)
 	}
@@ -546,7 +591,7 @@ func runReauthWebAuthnOpenClampsHardCap(t *testing.T, db *store.DB) {
 	token = enrolPasskey(t, auth, ctx, token, waPassword, dev)
 	token = stepUpPasskey(t, auth, ctx, token, dev)
 
-	ropts, err := auth.ReauthPasskeyStart(ctx, token, service.PurposeReveal, "env_prod", []string{"key_a"})
+	ropts, err := auth.ReauthPasskeyStart(ctx, token, disclosureReauthIntent(t, service.PurposeReveal, "env_prod", []string{"key_a"}))
 	if err != nil {
 		t.Fatalf("reauth start: %v", err)
 	}
@@ -597,7 +642,7 @@ func runReauthSlideUsesEffectiveWindow(t *testing.T, db *store.DB) {
 	token = enrolPasskey(t, auth, ctx, token, waPassword, dev)
 	token = stepUpPasskey(t, auth, ctx, token, dev)
 
-	ropts, err := auth.ReauthPasskeyStart(ctx, token, service.PurposeReveal, "env_prod", []string{"key_a"})
+	ropts, err := auth.ReauthPasskeyStart(ctx, token, disclosureReauthIntent(t, service.PurposeReveal, "env_prod", []string{"key_a"}))
 	if err != nil {
 		t.Fatalf("reauth start: %v", err)
 	}
@@ -664,7 +709,7 @@ func runReauthConsumeInvalidationFailsClosed(t *testing.T, db *store.DB) {
 	token = enrolPasskey(t, auth, ctx, token, waPassword, dev)
 	token = stepUpPasskey(t, auth, ctx, token, dev)
 
-	ropts, err := auth.ReauthPasskeyStart(ctx, token, service.PurposeReveal, "env_prod", []string{"key_a"})
+	ropts, err := auth.ReauthPasskeyStart(ctx, token, disclosureReauthIntent(t, service.PurposeReveal, "env_prod", []string{"key_a"}))
 	if err != nil {
 		t.Fatalf("reauth start: %v", err)
 	}
@@ -721,7 +766,7 @@ func runReauthTOTPZeroWindow(t *testing.T, db *store.DB) {
 	// 0 effective window: TOTP refuses, naming the WebAuthn remedy.
 	auth.ReauthWindow = 0
 	clk = base.Add(60 * time.Second)
-	if _, err := auth.ReauthTOTP(ctx, token, "env_prod", totpCode(t, uri, clk)); !errors.Is(err, service.ErrReauthWindowClosed) {
+	if _, err := auth.ReauthTOTP(ctx, token, unboundReauthIntent(t, "env_prod"), totpCode(t, uri, clk)); !errors.Is(err, service.ErrReauthWindowClosed) {
 		t.Fatalf("TOTP reauth at a 0 window: %v, want ErrReauthWindowClosed", err)
 	}
 
@@ -729,7 +774,7 @@ func runReauthTOTPZeroWindow(t *testing.T, db *store.DB) {
 	auth.ReauthWindow = 5 * time.Minute
 	auth.ReauthHardCap = 10 * time.Minute
 	clk = base.Add(120 * time.Second)
-	res, err := auth.ReauthTOTP(ctx, token, "env_prod", totpCode(t, uri, clk))
+	res, err := auth.ReauthTOTP(ctx, token, unboundReauthIntent(t, "env_prod"), totpCode(t, uri, clk))
 	if err != nil {
 		t.Fatalf("TOTP reauth at a non-zero window: %v", err)
 	}
@@ -1034,7 +1079,7 @@ func runCLIDisclosureReauthHandoff(t *testing.T, db *store.DB) {
 		t.Fatal(err)
 	}
 	clock = base.Add(time.Minute)
-	browserWindow, err := auth.ReauthTOTP(t.Context(), browser.SessionToken, "env_a1", totpCode(t, uri, clock))
+	browserWindow, err := auth.ReauthTOTP(t.Context(), browser.SessionToken, unboundReauthIntent(t, "env_a1"), totpCode(t, uri, clock))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1048,16 +1093,18 @@ func runCLIDisclosureReauthHandoff(t *testing.T, db *store.DB) {
 	challenge := base64.RawURLEncoding.EncodeToString(challengeBytes[:])
 	redirect := "http://127.0.0.1:40124/callback"
 
-	if _, err := auth.StartCLIReauth(t.Context(), cliConfirmed.SessionToken, string(service.PurposeReveal), string(authz.OpValueReveal), []string{"env_a1"}, nil, challenge, redirect); !errors.Is(err, service.ErrReauthUnitMismatch) {
+	emptyDisclosure := disclosureReauthIntent(t, service.PurposeReveal, "env_a1", nil)
+	if _, err := auth.StartCLIReauth(t.Context(), cliConfirmed.SessionToken, emptyDisclosure, challenge, redirect); !errors.Is(err, service.ErrReauthUnitMismatch) {
 		t.Fatalf("disclosure handoff without a key set = %v, want unit mismatch", err)
 	}
-	if _, err := auth.StartCLIReauth(t.Context(), cliConfirmed.SessionToken, string(service.PurposeAdapter), string(authz.OpAdapterSync), []string{"env_a1"}, secretKeys, challenge, redirect); !errors.Is(err, service.ErrReauthUnitMismatch) {
-		t.Fatalf("adapter handoff with a key set = %v, want unit mismatch", err)
+	if _, err := service.NewDisclosureReauthIntent(service.PurposeAdapter, []string{"env_a1"}, secretKeys); !errors.Is(err, domain.ErrInvalid) {
+		t.Fatalf("adapter purpose in a disclosure intent = %v, want invalid", err)
 	}
-	if _, err := auth.StartCLIReauth(t.Context(), cliConfirmed.SessionToken, string(service.PurposeReveal), string(authz.OpAdapterSync), []string{"env_a1"}, secretKeys, challenge, redirect); !errors.Is(err, domain.ErrInvalid) {
+	if _, err := service.NewAdapterReauthIntent(string(authz.OpValueReveal), []string{"env_a1"}); !errors.Is(err, service.ErrReauthUnitMismatch) {
 		t.Fatalf("reveal purpose with an adapter operation = %v, want invalid", err)
 	}
-	start, err := auth.StartCLIReauth(t.Context(), cliConfirmed.SessionToken, string(service.PurposeReveal), string(authz.OpValueReveal), []string{"env_a1"}, secretKeys, challenge, redirect)
+	disclosureIntent := disclosureReauthIntent(t, service.PurposeReveal, "env_a1", secretKeys)
+	start, err := auth.StartCLIReauth(t.Context(), cliConfirmed.SessionToken, disclosureIntent, challenge, redirect)
 	if err != nil {
 		t.Fatalf("start disclosure handoff: %v", err)
 	}
@@ -1154,7 +1201,7 @@ func runCLIDisclosureHandoffPasskeyBinding(t *testing.T, db *store.DB) {
 	res := passkeyCeremony(t, auth, ctx, browserToken, service.PurposeReveal, string(envA1), []string{keyA}, dev)
 	browserToken = res.SessionToken
 	_, wideChallenge := pkce("wide")
-	wide, err := auth.StartCLIReauth(ctx, cliToken, string(service.PurposeReveal), string(authz.OpValueReveal), []string{string(envA1)}, []string{keyA, keyB}, wideChallenge, "http://127.0.0.1:40125/callback")
+	wide, err := auth.StartCLIReauth(ctx, cliToken, disclosureReauthIntent(t, service.PurposeReveal, string(envA1), []string{keyA, keyB}), wideChallenge, "http://127.0.0.1:40125/callback")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1165,7 +1212,7 @@ func runCLIDisclosureHandoffPasskeyBinding(t *testing.T, db *store.DB) {
 	// single decision; the redeemed CLI window is single-decision, unbound in
 	// columns (bound through its ceremony), and spendable once over key A.
 	verifier, challenge := pkce("exact")
-	exact, err := auth.StartCLIReauth(ctx, cliToken, string(service.PurposeReveal), string(authz.OpValueReveal), []string{string(envA1)}, []string{keyA}, challenge, "http://127.0.0.1:40125/callback")
+	exact, err := auth.StartCLIReauth(ctx, cliToken, disclosureReauthIntent(t, service.PurposeReveal, string(envA1), []string{keyA}), challenge, "http://127.0.0.1:40125/callback")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1202,7 +1249,7 @@ func runCLIDisclosureHandoffPasskeyBinding(t *testing.T, db *store.DB) {
 	res = passkeyCeremony(t, auth, ctx, browserToken, service.PurposeReveal, string(envA1), []string{keyB}, dev)
 	browserToken = res.SessionToken
 	_, elsewhereChallenge := pkce("elsewhere")
-	elsewhere, err := auth.StartCLIReauth(ctx, redeemed.SessionToken, string(service.PurposeReveal), string(authz.OpValueReveal), []string{"env_prod"}, []string{keyB}, elsewhereChallenge, "http://127.0.0.1:40125/callback")
+	elsewhere, err := auth.StartCLIReauth(ctx, redeemed.SessionToken, disclosureReauthIntent(t, service.PurposeReveal, "env_prod", []string{keyB}), elsewhereChallenge, "http://127.0.0.1:40125/callback")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1213,7 +1260,7 @@ func runCLIDisclosureHandoffPasskeyBinding(t *testing.T, db *store.DB) {
 	// 3. An adapter-bound browser window never satisfies a disclosure handoff.
 	execRaw(t, db, `INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_hz_adapters', (SELECT principal_id FROM sessions WHERE id = '`+stepped.SessionID+`'), 'manage-adapters', 'org_a', 'prj_a1', NULL, `+ts+`)`)
 	execRaw(t, db, `INSERT INTO grant_origins (id, grant_id, kind, subject, created_at) VALUES ('gor_g_hz_adapters', 'g_hz_adapters', 'manual', 'seed', `+ts+`)`)
-	aopts, err := auth.ReauthAdapterPasskeyStart(ctx, browserToken, authz.OpAdapterSync, string(envA1), []string{string(envA1)})
+	aopts, err := auth.ReauthPasskeyStart(ctx, browserToken, targetedAdapterReauthIntent(t, authz.OpAdapterSync, string(envA1), []string{string(envA1)}))
 	if err != nil {
 		t.Fatalf("adapter passkey start: %v", err)
 	}
@@ -1227,7 +1274,7 @@ func runCLIDisclosureHandoffPasskeyBinding(t *testing.T, db *store.DB) {
 	}
 	browserToken = ares.SessionToken
 	_, mixChallenge := pkce("mix")
-	mix, err := auth.StartCLIReauth(ctx, redeemed.SessionToken, string(service.PurposeReveal), string(authz.OpValueReveal), []string{string(envA1)}, []string{keyB}, mixChallenge, "http://127.0.0.1:40125/callback")
+	mix, err := auth.StartCLIReauth(ctx, redeemed.SessionToken, disclosureReauthIntent(t, service.PurposeReveal, string(envA1), []string{keyB}), mixChallenge, "http://127.0.0.1:40125/callback")
 	if err != nil {
 		t.Fatal(err)
 	}

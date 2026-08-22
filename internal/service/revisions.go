@@ -510,7 +510,7 @@ func (s *Revisions) Export(ctx context.Context, actor Actor, scope domain.Scope,
 					unit = append(unit, entry.KeyID)
 				}
 			}
-			gate := ceremonyGate(ctx, s.Auth, az, caller, PurposeReveal, string(scope.Env))
+			gate := ceremonyGate(ctx, s.Auth, az, caller, revealIntentBuilder(string(scope.Env)))
 			if err := gate(unit); err != nil {
 				return revisionExportResult{}, err
 			}

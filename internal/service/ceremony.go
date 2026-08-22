@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"sort"
 	"time"
 
 	"github.com/Hikyo-Org/hikyo/internal/authz"
@@ -70,8 +69,8 @@ func skipsCeremony(caller authz.Identity) bool {
 // requireCeremony consumes the acting session's reauthentication window over
 // one environment for exactly the enumerated keys.
 //
-// keyIDs is the disclosure's unit. Callers pass the keys whose plaintext this
-// act will open — which is also exactly the set the ceremony modal enumerates
+// The intent carries the disclosure's variant, environment and enumerated
+// keys as one value. The keys are exactly the set the ceremony modal enumerates
 // and the set that will emit disclosure events, so the three cannot drift.
 //
 // An empty key set is NOT a free pass: it is a disclosure of nothing, and a
@@ -79,40 +78,59 @@ func skipsCeremony(caller authz.Identity) bool {
 // is `secret` material in play, so this is a guard against a caller that asked
 // for a gate it does not need rather than a hole.
 func requireCeremony(ctx context.Context, auth *Auth, az *authz.TxAuthorizer, caller authz.Identity,
-	purpose ReauthPurpose, envID string, keyIDs []string) error {
+	intent ReauthIntent) error {
 	if skipsCeremony(caller) {
 		return nil
 	}
-	if len(keyIDs) == 0 {
+	if len(intent.KeyIDs()) == 0 {
 		return nil
 	}
 	if auth == nil {
 		return ErrNoCeremonySeam
 	}
-	unit := append([]string(nil), keyIDs...)
-	sort.Strings(unit)
 	// The clock is read HERE, at consumption, never captured earlier by the
 	// caller. A copy resolves its keys, takes the destination project lock and
 	// runs a preflight before anything is opened; an instant captured before
 	// that lock is an instant that can be arbitrarily old by the time it is
 	// used, and a window that expired while the transaction waited would still
 	// be spent against it.
-	// #58's closed purpose set maps to the authz operation the shell names in
-	// the matching workspace step-up consent. A bound window can therefore be
-	// spent by this real disclosure seam, while ConsumeReauthWindow still
-	// accepts every #54 UNBOUND window because it checks the name only when the
-	// stored window itself carries a binding.
-	return auth.ConsumeReauthWindow(ctx, az, caller.SessionID, purpose, envID,
-		string(operationForReauthPurpose(purpose)), unit, auth.now())
+	// A bound window can therefore be spent by this real disclosure seam, while
+	// ConsumeReauthWindow still accepts every #54 UNBOUND window because it
+	// checks the name only when the stored window itself carries a binding.
+	return auth.ConsumeReauthWindow(ctx, az, caller.SessionID, intent, auth.now())
+}
+
+type disclosureIntentBuilder func(keyIDs []string) (ReauthIntent, error)
+
+func revealIntentBuilder(environmentID string) disclosureIntentBuilder {
+	return func(keyIDs []string) (ReauthIntent, error) {
+		return NewRevealReauthIntent(environmentID, keyIDs)
+	}
+}
+
+func copyIntentBuilder(environmentID string) disclosureIntentBuilder {
+	return func(keyIDs []string) (ReauthIntent, error) {
+		return NewCopyReauthIntent(environmentID, keyIDs)
+	}
+}
+
+func publishIntentBuilder(environmentID string) disclosureIntentBuilder {
+	return func(keyIDs []string) (ReauthIntent, error) {
+		return NewPublishReauthIntent(environmentID, keyIDs)
+	}
 }
 
 // ceremonyGate is the callback the value paths hand to readCells and
 // openSourceMaterial: the enumerated unit arrives, the window is consumed, and
 // a refusal lands before any ciphertext is opened.
 func ceremonyGate(ctx context.Context, auth *Auth, az *authz.TxAuthorizer, caller authz.Identity,
-	purpose ReauthPurpose, envID string) discloseGate {
+	buildIntent disclosureIntentBuilder) discloseGate {
 	return func(unit []string) error {
-		return requireCeremony(ctx, auth, az, caller, purpose, envID, unit)
+		intent, err := buildIntent(unit)
+		if err != nil {
+			return err
+		}
+		return requireCeremony(ctx, auth, az, caller, intent)
 	}
 }
 
@@ -299,23 +317,4 @@ func (p ReauthPurpose) Valid() bool {
 		return true
 	}
 	return false
-}
-
-// operationForReauthPurpose is the workspace consent vocabulary for #58's
-// closed purpose set. Keep one explicit switch arm per member: there is no
-// unnamed fallback that could make a new purpose silently unspendable.
-func operationForReauthPurpose(p ReauthPurpose) authz.Operation {
-	switch p {
-	case PurposeReveal:
-		return authz.OpValueReveal
-	case PurposeCopy:
-		return authz.OpValueCopySource
-	case PurposePublish:
-		return authz.OpValueCopyDestination
-	case PurposeMint:
-		return authz.OpCredentialMint
-	case PurposeAdapter:
-		return authz.OpAdapterAdopt
-	}
-	panic("service: unhandled reauthentication purpose")
 }

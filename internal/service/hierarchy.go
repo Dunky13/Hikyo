@@ -864,7 +864,7 @@ func (s *Environments) create(ctx context.Context, actor Actor, scope domain.Sco
 			// can be evaluated against the environment being created — which
 			// is what the ADR requires it to be evaluated against.
 			clone, err = cloneInto(ctx, r, az, caller, sealer, s.Keyring, s.Scan, scope, sourceEnvID, created.ID,
-				ceremonyGate(ctx, s.Auth, az, caller, PurposeCopy, sourceEnvID))
+				ceremonyGate(ctx, s.Auth, az, caller, copyIntentBuilder(sourceEnvID)))
 			if err != nil {
 				return err
 			}

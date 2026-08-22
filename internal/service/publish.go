@@ -383,7 +383,11 @@ func (s *Revisions) PublishPlanned(ctx context.Context, actor Actor, scope domai
 			for _, apply := range selection[envID] {
 				unit = append(unit, apply.keyID)
 			}
-			if err := requireCeremony(ctx, s.Auth, az, caller, PurposePublish, envID, unit); err != nil {
+			intent, err := NewPublishReauthIntent(envID, unit)
+			if err != nil {
+				return err
+			}
+			if err := requireCeremony(ctx, s.Auth, az, caller, intent); err != nil {
 				return err
 			}
 		}

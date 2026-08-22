@@ -509,13 +509,16 @@ func (s *Auth) RequireDisclosureAuthority(
 		}
 	}
 	for _, env := range union(current, historical) {
-		// No operation is named and no key set is enumerated: this conjunct is
-		// about reaching plaintext through a credential, not about one named
-		// disclosure. An UNBOUND window (every #54 ceremony) satisfies it; a
-		// window BOUND to a step-up's exact operation does not, and that refusal
-		// is correct — consent to reveal DATABASE_URL in a foreign shell is not
-		// consent to widen a machine credential's reach.
-		err := s.ConsumeReauthWindow(ctx, az, caller.SessionID, PurposeMint, string(env), "", nil, now)
+		// Credential minting is its own closed intent with no enumerated key set.
+		// An UNBOUND window (every #54 ceremony) satisfies it; a window BOUND to a
+		// different step-up operation does not, and that refusal is correct —
+		// consent to reveal DATABASE_URL in a foreign shell is not consent to
+		// widen a machine credential's reach.
+		intent, err := NewMintReauthIntent(string(env), nil)
+		if err != nil {
+			return err
+		}
+		err = s.ConsumeReauthWindow(ctx, az, caller.SessionID, intent, now)
 		switch {
 		case err == nil:
 		case errors.Is(err, ErrNoReauthWindow), errors.Is(err, ErrReauthWindowExpired),
