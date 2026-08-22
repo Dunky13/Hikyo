@@ -17,6 +17,7 @@ import {
   useReclassifyKey,
   useStageMatrixValue,
   type MatrixKeyList,
+  type MatrixEnvironmentRow,
   type MatrixPendingDraft,
   type MatrixRef,
   type MatrixSignalCell,
@@ -87,7 +88,8 @@ export function Matrix({ historyOpen = false }: { historyOpen?: boolean } = {}) 
   const copy = useCopyMatrixConfig(ref);
   const reclassify = useReclassifyKey(ref);
 
-  const environments = matrix.environments.data?.items ?? [];
+  const environmentRows = matrix.environmentRows;
+  const environments = environmentRows.map((row) => row.environment);
   const keys = matrix.keys.data?.items ?? [];
   const keyGroups = matrix.groups.data?.items ?? [];
   const [visibleEnvironmentIds, setVisibleEnvironmentIds] = useState<readonly string[]>([]);
@@ -132,36 +134,36 @@ export function Matrix({ historyOpen = false }: { historyOpen?: boolean } = {}) 
 
   const valuesByCell = useMemo(() => {
     const cells = new Map<string, ValueCell>();
-    environments.forEach((environment, index) => {
-      for (const cell of matrix.values[index]?.data?.items ?? []) {
-        cells.set(cellID(cell.key_id, environment.id), cell);
+    for (const row of environmentRows) {
+      for (const cell of row.values.data?.items ?? []) {
+        cells.set(cellID(cell.key_id, row.environmentId), cell);
       }
-    });
+    }
     return cells;
-  }, [environments, matrix.values]);
+  }, [environmentRows]);
 
   const signalsByCell = useMemo(() => {
     const cells = new Map<string, MatrixSignalCell>();
-    environments.forEach((environment, index) => {
-      for (const signal of matrix.signals[index]?.data?.cells ?? []) {
-        cells.set(cellID(signal.key_id, environment.id), signal);
+    for (const row of environmentRows) {
+      for (const signal of row.signals.data?.cells ?? []) {
+        cells.set(cellID(signal.key_id, row.environmentId), signal);
       }
-    });
+    }
     return cells;
-  }, [environments, matrix.signals]);
+  }, [environmentRows]);
 
   // The caller's own drafts, keyed by immutable version id. Server truth: the
   // publish sheet and the editors preview from this map, never from anything
   // cached client-side, so a reload or a second browser shows the same review.
   const draftsByVersion = useMemo(() => {
     const drafts = new Map<string, MatrixPendingDraft>();
-    for (const query of matrix.pendingDrafts) {
-      for (const draft of query.data?.items ?? []) {
+    for (const row of environmentRows) {
+      for (const draft of row.pendingDrafts.data?.items ?? []) {
         drafts.set(draft.version_id, draft);
       }
     }
     return drafts;
-  }, [matrix.pendingDrafts]);
+  }, [environmentRows]);
 
   const stateKeys = useMemo<readonly MatrixStateKey[]>(
     () =>
@@ -239,9 +241,9 @@ export function Matrix({ historyOpen = false }: { historyOpen?: boolean } = {}) 
   const firstVisibleEnvironment = visibleEnvironments[0];
   const pendingByEnvironment = useMemo(() => {
     const pending = new Map<string, readonly MatrixPendingEntry[]>();
-    environments.forEach((environment, index) => {
+    for (const row of environmentRows) {
       const rows: MatrixPendingEntry[] = [];
-      for (const signal of matrix.signals[index]?.data?.cells ?? []) {
+      for (const signal of row.signals.data?.cells ?? []) {
         if (signal.pending_version_id !== undefined) {
           if (signal.pending_operation === undefined) {
             throw new Error(
@@ -258,26 +260,26 @@ export function Matrix({ historyOpen = false }: { historyOpen?: boolean } = {}) 
           });
         }
       }
-      pending.set(environment.id, rows);
-    });
+      pending.set(row.environmentId, rows);
+    }
     return pending;
-  }, [environments, matrix.signals, draftsByVersion]);
+  }, [draftsByVersion, environmentRows]);
   const pendingCount = [...pendingByEnvironment.values()].reduce(
     (total, entries) => total + entries.length,
     0,
   );
   const revisionsByEnvironment = useMemo<ReadonlyMap<string, bigint>>(() => {
     const revisions = new Map<string, bigint>();
-    environments.forEach((environment, index) => {
-      const revision = matrix.signals[index]?.data?.revision;
+    for (const row of environmentRows) {
+      const revision = row.signals.data?.revision;
       if (revision !== undefined) {
-        revisions.set(environment.id, revision);
+        revisions.set(row.environmentId, revision);
       }
-    });
+    }
     return revisions;
-  }, [environments, matrix.signals]);
-  const protectedEnvironmentIds = environments.flatMap((environment, index) =>
-    matrix.settings[index]?.data?.protected === true ? [environment.id] : [],
+  }, [environmentRows]);
+  const protectedEnvironmentIds = environmentRows.flatMap((row) =>
+    row.settings.data?.protected === true ? [row.environmentId] : [],
   );
   const pendingCountByEnvironment = useMemo<ReadonlyMap<string, number>>(
     () =>
@@ -291,14 +293,14 @@ export function Matrix({ historyOpen = false }: { historyOpen?: boolean } = {}) 
   );
   const pendingByOthersByEnvironment = useMemo<ReadonlyMap<string, number>>(() => {
     const counts = new Map<string, number>();
-    environments.forEach((environment, index) => {
+    for (const row of environmentRows) {
       counts.set(
-        environment.id,
-        (matrix.signals[index]?.data?.cells ?? []).filter((cell) => cell.pending_by_others).length,
+        row.environmentId,
+        (row.signals.data?.cells ?? []).filter((cell) => cell.pending_by_others).length,
       );
-    });
+    }
     return counts;
-  }, [environments, matrix.signals]);
+  }, [environmentRows]);
   // The history drawer needs the CURRENT cell state to enumerate the ceremony
   // unit a restore will need: the comparison opens current secret plaintext only
   // where a set secret is being replaced.
@@ -320,34 +322,43 @@ export function Matrix({ historyOpen = false }: { historyOpen?: boolean } = {}) 
     ReadonlyMap<string, readonly ValueCell[]>
   >(() => {
     const values = new Map<string, readonly ValueCell[]>();
-    environments.forEach((environment, index) => {
-      values.set(environment.id, matrix.values[index]?.data?.items ?? []);
-    });
+    for (const row of environmentRows) {
+      values.set(row.environmentId, row.values.data?.items ?? []);
+    }
     return values;
-  }, [environments, matrix.values]);
+  }, [environmentRows]);
   const loading =
     matrix.environments.isPending ||
     matrix.keys.isPending ||
     matrix.groups.isPending ||
-    matrix.values.some((query) => query.isPending) ||
-    matrix.signals.some((query) => query.isPending) ||
-    matrix.settings.some((query) => query.isPending) ||
-    matrix.pendingDrafts.some((query) => query.isPending);
+    environmentRows.some(
+      (row) =>
+        row.values.isPending ||
+        row.signals.isPending ||
+        row.settings.isPending ||
+        row.pendingDrafts.isPending,
+    );
   const loadError =
     (matrix.environments.isError && matrix.environments.data === undefined) ||
     (matrix.keys.isError && matrix.keys.data === undefined) ||
     (matrix.groups.isError && matrix.groups.data === undefined) ||
-    matrix.values.some((query) => query.isError && query.data === undefined) ||
-    matrix.signals.some((query) => query.isError && query.data === undefined) ||
-    matrix.settings.some((query) => query.isError && query.data === undefined) ||
-    matrix.pendingDrafts.some((query) => query.isError && query.data === undefined);
+    environmentRows.some(
+      (row) =>
+        (row.values.isError && row.values.data === undefined) ||
+        (row.signals.isError && row.signals.data === undefined) ||
+        (row.settings.isError && row.settings.data === undefined) ||
+        (row.pendingDrafts.isError && row.pendingDrafts.data === undefined),
+    );
   const backgroundRefreshError =
     (matrix.environments.isError && matrix.environments.data !== undefined) ||
     (matrix.keys.isError && matrix.keys.data !== undefined) ||
     (matrix.groups.isError && matrix.groups.data !== undefined) ||
-    matrix.values.some((query) => query.isError && query.data !== undefined) ||
-    matrix.signals.some((query) => query.isError && query.data !== undefined) ||
-    matrix.settings.some((query) => query.isError && query.data !== undefined);
+    environmentRows.some(
+      (row) =>
+        (row.values.isError && row.values.data !== undefined) ||
+        (row.signals.isError && row.signals.data !== undefined) ||
+        (row.settings.isError && row.settings.data !== undefined),
+    );
   const virtualRows = rowVirtualizer.getVirtualItems();
   const virtualPaddingTop = virtualRows[0]?.start ?? 0;
   const virtualPaddingBottom =
@@ -769,19 +780,18 @@ export function Matrix({ historyOpen = false }: { historyOpen?: boolean } = {}) 
         <MatrixRowEditor
           refData={ref}
           keyRecord={selectedKey}
-          environment={selectedEnvironment}
-          environments={environments}
-          protectedEnvironmentIds={protectedEnvironmentIds}
-          rows={environments.map((environment) => {
-            const signal = signalsByCell.get(cellID(selectedKey.id, environment.id));
+          environmentId={selectedEnvironment.id}
+          rows={environmentRows.map((row: MatrixEnvironmentRow) => {
+            const signal = signalsByCell.get(cellID(selectedKey.id, row.environmentId));
             return {
-              environment,
-              protected: protectedEnvironmentIds.includes(environment.id),
-              cell: valuesByCell.get(cellID(selectedKey.id, environment.id)),
+              environmentId: row.environmentId,
+              environment: row.environment,
+              protected: row.settings.data?.protected === true,
+              cell: valuesByCell.get(cellID(selectedKey.id, row.environmentId)),
               signal,
               draftPreview: pendingConfigPreview(signal, draftsByVersion),
               problems:
-                problemsByCell.get(cellID(selectedKey.id, environment.id)) ?? [],
+                problemsByCell.get(cellID(selectedKey.id, row.environmentId)) ?? [],
             };
           })}
           busy={stage.isPending || clear.isPending || copy.isPending}
