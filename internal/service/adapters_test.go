@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -73,6 +74,25 @@ func adapterServiceDB(t *testing.T) *store.DB {
 }
 
 type fakeAdapterPlanModule struct{ plan adapter.Plan }
+
+func testModuleFactory(factory func(adapter.Provider, string, string) (adapter.Module, func(), error)) adapter.ModuleFactory {
+	return func(provider adapter.Provider, config adapter.Config, credential string) (*adapter.ModuleLease, error) {
+		module, release, err := factory(provider, config.Origin, credential)
+		if err != nil {
+			if release != nil {
+				release()
+			}
+			return nil, err
+		}
+		return adapter.NewModuleLease(module, release)
+	}
+}
+
+func providerBlindTestModuleFactory(factory func(string, string) (adapter.Module, func(), error)) adapter.ModuleFactory {
+	return testModuleFactory(func(_ adapter.Provider, origin, credential string) (adapter.Module, func(), error) {
+		return factory(origin, credential)
+	})
+}
 
 func (m fakeAdapterPlanModule) ValidateConfig(adapter.Config) error { return nil }
 func (m fakeAdapterPlanModule) TestConnection(context.Context, adapter.ConnectionRequest) (adapter.Connection, error) {
@@ -154,10 +174,10 @@ func TestAdapterCreateAndAddTargetRefuseBeforeCredentialOrProviderWithoutCeremon
 		db := adapterServiceDB(t)
 		bearer := adapterCLISession(t, db)
 		providerCalls := 0
-		svc := &Adapters{DB: db, Auth: &Auth{DB: db}, PlanModule: func(string, string) (adapter.Module, func(), error) {
+		svc := &Adapters{DB: db, Auth: &Auth{DB: db}, ModuleFactory: providerBlindTestModuleFactory(func(string, string) (adapter.Module, func(), error) {
 			providerCalls++
 			return fakeAdapterConfigureModule{gates: new(int)}, nil, nil
-		}}
+		})}
 		_, err := svc.Create(t.Context(), Bearer(bearer), domain.Scope{Org: "org_adapter", Project: "prj_adapter"}, CreateAdapterRequest{
 			Origin: "https://new.example", Credential: []byte("provider-token"),
 			Target: AdapterTargetInput{EnvironmentID: "env_one", DestinationKind: "repository", DestinationOwner: "acme", DestinationName: "new", KeyIDs: []string{"key_create"}},
@@ -174,10 +194,10 @@ func TestAdapterCreateAndAddTargetRefuseBeforeCredentialOrProviderWithoutCeremon
 		}
 		bearer := adapterCLISession(t, db)
 		providerCalls := 0
-		svc := &Adapters{DB: db, Auth: &Auth{DB: db}, PlanModule: func(string, string) (adapter.Module, func(), error) {
+		svc := &Adapters{DB: db, Auth: &Auth{DB: db}, ModuleFactory: providerBlindTestModuleFactory(func(string, string) (adapter.Module, func(), error) {
 			providerCalls++
 			return fakeAdapterConfigureModule{gates: new(int)}, nil, nil
-		}}
+		})}
 		_, err := svc.AddTarget(t.Context(), Bearer(bearer), domain.Scope{Org: "org_adapter", Project: "prj_adapter"}, "adp_1", AdapterTargetInput{
 			EnvironmentID: "env_one", DestinationKind: "repository", DestinationOwner: "acme", DestinationName: "new", KeyIDs: []string{"key_create"},
 		})
@@ -185,6 +205,24 @@ func TestAdapterCreateAndAddTargetRefuseBeforeCredentialOrProviderWithoutCeremon
 			t.Fatalf("AddTarget() error=%v provider calls=%d", err, providerCalls)
 		}
 	})
+}
+
+func TestAdapterCreateRejectsUnknownProviderBeforeCredentialUse(t *testing.T) {
+	factoryCalled := false
+	svc := &Adapters{ModuleFactory: func(adapter.Provider, adapter.Config, string) (*adapter.ModuleLease, error) {
+		factoryCalled = true
+		return adapter.NewModuleLease(fakeAdapterPlanModule{}, nil)
+	}}
+	_, err := svc.Create(t.Context(), LocalPrincipal("usr_adapter"), domain.Scope{Org: "org_adapter", Project: "prj_adapter"}, CreateAdapterRequest{
+		Provider: "gitlab", Origin: "https://gitlab.example", Credential: []byte("provider-token"),
+		Target: AdapterTargetInput{EnvironmentID: "env_one", KeyIDs: []string{"key_one"}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "unknown provider") {
+		t.Fatalf("Create() = %v, want unknown provider refusal", err)
+	}
+	if factoryCalled {
+		t.Fatal("unknown provider reached module factory")
+	}
 }
 
 func (fakeAdapterConfigureModule) ValidateConfig(adapter.Config) error { return nil }
@@ -228,12 +266,12 @@ func TestAdapterCreateAtomicallyBootstrapsCredentialAndFirstTarget(t *testing.T)
 	}
 	gates := 0
 	expires := time.Date(2026, 9, 30, 12, 34, 56, 0, time.UTC)
-	svc := &Adapters{DB: db, Keyring: kr, PlanModule: func(origin, credential string) (adapter.Module, func(), error) {
+	svc := &Adapters{DB: db, Keyring: kr, ModuleFactory: providerBlindTestModuleFactory(func(origin, credential string) (adapter.Module, func(), error) {
 		if origin != "https://new.example" || credential != "provider-token" {
 			t.Fatalf("factory=%q/%q", origin, credential)
 		}
 		return fakeAdapterConfigureModule{gates: &gates, credentialExpiry: expires}, nil, nil
-	}}
+	})}
 	view, err := svc.Create(t.Context(), LocalPrincipal("usr_adapter"), domain.Scope{Org: "org_adapter", Project: "prj_adapter"}, CreateAdapterRequest{Origin: "https://new.example", Credential: []byte("provider-token"), Target: AdapterTargetInput{EnvironmentID: "env_one", DestinationKind: "repository", DestinationOwner: "acme", DestinationName: "new", NamePrefix: "PROD_", KeyIDs: []string{"key_create"}}})
 	if err != nil {
 		t.Fatal(err)
@@ -281,12 +319,12 @@ func TestEnvironmentCreatePersistsGenerationFenceAndCorrelatedAudit(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := &Adapters{DB: db, Keyring: kr, ProviderModule: func(provider, _, _ string) (adapter.Module, func(), error) {
-		if provider != "github-actions" {
+	svc := &Adapters{DB: db, Keyring: kr, ModuleFactory: testModuleFactory(func(provider adapter.Provider, _, _ string) (adapter.Module, func(), error) {
+		if provider != adapter.GitHubActionsProvider {
 			t.Fatalf("provider = %q, want persisted github-actions", provider)
 		}
 		return fakeEnvironmentConfigureModule{}, nil, nil
-	}}
+	})}
 	view, err := svc.Create(t.Context(), LocalPrincipal("usr_adapter"), domain.Scope{Org: "org_adapter", Project: "prj_adapter"}, CreateAdapterRequest{
 		Provider: "github-actions", Origin: "https://api.github.com", Credential: []byte("github_pat_fine"),
 		Target: AdapterTargetInput{EnvironmentID: "env_one", DestinationKind: "environment", DestinationOwner: "acme", DestinationName: "app", DestinationEnvironment: "production", KeyIDs: []string{"key_env_create"}},
@@ -351,12 +389,12 @@ func TestOrganizationSelectedRepositoryIDsAreVerifiedBeforeRoutingCommit(t *test
 		t.Fatal(err)
 	}
 	seen := []int64{}
-	svc := &Adapters{DB: db, Keyring: kr, ProviderModule: func(provider, _, _ string) (adapter.Module, func(), error) {
-		if provider != "github-actions" {
+	svc := &Adapters{DB: db, Keyring: kr, ModuleFactory: testModuleFactory(func(provider adapter.Provider, _, _ string) (adapter.Module, func(), error) {
+		if provider != adapter.GitHubActionsProvider {
 			t.Fatalf("provider = %q", provider)
 		}
 		return fakeRoutingPreflightModule{seen: &seen}, nil, nil
-	}}
+	})}
 	updated, err := svc.UpdateTarget(t.Context(), LocalPrincipal("usr_adapter"), domain.Scope{Org: "org_adapter", Project: "prj_adapter"}, UpdateAdapterTargetRequest{
 		TargetID: "tgt_one", ExpectedGeneration: 1,
 		Target: AdapterTargetInput{EnvironmentID: "env_one", DestinationKind: "organization", DestinationOwner: "acme", Visibility: "selected", SelectedRepositoryIDs: []int64{11, 22}, NamePrefix: "ONE_", KeyIDs: []string{"key_org_route"}},
@@ -423,9 +461,9 @@ func TestAdapterTargetAddAuditsTransactionAuthorityTransition(t *testing.T) {
 		t.Fatal(err)
 	}
 	expires := time.Date(2026, 10, 1, 2, 3, 4, 0, time.UTC)
-	svc := &Adapters{DB: db, Keyring: kr, PlanModule: func(string, string) (adapter.Module, func(), error) {
+	svc := &Adapters{DB: db, Keyring: kr, ModuleFactory: providerBlindTestModuleFactory(func(string, string) (adapter.Module, func(), error) {
 		return fakeAdapterConfigureModule{gates: new(int), destinationID: 303, credentialExpiry: expires}, nil, nil
-	}}
+	})}
 	target, err := svc.AddTarget(t.Context(), LocalPrincipal("usr_adapter"), domain.Scope{Org: "org_adapter", Project: "prj_adapter"}, "adp_1", AdapterTargetInput{
 		EnvironmentID: "env_three", DestinationKind: "repository", DestinationOwner: "acme", DestinationName: "next", NamePrefix: "THREE_", KeyIDs: []string{"key_add_authority"},
 	})
@@ -480,9 +518,9 @@ func TestAdapterTargetAddRefusesDestinationEffectiveNameCollisionAtomically(t *t
 		t.Fatal(err)
 	}
 	gates := 0
-	svc := &Adapters{DB: db, Keyring: kr, PlanModule: func(string, string) (adapter.Module, func(), error) {
+	svc := &Adapters{DB: db, Keyring: kr, ModuleFactory: providerBlindTestModuleFactory(func(string, string) (adapter.Module, func(), error) {
 		return fakeAdapterConfigureModule{gates: &gates, destinationID: 42}, nil, nil
-	}}
+	})}
 	_, err = svc.AddTarget(t.Context(), LocalPrincipal("usr_adapter"), domain.Scope{Org: "org_adapter", Project: "prj_adapter"}, "adp_1", AdapterTargetInput{EnvironmentID: "env_three", DestinationKind: "repository", DestinationOwner: "acme", DestinationName: "app", NamePrefix: "ONE_", KeyIDs: []string{"key_collision"}})
 	if !errors.Is(err, domain.ErrConflict) {
 		t.Fatalf("AddTarget() error = %v, want conflict", err)
@@ -584,9 +622,9 @@ func TestAdapterTargetAddRequiresRevealAcrossEveryAdapterEnvironmentBeforeCreden
 		t.Fatal(err)
 	}
 	gates := 0
-	svc := &Adapters{DB: db, Keyring: kr, PlanModule: func(string, string) (adapter.Module, func(), error) {
+	svc := &Adapters{DB: db, Keyring: kr, ModuleFactory: providerBlindTestModuleFactory(func(string, string) (adapter.Module, func(), error) {
 		return fakeAdapterConfigureModule{gates: &gates, destinationID: 42}, nil, nil
-	}}
+	})}
 	_, err = svc.AddTarget(t.Context(), LocalPrincipal("usr_adapter"), domain.Scope{Org: "org_adapter", Project: "prj_adapter"}, "adp_1", AdapterTargetInput{EnvironmentID: "env_three", DestinationKind: "repository", DestinationOwner: "acme", DestinationName: "app", NamePrefix: "THREE_", KeyIDs: []string{"key_new_target"}})
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("AddTarget() error = %v, want tenant-safe refusal without env_two reveal", err)
@@ -1034,12 +1072,12 @@ func TestAdapterOriginMoveKeepsOldRouteAndCredentialThroughScrubBarrier(t *testi
 	if _, err := db.SQLiteWrite().ExecContext(t.Context(), `UPDATE adapters SET credential_ciphertext=?,credential_set_at='2026-08-17T00:00:00Z' WHERE id='adp_1'`, oldCredential); err != nil {
 		t.Fatal(err)
 	}
-	svc := &Adapters{DB: db, Keyring: kr, PlanModule: func(origin, credential string) (adapter.Module, func(), error) {
+	svc := &Adapters{DB: db, Keyring: kr, ModuleFactory: providerBlindTestModuleFactory(func(origin, credential string) (adapter.Module, func(), error) {
 		if origin != "https://git.next.example" || credential != "new-token" {
 			t.Fatalf("pending factory=%q/%q", origin, credential)
 		}
 		return fakeAdapterConfigureModule{gates: new(int)}, nil, nil
-	}}
+	})}
 	move, err := svc.MoveOrigin(t.Context(), LocalPrincipal("usr_adapter"), domain.Scope{Org: "org_adapter", Project: "prj_adapter"}, "adp_1", "https://git.next.example", []byte("new-token"), false)
 	if err != nil {
 		t.Fatal(err)
@@ -1189,12 +1227,12 @@ func TestAdapterPendingOriginReplacementAuditsTransactionAuthorityTransition(t *
 	if _, err := kr.ForProject(t.Context(), "org_adapter", "prj_adapter"); err != nil {
 		t.Fatal(err)
 	}
-	svc := &Adapters{DB: db, Keyring: kr, PlanModule: func(origin, credential string) (adapter.Module, func(), error) {
+	svc := &Adapters{DB: db, Keyring: kr, ModuleFactory: providerBlindTestModuleFactory(func(origin, credential string) (adapter.Module, func(), error) {
 		if origin != "https://git.fixed.example" || credential != "fixed-token" {
 			t.Fatalf("pending origin factory=%q/%q", origin, credential)
 		}
 		return fakeAdapterConfigureModule{gates: new(int)}, nil, nil
-	}}
+	})}
 	resumed, err := svc.ResumeOriginMove(t.Context(), LocalPrincipal("usr_adapter"), domain.Scope{Org: "org_adapter", Project: "prj_adapter"}, "move_origin_resume", "https://git.fixed.example", []byte("fixed-token"))
 	if err != nil {
 		t.Fatal(err)
@@ -1688,12 +1726,12 @@ func TestAdapterTargetConnectionReauthorizesEveryProviderRequest(t *testing.T) {
 	}
 	gates := 0
 	expires := time.Date(2026, 11, 2, 3, 4, 5, 0, time.UTC)
-	svc := &Adapters{DB: db, Keyring: kr, PlanModule: func(origin, credential string) (adapter.Module, func(), error) {
+	svc := &Adapters{DB: db, Keyring: kr, ModuleFactory: providerBlindTestModuleFactory(func(origin, credential string) (adapter.Module, func(), error) {
 		if origin != "https://git.example" || credential != "provider-token" {
 			t.Fatalf("factory origin=%q credential=%q", origin, credential)
 		}
 		return fakeAdapterTestModule{gates: &gates, credentialExpiry: expires}, nil, nil
-	}}
+	})}
 	if _, err := svc.ReplaceCredential(t.Context(), LocalPrincipal("usr_adapter"), domain.Scope{Org: "org_adapter", Project: "prj_adapter"}, "adp_1", []byte("provider-token")); err != nil {
 		t.Fatal(err)
 	}
@@ -1762,12 +1800,15 @@ func TestAdapterPlanPersistsProviderConflictArtifactAndInspectReturnsIt(t *testi
 	wantChange := adapter.Change{Surface: adapter.Secret, EffectiveName: "ONE_API_TOKEN", Disposition: adapter.Conflict}
 	svc := &Adapters{
 		DB: db, Keyring: kr,
-		PlanModule: func(origin, credential string) (adapter.Module, func(), error) {
+		ModuleFactory: testModuleFactory(func(provider adapter.Provider, origin, credential string) (adapter.Module, func(), error) {
+			if provider != adapter.ForgejoProvider {
+				t.Fatalf("factory got provider=%q, want forgejo", provider)
+			}
 			if origin != "https://git.example" || credential != "provider-token" {
 				t.Fatalf("factory got origin=%q credential=%q", origin, credential)
 			}
 			return fakeAdapterPlanModule{plan: adapter.Plan{Changes: []adapter.Change{wantChange}}}, func() {}, nil
-		},
+		}),
 	}
 	scope := domain.Scope{Org: "org_adapter", Project: "prj_adapter"}
 	result, err := svc.Plan(t.Context(), LocalPrincipal("usr_adapter"), scope, "tgt_one")
