@@ -1,14 +1,19 @@
 package server_test
 
 import (
+	"context"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/fstest"
 
 	"github.com/Hikyo-Org/hikyo/internal/server"
+	"github.com/Hikyo-Org/hikyo/internal/service"
 )
 
 // Embedded-serving rules (#56, system-architecture ADR § Frontend).
@@ -46,12 +51,26 @@ func uiServer(t *testing.T) *httptest.Server {
 // response plus its body.
 func get(t *testing.T, srv *httptest.Server, method, path, accept string) (*http.Response, string) {
 	t.Helper()
-	req, err := http.NewRequest(method, srv.URL+path, nil)
+	return doRequest(t, srv, method, path, accept, "")
+}
+
+// doRequest is get with a request body, for the one caller that needs the
+// API contract's own refusal leg rather than a navigation.
+func doRequest(t *testing.T, srv *httptest.Server, method, path, accept, body string) (*http.Response, string) {
+	t.Helper()
+	var reader io.Reader
+	if body != "" {
+		reader = strings.NewReader(body)
+	}
+	req, err := http.NewRequest(method, srv.URL+path, reader)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if accept != "" {
 		req.Header.Set("Accept", accept)
+	}
+	if body != "" {
+		req.Header.Set("Content-Type", "application/json")
 	}
 	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
 		return http.ErrUseLastResponse
@@ -61,11 +80,11 @@ func get(t *testing.T, srv *httptest.Server, method, path, accept string) (*http
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { resp.Body.Close() })
-	body, err := io.ReadAll(resp.Body)
+	got, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return resp, string(body)
+	return resp, string(got)
 }
 
 const htmlAccept = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
@@ -360,4 +379,174 @@ func TestNonRootEmbeddedFilesAreNotServedByName(t *testing.T) {
 			t.Fatalf("%s: served the embedded file's contents", path)
 		}
 	}
+}
+
+// The dynamic `connect-src` extension (#71) is DOCUMENT-SHAPED, and #211 moves
+// it to where it is consumed. `RemoteOrigins` is a datastore read behind the
+// authorizer, so asking for it on a liveness probe, a metrics scrape, a hashed
+// asset or a refusal spends a query on a response that can never carry the
+// answer. The static baseline — the CSP baseline itself, `nosniff` and the
+// referrer policy — stays on every response, refusals included; only the
+// remote-origin extension is confined to a successfully served document.
+//
+// countingRemotes records the reads. The five directory methods are not the
+// CSP writer's business, so they fail the test if the header path ever reaches
+// one.
+type countingRemotes struct {
+	t     *testing.T
+	calls atomic.Int64
+	mu    sync.RWMutex
+	items []string
+}
+
+// stubRemoteOrigin is the origin the stub reports. It appears in `connect-src`
+// on a document and nowhere else.
+const stubRemoteOrigin = "https://peer.example"
+
+func (c *countingRemotes) RemoteOrigins(context.Context) ([]string, error) {
+	c.calls.Add(1)
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return append([]string(nil), c.items...), nil
+}
+
+func (c *countingRemotes) setOrigins(origins ...string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.items = append(c.items[:0], origins...)
+}
+
+func (c *countingRemotes) unexpected(method string) {
+	c.t.Errorf("%s: the CSP writer reached the directory surface", method)
+}
+
+func (c *countingRemotes) AddRemote(context.Context, service.Actor, string, string, string, string) (service.RemoteView, error) {
+	c.unexpected("AddRemote")
+	return service.RemoteView{}, nil
+}
+
+func (c *countingRemotes) ListRemotes(context.Context, service.Actor) ([]service.RemoteView, error) {
+	c.unexpected("ListRemotes")
+	return nil, nil
+}
+
+func (c *countingRemotes) ShowRemote(context.Context, service.Actor, string) (service.RemoteView, error) {
+	c.unexpected("ShowRemote")
+	return service.RemoteView{}, nil
+}
+
+func (c *countingRemotes) RenameRemote(context.Context, service.Actor, string, string) (service.RemoteView, error) {
+	c.unexpected("RenameRemote")
+	return service.RemoteView{}, nil
+}
+
+func (c *countingRemotes) RemoveRemote(context.Context, service.Actor, string) error {
+	c.unexpected("RemoveRemote")
+	return nil
+}
+
+// countingServer is the real router with a directory surface whose only live
+// method is the origin read.
+func countingServer(t *testing.T, ui fs.FS) (*httptest.Server, *countingRemotes) {
+	t.Helper()
+	remotes := &countingRemotes{t: t, items: []string{stubRemoteOrigin}}
+	srv := httptest.NewServer(server.New(stubReady{}, &server.API{Remotes: remotes}, ui))
+	t.Cleanup(srv.Close)
+	return srv, remotes
+}
+
+// staticBaseline asserts the headers that belong to EVERY response, whatever
+// it is: the CSP baseline, `nosniff` and the referrer policy. A response that
+// drops them because it is not a document is the failure #211 must not cause.
+func staticBaseline(t *testing.T, resp *http.Response) {
+	t.Helper()
+	csp := resp.Header.Get("Content-Security-Policy")
+	if !strings.Contains(csp, "default-src 'self'") || !strings.Contains(csp, "frame-ancestors 'none'") {
+		t.Errorf("Content-Security-Policy = %q, want the baseline", csp)
+	}
+	if !strings.Contains(csp, "connect-src 'self';") {
+		t.Errorf("Content-Security-Policy connect-src = %q, want exactly self", csp)
+	}
+	if got := resp.Header.Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Errorf("X-Content-Type-Options = %q, want nosniff", got)
+	}
+	if got := resp.Header.Get("Referrer-Policy"); got != "no-referrer" {
+		t.Errorf("Referrer-Policy = %q, want no-referrer", got)
+	}
+}
+
+func TestRemoteOriginsAreReadOnlyForSuccessfulSPADocuments(t *testing.T) {
+	// Everything that is not a served document. Each carries the static
+	// baseline and none of them may spend a datastore read on it.
+	for _, c := range []struct {
+		name, method, path, accept, body string
+	}{
+		{"contract refusal", http.MethodPost, "/api/v1/orgs", "application/json", `{}`},
+		{"unrouted contract path", http.MethodGet, "/api/v1/nope", htmlAccept, ""},
+		{"liveness probe", http.MethodGet, "/healthz", htmlAccept, ""},
+		{"readiness probe", http.MethodGet, "/readyz", htmlAccept, ""},
+		{"metrics", http.MethodGet, "/metrics", htmlAccept, ""},
+		{"hashed asset", http.MethodGet, "/assets/app-deadbeef.js", "", ""},
+		{"missing hashed asset", http.MethodGet, "/assets/app-00000000.js", htmlAccept, ""},
+		{"root file", http.MethodGet, "/favicon.svg", "", ""},
+		{"json client on an application route", http.MethodGet, "/some/route", "application/json", ""},
+		{"non-navigation method", http.MethodPost, "/some/route", htmlAccept, ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			srv, remotes := countingServer(t, testUI())
+			resp, _ := doRequest(t, srv, c.method, c.path, c.accept, c.body)
+			if n := remotes.calls.Load(); n != 0 {
+				t.Errorf("RemoteOrigins called %d times for a non-document response", n)
+			}
+			staticBaseline(t, resp)
+			if csp := resp.Header.Get("Content-Security-Policy"); strings.Contains(csp, stubRemoteOrigin) {
+				t.Errorf("a remote origin reached a non-document response: %q", csp)
+			}
+		})
+	}
+
+	// The document legs share one live server. Root and HTML fallback use the
+	// same writer; each asks exactly once, and changing the configured origin
+	// between requests proves the writer does not cache across navigations.
+	srv, remotes := countingServer(t, testUI())
+	for i, c := range []struct{ name, method, path, origin string }{
+		{"root document", http.MethodGet, "/", stubRemoteOrigin},
+		{"html fallback", http.MethodGet, "/org/acme/projects", "https://replacement.example"},
+		{"head on the root document", http.MethodHead, "/", "https://head.example"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			remotes.setOrigins(c.origin)
+			resp, _ := get(t, srv, c.method, c.path, htmlAccept)
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("status = %d, want 200", resp.StatusCode)
+			}
+			if n := remotes.calls.Load(); n != int64(i+1) {
+				t.Errorf("RemoteOrigins called %d times, want %d", n, i+1)
+			}
+			csp := resp.Header.Get("Content-Security-Policy")
+			if !strings.Contains(csp, "connect-src 'self' "+c.origin+";") {
+				t.Errorf("the document's connect-src was not extended: %q", csp)
+			}
+			if i > 0 && strings.Contains(csp, stubRemoteOrigin) {
+				t.Errorf("the document retained removed origin %q: %q", stubRemoteOrigin, csp)
+			}
+		})
+	}
+
+	// A build with no document is not a successful document response. The
+	// refusal takes the baseline and spends nothing.
+	t.Run("missing index is not a document", func(t *testing.T) {
+		srv, remotes := countingServer(t, fstest.MapFS{})
+		resp, body := get(t, srv, http.MethodGet, "/", htmlAccept)
+		if resp.StatusCode != http.StatusNotFound {
+			t.Fatalf("status = %d, want 404", resp.StatusCode)
+		}
+		if strings.Contains(body, "<html") {
+			t.Fatalf("a build without a document served one:\n%s", body)
+		}
+		if n := remotes.calls.Load(); n != 0 {
+			t.Errorf("RemoteOrigins called %d times for a refusal", n)
+		}
+		staticBaseline(t, resp)
+	})
 }

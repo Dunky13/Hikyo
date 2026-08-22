@@ -39,11 +39,15 @@ type ReadyChecker interface {
 // rules in spa.go decide, and only for an HTML navigation to a non-reserved
 // path. A nil `ui` is an API-only binary, which is what a plain `go build`
 // produces.
-// remoteOriginSource adapts the directory service to the CSP writer. It
-// swallows the read error deliberately and answers the BASELINE: a database
+// remoteOriginSource adapts the directory service to the SPA document writer.
+// It swallows the read error deliberately and answers the BASELINE: a database
 // hiccup must tighten the policy, never loosen it, and a document served with
 // `connect-src 'self'` is a workspace that cannot connect — visible and safe —
 // where a document served with no CSP at all would be neither.
+//
+// It is handed to serveSPA rather than to the header middleware (#211): only a
+// served document consumes the extension, so only a served document pays for
+// the read.
 func remoteOriginSource(a *API) func(context.Context) []string {
 	if a == nil || a.Remotes == nil {
 		return nil
@@ -59,11 +63,12 @@ func remoteOriginSource(a *API) func(context.Context) []string {
 
 func New(ready ReadyChecker, a *API, ui fs.FS) http.Handler {
 	r := chi.NewRouter()
-	// The CSP's `connect-src` is extended with the configured remotes' origins
-	// (#71) — a closed list, read per response so an added or removed remote
-	// takes effect without a restart. Nil when no directory surface is wired,
-	// which keeps the baseline exactly as it was.
-	r.Use(securityHeaders(remoteOriginSource(a)))
+	// The static security baseline, on every response including refusals. The
+	// dynamic part — `connect-src` extended with the configured remotes'
+	// origins (#71), a closed list read per DOCUMENT so an added or removed
+	// remote takes effect without a restart — belongs to the SPA writer below,
+	// which is the only response that can use it.
+	r.Use(securityHeaders())
 	// Cross-origin readability for allowlisted workspace origins (#71), at the
 	// TOP of the chain rather than inside the API group, and that placement is
 	// load-bearing rather than tidy.
@@ -154,8 +159,9 @@ func New(ready ReadyChecker, a *API, ui fs.FS) http.Handler {
 		r.Handle(assetPrefix+"*", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			serveAsset(ui, w, req)
 		}))
+		origins := remoteOriginSource(a)
 		r.NotFound(func(w http.ResponseWriter, req *http.Request) {
-			serveSPA(ui, w, req)
+			serveSPA(ui, origins, w, req)
 		})
 	} else {
 		r.NotFound(func(w http.ResponseWriter, _ *http.Request) {
