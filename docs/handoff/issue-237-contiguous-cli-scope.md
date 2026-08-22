@@ -27,5 +27,5 @@ server authorization, API, database, migration, or generated output changed.
 - `go vet ./internal/cli/...`: passed
 - `go build ./...`: passed
 - `go test -count=1 ./...`: 3,267 passed in 57 packages
-- Two-axis review round 1: standards CLEAN; both spec findings fixed before
-  round 2 (pre-auth access validation and config-fold validation).
+- Two-axis review round 2: standards CLEAN; spec CLEAN after fixing pre-auth
+  access validation and config-fold validation findings from round 1.
