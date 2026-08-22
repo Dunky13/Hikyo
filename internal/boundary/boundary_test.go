@@ -13,6 +13,15 @@ import (
 
 const module = "github.com/Hikyo-Org/hikyo"
 
+// ImportConfinement declares the packages that may import one or more external
+// dependency module paths. DependencyPrefixes match either the module path
+// itself or a subpackage path, never a merely similar string.
+type ImportConfinement struct {
+	Name               string
+	DependencyPrefixes []string
+	AllowedImporters   []string
+}
+
 // storeImporters is the exact allowlist of packages permitted to import
 // internal/store or its subpackages. Additions here are architecture
 // decisions, not conveniences.
@@ -44,42 +53,50 @@ var authnImporters = map[string]bool{
 	module + "/internal/isolation":   true, // query-count instrumentation (tests only)
 }
 
-// oidcrpImporters is the allowlist for the OIDC relying-party wrapper (#54).
-// The protocol library (go-oidc, oauth2) is confined behind it, and only the
-// service layer consumes it - relying-party policy has exactly one home.
-var oidcrpImporters = map[string]bool{
-	module + "/internal/service": true,
-	module + "/internal/oidcrp":  true,
-	module + "/internal/app":     true, // construction wiring only
-}
-
-// samlspImporters confines the SAML/XML-DSIG implementation behind the strict
-// relying-party policy wrapper (#72). The service consumes the wrapper; no
-// handler or domain package may interpret signed XML directly.
-var samlspImporters = map[string]bool{
-	module + "/internal/service":  true,
-	module + "/internal/samlsp":   true,
-	module + "/internal/samltest": true, // signed-IdP fixture harness (tests only)
-}
-
-// webauthnrpImporters is the allowlist for the WebAuthn relying-party wrapper
-// (#54). The protocol library (go-webauthn) is confined behind it, and only the
-// service layer and the test harness consume it - relying-party policy has
-// exactly one home.
-var webauthnrpImporters = map[string]bool{
-	module + "/internal/service":      true,
-	module + "/internal/webauthnrp":   true,
-	module + "/internal/webauthntest": true, // software-authenticator harness (tests only)
-	module + "/internal/app":          true, // construction wiring only
-}
-
-// sopsImporters confines the getsops/sops v3 library behind the import
-// framework (#68). It is a large dependency tree — every KMS backend the
-// library supports rides in with it — and it parses and decrypts FOREIGN
-// material, which is the strongest reason to keep its blast radius to one
-// package: nothing outside internal/importer may hand it bytes.
-var sopsImporters = map[string]bool{
-	module + "/internal/importer": true,
+// protocolImportConfinements checks the actual third-party libraries, not the
+// Hikyo wrappers that consume them. The human-auth ADR owns OIDC, OAuth2, and
+// WebAuthn confinement; the machine-identities ADR owns oidcfed's direct OIDC
+// verifier; the saml-sp ADR owns SAML/XML-DSIG; and the import-paths ADR owns
+// SOPS. Exceptions are exact package paths: oidcfed verifies workload OIDC
+// tokens directly, while samltest is the signed IdP fixture harness. Generated
+// files receive no exception; go list includes their production imports, and
+// allImports adds both internal and external test imports to the same check.
+var protocolImportConfinements = []ImportConfinement{
+	{
+		Name:               "OIDC",
+		DependencyPrefixes: []string{"github.com/coreos/go-oidc/v3"},
+		AllowedImporters: []string{
+			module + "/internal/oidcrp",
+			module + "/internal/oidcfed", // workload-identity verifier (#45)
+		},
+	},
+	{
+		Name:               "OAuth2",
+		DependencyPrefixes: []string{"golang.org/x/oauth2"},
+		AllowedImporters:   []string{module + "/internal/oidcrp"},
+	},
+	{
+		Name:               "WebAuthn",
+		DependencyPrefixes: []string{"github.com/go-webauthn/webauthn"},
+		AllowedImporters:   []string{module + "/internal/webauthnrp"},
+	},
+	{
+		Name: "SAML/XML-DSIG",
+		DependencyPrefixes: []string{
+			"github.com/russellhaering/gosaml2",
+			"github.com/russellhaering/goxmldsig",
+			"github.com/mattermost/xml-roundtrip-validator",
+		},
+		AllowedImporters: []string{
+			module + "/internal/samlsp",
+			module + "/internal/samltest", // signed-IdP fixture harness (tests only)
+		},
+	},
+	{
+		Name:               "SOPS",
+		DependencyPrefixes: []string{"github.com/getsops/sops/v3"},
+		AllowedImporters:   []string{module + "/internal/importer"},
+	},
 }
 
 // forbidden direct edges: importer prefix -> banned import prefix.
@@ -159,10 +176,75 @@ func allImports(p pkg) []string {
 	return out
 }
 
+type confinementViolation struct {
+	Importer   string
+	Dependency string
+}
+
+func matchesDependencyPrefix(importPath, dependencyPrefix string) bool {
+	return importPath == dependencyPrefix || strings.HasPrefix(importPath, dependencyPrefix+"/")
+}
+
+func importerAllowed(importPath string, allowedImporters []string) bool {
+	for _, allowedImporter := range allowedImporters {
+		if importPath == allowedImporter {
+			return true
+		}
+	}
+	return false
+}
+
+func confinementViolations(confinement ImportConfinement, packages []pkg) []confinementViolation {
+	var violations []confinementViolation
+	for _, p := range packages {
+		for _, imp := range allImports(p) {
+			for _, dependencyPrefix := range confinement.DependencyPrefixes {
+				if matchesDependencyPrefix(imp, dependencyPrefix) && !importerAllowed(p.ImportPath, confinement.AllowedImporters) {
+					violations = append(violations, confinementViolation{Importer: p.ImportPath, Dependency: imp})
+				}
+			}
+		}
+	}
+	return violations
+}
+
+func TestProtocolImportConfinementMatchers(t *testing.T) {
+	const forbiddenImporter = module + "/internal/boundaryfixture"
+
+	for _, confinement := range protocolImportConfinements {
+		t.Run(confinement.Name, func(t *testing.T) {
+			for _, dependencyPrefix := range confinement.DependencyPrefixes {
+				t.Run(dependencyPrefix, func(t *testing.T) {
+					allowedImporter := confinement.AllowedImporters[0]
+					forbiddenSubpackageImporter := forbiddenImporter + "/subpackage"
+					forbiddenSubpackage := dependencyPrefix + "/subpkg"
+					packages := []pkg{
+						{ImportPath: forbiddenImporter, Imports: []string{dependencyPrefix}},
+						{ImportPath: forbiddenSubpackageImporter, TestImports: []string{forbiddenSubpackage}},
+						{ImportPath: allowedImporter, XTestImports: []string{forbiddenSubpackage}},
+						{ImportPath: forbiddenImporter, XTestImports: []string{dependencyPrefix + "-unrelated/subpkg"}},
+					}
+
+					violations := confinementViolations(confinement, packages)
+					if len(violations) != 2 {
+						t.Fatalf("got %d violations, want 2: %v", len(violations), violations)
+					}
+					if violations[0].Importer != forbiddenImporter || violations[0].Dependency != dependencyPrefix {
+						t.Fatalf("got violation %+v, want importer %s and dependency %s", violations[0], forbiddenImporter, dependencyPrefix)
+					}
+					if violations[1].Importer != forbiddenSubpackageImporter || violations[1].Dependency != forbiddenSubpackage {
+						t.Fatalf("got violation %+v, want importer %s and dependency %s", violations[1], forbiddenSubpackageImporter, forbiddenSubpackage)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestStoreImportAllowlist(t *testing.T) {
 	for _, p := range loadPackages(t) {
 		for _, imp := range allImports(p) {
-			if imp == module+"/internal/store" || strings.HasPrefix(imp, module+"/internal/store/") {
+			if matchesDependencyPrefix(imp, module+"/internal/store") {
 				if !storeImporters[p.ImportPath] {
 					t.Errorf("%s imports %s: not on the store-importer allowlist", p.ImportPath, imp)
 				}
@@ -179,51 +261,23 @@ func TestCryptoChokepoint(t *testing.T) {
 					t.Errorf("%s imports %s: cryptographic primitives are confined to internal/crypto", p.ImportPath, imp)
 				}
 			}
-			if (imp == "filippo.io/age" || strings.HasPrefix(imp, "filippo.io/age/")) && !ageImporters[p.ImportPath] {
+			if matchesDependencyPrefix(imp, "filippo.io/age") && !ageImporters[p.ImportPath] {
 				t.Errorf("%s imports %s: age is confined to internal/crypto/backup", p.ImportPath, imp)
 			}
 		}
 	}
 }
 
-// TestOIDCRPImportAllowlist confines the OIDC protocol library behind
-// internal/oidcrp: only the allowlisted packages may import it.
-func TestOIDCRPImportAllowlist(t *testing.T) {
-	oidcrp := module + "/internal/oidcrp"
-	for _, p := range loadPackages(t) {
-		for _, imp := range allImports(p) {
-			if imp == oidcrp && !oidcrpImporters[p.ImportPath] {
-				t.Errorf("%s imports %s: not on the oidcrp-importer allowlist", p.ImportPath, imp)
+// TestProtocolLibraryImportConfinement executes every declarative protocol
+// dependency rule through the same go-list import graph walker.
+func TestProtocolLibraryImportConfinement(t *testing.T) {
+	packages := loadPackages(t)
+	for _, confinement := range protocolImportConfinements {
+		t.Run(confinement.Name, func(t *testing.T) {
+			for _, violation := range confinementViolations(confinement, packages) {
+				t.Errorf("%s imports %s: %s dependencies are confined to %s", violation.Importer, violation.Dependency, confinement.Name, strings.Join(confinement.AllowedImporters, ", "))
 			}
-		}
-	}
-}
-
-func TestSAMLSPImportAllowlist(t *testing.T) {
-	for _, p := range loadPackages(t) {
-		for _, imp := range allImports(p) {
-			if (imp == "github.com/russellhaering/gosaml2" ||
-				strings.HasPrefix(imp, "github.com/russellhaering/gosaml2/") ||
-				imp == "github.com/russellhaering/goxmldsig" ||
-				strings.HasPrefix(imp, "github.com/russellhaering/goxmldsig/") ||
-				imp == "github.com/mattermost/xml-roundtrip-validator") &&
-				!samlspImporters[p.ImportPath] {
-				t.Errorf("%s imports %s: SAML/XML-DSIG libraries are confined to internal/samlsp", p.ImportPath, imp)
-			}
-		}
-	}
-}
-
-// TestWebAuthnRPImportAllowlist confines the WebAuthn protocol library behind
-// internal/webauthnrp: only the allowlisted packages may import it.
-func TestWebAuthnRPImportAllowlist(t *testing.T) {
-	webauthnrp := module + "/internal/webauthnrp"
-	for _, p := range loadPackages(t) {
-		for _, imp := range allImports(p) {
-			if imp == webauthnrp && !webauthnrpImporters[p.ImportPath] {
-				t.Errorf("%s imports %s: not on the webauthnrp-importer allowlist", p.ImportPath, imp)
-			}
-		}
+		})
 	}
 }
 
@@ -328,18 +382,6 @@ func TestAuthnImportAllowlist(t *testing.T) {
 			}
 			if p.ImportPath == authn && strings.HasPrefix(imp, module+"/") && !allowedImports[imp] {
 				t.Errorf("%s imports %s: the resolution surface builds on generated queries and domain only", p.ImportPath, imp)
-			}
-		}
-	}
-}
-
-// TestSOPSImportAllowlist confines the SOPS library (and the key-service
-// backends it drags in) to the import framework.
-func TestSOPSImportAllowlist(t *testing.T) {
-	for _, p := range loadPackages(t) {
-		for _, imp := range allImports(p) {
-			if strings.HasPrefix(imp, "github.com/getsops/sops/") && !sopsImporters[p.ImportPath] {
-				t.Errorf("%s imports %s: the SOPS library is confined to internal/importer", p.ImportPath, imp)
 			}
 		}
 	}
