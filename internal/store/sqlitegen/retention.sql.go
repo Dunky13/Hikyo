@@ -42,7 +42,6 @@ func (q *Queries) GetLastPruneSuccess(ctx context.Context) (sql.NullString, erro
 }
 
 const listEligibleSnapshotPayloads = `-- name: ListEligibleSnapshotPayloads :many
-
 WITH ranked AS (
     SELECT s.id, s.org_id, s.project_id, s.environment_id, s.revision,
            s.published_at, s.payload_present,
@@ -94,9 +93,6 @@ type ListEligibleSnapshotPayloadsRow struct {
 	RevisionCount int64
 }
 
-// Retention/GC (#53). Scheduler statements are cross-tenant by definition and
-// run only under the scheduler system-proof site. Tenant policy and pin reads
-// carry the ordinary proof-bound chain conjuncts.
 // hikyo:instance-scoped
 func (q *Queries) ListEligibleSnapshotPayloads(ctx context.Context, arg ListEligibleSnapshotPayloadsParams) ([]ListEligibleSnapshotPayloadsRow, error) {
 	rows, err := q.db.QueryContext(ctx, listEligibleSnapshotPayloads, arg.Now, arg.BatchLimit)
@@ -127,6 +123,34 @@ func (q *Queries) ListEligibleSnapshotPayloads(ctx context.Context, arg ListElig
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockSnapshotForRetentionConsequence = `-- name: LockSnapshotForRetentionConsequence :one
+
+SELECT id FROM snapshots
+WHERE org_id = ? AND project_id = ? AND environment_id = ? AND id = ?
+`
+
+type LockSnapshotForRetentionConsequenceParams struct {
+	OrgID         string
+	ProjectID     string
+	EnvironmentID string
+	ID            string
+}
+
+// Retention/GC (#53). Scheduler statements are cross-tenant by definition and
+// run only under the scheduler system-proof site. Tenant policy and pin reads
+// carry the ordinary proof-bound chain conjuncts.
+func (q *Queries) LockSnapshotForRetentionConsequence(ctx context.Context, arg LockSnapshotForRetentionConsequenceParams) (string, error) {
+	row := q.db.QueryRowContext(ctx, lockSnapshotForRetentionConsequence,
+		arg.OrgID,
+		arg.ProjectID,
+		arg.EnvironmentID,
+		arg.ID,
+	)
+	var id string
+	err := row.Scan(&id)
+	return id, err
 }
 
 const markSnapshotCollected = `-- name: MarkSnapshotCollected :execrows

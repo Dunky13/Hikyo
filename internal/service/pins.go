@@ -53,21 +53,104 @@ type SetPinRequest struct {
 }
 
 type PinView struct {
-	ID                   string
-	WorkloadPrincipalID  string
-	Revision             int64
-	AuthorityPrincipalID string
-	ExpiresAt            time.Time
-	CreatedAt            time.Time
-	AuthorizedAt         time.Time
-	HistoryAuthorized    bool
-	SchemaOverride       bool
-	Expired              bool
+	ID                          string
+	WorkloadPrincipalID         string
+	Revision                    int64
+	AuthorityPrincipalID        string
+	ExpiresAt                   time.Time
+	CreatedAt                   time.Time
+	AuthorizedAt                time.Time
+	HistoryAuthorized           bool
+	SchemaOverride              bool
+	Expired                     bool
+	ReleaseRetentionConsequence RetentionConsequence
 }
 
 type SetPinResult struct {
 	Action PinAction
 	Pin    PinView
+}
+
+type RetentionConsequence = store.RetentionConsequence
+
+const (
+	RetentionRetained           = store.RetentionRetained
+	RetentionCollectionEligible = store.RetentionCollectionEligible
+	RetentionAlreadyCollected   = store.RetentionAlreadyCollected
+)
+
+// ReleasePinResult describes transaction-time retention truth. A concurrent
+// GC that commits first yields already_collected; one that runs after release
+// may immediately collect a collection_eligible payload.
+type ReleasePinResult struct {
+	Revision             int64
+	RetentionConsequence RetentionConsequence
+}
+
+type pinRetentionState struct {
+	policy    store.RetentionPolicy
+	snapshots []store.Snapshot
+	pins      []store.RevisionPin
+}
+
+func loadPinRetentionState(ctx context.Context, p authz.Proof, orgs store.OrgReader,
+	projects store.ProjectReader, snapshotsRepo store.SnapshotReader,
+	pinsRepo store.RevisionPinReader) (pinRetentionState, error) {
+	org, err := orgs.Get(ctx, p)
+	if err != nil {
+		return pinRetentionState{}, err
+	}
+	project, err := projects.Get(ctx, p)
+	if err != nil {
+		return pinRetentionState{}, err
+	}
+	snapshots, err := snapshotsRepo.List(ctx, p)
+	if err != nil {
+		return pinRetentionState{}, err
+	}
+	pins, err := pinsRepo.List(ctx, p)
+	if err != nil {
+		return pinRetentionState{}, err
+	}
+	policy := org.Retention
+	if project.RetentionOverride != nil {
+		policy = *project.RetentionOverride
+	}
+	return pinRetentionState{policy: policy, snapshots: snapshots, pins: pins}, nil
+}
+
+func (s pinRetentionState) consequence(snapshotID, releasingPinID string, now time.Time) (RetentionConsequence, error) {
+	var target *store.Snapshot
+	for i := range s.snapshots {
+		if s.snapshots[i].ID == snapshotID {
+			target = &s.snapshots[i]
+			break
+		}
+	}
+	if target == nil {
+		return "", store.ErrNotFound
+	}
+	if !target.PayloadPresent {
+		return RetentionAlreadyCollected, nil
+	}
+	if s.policy.Unlimited || !target.PublishedAt.Before(now.Add(-s.policy.MaxAge)) {
+		return RetentionRetained, nil
+	}
+	var newestRank int64
+	for _, snapshot := range s.snapshots {
+		if snapshot.Revision >= target.Revision {
+			newestRank++
+		}
+	}
+	if newestRank <= s.policy.LastRevisions {
+		return RetentionRetained, nil
+	}
+	for _, pin := range s.pins {
+		if pin.ID != releasingPinID && pin.SnapshotID == snapshotID && pin.ExpiresAt.After(now) {
+			return RetentionRetained, nil
+		}
+	}
+	return RetentionCollectionEligible, nil
 }
 
 func (s *Pins) Set(ctx context.Context, actor Actor, scope domain.Scope, request SetPinRequest) (SetPinResult, error) {
@@ -264,13 +347,21 @@ func (s *Pins) Set(ctx context.Context, actor Actor, scope domain.Scope, request
 		if err := r.Audit().InsertTenant(ctx, p, ev); err != nil {
 			return err
 		}
-		out = SetPinResult{Action: action, Pin: pinView(store.RevisionPin{
-			ID: id, WorkloadPrincipalID: string(request.WorkloadPrincipalID), Revision: target.Revision,
-			AuthorityPrincipalID: string(caller.Principal), ExpiresAt: expiresAt,
-			CreatedAt: createdAt, AuthorizedAt: now, HistoryAuthorized: historyGated,
-			SchemaOverride: schemaOverride,
-		}, now)}
-		return nil
+		state, err := loadPinRetentionState(ctx, p, r.Orgs(), r.Projects(), r.Snapshots(), r.Pins())
+		if err != nil {
+			return fmt.Errorf("service: compute created pin release consequence: %w", err)
+		}
+		for _, listedPin := range state.pins {
+			if listedPin.ID == pin.ID {
+				consequence, err := state.consequence(listedPin.SnapshotID, listedPin.ID, now)
+				if err != nil {
+					return fmt.Errorf("service: compute created pin release consequence: %w", err)
+				}
+				out = SetPinResult{Action: action, Pin: pinView(listedPin, now, consequence)}
+				return nil
+			}
+		}
+		return fmt.Errorf("service: created pin missing from release consequence read: %w", store.ErrNotFound)
 	})
 	if err != nil {
 		return SetPinResult{}, err
@@ -403,70 +494,96 @@ func (s *Pins) List(ctx context.Context, actor Actor, scope domain.Scope) ([]Pin
 		if err != nil {
 			return err
 		}
-		pins, err := r.Pins().List(ctx, p)
+		state, err := loadPinRetentionState(ctx, p, r.Orgs(), r.Projects(), r.Snapshots(), r.Pins())
 		if err != nil {
 			return err
 		}
-		out = make([]PinView, 0, len(pins))
-		for _, pin := range pins {
-			out = append(out, pinView(pin, now))
+		out = make([]PinView, 0, len(state.pins))
+		for _, pin := range state.pins {
+			consequence, err := state.consequence(pin.SnapshotID, pin.ID, now)
+			if err != nil {
+				return fmt.Errorf("service: compute pin release consequence: %w", err)
+			}
+			out = append(out, pinView(pin, now, consequence))
 		}
 		return nil
 	})
 	return out, err
 }
 
-func (s *Pins) Release(ctx context.Context, actor Actor, scope domain.Scope, workloadPrincipalID domain.PrincipalID) error {
+func (s *Pins) Release(ctx context.Context, actor Actor, scope domain.Scope, workloadPrincipalID domain.PrincipalID) (ReleasePinResult, error) {
 	if workloadPrincipalID == "" {
-		return invalidDetail("pin workload principal is required")
+		return ReleasePinResult{}, invalidDetail("pin workload principal is required")
 	}
-	return tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
-		caller, err := actor.resolve(ctx, az, s.now())
+	return tx.WriteResult(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) (ReleasePinResult, error) {
+		caller, err := actor.resolve(ctx, az, store.CanonTime(s.now()))
 		if err != nil {
-			return err
+			return ReleasePinResult{}, err
 		}
 		p, err := az.Authorize(ctx, caller, authz.OpPinRelease, scope)
 		if err != nil {
-			return err
+			return ReleasePinResult{}, err
+		}
+		if err := r.Orgs().Lock(ctx, p); err != nil {
+			return ReleasePinResult{}, fmt.Errorf("service: lock released pin org: %w", err)
 		}
 		if err := r.Projects().Lock(ctx, p); err != nil {
-			return err
+			return ReleasePinResult{}, fmt.Errorf("service: lock released pin project: %w", err)
 		}
 		pin, err := r.Pins().GetForWorkload(ctx, p, string(workloadPrincipalID))
 		if err != nil {
-			return err
+			return ReleasePinResult{}, fmt.Errorf("service: resolve released pin: %w", err)
 		}
 		deleted, err := r.Pins().Delete(ctx, p, string(workloadPrincipalID))
 		if err != nil {
-			return err
+			return ReleasePinResult{}, fmt.Errorf("service: delete released pin: %w", err)
 		}
 		if !deleted {
-			return domain.ErrNotFound
+			return ReleasePinResult{}, fmt.Errorf("service: delete released pin: %w", domain.ErrNotFound)
+		}
+		if err := r.Retention().LockSnapshot(ctx, p, pin.SnapshotID); err != nil {
+			return ReleasePinResult{}, fmt.Errorf("service: lock released pin snapshot: %w", err)
+		}
+		// The consequence instant belongs to this committed attempt, after every
+		// policy/publish/pin/snapshot lock. A retry or lock wait must not reuse a
+		// pre-transaction age or expiry decision.
+		now := store.CanonTime(s.now())
+		state, err := loadPinRetentionState(ctx, p, r.Orgs(), r.Projects(), r.Snapshots(), r.Pins())
+		if err != nil {
+			return ReleasePinResult{}, fmt.Errorf("service: load released pin retention state: %w", err)
+		}
+		consequence, err := state.consequence(pin.SnapshotID, pin.ID, now)
+		if err != nil {
+			return ReleasePinResult{}, fmt.Errorf("service: released pin retention consequence: %w", err)
 		}
 		generation, err := az.PinGeneration(ctx, workloadPrincipalID, scope.Env)
 		if err != nil {
-			return err
+			return ReleasePinResult{}, fmt.Errorf("service: read released pin generation: %w", err)
 		}
 		if err := az.SetPinGeneration(ctx, workloadPrincipalID, scope.Env, generation+1); err != nil {
-			return err
+			return ReleasePinResult{}, fmt.Errorf("service: advance released pin generation: %w", err)
 		}
 		ev, err := domainEvent(ctx, audit.EventPinReleased, caller.Principal,
 			audit.Object{Type: "environment", ID: string(scope.Env)}, audit.Payload{
 				"workload_principal_id": string(workloadPrincipalID), "revision": pin.Revision,
 			})
 		if err != nil {
-			return err
+			return ReleasePinResult{}, err
 		}
-		return r.Audit().InsertTenant(ctx, p, ev)
+		if err := r.Audit().InsertTenant(ctx, p, ev); err != nil {
+			return ReleasePinResult{}, fmt.Errorf("service: audit released pin: %w", err)
+		}
+		return ReleasePinResult{Revision: pin.Revision, RetentionConsequence: consequence}, nil
 	})
 }
 
-func pinView(pin store.RevisionPin, now time.Time) PinView {
+func pinView(pin store.RevisionPin, now time.Time, consequence RetentionConsequence) PinView {
 	return PinView{
 		ID: pin.ID, WorkloadPrincipalID: pin.WorkloadPrincipalID, Revision: pin.Revision,
 		AuthorityPrincipalID: pin.AuthorityPrincipalID, ExpiresAt: pin.ExpiresAt,
 		CreatedAt: pin.CreatedAt, AuthorizedAt: pin.AuthorizedAt,
 		HistoryAuthorized: pin.HistoryAuthorized, SchemaOverride: pin.SchemaOverride,
-		Expired: !pin.ExpiresAt.After(now),
+		Expired:                     !pin.ExpiresAt.After(now),
+		ReleaseRetentionConsequence: consequence,
 	}
 }

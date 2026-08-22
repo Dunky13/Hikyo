@@ -8102,13 +8102,23 @@ paths:
       operationId: releaseRevisionPin
       tags: [revisions]
       summary: Release a workload revision pin.
+      description: |
+        Returns the released revision payload's retention consequence from the
+        same locked transaction that removes the pin. This is transaction-time
+        truth, not a durable retention promise: collection_eligible may be
+        collected immediately after commit, while concurrent GC that commits
+        first is reported as already_collected.
       x-hikyo-class: tenant
       x-hikyo-operation: pin.release
       x-hikyo-formula: [pin@environment]
       x-hikyo-artifacts: [human-session]
       x-hikyo-min-revision: 1
       responses:
-        "204": {description: Released.}
+        "200":
+          description: Released, with the server-derived retention consequence.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/RevisionPinReleaseResult"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "404": {$ref: "#/components/responses/NotFound"}
         "429": {$ref: "#/components/responses/TooManyRequests"}
@@ -10584,7 +10594,7 @@ components:
     RevisionPin:
       type: object
       additionalProperties: false
-      required: [id, workload_principal_id, revision, authority_principal_id, expires_at, created_at, authorized_at, history_authorized, schema_override, expired]
+      required: [id, workload_principal_id, revision, authority_principal_id, expires_at, created_at, authorized_at, history_authorized, schema_override, expired, release_retention_consequence]
       properties:
         id: {$ref: "#/components/schemas/ID"}
         workload_principal_id: {$ref: "#/components/schemas/ID"}
@@ -10596,6 +10606,13 @@ components:
         history_authorized: {type: boolean}
         schema_override: {type: boolean}
         expired: {type: boolean}
+        release_retention_consequence:
+          allOf:
+            - $ref: "#/components/schemas/RetentionConsequence"
+          description: |
+            Server-derived preview of releasing this pin. It controls the
+            existing collection-risk confirmation, but may become stale; the
+            release response is authoritative transaction-time truth.
     RevisionPinResult:
       type: object
       additionalProperties: false
@@ -10603,6 +10620,21 @@ components:
       properties:
         action: {type: string, enum: [created, reassigned, renewed]}
         pin: {$ref: "#/components/schemas/RevisionPin"}
+    RetentionConsequence:
+      type: string
+      enum: [retained, collection_eligible, already_collected]
+      description: |
+        Transaction-time payload state after a pin release. retained means the
+        effective policy or another live pin still keeps the payload;
+        collection_eligible means a sweep may collect it immediately;
+        already_collected means GC committed collection before this result.
+    RevisionPinReleaseResult:
+      type: object
+      additionalProperties: false
+      required: [revision, retention_consequence]
+      properties:
+        revision: {type: integer, format: int64, minimum: 1}
+        retention_consequence: {$ref: "#/components/schemas/RetentionConsequence"}
     RevisionPinList:
       type: object
       additionalProperties: false

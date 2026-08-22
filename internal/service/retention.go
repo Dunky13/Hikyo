@@ -81,6 +81,10 @@ func peakProjectStorage(ctx context.Context, values store.ValueReader, snapshots
 type Retention struct {
 	DB  *store.DB
 	Now func() time.Time
+	// AfterMarkCollected is a deterministic race-test seam. It runs inside the
+	// collection transaction after the snapshot row is marked and locked, but
+	// before value rows are deleted and the transaction commits.
+	AfterMarkCollected func(context.Context, string) error
 }
 
 func (s *Retention) now() time.Time {
@@ -377,6 +381,11 @@ func (s *Retention) Sweep(ctx context.Context) (int64, error) {
 				}
 				if !marked {
 					continue
+				}
+				if s.AfterMarkCollected != nil {
+					if err := s.AfterMarkCollected(ctx, row.ID); err != nil {
+						return retentionSweepChunk{}, err
+					}
 				}
 				if _, err := r.Retention().DeleteCollectedEntries(ctx, p, row.ID); err != nil {
 					return retentionSweepChunk{}, err
