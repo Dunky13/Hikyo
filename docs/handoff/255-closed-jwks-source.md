@@ -46,5 +46,5 @@ go test -run '^$' ./...
 all packages compile
 
 go test -count=1 ./...
-3359 passed across 58 packages
+3376 passed across 59 packages after merging current origin/main
 ```
