@@ -11,6 +11,11 @@ const pages = [
   { source: 'SECURITY.md', target: 'security.md', title: 'Security policy' },
   { source: 'SUPPORT.md', target: 'support.md', title: 'Support policy' },
   { source: 'GOVERNANCE.md', target: 'governance.md', title: 'Governance' },
+  {
+    source: 'docs/status/README.md',
+    target: 'implementation-status.md',
+    title: 'Implementation status',
+  },
   { source: 'TRADEMARK.md', target: 'trademark.md', title: 'Trademark policy' },
   { source: 'CONTRIBUTING.md', target: 'contributing.md', title: 'Contributing' },
   {
@@ -23,6 +28,11 @@ const pages = [
 const siteLinks = new Map([
   ['./CONTRIBUTING.md', '/contributing/'],
   ['./GOVERNANCE.md', '/governance/'],
+  ['./docs/status/README.md', '/implementation-status/'],
+  [
+    './docs/handoff/github-org-transfer.md',
+    'https://github.com/Hikyo-Org/Hikyo/blob/main/docs/handoff/github-org-transfer.md',
+  ],
   ['./SECURITY.md', '/security/'],
   ['./SUPPORT.md', '/support/'],
   ['./TRADEMARK.md', '/trademark/'],
