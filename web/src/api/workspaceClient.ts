@@ -1,6 +1,11 @@
 import { createClient, createConfig, type Client } from '@hikyo/runtime-core';
 
-import { dropWorkspaceValue, workspaceBearer, WorkspaceError } from './workspace.ts';
+import {
+  dropWorkspaceSession,
+  workspaceSession,
+  WorkspaceError,
+  type WorkspaceSessionReference,
+} from './workspace.ts';
 
 /**
  * The workspace tier's DATA transport (#71, multi-instance ADR § What the
@@ -46,16 +51,13 @@ export function createWorkspaceClient(origin: string): Client {
     }),
   );
 
-  // Which bearer VALUE each in-flight request was sent under, so a 401 for a
-  // credential that has since been rotated cannot drop its replacement. Keyed
-  // by the Request object the interceptors share; entries fall away with the
-  // request. The value, not the session id — a step-up rotates the value under
-  // a stable session id, and only the exact value that was rejected is dead.
-  const sentUnder = new WeakMap<Request, string>();
+  // Which aggregate epoch each in-flight request was sent under. Bearer text is
+  // not an identity: only the captured aggregate may consume its 401 verdict.
+  const sentUnder = new WeakMap<Request, WorkspaceSessionReference>();
 
   client.interceptors.request.use((request) => {
-    const bearer = workspaceBearer(origin);
-    if (bearer === undefined) {
+    const session = workspaceSession(origin);
+    if (session === undefined) {
       // FAIL CLOSED. No bearer means no workspace: rather than let a call go
       // out unauthenticated (or, worse, pick up an ambient credential), refuse
       // it here. The provider renders the reconnect state whenever the bearer
@@ -66,8 +68,8 @@ export function createWorkspaceClient(origin: string): Client {
         'This workspace is no longer connected. Reconnect to the remote to continue.',
       );
     }
-    request.headers.set('Authorization', `Bearer ${bearer.value}`);
-    sentUnder.set(request, bearer.value);
+    request.headers.set('Authorization', `Bearer ${session.bearer.value}`);
+    sentUnder.set(request, session);
     return request;
   });
 
@@ -83,13 +85,13 @@ export function createWorkspaceClient(origin: string): Client {
     // de-allowlist is not a 403 either: it strips the CORS headers, so the
     // browser blocks the response and the liveness probe catches it.)
     if (response.status === 401) {
-      const value = sentUnder.get(request);
-      if (value !== undefined) {
+      const session = sentUnder.get(request);
+      if (session !== undefined) {
         // The remote has stopped honouring this bearer. Drop it now — the
         // kill switch bites at the next request the ADR promises, and this is
         // that request — so the shell shows "reconnect" without waiting for
         // the liveness poll to notice.
-        dropWorkspaceValue(origin, value);
+        dropWorkspaceSession(session);
       }
     }
     return response;

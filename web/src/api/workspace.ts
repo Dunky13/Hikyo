@@ -41,76 +41,89 @@ export type WorkspaceBearer = {
 };
 
 /**
- * The bearer store: a module-level Map and nothing else.
+ * The workspace session store: one module-level Map and nothing else.
  *
  * Never a cookie, never localStorage, never sessionStorage — the ADR's rule,
  * and the reason is stated plainly there: in-memory narrows the AT-REST window,
  * it is not non-stealability. A reload is a re-establishment, which costs one
  * popup and one passkey tap.
  */
-const bearers = new Map<string, WorkspaceBearer>();
+export type WorkspaceSessionReference = {
+  readonly bearer: WorkspaceBearer;
+  readonly epoch: number;
+};
+
+type WorkspaceSessionState = WorkspaceSessionReference & {
+  consecutiveFailures: number;
+};
+
+const workspaceSessions = new Map<string, WorkspaceSessionState>();
 const listeners = new Set<() => void>();
 let snapshot: readonly WorkspaceBearer[] = [];
+let nextWorkspaceEpoch = 0;
 
 function publish(): void {
-  snapshot = [...bearers.values()];
+  snapshot = [...workspaceSessions.values()].map((state) => state.bearer);
   for (const listener of listeners) {
     listener();
   }
 }
 
 export function workspaceBearer(origin: string): WorkspaceBearer | undefined {
-  return bearers.get(origin);
+  return workspaceSessions.get(origin)?.bearer;
+}
+
+/** Captures the aggregate identity an asynchronous workspace request belongs to. */
+export function workspaceSession(origin: string): WorkspaceSessionReference | undefined {
+  return workspaceSessions.get(origin);
+}
+
+function workspaceSessionFor(bearer: WorkspaceBearer): WorkspaceSessionState | undefined {
+  const session = workspaceSessions.get(bearer.origin);
+  if (
+    session === undefined ||
+    session.bearer.session !== bearer.session ||
+    session.bearer.value !== bearer.value
+  ) {
+    return undefined;
+  }
+  return session;
 }
 
 export function forgetWorkspace(origin: string): void {
-  // The strike count goes with the bearer VALUE. A workspace that is
-  // re-established after a run of unreachable probes is a NEW credential, and
-  // letting it inherit the old count would kill it on its first blip instead of
-  // its second. Read the held value before deleting the bearer, or the count
-  // outlives the credential it belonged to.
-  const held = bearers.get(origin);
-  if (held !== undefined) {
-    failures.delete(held.value);
-  }
-  if (bearers.delete(origin)) {
+  // One delete removes bearer identity and health together. A later session at
+  // this origin receives a new epoch and starts with its full strike allowance.
+  if (workspaceSessions.delete(origin)) {
     publish();
   }
 }
 
 /**
- * dropWorkspaceValue drops the bearer for one origin ONLY IF it is still the
- * exact VALUE the caller is talking about — the transport's 401/403 kill path
- * and the liveness probe's terminal drop both route through it (#71).
+ * dropWorkspaceSession drops one origin ONLY IF the captured aggregate is
+ * still current. The transport's 401 kill path and liveness probe both use it.
  *
- * Keyed by the value, not the session id, for two reasons that are really one:
- * a probe is asynchronous and the human is not, and a step-up ELEVATES in place
- * — same session id, a freshly ROTATED value. A stale verdict about a value
- * that has since been rotated (by a reconnect OR a step-up) must be a no-op, or
- * a 401 for the dead pre-rotation value would take down the live post-rotation
- * bearer that shares its session id. Only a verdict whose value is still the one
- * we hold is a verdict about the live credential.
+ * The aggregate reference is the epoch boundary. Comparing bearer text is not
+ * enough: even an adversarial value collision must not let old asynchronous
+ * work mutate a replacement session.
  */
-export function dropWorkspaceValue(origin: string, value: string): void {
-  const held = bearers.get(origin);
-  if (held === undefined || held.value !== value) {
+export function dropWorkspaceSession(session: WorkspaceSessionReference): void {
+  if (workspaceSessions.get(session.bearer.origin) !== session) {
     return;
   }
-  forgetWorkspace(origin);
+  workspaceSessions.delete(session.bearer.origin);
+  publish();
 }
 
-/** strike counts one unreachable probe, keyed by the bearer VALUE. */
-function strike(bearer: WorkspaceBearer): boolean {
-  const held = bearers.get(bearer.origin);
-  if (held === undefined || held.value !== bearer.value) {
+/** Counts one unreachable probe only against the aggregate that launched it. */
+function strike(session: WorkspaceSessionState): boolean {
+  if (workspaceSessions.get(session.bearer.origin) !== session) {
     return false;
   }
-  const next = (failures.get(bearer.value) ?? 0) + 1;
-  failures.set(bearer.value, next);
-  if (next < UNREACHABLE_STRIKES) {
+  session.consecutiveFailures += 1;
+  if (session.consecutiveFailures < UNREACHABLE_STRIKES) {
     return true;
   }
-  dropWorkspaceValue(bearer.origin, bearer.value);
+  dropWorkspaceSession(session);
   return false;
 }
 
@@ -150,6 +163,10 @@ export const livenessPollMs = LIVENESS_POLL_MS;
  * claim a workspace that is not there.
  */
 export async function probeWorkspace(bearer: WorkspaceBearer): Promise<boolean> {
+  const session = workspaceSessionFor(bearer);
+  if (session === undefined) {
+    return false;
+  }
   let response: Response;
   try {
     response = await fetch(`${bearer.origin}/api/v1/me/sessions`, {
@@ -172,12 +189,12 @@ export async function probeWorkspace(bearer: WorkspaceBearer): Promise<boolean> 
     // a run of them is: whatever the cause, a workspace this shell cannot
     // reach is not a workspace, and claiming it is open is the one thing the
     // card must not do.
-    return strike(bearer);
+    return strike(session);
   }
   // Only a 401 is the session dying (revoked, expired, origin-binding mismatch —
   // all ErrUnauthenticated).
   if (response.status === 401) {
-    dropWorkspaceValue(bearer.origin, bearer.value);
+    dropWorkspaceSession(session);
     return false;
   }
   // A 403 is NOT death and NOT unreachability — it is a "forbidden" from a
@@ -188,7 +205,7 @@ export async function probeWorkspace(bearer: WorkspaceBearer): Promise<boolean> 
   // session — so a forbidden never becomes a false reconnect. It does not clear
   // the strike count either: it is not the clean answer that proves liveness.
   if (response.status === 403) {
-    return true;
+    return workspaceSessions.get(bearer.origin) === session;
   }
   // ONLY A WELL-FORMED SUCCESS CLEARS THE STRIKE COUNT. Anything else is a
   // strike: a 404 or a 500 is not this endpoint answering, and a 200 carrying
@@ -197,14 +214,17 @@ export async function probeWorkspace(bearer: WorkspaceBearer): Promise<boolean> 
   // ends up claiming a workspace nobody can use, which is the exact failure the
   // strike counter exists to prevent.
   if (!response.ok) {
-    return strike(bearer);
+    return strike(session);
   }
   try {
     zSessionList.parse(await response.json());
   } catch {
-    return strike(bearer);
+    return strike(session);
   }
-  failures.delete(bearer.value);
+  if (workspaceSessions.get(bearer.origin) !== session) {
+    return false;
+  }
+  session.consecutiveFailures = 0;
   return true;
 }
 
@@ -216,9 +236,6 @@ const UNREACHABLE_STRIKES = 2;
  * probe still running when the next is due has already answered the question.
  */
 const PROBE_TIMEOUT_MS = 4_000;
-
-/** Strike counts, keyed by bearer VALUE so a rotated credential starts at zero. */
-const failures = new Map<string, number>();
 
 /** WorkspaceError is a refusal this shell can put in front of a human. */
 export class WorkspaceError extends Error {
@@ -501,19 +518,17 @@ export async function openPrepared(prepared: PreparedWorkspace): Promise<Workspa
 /**
  * rememberWorkspace installs a redeemed bearer as the live one for its origin.
  *
- * It is the ONLY writer of the store, so "which credential is current" has one
- * answer and the probe path can compare against it. Replacing an origin's
- * bearer clears the outgoing VALUE's strike count with it: a new credential
- * starts with its full allowance, and the old value's count can never be spent
- * against it — including across a step-up, which rotates the value under a
- * stable session id.
+ * It is the ONLY writer of the store, so bearer identity and health change in
+ * one Map write. Every replacement gets a new local epoch and zero failures;
+ * old asynchronous work retains the outgoing aggregate reference and cannot
+ * spend a strike, clear health, or evict the replacement.
  */
 export function rememberWorkspace(bearer: WorkspaceBearer): void {
-  const previous = bearers.get(bearer.origin);
-  if (previous !== undefined) {
-    failures.delete(previous.value);
-  }
-  failures.delete(bearer.value);
-  bearers.set(bearer.origin, bearer);
+  nextWorkspaceEpoch += 1;
+  workspaceSessions.set(bearer.origin, {
+    bearer,
+    epoch: nextWorkspaceEpoch,
+    consecutiveFailures: 0,
+  });
   publish();
 }

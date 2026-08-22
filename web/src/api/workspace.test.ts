@@ -72,6 +72,23 @@ describe('probeWorkspace strike counting', () => {
     expect(await probeWorkspace(bearer)).toBe(false);
     expect(workspaceBearer(bearer.origin)).toBeUndefined();
   });
+
+  it('removes bearer and health together when the workspace is closed', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.reject(new TypeError('Failed to fetch'))),
+    );
+    rememberWorkspace(bearer);
+    expect(await probeWorkspace(bearer)).toBe(true);
+
+    forgetWorkspace(bearer.origin);
+    expect(workspaceBearer(bearer.origin)).toBeUndefined();
+
+    const reopened = { ...bearer, session: 'ses_2' };
+    rememberWorkspace(reopened);
+    expect(await probeWorkspace(reopened)).toBe(true);
+    expect(workspaceBearer(bearer.origin)?.session).toBe('ses_2');
+  });
 });
 
 // A probe is asynchronous and the human is not. Closing a workspace and opening
@@ -128,6 +145,53 @@ describe('probeWorkspace session identity', () => {
     expect(await inFlight).toBe(false);
     expect(workspaceBearer(bearer.origin)?.value).toBe('hik_ws_elevated');
     expect(workspaceBearer(bearer.origin)?.session).toBe('ses_1');
+  });
+
+  it('does not report a stale successful probe as health for the replacement session', async () => {
+    let settle: (r: Response) => void = () => {};
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        () =>
+          new Promise<Response>((resolve) => {
+            settle = resolve;
+          }),
+      ),
+    );
+    rememberWorkspace(bearer);
+    const inFlight = probeWorkspace(bearer);
+
+    rememberWorkspace({ ...bearer, session: 'ses_2', value: 'hik_ws_second' });
+
+    settle(sessionList());
+    expect(await inFlight).toBe(false);
+    expect(workspaceBearer(bearer.origin)?.session).toBe('ses_2');
+  });
+
+  it('does not spend a stale failed probe against a replacement epoch', async () => {
+    let rejectOld: (reason: Error) => void = () => {};
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<Response>((_resolve, reject) => {
+            rejectOld = reject;
+          }),
+      )
+      .mockRejectedValue(new TypeError('Failed to fetch'));
+    vi.stubGlobal('fetch', fetchMock);
+    rememberWorkspace(bearer);
+    const inFlight = probeWorkspace(bearer);
+
+    // Epoch, not bearer text, owns the strike count. Reusing the same value in
+    // this adversarial case proves old async work cannot mutate replacement.
+    const replacement = { ...bearer, session: 'ses_2' };
+    rememberWorkspace(replacement);
+    rejectOld(new TypeError('Failed to fetch'));
+
+    expect(await inFlight).toBe(false);
+    expect(await probeWorkspace(replacement)).toBe(true);
+    expect(workspaceBearer(bearer.origin)?.session).toBe('ses_2');
   });
 });
 
