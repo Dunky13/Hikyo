@@ -87,13 +87,14 @@ func (s *Definitions) Apply(ctx context.Context, actor Actor, scope domain.Scope
 		} else {
 			compiledBundle = *precompiled
 		}
-		bundle := compiledBundle.Bundle
+		canonical := compiledBundle.Canonical()
+		bundle := canonical.WireBundle()
 		cur, err := buildCurrentState(ctx, r.Catalogue(), r.Environments(), p)
 		if err != nil {
 			return err
 		}
 
-		if err := s.recheckPins(ctx, r, az, caller, p, scope, plan, bundle, cur, opts); err != nil {
+		if err := s.recheckPins(ctx, r, az, caller, p, scope, plan, canonical, cur, opts); err != nil {
 			return err
 		}
 
@@ -230,7 +231,7 @@ func (s *Definitions) scanApplySkew(ctx context.Context, actor Actor, scope doma
 		if plan.ScanSnapshot == s.Scan.SnapshotVersion() {
 			return nil // no skew: a same-version apply adds no second scan
 		}
-		res, err := scanDeclaration(ctx, s.Keyring, s.Scan, bundleLeaves(parsed.Bundle), newAckSet(acks), s.now(), ingressApply)
+		res, err := scanDeclaration(ctx, s.Keyring, s.Scan, bundleLeaves(parsed.WireBundle()), newAckSet(acks), s.now(), ingressApply)
 		if err != nil {
 			return err
 		}
@@ -257,7 +258,7 @@ func (s *Definitions) scanApplySkew(ctx context.Context, actor Actor, scope doma
 // since the plan (#70, ADR § Plan and apply). Each refusal names what moved and
 // records the rollback-surviving apply_rejected_stale event.
 func (s *Definitions) recheckPins(ctx context.Context, r store.Repos, az *authz.TxAuthorizer, caller authz.Identity,
-	p authz.Proof, scope domain.Scope, plan store.DefinitionsPlan, bundle definitions.Bundle, cur definitions.CurrentState, opts ApplyOptions) error {
+	p authz.Proof, scope domain.Scope, plan store.DefinitionsPlan, bundle definitions.CanonicalBundle, cur definitions.CurrentState, opts ApplyOptions) error {
 	moved := func(what string) error {
 		ev, evErr := newAuditEvent(ctx, audit.EventDefinitionsApplyRejectedStale, caller.Principal,
 			audit.Object{Type: "definitions-plan", ID: plan.ID}, audit.OutcomeDenied, "",

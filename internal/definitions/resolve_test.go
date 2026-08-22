@@ -36,7 +36,7 @@ func TestResolveIDFirstThenBareCreate(t *testing.T) {
 		Environments: []Environment{}, KeyGroups: []KeyGroup{},
 		Keys: []Key{bKey("id-1", "B", "config"), bKey("", "A", "config")},
 	}
-	b, _ = Normalize(b)
+	b = mustCanonicalize(t, b).WireBundle()
 	res, err := Resolve(b, cur)
 	if err != nil {
 		t.Fatal(err)
@@ -62,7 +62,7 @@ func TestResolveSwapRename(t *testing.T) {
 		Environments: []Environment{}, KeyGroups: []KeyGroup{},
 		Keys: []Key{bKey("id-a", "B", "config"), bKey("id-b", "A", "config")},
 	}
-	b, _ = Normalize(b)
+	b = mustCanonicalize(t, b).WireBundle()
 	res, err := Resolve(b, cur)
 	if err != nil {
 		t.Fatalf("swap must resolve: %v", err)
@@ -79,7 +79,7 @@ func TestResolveStaleIDIsHardError(t *testing.T) {
 		Environments: []Environment{}, KeyGroups: []KeyGroup{},
 		Keys: []Key{bKey("id-ghost", "A", "config")},
 	}
-	b, _ = Normalize(b)
+	b = mustCanonicalize(t, b).WireBundle()
 	_, err := Resolve(b, cur)
 	if !errors.Is(err, domain.ErrInvalid) || !strings.Contains(err.Error(), "stale file") {
 		t.Fatalf("stale id must be a hard error: %v", err)
@@ -95,7 +95,7 @@ func TestResolveDuplicateFinalNameNamesBoth(t *testing.T) {
 		Environments: []Environment{}, KeyGroups: []KeyGroup{},
 		Keys: []Key{bKey("id-1", "SAME", "config"), bKey("id-2", "SAME", "config")},
 	}
-	b, _ = Normalize(b)
+	b = mustCanonicalize(t, b).WireBundle()
 	_, err := Resolve(b, cur)
 	if !errors.Is(err, domain.ErrInvalid) || !strings.Contains(err.Error(), "SAME") {
 		t.Fatalf("duplicate final name must name it: %v", err)
@@ -113,7 +113,7 @@ func TestResolvePortableMatchesByName(t *testing.T) {
 		Environments:  []Environment{}, KeyGroups: []KeyGroup{},
 		Keys: []Key{bKey("", "A", "config"), bKey("", "B", "config")},
 	}
-	b, _ = Normalize(b)
+	b = mustCanonicalize(t, b).WireBundle()
 	res, err := Resolve(b, cur)
 	if err != nil {
 		t.Fatal(err)
@@ -133,7 +133,7 @@ func TestResolveAdditiveModificationRefused(t *testing.T) {
 	mod := bKey("", "A", "config")
 	mod.Declaration = schema.Declaration{Rule: &schema.Rule{Type: schema.TypeInteger}}
 	b := Bundle{FormatVersion: FormatVersion, Environments: []Environment{}, KeyGroups: []KeyGroup{}, Keys: []Key{mod}}
-	b, _ = Normalize(b)
+	b = mustCanonicalize(t, b).WireBundle()
 	_, err := Resolve(b, cur)
 	if !errors.Is(err, domain.ErrInvalid) || !strings.Contains(err.Error(), "additive bundle may not modify") {
 		t.Fatalf("additive modification must be refused naming the key: %v", err)
@@ -149,7 +149,7 @@ func TestResolveDeletionByAbsence(t *testing.T) {
 		Environments: []Environment{}, KeyGroups: []KeyGroup{},
 		Keys: []Key{bKey("id-1", "KEEP", "config")},
 	}
-	b, _ = Normalize(b)
+	b = mustCanonicalize(t, b).WireBundle()
 	res, err := Resolve(b, cur)
 	if err != nil {
 		t.Fatal(err)
@@ -171,7 +171,7 @@ func TestResolveRevealOnSecretRuleChange(t *testing.T) {
 	changed := bKey("id-1", "TOKEN", "secret")
 	changed.Declaration = schema.Declaration{Rule: &schema.Rule{Type: schema.TypeInteger}}
 	b := Bundle{FormatVersion: FormatVersion, BaseRevision: rev(2), Environments: []Environment{}, KeyGroups: []KeyGroup{}, Keys: []Key{changed}}
-	b, _ = Normalize(b)
+	b = mustCanonicalize(t, b).WireBundle()
 	res, err := Resolve(b, cur)
 	if err != nil {
 		t.Fatal(err)
@@ -186,7 +186,7 @@ func TestResolveDanglingPresenceRejected(t *testing.T) {
 	k := bKey("", "A", "config")
 	k.RequiredIn = Presence{Mode: "explicit", Environments: []string{"ghost"}}
 	b := Bundle{FormatVersion: FormatVersion, Environments: []Environment{}, KeyGroups: []KeyGroup{}, Keys: []Key{k}}
-	b, _ = Normalize(b)
+	b = mustCanonicalize(t, b).WireBundle()
 	_, err := Resolve(b, cur)
 	if !errors.Is(err, domain.ErrInvalid) || !strings.Contains(err.Error(), "ghost") {
 		t.Fatalf("dangling presence env must be rejected naming it: %v", err)
@@ -197,8 +197,7 @@ func TestClassifyDrift(t *testing.T) {
 	cur := CurrentState{SchemaRevision: 10, Keys: []CurrentKey{curKey("id-1", "A", "config")}}
 	equalBundle := func(base int64, keys ...Key) Bundle {
 		b := Bundle{FormatVersion: FormatVersion, BaseRevision: rev(base), Environments: []Environment{}, KeyGroups: []KeyGroup{}, Keys: keys}
-		b, _ = Normalize(b)
-		return b
+		return mustCanonicalize(t, b).WireBundle()
 	}
 	cases := []struct {
 		name string

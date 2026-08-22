@@ -113,7 +113,7 @@ users:
 			if plan.Template.Scope.FileDigest != "" {
 				t.Fatalf("live template recorded a file digest: %q", plan.Template.Scope.FileDigest)
 			}
-			for _, key := range plan.Bundle.Keys {
+			for _, key := range plan.Bundle.WireBundle().Keys {
 				if key.Classification != string(schema.Secret) {
 					t.Fatalf("live key %s defaulted to %s, want secret", key.Name, key.Classification)
 				}
@@ -123,8 +123,8 @@ users:
 			if err != nil {
 				t.Fatalf("phase 2 refused live fixture: %v", err)
 			}
-			if len(imported.Imported) != len(plan.Bundle.Keys) {
-				t.Fatalf("imported = %v, bundle keys = %d", imported.Imported, len(plan.Bundle.Keys))
+			if len(imported.Imported) != len(plan.Bundle.WireBundle().Keys) {
+				t.Fatalf("imported = %v, bundle keys = %d", imported.Imported, len(plan.Bundle.WireBundle().Keys))
 			}
 		})
 	}
@@ -532,12 +532,12 @@ func scenarioImportPerSourceE2E(t *testing.T, db *store.DB) {
 			if strings.Join(plan.New, ",") != strings.Join(tc.wantKeys, ",") {
 				t.Fatalf("new bucket = %v, want %v", plan.New, tc.wantKeys)
 			}
-			if len(plan.Bundle.Keys) != len(tc.wantKeys) {
-				t.Fatalf("bundle declares %d keys, want %d", len(plan.Bundle.Keys), len(tc.wantKeys))
+			if len(plan.Bundle.WireBundle().Keys) != len(tc.wantKeys) {
+				t.Fatalf("bundle declares %d keys, want %d", len(plan.Bundle.WireBundle().Keys), len(tc.wantKeys))
 			}
 			// Classification matrix: EVERY imported key defaults `secret`, from
 			// every source, with no exception and no downgrade.
-			for _, k := range plan.Bundle.Keys {
+			for _, k := range plan.Bundle.WireBundle().Keys {
 				if k.Classification != string(schema.Secret) {
 					t.Errorf("%s declared %s; every imported key defaults secret", k.Name, k.Classification)
 				}
@@ -565,7 +565,7 @@ func scenarioImportPerSourceE2E(t *testing.T, db *store.DB) {
 			// definitions revision: applying the bundle bumps that revision, so
 			// a run that silently re-planned in between would pass here while
 			// the product's documented flow failed.
-			for _, k := range plan.Bundle.Keys {
+			for _, k := range plan.Bundle.WireBundle().Keys {
 				mustKey(t, keys, actor, scope, k.Name, k.Classification, schema.DefaultPresenceRules())
 			}
 			imported, err := values.Import(t.Context(), actor, prod, importRequestFrom(plan))
@@ -620,9 +620,9 @@ func scenarioMultiEnvImportE2E(t *testing.T, db *store.DB) {
 	wantKeys := []string{"API_KEY", "DB_HOST", "DB_PASSWORD", "DB_PORT"}
 
 	plan := mustProjectPlan(t, "k8s", result, values, actor, scope, raw, staging, prod)
-	if len(plan.Bundle.Keys) != len(wantKeys) {
+	if len(plan.Bundle.WireBundle().Keys) != len(wantKeys) {
 		t.Fatalf("bundle declares %d keys, want ONE project-wide declaration per key (%d)",
-			len(plan.Bundle.Keys), len(wantKeys))
+			len(plan.Bundle.WireBundle().Keys), len(wantKeys))
 	}
 	if len(plan.Envs) != 2 || len(plan.Manifest.Target.Environments) != 2 {
 		t.Fatalf("plan does not span both environments: envs=%d manifest=%v",
@@ -631,7 +631,7 @@ func scenarioMultiEnvImportE2E(t *testing.T, db *store.DB) {
 
 	// Apply the one bundle by hand (definitions plan|apply is #70), then import
 	// each environment's values file against the original manifest.
-	for _, k := range plan.Bundle.Keys {
+	for _, k := range plan.Bundle.WireBundle().Keys {
 		mustKey(t, keys, actor, scope, k.Name, k.Classification, schema.DefaultPresenceRules())
 	}
 	for _, env := range []domain.Scope{staging, prod} {
@@ -724,8 +724,8 @@ func scenarioImportUndeclaredTransition(t *testing.T, db *store.DB) {
 		Folder: []string{"source"}, SourceName: "NEW_KEY", Value: "value", Type: schema.TypeString,
 	}}}
 	plan := mustPlan(t, "k8s", result, values, actor, scope, prod, []byte("fixture"), "")
-	if len(plan.Bundle.Keys) != 1 {
-		t.Fatalf("phase 1 emitted %d bundle keys, want one", len(plan.Bundle.Keys))
+	if len(plan.Bundle.WireBundle().Keys) != 1 {
+		t.Fatalf("phase 1 emitted %d bundle keys, want one", len(plan.Bundle.WireBundle().Keys))
 	}
 	created := mustKey(t, keys, actor, scope, "NEW_KEY", string(schema.Secret), schema.DefaultPresenceRules())
 	if _, _, err := keys.Reclassify(t.Context(), actor, scope, created.ID, string(schema.Config)); err != nil {
