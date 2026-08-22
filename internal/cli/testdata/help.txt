@@ -190,6 +190,8 @@ machine identities:
   a minted credential is shown ONCE. It reaches a workload through
   --token-file <path> or HIKYO_TOKEN, never a --token flag: a secret in argv
   is visible in ps, in /proc, and in shell history.
+  When both eligible artifact kinds are available, pass --auth=human or
+  --auth=machine; Hikyo refuses to guess.
 
 oidc federation:
   hikyo instance-config federation-issuer list [-o table|json]

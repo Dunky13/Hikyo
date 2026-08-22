@@ -144,15 +144,16 @@ func splitAdapterKeys(raw string) []string {
 	return out
 }
 
-func runAdapterCeremony(ctx context.Context, ios IO, client *Client, st *State, artifact SessionArtifact, base, adapterID, operation string, additional ...string) error {
+func runAdapterCeremony(ctx context.Context, ios IO, client *Client, st *State, artifact AuthArtifact, base, adapterID, operation string, additional ...string) error {
+	session, err := requireHumanSession("adapter reauthentication", artifact)
+	if err != nil {
+		return err
+	}
 	// Command tests and embedded callers may deliberately omit the browser
 	// adapter. The shipped binary always supplies it; omission keeps this
 	// transport seam injectable without launching a real browser in tests.
 	if ios.OpenURL == nil {
 		return nil
-	}
-	if artifact.Instance == "" {
-		return failf(ExitRefused, "adapter reauthentication requires a stored human CLI session")
 	}
 	environments := append([]string(nil), additional...)
 	if adapterID != "" {
@@ -169,7 +170,7 @@ func runAdapterCeremony(ctx context.Context, ios IO, client *Client, st *State, 
 	if len(environments) == 0 {
 		return failf(ExitRefused, "adapter reauthentication requires at least one target environment")
 	}
-	return runCLIAdapterReauth(ctx, client, st, artifact, operation, environments, ios.OpenURL)
+	return runCLIAdapterReauth(ctx, client, st, session, operation, environments, ios.OpenURL)
 }
 
 func runAdapter(ctx context.Context, ios IO, args []string) error {
