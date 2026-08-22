@@ -4,8 +4,8 @@ set -eu
 script_dir=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 checker="$script_dir/check-required-jobs.sh"
 
-if ! "$checker" --supports-plan-v1; then
-	printf 'required-jobs fixture failed: plan-v1 capability was not reported\n' >&2
+if ! "$checker" --supports-plan-v2; then
+	printf 'required-jobs fixture failed: plan-v2 capability was not reported\n' >&2
 	exit 1
 fi
 
@@ -33,16 +33,16 @@ expect_reject() {
 
 all_plan='{
 	"client":true,
-	"compose_demo":true,
+	"compose-demo":true,
 	"docs":true,
 	"fuzz":true,
 	"generated":true,
-	"headline_guarantee":true,
-	"k8s_e2e":true,
+	"headline-guarantee":true,
+	"k8s-e2e":true,
 	"lint":true,
 	"race":true,
-	"release_snapshot":true,
-	"supply_chain_checks":true,
+	"release-snapshot":true,
+	"supply-chain-checks":true,
 	"test":true,
 	"web":true
 }'
