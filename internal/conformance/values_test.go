@@ -933,7 +933,7 @@ func auditOperationCount(t *testing.T, db *store.DB, actor domain.PrincipalID, o
 	if db.Engine() == store.EnginePostgres {
 		err = db.PG().QueryRow(t.Context(),
 			`SELECT COUNT(*) FROM audit_tenant_events
-			 WHERE type = 'grant.denied' AND actor_id = $1 AND payload->>'operation' = $2`,
+			 WHERE type = 'grant.denied' AND actor_id = $1 AND (payload::jsonb)->>'operation' = $2`,
 			actor, string(op)).Scan(&out)
 	} else {
 		err = db.SQLiteRead().QueryRowContext(t.Context(),
