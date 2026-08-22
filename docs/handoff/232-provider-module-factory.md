@@ -1,7 +1,7 @@
 # Handoff: #232 provider-aware adapter module factory
 
 Issue: https://github.com/Hikyo-Org/Hikyo/issues/232 (parent #204; programme
-#203; audit ID `BE16-B`). Base: `4a4060b0d986111af9822974c7ce264714fc0e04`.
+#203; audit ID `BE16-B`). Base: `709b2b0ca32b906b95a9ae7149664328ca823b97`.
 
 ## Contract
 
@@ -38,7 +38,7 @@ go test -count=1 ./internal/app/... ./internal/adapter/... ./internal/service/..
 go test -race -count=1 ./internal/adapter/...              110 passed
 go build ./...                                             passed
 go vet ./...                                               passed
-go test -p 4 -count=1 -timeout=20m ./...                   3228 passed / 57 packages
+go test -p 4 -count=1 -timeout=20m ./...                   3235 passed / 57 packages
 ```
 
 Two-axis Codex review reached `CLEAN` in round 2 after release ownership was
