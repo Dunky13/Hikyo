@@ -237,7 +237,7 @@ func runDefinitionsScaffold(ios IO, args []string) error {
 		return failf(ExitRefused, "%v", err)
 	}
 
-	bundle := definitions.Bundle{Keys: make([]definitions.Key, 0, len(entries))}
+	bundle := definitions.Bundle{FormatVersion: definitions.FormatVersion, Keys: make([]definitions.Key, 0, len(entries))}
 	for _, e := range entries {
 		bundle.Keys = append(bundle.Keys, definitions.Key{
 			Name:           e.Key,
@@ -248,11 +248,11 @@ func runDefinitionsScaffold(ios IO, args []string) error {
 			ForbiddenIn:    definitions.Presence{Mode: string(schema.PresenceNone)},
 		})
 	}
-	normalized, err := definitions.Normalize(bundle)
+	canonical, err := definitions.Canonicalize(bundle)
 	if err != nil {
 		return failf(ExitInternal, "%v", err)
 	}
-	out, err := definitions.Encode(normalized)
+	out, err := definitions.Encode(canonical)
 	if err != nil {
 		return failf(ExitInternal, "%v", err)
 	}
