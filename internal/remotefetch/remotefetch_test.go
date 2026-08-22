@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -265,7 +266,7 @@ func TestCanonicalRemoteURLHasNoTrailingSlash(t *testing.T) {
 // a remote that was contacted and did not answer. The caller then persisted a
 // fetch-failure snapshot and an audit event per remote, for connections nobody
 // opened.
-func TestRoundBudgetCoversEveryWaveAndUnattemptedTargetsAreOmitted(t *testing.T) {
+func TestRoundBudgetCoversEveryWave(t *testing.T) {
 	c, err := New(Config{Deadline: 10 * time.Second, ResponseCap: 1 << 20, FanOut: 4})
 	if err != nil {
 		t.Fatal(err)
@@ -279,18 +280,110 @@ func TestRoundBudgetCoversEveryWaveAndUnattemptedTargetsAreOmitted(t *testing.T)
 	if got := c.RoundBudget(1); got < 10*time.Second {
 		t.Errorf("RoundBudget(1) = %v, want at least one per-remote deadline", got)
 	}
+}
 
-	// Three waves' worth of targets against a round context that is already
-	// over: nothing is attempted, so nothing is reported.
-	targets := make([]Target, 12)
-	for i := range targets {
-		targets[i] = Target{ID: "rmt_" + string(rune('a'+i)), Origin: "https://unreachable.invalid", Pin: "x"}
+func TestFetchAllReturnsOneOrderedResultPerTargetWhenCancelledMidQueue(t *testing.T) {
+	started := make(chan struct{}, 1)
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		started <- struct{}{}
+		<-r.Context().Done()
+	}))
+	defer srv.Close()
+
+	c, err := New(Config{Deadline: 5 * time.Second, ResponseCap: 1 << 20, FanOut: 1})
+	if err != nil {
+		t.Fatal(err)
 	}
+	targets := make([]Target, 4)
+	for i := range targets {
+		targets[i] = Target{
+			ID: "rmt_" + strconv.Itoa(i), Origin: srv.URL,
+			Pin: SPKIFingerprint(srv.Certificate()), Credential: "hik_ic_test",
+		}
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	results := make(chan []Result, 1)
+	go func() { results <- c.FetchAll(ctx, targets) }()
+	<-started
+	cancel()
+	got := <-results
+
+	if len(got) != len(targets) {
+		t.Fatalf("FetchAll returned %d results for %d targets", len(got), len(targets))
+	}
+	attempted, slotRefused, cancelled := 0, 0, 0
+	for i, result := range got {
+		if result.TargetID() != targets[i].ID {
+			t.Errorf("result[%d] identifies %q, want %q", i, result.TargetID(), targets[i].ID)
+		}
+		switch result := result.(type) {
+		case *Attempted:
+			attempted++
+			if result.Err == nil {
+				t.Error("cancelled in-flight request reported a successful attempt")
+			}
+		case *NotAttempted:
+			switch result.Reason {
+			case NotAttemptedSlotNotAcquired:
+				slotRefused++
+			case NotAttemptedContextCancelled:
+				cancelled++
+			default:
+				t.Errorf("result[%d] has unknown not-attempted reason %q", i, result.Reason)
+			}
+		default:
+			t.Fatalf("result[%d] has unknown variant %T", i, result)
+		}
+	}
+	if attempted != 1 {
+		t.Errorf("attempted %d targets, want the one request that reached the peer", attempted)
+	}
+	if slotRefused != 1 {
+		t.Errorf("reported %d slot refusals, want the first queued target", slotRefused)
+	}
+	if cancelled != len(targets)-2 {
+		t.Errorf("reported %d context-cancelled targets, want %d never queued targets", cancelled, len(targets)-2)
+	}
+}
+
+func TestFetchAllDistinguishesAttemptedNetworkFailureFromCancellation(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+
+	c, err := New(Config{Deadline: time.Second, ResponseCap: 1 << 20, FanOut: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := Target{
+		ID: "rmt_failure", Origin: srv.URL,
+		Pin: SPKIFingerprint(srv.Certificate()), Credential: "hik_ic_test",
+	}
+	got := c.FetchAll(t.Context(), []Target{target})
+	if len(got) != 1 {
+		t.Fatalf("FetchAll returned %d results, want 1", len(got))
+	}
+	attempt, ok := got[0].(*Attempted)
+	if !ok {
+		t.Fatalf("network request result is %T, want Attempted", got[0])
+	}
+	if attempt.Outcome != OutcomeUnreachable || attempt.Err == nil {
+		t.Errorf("attempt = %+v, want unreachable with error detail", attempt)
+	}
+
 	dead, cancel := context.WithCancel(t.Context())
 	cancel()
-	if got := c.FetchAll(dead, targets); len(got) != 0 {
-		t.Errorf("a cancelled round reported %d results; a target that was never dialled "+
-			"has produced no evidence and must be OMITTED, so the caller serves its "+
-			"last-known snapshot instead of persisting a fabricated failure", len(got))
+	got = c.FetchAll(dead, []Target{target})
+	if len(got) != 1 {
+		t.Fatalf("cancelled FetchAll returned %d results, want 1", len(got))
+	}
+	notAttempted, ok := got[0].(*NotAttempted)
+	if !ok {
+		t.Fatalf("cancelled-before-scheduling result is %T, want NotAttempted", got[0])
+	}
+	if notAttempted.Reason != NotAttemptedContextCancelled {
+		t.Errorf("not-attempted reason = %q, want %q", notAttempted.Reason, NotAttemptedContextCancelled)
 	}
 }
