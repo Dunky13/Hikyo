@@ -42,28 +42,18 @@ jobs:
           set -o pipefail
           if [ "$EVENT_NAME" = push ]; then
             plan=$(./scripts/ci/classify-changed-paths.sh --all)
-          elif git cat-file -e "$BASE_SHA:scripts/ci/classify-changed-paths.sh" 2>/dev/null; then
+          elif git cat-file -e "$BASE_SHA:scripts/ci/classify-changed-paths.sh" 2>/dev/null &&
+            git cat-file -e "$BASE_SHA:scripts/ci/ci-job-registry.json" 2>/dev/null; then
             trusted_classifier="$RUNNER_TEMP/classify-changed-paths.sh"
+            trusted_registry="$RUNNER_TEMP/ci-job-registry.json"
             git show "$BASE_SHA:scripts/ci/classify-changed-paths.sh" >"$trusted_classifier"
+            git show "$BASE_SHA:scripts/ci/ci-job-registry.json" >"$trusted_registry"
             chmod +x "$trusted_classifier"
             plan=$(git diff --name-only "$BASE_SHA...$HEAD_SHA" |
-              "$trusted_classifier" --files)
+              CI_JOB_REGISTRY="$trusted_registry" "$trusted_classifier" --files)
           else
-            plan=$(jq -cn '{
-              client: true,
-              compose_demo: true,
-              docs: true,
-              fuzz: true,
-              generated: true,
-              headline_guarantee: true,
-              k8s_e2e: true,
-              lint: true,
-              race: true,
-              release_snapshot: true,
-              supply_chain_checks: true,
-              test: true,
-              web: true
-            }')
+            echo "trusted CI classifier or job registry is missing at $BASE_SHA" >&2
+            exit 1
           fi
           printf 'plan=%s\n' "$plan" >>"$GITHUB_OUTPUT"
 
@@ -145,7 +135,7 @@ jobs:
 
   supply-chain-checks:
     needs: changes
-    if: ${{ fromJSON(needs.changes.outputs.plan).supply_chain_checks }}
+    if: ${{ fromJSON(needs.changes.outputs.plan)['supply-chain-checks'] }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -189,6 +179,8 @@ jobs:
         run: ./scripts/ci/check-required-jobs_test.sh
       - name: Changed-path classifier fixture
         run: ./scripts/ci/classify-changed-paths_test.sh
+      - name: CI job registry and workflow bijection fixture
+        run: go test -count=1 ./scripts/ci -run '^TestCIJobRegistry'
       - name: Chart check fixture
         run: ./scripts/ci/check-chart_test.sh
       - name: Trusted CI scripts fixture
@@ -298,7 +290,7 @@ jobs:
 
   release-snapshot:
     needs: changes
-    if: ${{ fromJSON(needs.changes.outputs.plan).release_snapshot }}
+    if: ${{ fromJSON(needs.changes.outputs.plan)['release-snapshot'] }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -516,7 +508,7 @@ jobs:
 
   compose-demo:
     needs: changes
-    if: ${{ fromJSON(needs.changes.outputs.plan).compose_demo }}
+    if: ${{ fromJSON(needs.changes.outputs.plan)['compose-demo'] }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -801,7 +793,7 @@ jobs:
   # a fresh `hikyo-e2e` cluster and deletes it in a trap.
   k8s-e2e:
     needs: changes
-    if: ${{ fromJSON(needs.changes.outputs.plan).k8s_e2e }}
+    if: ${{ fromJSON(needs.changes.outputs.plan)['k8s-e2e'] }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -1205,7 +1197,7 @@ jobs:
   # the project's positioning rests on.
   headline-guarantee:
     needs: changes
-    if: ${{ fromJSON(needs.changes.outputs.plan).headline_guarantee }}
+    if: ${{ fromJSON(needs.changes.outputs.plan)['headline-guarantee'] }}
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -1291,16 +1283,18 @@ jobs:
           PLAN_JSON: ${{ needs.changes.outputs.plan }}
         run: |
           trusted_checker="$RUNNER_TEMP/check-required-jobs.sh"
+          trusted_registry="$RUNNER_TEMP/ci-job-registry.json"
           if [ "$GITHUB_EVENT_NAME" = push ]; then
             cp ./scripts/ci/check-required-jobs.sh "$trusted_checker"
+            cp ./scripts/ci/ci-job-registry.json "$trusted_registry"
           else
             git show "$BASE_SHA:scripts/ci/check-required-jobs.sh" >"$trusted_checker"
+            git show "$BASE_SHA:scripts/ci/ci-job-registry.json" >"$trusted_registry"
           fi
           chmod +x "$trusted_checker"
 
-          if "$trusted_checker" --supports-plan-v1 >/dev/null 2>&1; then
-            "$trusted_checker" "$GITHUB_EVENT_NAME" "$NEEDS_JSON" "$PLAN_JSON"
-          else
-            legacy_needs=$(printf '%s\n' "$NEEDS_JSON" | jq -c 'del(.changes)')
-            "$trusted_checker" "$GITHUB_EVENT_NAME" "$legacy_needs"
+          if ! CI_JOB_REGISTRY="$trusted_registry" "$trusted_checker" --supports-plan-v2; then
+            echo "trusted required-job checker does not support CI plan v2" >&2
+            exit 1
           fi
+          CI_JOB_REGISTRY="$trusted_registry" "$trusted_checker" "$GITHUB_EVENT_NAME" "$NEEDS_JSON" "$PLAN_JSON"

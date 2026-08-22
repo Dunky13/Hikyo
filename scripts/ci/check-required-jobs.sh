@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-if [ "$#" -eq 1 ] && [ "$1" = "--supports-plan-v1" ]; then
+if [ "$#" -eq 1 ] && [ "$1" = "--supports-plan-v2" ]; then
 	exit 0
 fi
 
@@ -13,8 +13,16 @@ fi
 event=$1
 results=$2
 plan=$3
-expected_results='["changes","client","compose-demo","dco","docs","fuzz","generated","headline-guarantee","k8s-e2e","lint","no-egress","race","release-snapshot","supply-chain-checks","test","web"]'
-expected_plan='["client","compose_demo","docs","fuzz","generated","headline_guarantee","k8s_e2e","lint","race","release_snapshot","supply_chain_checks","test","web"]'
+script_dir=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
+registry_path=${CI_JOB_REGISTRY:-$script_dir/ci-job-registry.json}
+if ! registry=$(jq -ce '
+	select(.version == 2) |
+	select(.path_classes.full | type == "array" and length > 0) |
+	select(.jobs | type == "object" and length > 0)
+' "$registry_path"); then
+	printf 'required jobs: invalid CI job registry %s\n' "$registry_path" >&2
+	exit 1
+fi
 
 case "$event" in
 	pull_request | pull_request_target | push) ;;
@@ -24,42 +32,56 @@ case "$event" in
 		;;
 esac
 
-if ! jq -en \
+if ! validation=$(jq -cn \
 	--arg event "$event" \
 	--argjson results "$results" \
 	--argjson plan "$plan" \
-	--argjson expected_results "$expected_results" \
-	--argjson expected_plan "$expected_plan" '
-	def result_key: gsub("_"; "-");
+	--argjson registry "$registry" '
+	def direct_gate:
+		.required_gate == "always" or
+		.required_gate == "pull-request" or
+		.required_gate == "planned";
+	def should_run($rule):
+		if $rule.required_gate == "always" then true
+		elif $rule.required_gate == "pull-request" then $event != "push"
+		elif $rule.required_gate == "planned" then
+			any($rule.plan_jobs[]; $plan[.] == true)
+		else false
+		end;
 
-	($results | type == "object" and (keys == ($expected_results | sort))) and
-	($plan | type == "object" and (keys == ($expected_plan | sort)) and
-		all(.[]; type == "boolean")) and
-	($results.changes.result == "success") and
-	(if $event == "push" then
-		$results.dco.result == "skipped" and
-		all($plan[]; . == true)
-	else
-		$results.dco.result == "success"
-	end) and
-	($results["no-egress"].result ==
-		(if $plan.web then "success" else "skipped" end)) and
-	all($plan | to_entries[];
-		. as $entry |
-		$results[($entry.key | result_key)].result ==
-			(if $entry.value then "success" else "skipped" end)
-	)
-' >/dev/null; then
+	([$registry.jobs | to_entries[] | select(.value | direct_gate) | .key] | sort) as $expected_results |
+	($registry.path_classes.full | sort) as $expected_plan |
+	(if ($results | type) == "object" then
+		($results | keys) == $expected_results
+	else false end) as $results_shape |
+	(if ($plan | type) == "object" then
+		($plan | keys) == $expected_plan and all($plan[]; type == "boolean")
+	else false end) as $plan_shape |
+	(if $results_shape and $plan_shape then
+		[$registry.jobs | to_entries[] | select(.value | direct_gate) |
+			. as $entry |
+			(if should_run($entry.value) then "success" else "skipped" end) as $expected |
+			select($results[$entry.key].result != $expected) |
+			{job: $entry.key, expected: $expected, actual: ($results[$entry.key].result // "missing")}]
+	else [] end) as $mismatches |
+	{
+		valid: (
+			$results_shape and
+			$plan_shape and
+			(if $event == "push" then all($plan[]; . == true) else true end) and
+			($mismatches | length == 0)
+		),
+		mismatches: $mismatches
+	}
+'); then
+	printf 'required jobs: validation inputs were not valid JSON\n' >&2
+	exit 1
+fi
+
+if ! printf '%s\n' "$validation" | jq -e '.valid == true' >/dev/null; then
 	printf 'required jobs: validation results did not match the change plan\n' >&2
-	printf '%s\n' "$results" | jq -r --argjson plan "$plan" '
-		def result_key: gsub("_"; "-");
-		$plan | to_entries[] |
-		. as $entry |
-		($entry.key | result_key) as $job |
-		(if $entry.value then "success" else "skipped" end) as $expected |
-		select($results[$job].result != $expected) |
-		"  \($job): expected \($expected), got \($results[$job].result // "missing")"
-	' --argjson results "$results" >&2 2>/dev/null || true
+	printf '%s\n' "$validation" | jq -r \
+		'.mismatches[] | "  \(.job): expected \(.expected), got \(.actual)"' >&2
 	exit 1
 fi
 
