@@ -26,6 +26,10 @@ is_digest "$image_digest" || { printf 'manifest: invalid image digest\n' >&2; ex
 is_digest "$chart_digest" || { printf 'manifest: invalid chart digest\n' >&2; exit 2; }
 [ -d "$dist" ] || { printf 'manifest: missing dist directory\n' >&2; exit 2; }
 [ -f "$metadata" ] || { printf 'manifest: missing trust metadata\n' >&2; exit 2; }
+[ -f "$dist/binary-provenance.json" ] || {
+	printf 'manifest: missing binary provenance\n' >&2
+	exit 2
+}
 if find "$dist" -maxdepth 1 -type l | grep . >/dev/null; then
 	printf 'manifest: symlinked release artifacts are forbidden\n' >&2
 	exit 1
@@ -49,6 +53,13 @@ while IFS= read -r path; do
 	name=$(basename "$path")
 	case "$name" in
 		release-manifest.json | *.sigstore.json) continue ;;
+		binary-provenance.json)
+			kind='binary-provenance'
+			validate_binary_provenance "$path" "$commit" "$version" || {
+				printf 'manifest: invalid binary provenance\n' >&2
+				exit 1
+			}
+			;;
 		image-index.oci-payload.json) kind='oci-payload'; subject_kind=image ;;
 		chart-index.oci-payload.json) kind='oci-payload'; subject_kind=chart ;;
 		hikyo_*.tar.gz | hikyo_*.zip) kind=binary ;;

@@ -177,6 +177,10 @@ jobs:
         run: ./scripts/release/bind-manifest_test.sh
       - name: Release manifest fixture
         run: ./scripts/release/create-manifest_test.sh
+      - name: Canonical release binary fixture
+        run: ./scripts/release/prepare-image-root_test.sh
+      - name: Release binary workflow fixture
+        run: ./scripts/ci/check-release-binary-reuse_test.sh
       - name: DCO fixture
         run: ./scripts/ci/check-dco_test.sh
       - name: Required-jobs fixture
@@ -336,6 +340,21 @@ jobs:
           distribution: goreleaser
           version: v2.17.1
           args: release --snapshot --clean --skip=publish
+      - name: Prepare canonical image inputs
+        run: >-
+          ./scripts/release/prepare-image-root.sh
+          dist image-root "$(git rev-parse HEAD)" .goreleaser.yaml
+      - name: Smoke the exact candidate image
+        run: |
+          docker build --build-arg TARGETARCH=amd64 \
+            --tag hikyo-release-snapshot:${{ github.sha }} \
+            --file Dockerfile.release .
+          expected=$(jq -r '.version' dist/metadata.json)
+          actual=$(docker run --rm hikyo-release-snapshot:${{ github.sha }} version)
+          case "$actual" in
+            "hikyo $expected ("*) ;;
+            *) printf 'candidate image: version mismatch: %s\n' "$actual" >&2; exit 1 ;;
+          esac
       # This fixture works on a temporary copy of dist. Keep it before upload:
       # failed archive/version/manifest checks must not leave a download behind.
       - name: Classify complete snapshot manifest
@@ -359,6 +378,7 @@ jobs:
             dist/hikyo_*_Linux_*.tar.gz
             dist/hikyo_*_Windows_*.zip
             dist/checksums.txt
+            dist/binary-provenance.json
             dist/DEVELOPMENT-SNAPSHOT.txt
           if-no-files-found: error
           retention-days: 14
