@@ -1,7 +1,6 @@
 import type { ReactElement } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router';
 
-import { useSession } from '../api/session.ts';
 import { AccountSecurity } from '../routes/AccountSecurity.tsx';
 import { CLIReauth } from '../routes/CLIReauth.tsx';
 import { InstanceAdmin } from '../routes/InstanceAdmin.tsx';
@@ -19,8 +18,14 @@ import { Values } from '../routes/Values.tsx';
 import { WorkspaceApprove } from '../routes/WorkspaceApprove.tsx';
 import { WorkspaceCallback } from '../routes/WorkspaceCallback.tsx';
 import { WorkspaceScope } from '../routes/WorkspaceScope.tsx';
-import { CHROMELESS, SURFACES, surfaceById, type Surface, type SurfaceId } from './navigation.ts';
+import {
+  allowsAnonymousSession,
+  SURFACES,
+  surfaceById,
+  type SurfaceId,
+} from './navigation.ts';
 import { ToastViewport } from './notifications.tsx';
+import { useAuth } from './AuthProvider.tsx';
 
 /**
  * ELEMENTS is what each locked surface renders.
@@ -70,15 +75,16 @@ const ELEMENTS: Record<SurfaceId, ReactElement> = {
 };
 
 /**
- * The surfaces that render inside the chrome and behind a session: everything
- * that is not chromeless. Complement of CHROMELESS rather than
- * `section !== null`, because `values` has no section and is still a chromed,
- * signed-in surface — see the note on CHROMELESS.
+ * Chrome and session access both come from the route registry. `section`
+ * remains navigation placement only: `values` has no sidebar section but is
+ * still an authenticated shell route.
  */
-const shellSurfaces: readonly Surface[] = SURFACES.filter((s) => !CHROMELESS.includes(s));
+const shellSurfaces = SURFACES.filter((surface) => surface.chrome === 'shell');
 
 /**
- * The chromeless surfaces reachable WITHOUT a session.
+ * Routes reachable WITHOUT a session. Public routes need no session;
+ * establishing ceremonies render Login in place so their state-bearing URL
+ * survives authentication.
  *
  * The approve page is here deliberately and it is the non-obvious one: a first
  * establishment lands in a popup carrying no cookies for this instance at all,
@@ -90,26 +96,24 @@ const shellSurfaces: readonly Surface[] = SURFACES.filter((s) => !CHROMELESS.inc
  * parameters and shouts them down a channel, and making that depend on a
  * session would break the one arc where the human has no session yet.
  */
-const publicSurfaces: readonly Surface[] = CHROMELESS;
+const anonymousSurfaces = SURFACES.filter(allowsAnonymousSession);
+
+/** Every non-login route that renders without shell chrome after sign-in. */
+const sessionChromelessSurfaces = SURFACES.filter(
+  (surface) => surface.chrome === 'none' && surface.id !== 'login',
+);
 
 /**
  * The application root.
  *
- * Two states, decided by one question asked once per load: `whoami` either
- * resolves a live session or answers 401. There is no third "maybe" state and
- * no optimistic render of the chrome — showing an org rail to someone who is
- * about to be bounced to the login page is a flash of somebody else's data.
+ * AuthProvider resolves and revalidates the one root identity. Checking and
+ * transitions render no chrome, so an old session cannot keep painting while
+ * its replacement is being bound to a fresh cache.
  */
 export function App() {
-  const session = useSession();
+  const auth = useAuth();
 
-  if (session.isPending) {
-    // Deliberately quiet: this resolves in one round trip against a local
-    // server, and a spinner that appears for 20ms is noise, not feedback.
-    return <><p className="login" role="status">Loading…</p><ToastViewport /></>;
-  }
-
-  if (session.isError) {
+  if (auth.failure !== null) {
     return <>
       <main className="login">
         <p className="alert" role="alert">
@@ -123,13 +127,27 @@ export function App() {
     </>;
   }
 
-  const live = session.data;
+  let live: typeof auth.identity = null;
+  switch (auth.state.status) {
+    case 'checking':
+    case 'transitioning':
+      // Deliberately quiet: this resolves in one round trip against a local
+      // server, and a spinner that appears for 20ms is noise, not feedback.
+      return <><p className="login" role="status">Loading…</p><ToastViewport /></>;
+    case 'anonymous':
+      break;
+    case 'authenticated':
+      live = auth.identity;
+      if (live === null) {
+        throw new Error('authenticated root state has no identity');
+      }
+  }
 
   return <>
     <BrowserRouter>
       {live === null ? (
         <Routes>
-          {publicSurfaces.map((surface) => (
+          {anonymousSurfaces.map((surface) => (
             <Route key={surface.id} path={surface.path} element={ELEMENTS[surface.id]} />
           ))}
           <Route path="*" element={<Navigate to={surfaceById('login').path} replace />} />
@@ -140,11 +158,9 @@ export function App() {
             path={surfaceById('login').path}
             element={<Navigate to={surfaceById('overview').path} replace />}
           />
-          {publicSurfaces
-            .filter((surface) => surface.id !== 'login')
-            .map((surface) => (
-              <Route key={surface.id} path={surface.path} element={ELEMENTS[surface.id]} />
-            ))}
+          {sessionChromelessSurfaces.map((surface) => (
+            <Route key={surface.id} path={surface.path} element={ELEMENTS[surface.id]} />
+          ))}
           <Route element={<Shell session={live} />}>
             {shellSurfaces.map((surface) => (
               <Route key={surface.id} path={surface.path} element={ELEMENTS[surface.id]} />

@@ -63,6 +63,14 @@ test.describe('app chrome', () => {
     await expect(page.getByRole('heading', { name: 'Projects', level: 1 })).toBeVisible();
   });
 
+  test('redirects the public login route to overview with a live session', async ({ page }) => {
+    await page.goto('/login');
+
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.getByRole('navigation', { name: 'Organisations' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Overview', level: 1 })).toBeVisible();
+  });
+
   test('the binary toggle flips theme and keeps the choice explicit', async ({ page }) => {
     // The header control is a two-state sun/moon; `system` lives in the account
     // Preferences panel. Each click writes an explicit theme opposite the one
@@ -244,5 +252,25 @@ test.describe('sign out', () => {
     const names = (await page.context().cookies()).map((c) => c.name);
     expect(names).not.toContain('__Host-hikyo');
     expect(names).not.toContain('__Host-hikyo-csrf');
+  });
+
+  test('moves two tabs through one login and logout state machine', async ({ context, page }) => {
+    const other = await context.newPage();
+    await page.goto('/login');
+    await other.goto('/login');
+    await expect(other.getByRole('heading', { name: 'Sign in to Hikyo' })).toBeVisible();
+
+    await page.getByLabel('Username').fill(ADMIN.username);
+    await page.getByLabel('Password').fill(ADMIN.password);
+    await page.getByRole('button', { name: 'Sign in' }).click();
+
+    await expect(page.getByRole('navigation', { name: 'Organisations' })).toBeVisible();
+    await expect(other.getByRole('navigation', { name: 'Organisations' })).toBeVisible();
+
+    await page.getByRole('button', { name: /^Account:/ }).click();
+    await page.getByRole('menuitem', { name: 'Sign out' }).click();
+
+    await expect(page.getByRole('heading', { name: 'Sign in to Hikyo' })).toBeVisible();
+    await expect(other.getByRole('heading', { name: 'Sign in to Hikyo' })).toBeVisible();
   });
 });

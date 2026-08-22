@@ -19,6 +19,7 @@ import { zGrantList } from '@hikyo/zod';
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import type { z } from 'zod';
 
+import { useAuth } from '../app/AuthProvider.tsx';
 import { ApiError, ok, parsed } from './client.ts';
 import type { Grant } from './identities.ts';
 
@@ -667,7 +668,7 @@ export function grantOutcomeSummary(results: readonly GrantOutcomeView[]): strin
  * shape #55 gave `access member remove`.
  */
 export function useCreateGrants() {
-  const queries = useQueryClient();
+  const auth = useAuth();
   return useMutation({
     mutationFn: async (input: {
       scope: ScopeRef;
@@ -678,12 +679,12 @@ export function useCreateGrants() {
         createOne(input.scope, { principal: input.principal, capability }),
       );
     },
-    onSettled: () => queries.invalidateQueries(),
+    onSettled: () => auth.refreshSession(),
   });
 }
 
 export function useApplyTemplate() {
-  const queries = useQueryClient();
+  const auth = useAuth();
   return useMutation({
     mutationFn: (input: { scope: ScopeRef; principal: string; template: string }) => {
       const body = { principal: input.principal, template: templateOf(input.template) };
@@ -708,7 +709,7 @@ export function useApplyTemplate() {
           return parsed(applyOrgTemplateOp, { path: { org: input.scope.org }, body });
       }
     },
-    onSettled: () => queries.invalidateQueries(),
+    onSettled: () => auth.refreshSession(),
   });
 }
 
@@ -729,7 +730,7 @@ function templateOf(
 }
 
 export function useRevokeGrant() {
-  const queries = useQueryClient();
+  const auth = useAuth();
   return useMutation({
     mutationFn: (input: { grant: Grant }) => {
       const query = {
@@ -751,7 +752,7 @@ export function useRevokeGrant() {
           return ok(revokeInstanceGrantOp, { query });
       }
     },
-    onSettled: () => queries.invalidateQueries(),
+    onSettled: () => auth.refreshSession(),
   });
 }
 

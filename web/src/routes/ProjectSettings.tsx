@@ -126,7 +126,12 @@ export function ProjectSettings() {
         </dl>
         <div className="field">
           <label htmlFor={nameId}>Name</label>
-          <input id={nameId} value={name} onChange={(event) => setName(event.target.value)} />
+          <input
+            id={nameId}
+            value={name}
+            disabled={current === undefined}
+            onChange={(event) => setName(event.target.value)}
+          />
         </div>
         <div className="panel__actions">
           <button

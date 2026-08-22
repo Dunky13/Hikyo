@@ -123,6 +123,7 @@ export function TypedNameConfirm({
         <input
           id={id}
           value={typed}
+          disabled={expect === null}
           autoComplete="off"
           spellCheck={false}
           placeholder={expect === null ? undefined : expect}
