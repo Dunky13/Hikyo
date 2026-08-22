@@ -854,6 +854,73 @@ func TestOfflineRenderSnapshotRefusedForRun(t *testing.T) {
 	}
 }
 
+func TestSnapshotBindingLiveAndOfflineRenderPathsAreEquivalent(t *testing.T) {
+	issued := time.Date(2026, 8, 19, 10, 0, 0, 123, time.UTC)
+	server := deliveryServer(t, apigen.DeliveryResponse{
+		ChangeToken: "v1:tok", CredentialId: "cred_1", Current: false, Cursor: "v1:c1",
+		IssuedAt: issued, SnapshotExpiresAt: issued.Add(7 * 24 * time.Hour),
+		SchemaRevision: 1,
+		Keys: []apigen.DeliveredKey{{
+			KeyId: "key_1", Name: "DATABASE_URL", Classification: apigen.KeyClassificationConfig,
+			Presence: apigen.DeliveredKeyPresenceSet, Value: strPtr("postgres://live"),
+		}},
+	})
+	runtimeDir := filepath.Join(t.TempDir(), "runtime")
+	projectDir := t.TempDir()
+	content := "version: 1\ninstance: " + server.URL + "\norg: org_1\nproject: prj_1\nenvironment: env_1\n" +
+		"slug: acme\nruntime_dir: " + runtimeDir + "\nsnapshot:\n  offline_serve: true\n" +
+		"targets:\n  api:\n    keys: [key_1]\n    services: [api]\n"
+	if err := os.WriteFile(filepath.Join(projectDir, composeConfigName), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, stateRoot := machineState(t, server.URL)
+	now := func() time.Time { return issued.Add(time.Hour) }
+
+	liveIO, _, liveStderr := composeIO(stateRoot, projectDir, "wl_token", nil)
+	liveIO.Now = now
+	if code := Run(t.Context(), liveIO, []string{"compose", "render"}); code != ExitOK {
+		t.Fatalf("live render exit=%d; stderr=%s", code, liveStderr)
+	}
+	stateDir := filepath.Join(stateRoot, "compose", "acme")
+	cfg, err := compose.ParseConfig([]byte(content))
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, err := newSnapshotBinding(stateDir, TrustEntry{Origin: server.URL}, "org_1", "prj_1", "env_1", "wl_token", false, []string{"api"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, liveBinding, err := loadOfflineSnapshot(liveIO, cfg, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	liveAAD, err := liveBinding.CanonicalAAD()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	server.Close()
+	offlineIO, _, offlineStderr := composeIO(stateRoot, projectDir, "wl_token", nil)
+	offlineIO.Now = now
+	if code := Run(t.Context(), offlineIO, []string{"compose", "render"}); code != ExitOK {
+		t.Fatalf("offline render exit=%d; stderr=%s", code, offlineStderr)
+	}
+	if !strings.Contains(offlineStderr.String(), "serving stale from 2026-08-19T10:00:00.000000123Z") {
+		t.Fatalf("offline render did not use stored issuance: %s", offlineStderr)
+	}
+	_, offlineBinding, err := loadOfflineSnapshot(offlineIO, cfg, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	offlineAAD, err := offlineBinding.CanonicalAAD()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(liveAAD, offlineAAD) {
+		t.Fatalf("live/offline binding mismatch:\n live %s\noffline %s", liveAAD, offlineAAD)
+	}
+}
+
 // seedRenderSnapshot writes a render-mode snapshot (TargetNames [target]) with
 // the given rows, bound to the fingerprint of `token`, so an offline render that
 // presents the SAME token can open it (R1-3 — no server-credential record).
@@ -875,7 +942,15 @@ func seedRenderSnapshot(t *testing.T, stateDir, origin, token, target string, ro
 		IssuedAt:    issued.Format(time.RFC3339), ExpiresAt: issued.Add(7 * 24 * time.Hour).Format(time.RFC3339),
 	}
 	payload := compose.SnapshotPayload{Rows: rows, GenerationStamps: map[string]string{target: "v1-00000000000000000000000000000000"}}
-	if err := compose.SaveSnapshot(stateDir, keys, aad, payload); err != nil {
+	header, err := aad.Canonical()
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, err := crypto.ParseSnapshotBinding(stateDir, header)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := compose.SaveSnapshot(keys, binding, payload); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -954,7 +1029,15 @@ func seedRunSnapshot(t *testing.T, stateDir, origin, token string) {
 		IssuedAt: issued.Format(time.RFC3339), ExpiresAt: issued.Add(7 * 24 * time.Hour).Format(time.RFC3339),
 	}
 	payload := compose.SnapshotPayload{Rows: rows, GenerationStamps: map[string]string{runGenerationKey: stamp}}
-	if err := compose.SaveSnapshot(stateDir, keys, aad, payload); err != nil {
+	header, err := aad.Canonical()
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, err := crypto.ParseSnapshotBinding(stateDir, header)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := compose.SaveSnapshot(keys, binding, payload); err != nil {
 		t.Fatal(err)
 	}
 }
