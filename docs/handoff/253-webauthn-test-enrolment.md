@@ -27,6 +27,10 @@ output changed.
 - The isolation UV-refusal test restores UV on the same enrolled credential and
   proves the control login succeeds. This distinguishes the intended server UV
   refusal from malformed or zero-value fixture failure.
+- Exact-head CI exposed an unrelated race in the desktop workspace flow: an
+  add could run while the initial allowlist GET was still in flight. A shared
+  helper now waits for either the empty or already-allowed state before every
+  consent path, so an earlier list response cannot overwrite a later mutation.
 
 ## Validation
 
@@ -34,9 +38,12 @@ output changed.
 go test -count=1 ./internal/webauthntest/...       7 passed
 go test -count=1 ./internal/isolation/ -run WebAuthn
                                                    18 passed
-go test -count=1 ./...                             3216 passed in 57 packages
+go test -p=1 -count=1 ./...                        3228 passed in 57 packages at 497da487
 go vet ./...                                       passed
 git diff --check                                   passed
+pnpm --dir web run typecheck                       passed
+pnpm --dir web run test                            248 passed
+playwright test workspace.spec.ts --project=desktop 12 passed
 ```
 
 ## Review
