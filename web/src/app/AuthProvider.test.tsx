@@ -227,7 +227,10 @@ describe('AuthProvider', () => {
         <Probe />
       </AuthProvider>,
     );
-    await settle(30);
+    await settle();
+    // TanStack Query publishes resolved observer data from a scheduled task,
+    // after the microtask-only auth settle has completed.
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
     expect(text(container, 'private')).toContain(id('ses', '00'));
 
     await act(async () => globalThis.dispatchEvent(new Event('focus')));
