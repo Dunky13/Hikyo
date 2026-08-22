@@ -705,16 +705,16 @@ paths:
       tags: [orgs]
       summary: Create an organisation.
       description: |
-        The first audited mutating endpoint: authorization is evaluated at the
-        chokepoint inside the request's own transaction, and the
-        `org.created` audit event commits in that same transaction — a write
-        without its durable record does not complete.
+        Authorization is evaluated at the chokepoint inside the request's own
+        transaction. The organisation, `org.created` event, and creator's org
+        `admin` template grants commit atomically. The privilege increase ends
+        the creator's sessions; the new membership is usable after login.
 
         Not idempotent: each call creates a distinct organisation. The name must
         be unused among live organisations; a collision is a `conflict`.
       x-hikyo-class: instance
       x-hikyo-operation: org.create
-      x-hikyo-formula: [instance-config@instance]
+      x-hikyo-formula: [instance-config@instance, manage-members@instance]
       x-hikyo-artifacts: [human-session]
       x-hikyo-min-revision: 1
       requestBody:
@@ -1630,7 +1630,7 @@ paths:
               $ref: "#/components/schemas/CreateGrantRequest"
       responses:
         "200":
-          description: The grant, created or joined by a second origin.
+          description: The grant mutation result, including an idempotent repeat.
           content:
             application/json:
               schema:
@@ -1778,7 +1778,7 @@ paths:
               $ref: "#/components/schemas/CreateGrantRequest"
       responses:
         "200":
-          description: The grant, created or joined by a second origin.
+          description: The grant mutation result, including an idempotent repeat.
           content:
             application/json:
               schema:
@@ -1919,7 +1919,7 @@ paths:
               $ref: "#/components/schemas/CreateGrantRequest"
       responses:
         "200":
-          description: The grant, created or joined by a second origin.
+          description: The grant mutation result, including an idempotent repeat.
           content:
             application/json:
               schema:
@@ -2034,7 +2034,7 @@ paths:
               $ref: "#/components/schemas/CreateGrantRequest"
       responses:
         "200":
-          description: The grant, created or joined by a second origin.
+          description: The grant mutation result, including an idempotent repeat.
           content:
             application/json:
               schema:
@@ -12485,18 +12485,22 @@ components:
     GrantResult:
       type: object
       additionalProperties: false
-      required: [grant_id, capability, created, origin_added]
+      required: [grant_id, capability, outcome]
       properties:
         grant_id:
           $ref: "#/components/schemas/ID"
         capability:
           $ref: "#/components/schemas/Capability"
-        created:
-          type: boolean
-          description: False when an existing row was deduplicated and this call only attached an origin.
-        origin_added:
-          type: boolean
-          description: False when the caller's own origin already held the row - a genuinely idempotent repeat.
+        outcome:
+          type: string
+          enum: [created, origin_added, unchanged]
+          x-go-type: api.GrantOutcome
+          x-go-type-import:
+            path: github.com/Hikyo-Org/hikyo/api
+            name: api
+          description: >
+            The only possible mutation results: a new grant row, a new origin
+            on an existing row, or an idempotent repeat that changed nothing.
 
     GrantResultList:
       type: object

@@ -16,6 +16,7 @@ import (
 	"github.com/Hikyo-Org/hikyo/internal/app"
 	"github.com/Hikyo-Org/hikyo/internal/cli"
 	"github.com/Hikyo-Org/hikyo/internal/config"
+	"github.com/Hikyo-Org/hikyo/internal/disclose"
 	"github.com/Hikyo-Org/hikyo/internal/importer"
 	"github.com/Hikyo-Org/hikyo/internal/operator"
 )
@@ -64,13 +65,16 @@ func run() int {
 	case cmd == "restore":
 		return runOperator(ctx, "restore", args, app.RunRestore)
 	case slices.Contains(cli.Verbs, cmd):
+		terminalSession, terminalError := disclose.OpenTerminalSession()
 		return cli.Run(ctx, cli.IO{
-			Stdin:   os.Stdin,
-			Stdout:  os.Stdout,
-			Stderr:  os.Stderr,
-			Env:     cli.Env{Getenv: os.Getenv},
-			Workdir: workdir(),
-			OpenURL: cli.OpenBrowser,
+			Stdin:           os.Stdin,
+			Stdout:          os.Stdout,
+			Stderr:          os.Stderr,
+			Env:             cli.Env{Getenv: os.Getenv},
+			Workdir:         workdir(),
+			TerminalSession: terminalSession,
+			TerminalError:   terminalError,
+			OpenURL:         cli.OpenBrowser,
 			StderrIsTerminal: func() bool {
 				return term.IsTerminal(int(os.Stderr.Fd()))
 			},
@@ -143,7 +147,7 @@ func runAdmin(ctx context.Context, args []string) int {
 // beside them reads, so an operator cannot back up one datastore and restore
 // another by passing a different flag.
 func runOperator(ctx context.Context, name string, args []string,
-	run func(context.Context, *config.Config, *slog.Logger, []string, io.Writer) error,
+	run func(context.Context, *config.Config, *slog.Logger, []string, io.Writer, *disclose.TerminalSession, error) error,
 ) int {
 	cfg, warnings, err := config.Load(name, nil, os.Getenv, os.Environ())
 	if err != nil {
@@ -154,7 +158,9 @@ func runOperator(ctx context.Context, name string, args []string,
 	for _, w := range warnings {
 		log.Warn(w)
 	}
-	if err := run(ctx, cfg, log, args, os.Stderr); err != nil {
+	terminalSession, terminalError := disclose.OpenTerminalSession()
+	defer terminalSession.Close()
+	if err := run(ctx, cfg, log, args, os.Stderr, terminalSession, terminalError); err != nil {
 		fmt.Fprintf(os.Stderr, "hikyo %s: %v\n", name, err)
 		return 1
 	}

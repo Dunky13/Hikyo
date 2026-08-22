@@ -1,5 +1,15 @@
 # Hikyo permission model — RBAC & secret reveal (ADR, locked 2026-07-31)
 
+> **Declared amendment (2026-08-21):** creating an organisation atomically
+> applies the org-scoped `admin` template to the creating principal. Because
+> this is an audited self-grant with disclosure authority, `org.create`
+> requires both `instance-config@instance` and `manage-members@instance`; the
+> grant advances the creator's session generation, and the new authority is
+> usable only after a fresh login. This removes the web-only bootstrap loop in
+> which the Members surface required membership before membership could be
+> granted, without creating a hidden owner role or bypassing ordinary grant
+> rows, origins, audit, or invalidation.
+
 > **Declared amendment (2026-08-06, [scim-provisioning.md](./scim-provisioning.md), [#38](https://github.com/Hikyo-Org/Hikyo/issues/38), per the [oss-mechanics.md](./oss-mechanics.md) amendment procedure):** (a) every grant row carries one or more **origins** — `manual(granted_by)` (every pre-existing grant has exactly this), `scim(binding, mapping_row, group)`, `lockout-retention(cause)`, or `structural(binding)` (exactly the provisioning connection's system-created `scim-provision` grant, retired atomically with its binding); a row exists while ≥1 origin holds it and is revoked, with the locked session-generation advance, when its last origin is released. **Evaluation is untouched**: authority remains the bare `(principal, capability, scope)` triple, origins are never consulted by `authorize()`, and no deny rule exists. Origin chips join the membership surface **per capability line** — the per-line inspection/revocation property is unchanged. (b) The lockout invariant's refusal binds *human revocation* unchanged; for SCIM-side release, refusal converts to **lockout retention** (the withdrawn `scim` origin is honestly released; a system-owned `lockout-retention` origin holds the row, cured — audited both ways — the moment another org `manage-members` holder exists). (c) The closed capability atom set gains **`scim-provision`** (org scope, machine-only, never grantable to humans), and the normative machine allowlists gain one row: the **provisioning-connection** class → `{scim-provision}`, the grant system-created with its SCIM binding and refused via the grant API. Details in [scim-provisioning.md](./scim-provisioning.md).
 
 > **Amended by the flat-model ADR ([flat-model.md](./flat-model.md), 2026-08-06, [#40](https://github.com/Hikyo-Org/Hikyo/issues/40), per the [oss-mechanics.md](./oss-mechanics.md) amendment procedure):** the closed *dynamically triggered disclosure checks* list reads per that ADR's trigger enumeration (copy/clone/bulk-apply, restore; the unmask and new-environment triggers are unreachable). The scope lattice's downward **grant** inheritance is untouched — different sense of the word. The copy/clone/bulk-apply and pin formula rows stand exactly as written.

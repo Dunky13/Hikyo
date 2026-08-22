@@ -72,16 +72,18 @@ the root key, so 'kubectl logs' would hand a remote reader the authority.
 }
 
 // RunAdmin dispatches the local-admin verb group.
-func RunAdmin(ctx context.Context, cfg *config.Config, log *slog.Logger, args []string, stderr io.Writer) error {
+func RunAdmin(ctx context.Context, cfg *config.Config, log *slog.Logger, args []string, stderr io.Writer,
+	terminalSession *disclose.TerminalSession, terminalError error,
+) error {
 	if len(args) == 0 {
 		AdminUsage(stderr)
 		return errors.New("usage: hikyo admin create --username USER | hikyo admin reset-credential --principal ID | hikyo admin grant --principal ID --capability CAP")
 	}
 	switch args[0] {
 	case "create":
-		return runAdminCreate(ctx, cfg, log, args, stderr)
+		return runAdminCreate(ctx, cfg, log, args, stderr, terminalSession, terminalError)
 	case "reset-credential":
-		return runAdminReset(ctx, cfg, log, args, stderr)
+		return runAdminReset(ctx, cfg, log, args, stderr, terminalSession, terminalError)
 	case "grant":
 		return runAdminGrant(ctx, cfg, log, args, stderr)
 	default:
@@ -90,7 +92,16 @@ func RunAdmin(ctx context.Context, cfg *config.Config, log *slog.Logger, args []
 	}
 }
 
-func runAdminCreate(ctx context.Context, cfg *config.Config, log *slog.Logger, args []string, stderr io.Writer) error {
+func prepareDisclosure(options disclose.Options, terminalSession *disclose.TerminalSession, terminalError error) (*disclose.PreparedSink, error) {
+	if options.OutputFile == "" && !options.DangerouslyPrint && terminalSession == nil {
+		return nil, errors.Join(disclose.ErrNoDestination, terminalError)
+	}
+	return disclose.Prepare(options, terminalSession)
+}
+
+func runAdminCreate(ctx context.Context, cfg *config.Config, log *slog.Logger, args []string, stderr io.Writer,
+	terminalSession *disclose.TerminalSession, terminalError error,
+) (returnErr error) {
 	fs := flag.NewFlagSet("admin create", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	username := fs.String("username", "", "the first administrator's login handle")
@@ -104,28 +115,17 @@ func runAdminCreate(ctx context.Context, cfg *config.Config, log *slog.Logger, a
 		return errors.New("--username is required")
 	}
 
-	// The delivery mode is decided BEFORE the authority exists, so it can be
-	// recorded in the mint event. A token that reached a log shipper is a
-	// different event from one written to a root-owned file, and the trail has
-	// to be able to say which.
-	delivery := string(disclose.DestTerminal)
-	switch {
-	case *outputFile != "" && *dangerous:
-		return errors.New("--output-file and --dangerously-print name two destinations; choose one")
-	case *outputFile != "":
-		delivery = string(disclose.DestFile)
-	case *dangerous:
-		delivery = string(disclose.DestStdout)
-	}
-
-	// Check the destination BEFORE anything is created. Minting first and
-	// discovering afterwards that the value has nowhere to go would leave the
-	// instance bootstrapped with an authority nobody ever saw — and running
-	// this again refuses, because the instance now has an account.
+	// Reserve the destination BEFORE anything is created. Minting first would
+	// leave the instance bootstrapped with an authority nobody ever saw.
 	deliveryOpts := disclose.Options{OutputFile: *outputFile, DangerouslyPrint: *dangerous}
-	if err := disclose.Preflight(deliveryOpts); err != nil {
+	sink, err := prepareDisclosure(deliveryOpts, terminalSession, terminalError)
+	if err != nil {
 		return err
 	}
+	defer sink.AbortOnReturn(&returnErr)
+	// Record the exact prepared delivery mode in the mint event. A value sent
+	// to stdout is a different audit fact from one sent to an owner-only file.
+	delivery := string(sink.Destination())
 
 	auth, closeDB, err := adminAuth(ctx, cfg, log)
 	if err != nil {
@@ -138,10 +138,10 @@ func runAdminCreate(ctx context.Context, cfg *config.Config, log *slog.Logger, a
 		return err
 	}
 
-	dest, err := disclose.Emit(
+	dest, err := sink.WriteOnce(
 		fmt.Sprintf("Credential-establishment authority for %s (expires %s)",
 			result.Username, result.ExpiresAt.Format("2006-01-02 15:04 MST")),
-		result.Authority, deliveryOpts)
+		result.Authority)
 	if err != nil {
 		// The administrator exists and the authority is minted, but nobody
 		// received it. Say so precisely rather than leaving the operator to
@@ -205,7 +205,9 @@ func adminAuth(ctx context.Context, cfg *config.Config, log *slog.Logger) (*serv
 // — on the server's own host under local authority, with no network route. The
 // classification-totality invariant keeps that true: `cli:admin` is ClassSystem,
 // whose probe contract is network unreachability.
-func runAdminReset(ctx context.Context, cfg *config.Config, log *slog.Logger, args []string, stderr io.Writer) error {
+func runAdminReset(ctx context.Context, cfg *config.Config, log *slog.Logger, args []string, stderr io.Writer,
+	terminalSession *disclose.TerminalSession, terminalError error,
+) (returnErr error) {
 	fs := flag.NewFlagSet("admin reset-credential", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	principal := fs.String("principal", "", "the target principal id to reset")
@@ -218,19 +220,13 @@ func runAdminReset(ctx context.Context, cfg *config.Config, log *slog.Logger, ar
 		return errors.New("--principal is required")
 	}
 
-	delivery := string(disclose.DestTerminal)
-	switch {
-	case *outputFile != "" && *dangerous:
-		return errors.New("--output-file and --dangerously-print name two destinations; choose one")
-	case *outputFile != "":
-		delivery = string(disclose.DestFile)
-	case *dangerous:
-		delivery = string(disclose.DestStdout)
-	}
 	deliveryOpts := disclose.Options{OutputFile: *outputFile, DangerouslyPrint: *dangerous}
-	if err := disclose.Preflight(deliveryOpts); err != nil {
+	sink, err := prepareDisclosure(deliveryOpts, terminalSession, terminalError)
+	if err != nil {
 		return err
 	}
+	defer sink.AbortOnReturn(&returnErr)
+	delivery := string(sink.Destination())
 
 	auth, closeDB, err := adminAuth(ctx, cfg, log)
 	if err != nil {
@@ -242,10 +238,10 @@ func runAdminReset(ctx context.Context, cfg *config.Config, log *slog.Logger, ar
 	if err != nil {
 		return err
 	}
-	dest, err := disclose.Emit(
+	dest, err := sink.WriteOnce(
 		fmt.Sprintf("Credential-establishment authority for %s (expires %s)",
 			result.TargetUser, result.ExpiresAt.Format("2006-01-02 15:04 MST")),
-		result.Authority, deliveryOpts)
+		result.Authority)
 	if err != nil {
 		return fmt.Errorf(
 			"the credential for principal %q was reset (its sessions revoked and generation advanced), "+
@@ -312,9 +308,16 @@ func runAdminGrant(ctx context.Context, cfg *config.Config, log *slog.Logger, ar
 	}
 	// The grant id, not the capability value: there is nothing secret here, and
 	// the operator needs the id to revoke it again through the ordinary surface.
-	verb := "joined"
-	if res.Created {
+	var verb string
+	switch res.Outcome {
+	case service.GrantCreated():
 		verb = "created"
+	case service.GrantOriginAdded():
+		verb = "origin added"
+	case service.GrantUnchanged():
+		verb = "unchanged"
+	default:
+		return fmt.Errorf("invalid grant outcome %q", res.Outcome)
 	}
 	fmt.Fprintf(stderr, "break-glass grant %s: %s (%s at %s) for %s\n",
 		verb, res.GrantID, *capability, scopeLabel(scope), *principal)

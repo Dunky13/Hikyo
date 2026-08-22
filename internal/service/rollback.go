@@ -166,7 +166,11 @@ func (s *Revisions) Restore(ctx context.Context, actor Actor, scope domain.Scope
 				}
 			}
 			if len(unit) > 0 {
-				if err := requireCeremony(ctx, s.Auth, az, caller, PurposeReveal, string(scope.Env), unit); err != nil {
+				intent, err := NewRevealReauthIntent(string(scope.Env), unit)
+				if err != nil {
+					return err
+				}
+				if err := requireCeremony(ctx, s.Auth, az, caller, intent); err != nil {
 					return err
 				}
 			}

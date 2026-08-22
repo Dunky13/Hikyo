@@ -1,11 +1,10 @@
 import {
-  passkeyLoginFinish,
-  passkeyLoginStart,
-  stepUpPasskeyFinish,
-  stepUpPasskeyStart,
-  stepUpTotp,
-} from '@hikyo/client';
-import { zLoginResult, zWebauthnOptions } from '@hikyo/zod';
+  passkeyLoginFinishOp,
+  passkeyLoginStartOp,
+  stepUpPasskeyFinishOp,
+  stepUpPasskeyStartOp,
+  stepUpTotpOp,
+} from '@hikyo/operations';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { ApiError, parsed } from './client.ts';
@@ -63,7 +62,7 @@ export function useStepUpTotp() {
   const queries = useQueryClient();
   return useMutation({
     mutationFn: async (code: string) => {
-      const result = await parsed(stepUpTotp({ body: { code } }), zLoginResult);
+      const result = await parsed(stepUpTotpOp, { body: { code } });
       if (result.session.artifact === 'browser' && result.session_token !== undefined) {
         throw new Error('the server returned a browser session token in the response body');
       }
@@ -78,9 +77,9 @@ export function useStepUpPasskey() {
   const queries = useQueryClient();
   return useMutation({
     mutationFn: async () => {
-      const options = await parsed(stepUpPasskeyStart(), zWebauthnOptions);
+      const options = await parsed(stepUpPasskeyStartOp, {});
       const body = await assert(options);
-      const result = await parsed(stepUpPasskeyFinish({ body }), zLoginResult);
+      const result = await parsed(stepUpPasskeyFinishOp, { body });
       if (result.session.artifact === 'browser' && result.session_token !== undefined) {
         throw new Error('the server returned a browser session token in the response body');
       }
@@ -99,9 +98,9 @@ export function usePasskeyLogin() {
   const queries = useQueryClient();
   return useMutation({
     mutationFn: async () => {
-      const options = await parsed(passkeyLoginStart(), zWebauthnOptions);
+      const options = await parsed(passkeyLoginStartOp, {});
       const body = await assert(options);
-      const result = await parsed(passkeyLoginFinish({ body }), zLoginResult);
+      const result = await parsed(passkeyLoginFinishOp, { body });
       if (result.session.artifact === 'browser' && result.session_token !== undefined) {
         throw new Error('the server returned a browser session token in the response body');
       }

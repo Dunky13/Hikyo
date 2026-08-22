@@ -1,20 +1,21 @@
 import {
-  applyEnvTemplate,
-  applyInstanceTemplate,
-  applyOrgTemplate,
-  applyProjectTemplate,
-  createEnvGrant,
-  createInstanceGrant,
-  createOrgGrant,
-  createProjectGrant,
-  listInstanceGrants,
-  listOrgGrants,
-  revokeEnvGrant,
-  revokeInstanceGrant,
-  revokeOrgGrant,
-  revokeProjectGrant,
-} from '@hikyo/client';
-import { zGrantList, zGrantResult, zGrantResultList } from '@hikyo/zod';
+  applyEnvTemplateOp,
+  applyInstanceTemplateOp,
+  applyOrgTemplateOp,
+  applyProjectTemplateOp,
+  createEnvGrantOp,
+  createInstanceGrantOp,
+  createOrgGrantOp,
+  createProjectGrantOp,
+  listInstanceGrantsOp,
+  listOrgGrantsOp,
+  revokeEnvGrantOp,
+  revokeInstanceGrantOp,
+  revokeOrgGrantOp,
+  revokeProjectGrantOp,
+} from '@hikyo/operations';
+import type { GrantResult } from '@hikyo/client';
+import { zGrantList } from '@hikyo/zod';
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import type { z } from 'zod';
 
@@ -566,7 +567,7 @@ const instanceGrantsKey = ['instance-grants'] as const;
 export function useOrgGrants(org: string): UseQueryResult<GrantList> {
   return useQuery({
     queryKey: orgGrantsKey(org),
-    queryFn: () => parsed(listOrgGrants({ path: { org } }), zGrantList),
+    queryFn: () => parsed(listOrgGrantsOp, { path: { org } }),
     enabled: org !== '',
     retry: false,
   });
@@ -575,33 +576,28 @@ export function useOrgGrants(org: string): UseQueryResult<GrantList> {
 export function useInstanceGrants(): UseQueryResult<GrantList> {
   return useQuery({
     queryKey: instanceGrantsKey,
-    queryFn: () => parsed(listInstanceGrants(), zGrantList),
+    queryFn: () => parsed(listInstanceGrantsOp, {}),
     retry: false,
   });
 }
 
 type GrantInput = { readonly principal: string; readonly capability: string };
+type GrantOutcomeView = Pick<GrantResult, 'capability' | 'outcome'>;
 
 function createOne(scope: ScopeRef, input: GrantInput) {
   const body = { principal: input.principal, capability: input.capability };
   switch (scope.kind) {
     case 'instance':
-      return parsed(createInstanceGrant({ body }), zGrantResult);
+      return parsed(createInstanceGrantOp, { body });
     case 'environment':
-      return parsed(
-        createEnvGrant({
+      return parsed(createEnvGrantOp, {
           path: { org: scope.org, project: scope.project, environment: scope.environment },
           body,
-        }),
-        zGrantResult,
-      );
+        });
     case 'project':
-      return parsed(
-        createProjectGrant({ path: { org: scope.org, project: scope.project }, body }),
-        zGrantResult,
-      );
+      return parsed(createProjectGrantOp, { path: { org: scope.org, project: scope.project }, body });
     case 'org':
-      return parsed(createOrgGrant({ path: { org: scope.org }, body }), zGrantResult);
+      return parsed(createOrgGrantOp, { path: { org: scope.org }, body });
   }
 }
 
@@ -609,31 +605,55 @@ export class GrantPartialFailure extends Error {
   override readonly cause: unknown;
 
   constructor(
-    readonly granted: readonly string[],
+    readonly completed: readonly GrantOutcomeView[],
     readonly failedCapability: string,
     readonly total: number,
     cause: unknown,
   ) {
-    super(`granting ${failedCapability} failed after ${granted.length} earlier capabilities`, { cause });
+    super(`granting ${failedCapability} failed after ${completed.length} earlier capabilities`, { cause });
     this.name = 'GrantPartialFailure';
     this.cause = cause;
   }
 }
 
-export async function createGrantsSequentially(
+export async function createGrantsSequentially<Result extends GrantOutcomeView>(
   capabilities: readonly string[],
-  create: (capability: string) => Promise<unknown>,
-): Promise<readonly string[]> {
-  const granted: string[] = [];
+  create: (capability: string) => Promise<Result>,
+): Promise<readonly Result[]> {
+  const results: Result[] = [];
   for (const capability of capabilities) {
     try {
-      await create(capability);
+      results.push(await create(capability));
     } catch (error) {
-      throw new GrantPartialFailure(granted, capability, capabilities.length, error);
+      throw new GrantPartialFailure(results, capability, capabilities.length, error);
     }
-    granted.push(capability);
   }
-  return granted;
+  return results;
+}
+
+export function grantOutcomeSummary(results: readonly GrantOutcomeView[]): string {
+  const created: string[] = [];
+  const originAdded: string[] = [];
+  const unchanged: string[] = [];
+  for (const result of results) {
+    switch (result.outcome) {
+      case 'created':
+        created.push(result.capability);
+        break;
+      case 'origin_added':
+        originAdded.push(result.capability);
+        break;
+      case 'unchanged':
+        unchanged.push(result.capability);
+        break;
+      default: {
+        const impossible: never = result.outcome;
+        return impossible;
+      }
+    }
+  }
+  const render = (items: readonly string[]) => (items.length === 0 ? 'none' : items.join(', '));
+  return `Created: ${render(created)}. Origin added: ${render(originAdded)}. Unchanged: ${render(unchanged)}.`;
 }
 
 /**
@@ -669,32 +689,23 @@ export function useApplyTemplate() {
       const body = { principal: input.principal, template: templateOf(input.template) };
       switch (input.scope.kind) {
         case 'instance':
-          return parsed(applyInstanceTemplate({ body }), zGrantResultList);
+          return parsed(applyInstanceTemplateOp, { body });
         case 'environment':
-          return parsed(
-            applyEnvTemplate({
+          return parsed(applyEnvTemplateOp, {
               path: {
                 org: input.scope.org,
                 project: input.scope.project,
                 environment: input.scope.environment,
               },
               body,
-            }),
-            zGrantResultList,
-          );
+            });
         case 'project':
-          return parsed(
-            applyProjectTemplate({
+          return parsed(applyProjectTemplateOp, {
               path: { org: input.scope.org, project: input.scope.project },
               body,
-            }),
-            zGrantResultList,
-          );
+            });
         case 'org':
-          return parsed(
-            applyOrgTemplate({ path: { org: input.scope.org }, body }),
-            zGrantResultList,
-          );
+          return parsed(applyOrgTemplateOp, { path: { org: input.scope.org }, body });
       }
     },
     onSettled: () => queries.invalidateQueries(),
@@ -728,18 +739,16 @@ export function useRevokeGrant() {
       const scope = scopeOf(input.grant);
       switch (scope.kind) {
         case 'environment':
-          return ok(
-            revokeEnvGrant({
+          return ok(revokeEnvGrantOp, {
               path: { org: scope.org, project: scope.project, environment: scope.environment },
               query,
-            }),
-          );
+            });
         case 'project':
-          return ok(revokeProjectGrant({ path: { org: scope.org, project: scope.project }, query }));
+          return ok(revokeProjectGrantOp, { path: { org: scope.org, project: scope.project }, query });
         case 'org':
-          return ok(revokeOrgGrant({ path: { org: scope.org }, query }));
+          return ok(revokeOrgGrantOp, { path: { org: scope.org }, query });
         case 'instance':
-          return ok(revokeInstanceGrant({ query }));
+          return ok(revokeInstanceGrantOp, { query });
       }
     },
     onSettled: () => queries.invalidateQueries(),
@@ -760,12 +769,12 @@ export function useRevokeGrant() {
  */
 export function grantFailureText(error: unknown): string {
   if (error instanceof GrantPartialFailure) {
-    if (error.granted.length === 0) {
+    if (error.completed.length === 0) {
       return grantFailureText(error.cause);
     }
-    const granted = error.granted.join(', ');
     return (
-      `Granted: ${granted} (${String(error.granted.length)} of ${String(error.total)}, live and listed below). ` +
+      `Completed ${String(error.completed.length)} of ${String(error.total)} (live and listed below). ` +
+      `${grantOutcomeSummary(error.completed)} ` +
       `${error.failedCapability} was refused: ${grantFailureText(error.cause)}`
     );
   }

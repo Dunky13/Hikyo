@@ -1,4 +1,7 @@
-import { getDefinitionsSettings, setDefinitionsSettings } from '@hikyo/client';
+import {
+  getDefinitionsSettingsOp,
+  setDefinitionsSettingsOp,
+} from '@hikyo/operations';
 import { zDefinitionsSettings, zSetDefinitionsSettingsRequest } from '@hikyo/zod';
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import type { z } from 'zod';
@@ -33,7 +36,7 @@ export function definitionsSettingsQueryOptions(org: string, project: string) {
   return {
     queryKey: definitionsSettingsKey(org, project),
     queryFn: () =>
-      parsed(getDefinitionsSettings({ path: { org, project } }), zDefinitionsSettings),
+      parsed(getDefinitionsSettingsOp, { path: { org, project } }),
     enabled: org !== '' && project !== '',
     retry: false,
   };
@@ -50,13 +53,10 @@ export function useSetDefinitionsSettings(org: string, project: string) {
   const queries = useQueryClient();
   return useMutation({
     mutationFn: (definitionsSource: DefinitionsSource) =>
-      parsed(
-        setDefinitionsSettings({
+      parsed(setDefinitionsSettingsOp, {
           path: { org, project },
           body: { definitions_source: definitionsSource },
         }),
-        zDefinitionsSettings,
-      ),
     onSuccess: () =>
       queries.invalidateQueries({ queryKey: definitionsSettingsKey(org, project) }),
   });

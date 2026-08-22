@@ -75,13 +75,20 @@ func newAccessWireEnv(t *testing.T, db *store.DB) accessWireEnv {
 	if err != nil {
 		t.Fatalf("create org: %v", err)
 	}
+	// Creation granted this principal org-admin access and therefore killed the
+	// creating session. Re-login and present the already-enrolled passkey before
+	// the wire assertions begin.
+	login, err := auth.LocalLogin(ctx, waAdmin, password, service.ArtifactCLI)
+	if err != nil {
+		t.Fatalf("login after org create: %v", err)
+	}
+	token = stepUpPasskey(t, auth, ctx, login.SessionToken, dev)
 
 	// The project and environment are seeded directly, as the harness seeds
 	// every other fixture row. Creating them through the API would mean first
-	// granting the administrator `manage-projects` and `definitions-edit` at
-	// the org and then re-authenticating (a self-grant kills the acting
-	// session) — churn that changes nothing about the property under test,
-	// which is only that the object EXISTS when the refused leg addresses it.
+	// re-authenticating after the creator-admin grant invalidated the creating
+	// session — churn that changes nothing about the property under test, which
+	// is only that the object EXISTS when the refused leg addresses it.
 	const (
 		wireProject = "prj_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0fdd"
 		wireEnv     = "env_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0fcc"
@@ -202,9 +209,10 @@ func runAccessWireUniformity(t *testing.T, db *store.DB) {
 		t.Fatalf("positive control: listing instance grants = %d %s", code, body)
 	}
 
-	// Strip the administrator's instance member-management. Their org-scope
-	// admin template is not applied, so every access route below is now a
-	// genuine grant refusal against an org that genuinely exists.
+	// Strip the creator's automatic org-admin grants and their instance member
+	// management. Every access route below is then a genuine grant refusal
+	// against an org that genuinely exists.
+	clearOrgGrants(t, db, e.org)
 	stripMemberManagement(t, db, e.admin)
 
 	// Contract-shaped ids: an id outside the ID pattern is refused on SHAPE,
@@ -295,6 +303,7 @@ func TestAccessWireQueryTracePostgres(t *testing.T) {
 //     is the residual the tenant-isolation ADR already accepts.
 func runAccessWireQueryTrace(t *testing.T, db *store.DB) {
 	e := newAccessWireEnv(t, db)
+	clearOrgGrants(t, db, e.org)
 	stripMemberManagement(t, db, e.admin)
 
 	grants := &service.Grants{DB: db}
@@ -376,10 +385,11 @@ func serviceQueryCount(t *testing.T, run func() error) int {
 	return n
 }
 
-// stripMemberManagement removes a principal's `manage-members` grants by raw
+// stripMemberManagement removes all of a principal's `manage-members` grants by raw
 // SQL. The lockout invariant refuses to do it through the API — correctly —
 // and there is no other way to make a bootstrapped administrator unauthorized
-// over an org that genuinely exists.
+// over an org that genuinely exists. This includes the org-scoped grant
+// creation now supplies automatically.
 func stripMemberManagement(t *testing.T, db *store.DB, p domain.PrincipalID) {
 	t.Helper()
 	execRaw(t, db, `DELETE FROM grant_origins WHERE grant_id IN (`+

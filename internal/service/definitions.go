@@ -180,8 +180,7 @@ func (s *Definitions) Export(ctx context.Context, actor Actor, scope domain.Scop
 		if err != nil {
 			return err
 		}
-		bundle := bundleFromState(cur, !portable)
-		bundle, err = definitions.Normalize(bundle)
+		bundle, err := definitions.Canonicalize(bundleFromState(cur, !portable))
 		if err != nil {
 			return err
 		}
@@ -213,10 +212,11 @@ func (s *Definitions) Check(ctx context.Context, actor Actor, scope domain.Scope
 		if err != nil {
 			return err
 		}
-		bundle, err := definitions.Parse(raw)
+		canonical, err := definitions.Parse(raw)
 		if err != nil {
 			return err
 		}
+		bundle := canonical.WireBundle()
 		cur, err := buildCurrentState(ctx, r.Catalogue(), r.Environments(), p)
 		if err != nil {
 			return err

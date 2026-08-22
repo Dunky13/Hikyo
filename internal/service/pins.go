@@ -166,7 +166,11 @@ func (s *Pins) Set(ctx context.Context, actor Actor, scope domain.Scope, request
 			for _, entry := range disclosedSecrets {
 				unit = append(unit, entry.KeyID)
 			}
-			if err := requireCeremony(ctx, s.Auth, az, caller, PurposeReveal, string(scope.Env), unit); err != nil {
+			intent, err := NewRevealReauthIntent(string(scope.Env), unit)
+			if err != nil {
+				return err
+			}
+			if err := requireCeremony(ctx, s.Auth, az, caller, intent); err != nil {
 				return err
 			}
 		}
@@ -314,7 +318,11 @@ func validatePinnedSnapshot(ctx context.Context, r store.Repos, p authz.Proof, s
 		}
 		cells = append(cells, cell)
 	}
-	return validateResolved(cells, presence, string(scope.Env))
+	index, err := newGroupIndex(keys, presence)
+	if err != nil {
+		return err
+	}
+	return index.validateResolvedPublish(cells, string(scope.Env))
 }
 
 func pinnedHistoricalSecrets(ctx context.Context, r store.Repos, p authz.Proof,

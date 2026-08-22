@@ -277,8 +277,7 @@ func (s *Auth) EnrolPasskeyFinish(ctx context.Context, presented string, respons
 	if err != nil {
 		return LoginResult{}, err
 	}
-	var result LoginResult
-	err = tx.Write(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
+	result, err := writeCommittedLoginResult(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer, result *LoginResult) error {
 		now := s.now()
 		live, err := az.Authenticate(ctx, presented, now)
 		if err != nil {
@@ -321,7 +320,7 @@ func (s *Auth) EnrolPasskeyFinish(ctx context.Context, presented string, respons
 		if err := s.assertPasskeyOnlyInvariant(ctx, az, account.ID); err != nil {
 			return err
 		}
-		result, err = s.reissueSession(ctx, az, account, ceremony.OperationBinding, MethodLocalPassword, Artifact(acting.Artifact), now)
+		*result, err = s.reissueSession(ctx, az, account, ceremony.OperationBinding, MethodLocalPassword, Artifact(acting.Artifact), now)
 		if err != nil {
 			return err
 		}
@@ -472,10 +471,7 @@ func (s *Auth) attemptPasskeyLogin(ctx context.Context, responseJSON []byte) (Lo
 
 	// Resolve the stored credential and apply the sign-count rule + mint the
 	// session, atomically.
-	var result LoginResult
-	var refused error
-	err = tx.Write(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
-		refused = nil
+	attempt, err := writeCommittedSessionAttempt(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer, attempt *sessionCompletionAttempt) error {
 		now := s.now()
 		// Reload the ceremony inside the write tx and re-validate against the tx
 		// clock/epoch (A3): a ceremony accepted just before expiry must not
@@ -483,7 +479,7 @@ func (s *Auth) attemptPasskeyLogin(ctx context.Context, responseJSON []byte) (Lo
 		fresh, err := az.WebAuthnCeremonyByChallenge(ctx, challengeVerifier(challenge))
 		if err != nil {
 			if errors.Is(err, domain.ErrNotFound) {
-				refused = domain.ErrUnauthenticated
+				attempt.refused = sessionRefusedUnauthenticated
 				return nil
 			}
 			return err
@@ -493,19 +489,19 @@ func (s *Auth) attemptPasskeyLogin(ctx context.Context, responseJSON []byte) (Lo
 			return err
 		}
 		if !validCeremony(fresh, "login", "", "", "", now) || fresh.CredentialEpoch != epoch {
-			refused = domain.ErrUnauthenticated
+			attempt.refused = sessionRefusedUnauthenticated
 			return nil
 		}
 		stored, err := az.WebAuthnCredentialByCredentialID(ctx, assertion.CredentialID)
 		if err != nil {
 			if errors.Is(err, domain.ErrNotFound) {
-				refused = domain.ErrUnauthenticated
+				attempt.refused = sessionRefusedUnauthenticated
 				return nil
 			}
 			return err
 		}
 		if stored.Disabled || stored.CredentialEpoch != epoch || !stored.Discoverable {
-			refused = domain.ErrUnauthenticated
+			attempt.refused = sessionRefusedUnauthenticated
 			return nil
 		}
 		account, err := az.AccountByID(ctx, stored.AccountID)
@@ -519,14 +515,14 @@ func (s *Auth) attemptPasskeyLogin(ctx context.Context, responseJSON []byte) (Lo
 			return err
 		}
 		if !consumed {
-			refused = domain.ErrUnauthenticated
+			attempt.refused = sessionRefusedUnauthenticated
 			return nil
 		}
 		if s.isClone(stored, assertion.SignCount) {
 			if err := s.respondToClone(ctx, az, account, stored, now); err != nil {
 				return err
 			}
-			refused = domain.ErrUnauthenticated
+			attempt.refused = sessionRefusedUnauthenticated
 			return nil
 		}
 		advanced, err := az.AdvanceWebAuthnSignCount(ctx, stored.ID, stored.RowVersion, int64(assertion.SignCount), now)
@@ -537,13 +533,13 @@ func (s *Auth) attemptPasskeyLogin(ctx context.Context, responseJSON []byte) (Lo
 			// The row moved under a concurrent assertion — the single-writer
 			// guarantee row_version exists for. Refuse rather than mint on a stale
 			// counter.
-			refused = domain.ErrUnauthenticated
+			attempt.refused = sessionRefusedUnauthenticated
 			return nil
 		}
 		// Mint against the RELOADED ceremony row (A3): its id is what was consumed
 		// above, so the minted session's ceremony_id traces the credential that
 		// authored it even if the pre-tx row were ever superseded.
-		result, err = s.mintPasskeySession(ctx, az, account, fresh.ID, now)
+		attempt.result, err = s.mintPasskeySession(ctx, az, account, fresh.ID, now)
 		if err != nil {
 			return err
 		}
@@ -552,10 +548,10 @@ func (s *Auth) attemptPasskeyLogin(ctx context.Context, responseJSON []byte) (Lo
 	if err != nil {
 		return LoginResult{}, err
 	}
-	if refused != nil {
+	if refused := attempt.refused.err(); refused != nil {
 		return LoginResult{}, refused
 	}
-	return result, nil
+	return attempt.result, nil
 }
 
 // isClone applies B9: skip the counter comparison for a backup-eligible
@@ -601,40 +597,15 @@ func (s *Auth) respondToClone(ctx context.Context, az *authz.TxAuthorizer, accou
 // ceremony_id is the login ceremony, whose credential_id is the passkey that
 // authored it — the link the clone sweep traces.
 func (s *Auth) mintPasskeySession(ctx context.Context, az *authz.TxAuthorizer, account authz.Account, ceremonyID string, now time.Time) (LoginResult, error) {
-	generation, err := az.PrincipalGeneration(ctx, account.PrincipalID)
+	result, err := s.completeSession(ctx, az, CreateSession{
+		account: account, artifact: ArtifactBrowser,
+		assurance: Assurance{
+			Method: MethodLocalPasskey, Factors: []string{"webauthn"},
+			AuthenticatedAt: now, CeremonyID: ceremonyID,
+		},
+		csrf: sessionWithCSRF,
+	}, now)
 	if err != nil {
-		return LoginResult{}, err
-	}
-	epoch, err := az.CredentialEpoch(ctx)
-	if err != nil {
-		return LoginResult{}, err
-	}
-	value, verifier, err := crypto.NewArtifact(crypto.ArtifactBrowserSession)
-	if err != nil {
-		return LoginResult{}, err
-	}
-	csrfValue, csrfVerifier, err := crypto.NewArtifact(crypto.ArtifactCSRF)
-	if err != nil {
-		return LoginResult{}, err
-	}
-	sessionID, err := newID("ses")
-	if err != nil {
-		return LoginResult{}, err
-	}
-	factors, err := json.Marshal([]string{"webauthn"})
-	if err != nil {
-		return LoginResult{}, err
-	}
-	wire := audit.FromContext(ctx)
-	sess := authz.NewSession{
-		ID: sessionID, PrincipalID: account.PrincipalID, Verifier: verifier,
-		Artifact: ArtifactBrowser.String(), SessionGeneration: generation, CredentialEpoch: epoch,
-		AuthMethod: MethodLocalPasskey, Factors: string(factors),
-		AuthenticatedAt: now, CeremonyID: ceremonyID, CreatedAt: now,
-		IdleExpiresAt: now.Add(BrowserSessionIdle), AbsoluteExpiresAt: now.Add(BrowserSessionAbsolute),
-		SourceIP: wire.SourceIP, UserAgent: wire.UserAgent, CSRFVerifier: csrfVerifier,
-	}
-	if err := az.MintSession(ctx, sess); err != nil {
 		return LoginResult{}, err
 	}
 	for _, ev := range []struct {
@@ -646,12 +617,12 @@ func (s *Auth) mintPasskeySession(ctx context.Context, az *authz.TxAuthorizer, a
 			"subject_resolved": true, "account_id": account.ID, "assurance": "multi-factor",
 		}},
 		{audit.EventAuthSessionCreated, audit.Payload{
-			"session_id": sessionID, "artifact": ArtifactBrowser.String(),
+			"session_id": result.SessionID, "artifact": ArtifactBrowser.String(),
 			"method": MethodLocalPasskey, "assurance": "multi-factor",
 		}},
 	} {
 		e, err := newAuditEvent(ctx, ev.typ, account.PrincipalID,
-			audit.Object{Type: "session", ID: sessionID}, audit.OutcomeSuccess, "", ev.payload)
+			audit.Object{Type: "session", ID: result.SessionID}, audit.OutcomeSuccess, "", ev.payload)
 		if err != nil {
 			return LoginResult{}, err
 		}
@@ -659,13 +630,7 @@ func (s *Auth) mintPasskeySession(ctx context.Context, az *authz.TxAuthorizer, a
 			return LoginResult{}, err
 		}
 	}
-	return LoginResult{
-		SessionToken: value, SessionID: sessionID, Artifact: ArtifactBrowser,
-		CreatedAt: now, IdleExpires: sess.IdleExpiresAt, AbsExpires: sess.AbsoluteExpiresAt,
-		Principal: account.PrincipalID, AccountID: account.ID, DisplayName: account.DisplayName,
-		Assurance: Assurance{Method: MethodLocalPasskey, Factors: []string{"webauthn"}, AuthenticatedAt: now},
-		CSRFToken: csrfValue,
-	}, nil
+	return result, nil
 }
 
 // StepUpPasskeyStart opens a non-discoverable ceremony scoped to the acting
@@ -685,42 +650,20 @@ func (s *Auth) StepUpPasskeyFinish(ctx context.Context, presented string, respon
 // ReauthPasskeyStart opens a reauth ceremony bound to the enumerated unit
 // (purpose + environment + sorted key ids), so the challenge authorizes exactly
 // that decision and no other with the same shape.
-func (s *Auth) ReauthPasskeyStart(ctx context.Context, presented string, purpose ReauthPurpose,
-	environmentID string, keyIDs []string) ([]byte, error) {
-	if environmentID == "" {
-		return nil, ErrNoWebAuthnCeremony
-	}
-	binding, err := operationBinding(purpose, environmentID, keyIDs)
+func (s *Auth) ReauthPasskeyStart(ctx context.Context, presented string, intent ReauthIntent) ([]byte, error) {
+	unbound, err := intent.isUnbound()
 	if err != nil {
 		return nil, err
 	}
-	return s.beginAccountCeremony(ctx, presented, "reauth", binding, environmentID, []string{environmentID})
-}
-
-// ReauthAdapterPasskeyStart opens one signed WebAuthn ceremony for one
-// effective-zero environment, with the adapter purpose, concrete operation and
-// complete adapter environment set all inside the signed challenge binding.
-// A mixed-policy act calls this once per zero-window environment.
-func (s *Auth) ReauthAdapterPasskeyStart(ctx context.Context, presented string, operation authz.Operation,
-	environmentID string, environmentIDs []string) ([]byte, error) {
-	if !adapterReauthOperation(operation) || environmentID == "" {
+	if unbound {
 		return nil, ErrReauthUnitMismatch
 	}
-	environmentIDs = adapterEnvironmentSet(environmentIDs)
-	if !slices.Contains(environmentIDs, environmentID) {
-		return nil, ErrReauthUnitMismatch
-	}
-	binding, err := adapterOperationBinding(operation, environmentID, environmentIDs)
+	binding, err := intent.bindingFor(intent.environmentID)
 	if err != nil {
 		return nil, err
 	}
-	return s.beginAccountCeremony(ctx, presented, "reauth", binding, environmentID, environmentIDs)
-}
-
-// ReauthAdapterPasskeyStartWire keeps the transport boundary free of authz
-// package types while preserving the same closed operation validation here.
-func (s *Auth) ReauthAdapterPasskeyStartWire(ctx context.Context, presented, operation, environmentID string, environmentIDs []string) ([]byte, error) {
-	return s.ReauthAdapterPasskeyStart(ctx, presented, authz.Operation(operation), environmentID, environmentIDs)
+	return s.beginAccountCeremony(ctx, presented, "reauth", binding.challengeBinding,
+		binding.environmentID, intent.EnvironmentIDs())
 }
 
 // ReauthPasskeyFinish validates the assertion and opens a reauthentication
@@ -765,12 +708,21 @@ func (s *Auth) ReauthPasskeyFinish(ctx context.Context, presented string, respon
 		if binding, ok, err := parseAdapterOperationBinding(ceremony.OperationBinding); err != nil {
 			return err
 		} else if ok {
-			if binding.EnvironmentID != ceremony.EnvironmentID || !adapterReauthOperation(authz.Operation(binding.Operation)) {
+			intent, err := NewAdapterReauthIntent(binding.Operation, binding.EnvironmentIDs)
+			if err != nil {
 				return ErrReauthUnitMismatch
 			}
-			window.BoundPurpose = string(PurposeAdapter)
-			window.BoundOperation = binding.Operation
-			window.BoundEnvironmentSet = CanonicalEnvironmentSet(binding.EnvironmentIDs)
+			target, err := intent.ForEnvironment(binding.EnvironmentID)
+			if err != nil {
+				return ErrReauthUnitMismatch
+			}
+			derived, err := target.bindingFor(binding.EnvironmentID)
+			if err != nil || binding.EnvironmentID != ceremony.EnvironmentID || derived.challengeBinding != ceremony.OperationBinding {
+				return ErrReauthUnitMismatch
+			}
+			window.BoundPurpose = string(derived.purpose)
+			window.BoundOperation = string(derived.operation)
+			window.BoundEnvironmentSet = derived.environmentSet
 		}
 		if err := az.OpenReauthWindow(ctx, window); err != nil {
 			return err
@@ -939,15 +891,8 @@ func (s *Auth) finishAssertionElevation(ctx context.Context, presented string, r
 	}
 
 	factors := stepUpFactors(acting.Assurance.Factors, "webauthn")
-	value, verifier, err := s.newSessionArtifact(Artifact(acting.Artifact))
-	if err != nil {
-		return LoginResult{}, err
-	}
 
-	var result LoginResult
-	var refused error
-	err = tx.Write(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
-		refused = nil
+	attempt, err := writeCommittedSessionAttempt(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer, attempt *sessionCompletionAttempt) error {
 		now := s.now()
 		live, err := az.Authenticate(ctx, presented, now)
 		if err != nil {
@@ -962,7 +907,7 @@ func (s *Auth) finishAssertionElevation(ctx context.Context, presented string, r
 		fresh, err := az.WebAuthnCeremonyByChallenge(ctx, challengeVerifier(challenge))
 		if err != nil {
 			if errors.Is(err, domain.ErrNotFound) {
-				refused = domain.ErrUnauthenticated
+				attempt.refused = sessionRefusedUnauthenticated
 				return nil
 			}
 			return err
@@ -972,19 +917,19 @@ func (s *Auth) finishAssertionElevation(ctx context.Context, presented string, r
 			return err
 		}
 		if !validCeremony(fresh, purpose, account.ID, acting.SessionID, expectedBinding, now) || fresh.CredentialEpoch != epoch {
-			refused = domain.ErrUnauthenticated
+			attempt.refused = sessionRefusedUnauthenticated
 			return nil
 		}
 		stored, err := az.WebAuthnCredentialByCredentialID(ctx, assertion.CredentialID)
 		if err != nil {
 			if errors.Is(err, domain.ErrNotFound) {
-				refused = domain.ErrUnauthenticated
+				attempt.refused = sessionRefusedUnauthenticated
 				return nil
 			}
 			return err
 		}
 		if stored.AccountID != account.ID || stored.Disabled || stored.CredentialEpoch != epoch {
-			refused = domain.ErrUnauthenticated
+			attempt.refused = sessionRefusedUnauthenticated
 			return nil
 		}
 		consumed, err := az.ConsumeWebAuthnCeremony(ctx, fresh.ID, stored.ID, now)
@@ -992,7 +937,7 @@ func (s *Auth) finishAssertionElevation(ctx context.Context, presented string, r
 			return err
 		}
 		if !consumed {
-			refused = domain.ErrUnauthenticated
+			attempt.refused = sessionRefusedUnauthenticated
 			return nil
 		}
 		if s.isClone(stored, assertion.SignCount) {
@@ -1000,7 +945,7 @@ func (s *Auth) finishAssertionElevation(ctx context.Context, presented string, r
 				return err
 			}
 			s.Admission.RecordFailure(account.ID)
-			refused = domain.ErrUnauthenticated
+			attempt.refused = sessionRefusedUnauthenticated
 			return nil
 		}
 		advanced, err := az.AdvanceWebAuthnSignCount(ctx, stored.ID, stored.RowVersion, int64(assertion.SignCount), now)
@@ -1008,7 +953,7 @@ func (s *Auth) finishAssertionElevation(ctx context.Context, presented string, r
 			return err
 		}
 		if !advanced {
-			refused = domain.ErrUnauthenticated
+			attempt.refused = sessionRefusedUnauthenticated
 			return nil
 		}
 		// Rotate the acting session token (every step-up/reauth rotates),
@@ -1018,11 +963,10 @@ func (s *Auth) finishAssertionElevation(ctx context.Context, presented string, r
 		if purpose == "step-up" {
 			newFactors = factors
 		}
-		nf, err := json.Marshal(newFactors)
+		completion, err := s.completeSession(ctx, az, RotateSession{
+			session: live, account: account, factors: newFactors,
+		}, now)
 		if err != nil {
-			return err
-		}
-		if err := az.RotateSessionFactors(ctx, live.SessionID, verifier, string(nf)); err != nil {
 			return err
 		}
 		if effect != nil {
@@ -1039,25 +983,17 @@ func (s *Auth) finishAssertionElevation(ctx context.Context, presented string, r
 		if err := az.RecordAuthEvent(ctx, e); err != nil {
 			return err
 		}
-		result = LoginResult{
-			SessionToken: value, SessionID: acting.SessionID, Artifact: Artifact(acting.Artifact),
-			CreatedAt: acting.CreatedAt, IdleExpires: acting.IdleExpiresAt, AbsExpires: acting.AbsoluteExpiresAt,
-			Principal: account.PrincipalID, AccountID: account.ID, DisplayName: account.DisplayName,
-			Assurance: Assurance{
-				Method: acting.Assurance.Method, Factors: newFactors,
-				AuthenticatedAt: acting.Assurance.AuthenticatedAt, CeremonyID: acting.Assurance.CeremonyID,
-			},
-		}
+		attempt.result = completion
 		return nil
 	})
 	if err != nil {
 		return LoginResult{}, err
 	}
-	if refused != nil {
+	if refused := attempt.refused.err(); refused != nil {
 		return LoginResult{}, refused
 	}
 	s.Admission.RecordSuccess(account.ID)
-	return result, nil
+	return attempt.result, nil
 }
 
 // RemovePasskey removes a credential as an account-security mutation. The
@@ -1119,8 +1055,7 @@ func (s *Auth) RemovePasskey(ctx context.Context, presented, credentialID, passw
 	}
 	s.Admission.RecordSuccess(account.ID)
 
-	var result LoginResult
-	err = tx.Write(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
+	result, err := writeCommittedLoginResult(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer, result *LoginResult) error {
 		now := s.now()
 		live, err := az.Authenticate(ctx, presented, now)
 		if err != nil {
@@ -1154,7 +1089,7 @@ func (s *Auth) RemovePasskey(ctx context.Context, presented, credentialID, passw
 		if err := s.assertPasskeyOnlyInvariant(ctx, az, account.ID); err != nil {
 			return err
 		}
-		result, err = s.reissueSession(ctx, az, account, proofClass, MethodLocalPassword, Artifact(live.Artifact), now)
+		*result, err = s.reissueSession(ctx, az, account, proofClass, MethodLocalPassword, Artifact(live.Artifact), now)
 		if err != nil {
 			return err
 		}

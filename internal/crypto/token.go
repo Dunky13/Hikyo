@@ -11,7 +11,7 @@ import (
 // protocol data; changing it would derive different keys for existing values.
 const tokenInfoLabel = "wenv/change-token/v1"
 
-// ScopedTokenKey derives the per-scope change-token key from the root token
+// deriveScopedTokenKey derives one purpose's per-scope key from the root token
 // key (encryption-model ADR § Key hierarchy):
 //
 //	scopedTokenKey = HKDF-SHA256(rootTokenKey, info = LP(label, org_id, project_id, env_id))
@@ -19,10 +19,11 @@ const tokenInfoLabel = "wenv/change-token/v1"
 // The info encoding is the same length-prefixed canonical encoding as the
 // AADs — load-bearing: raw concatenation would let ("a","bc") and ("ab","c")
 // derive the identical key, resurrecting the cross-scope equality oracle the
-// revision-model ADR keyed the token to eliminate. Derived per use, never cached
-// or stored.
-func (k *Keyring) ScopedTokenKey(orgID, projectID, envID string) ([]byte, error) {
-	info := appendLP(nil, []byte(tokenInfoLabel))
+// revision-model ADR keyed the token to eliminate. label is immutable protocol
+// data and domain-separates each token purpose. Derived per use, never cached or
+// stored; callers zero the returned key after tagging.
+func (k *Keyring) deriveScopedTokenKey(label, orgID, projectID, envID string) ([]byte, error) {
+	info := appendLP(nil, []byte(label))
 	info = appendLP(info, []byte(orgID))
 	info = appendLP(info, []byte(projectID))
 	info = appendLP(info, []byte(envID))
@@ -41,7 +42,7 @@ const occurrenceInfoLabel = "hikyo/import-occurrence/v1"
 
 const publishPreviewInfoLabel = "hikyo/publish-preview/v1"
 
-// OccurrenceToken is HMAC-SHA256(scopedOccurrenceKey, encoding), base64url,
+// OccurrenceToken is HMAC-SHA256(scoped occurrence key, encoding), base64url,
 // prefixed — the server-minted opaque token an import's phase 1 records per
 // (key, environment) and phase 2 verifies inside its own authorized
 // transaction.
@@ -58,7 +59,7 @@ const publishPreviewInfoLabel = "hikyo/publish-preview/v1"
 // The caller owns the encoding (internal/delivery.EncodeOccurrence); this
 // package receives bytes and returns a token.
 func (k *Keyring) OccurrenceToken(orgID, projectID, envID string, encoding []byte) (string, error) {
-	key, err := k.scopedOccurrenceKey(orgID, projectID, envID)
+	key, err := k.deriveScopedTokenKey(occurrenceInfoLabel, orgID, projectID, envID)
 	if err != nil {
 		return "", err
 	}
@@ -70,31 +71,12 @@ func (k *Keyring) OccurrenceToken(orgID, projectID, envID string, encoding []byt
 // inputs. It has its own derivation label so a preview token is never usable as
 // a delivery cursor, occurrence token, or change token.
 func (k *Keyring) PublishPreviewToken(orgID, projectID, envID string, encoding []byte) (string, error) {
-	info := appendLP(nil, []byte(publishPreviewInfoLabel))
-	info = appendLP(info, []byte(orgID))
-	info = appendLP(info, []byte(projectID))
-	info = appendLP(info, []byte(envID))
-	key, err := hkdf.Key(sha256.New, k.rootTokenKey(), nil, string(info), KeySize)
+	key, err := k.deriveScopedTokenKey(publishPreviewInfoLabel, orgID, projectID, envID)
 	if err != nil {
-		return "", fmt.Errorf("crypto: derive publish-preview key: %w", err)
+		return "", err
 	}
 	defer Zero(key)
 	return tag(key, encoding), nil
-}
-
-// scopedOccurrenceKey mirrors ScopedTokenKey under its own label, with the same
-// length-prefixed info encoding — load-bearing for the same reason: raw
-// concatenation would let ("a","bc") and ("ab","c") derive the identical key.
-func (k *Keyring) scopedOccurrenceKey(orgID, projectID, envID string) ([]byte, error) {
-	info := appendLP(nil, []byte(occurrenceInfoLabel))
-	info = appendLP(info, []byte(orgID))
-	info = appendLP(info, []byte(projectID))
-	info = appendLP(info, []byte(envID))
-	key, err := hkdf.Key(sha256.New, k.rootTokenKey(), nil, string(info), KeySize)
-	if err != nil {
-		return nil, fmt.Errorf("crypto: derive scoped occurrence key: %w", err)
-	}
-	return key, nil
 }
 
 // rootTokenKey reads the live root token key under the rotation mutex, so a

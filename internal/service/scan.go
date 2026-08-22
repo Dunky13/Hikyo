@@ -207,15 +207,79 @@ func ackRef(token string) string {
 	return base64.RawURLEncoding.EncodeToString(h[:])
 }
 
-// ackSet tracks the tokens a resubmission presented, consuming each as it
-// matches a current finding so surplus tokens can be rejected by name (ADR §4).
+type ackBindingIndexKey struct {
+	kind       string
+	locator    string
+	ruleDigest string
+}
+
+type ackMatchIndexKey struct {
+	snapshot   string
+	contentSHA [32]byte
+}
+
+type ackEntry struct {
+	originalIndex int
+	token         string
+	binding       ackBinding
+	decodeErr     error
+	used          bool
+}
+
+type ackBindingBucket struct {
+	byMatch map[ackMatchIndexKey][]int
+	cursors map[ackMatchIndexKey]int
+}
+
+// ackSet decodes each presented token once, retains its original position and
+// indexes valid bindings for linear matching. Entries remain distinct so
+// duplicate tokens cannot collapse into one map value and rejection reporting
+// stays in submission order (ADR §4).
 type ackSet struct {
-	tokens []string
-	used   []bool
+	entries      []ackEntry
+	bindingIndex map[ackBindingIndexKey]*ackBindingBucket
+	decoded      bool
+	open         func(*crypto.Keyring, string) (ackBinding, error)
 }
 
 func newAckSet(tokens []string) *ackSet {
-	return &ackSet{tokens: tokens, used: make([]bool, len(tokens))}
+	entries := make([]ackEntry, len(tokens))
+	for i, token := range tokens {
+		entries[i] = ackEntry{originalIndex: i, token: token}
+	}
+	return &ackSet{entries: entries, open: openAck}
+}
+
+// decode opens every token on first use. Both matching and rejection
+// classification share the retained result, so neither can repeat crypto work.
+func (a *ackSet) decode(kr *crypto.Keyring) {
+	if a.decoded {
+		return
+	}
+	a.decoded = true
+	a.bindingIndex = make(map[ackBindingIndexKey]*ackBindingBucket, len(a.entries))
+	for i := range a.entries {
+		entry := &a.entries[i]
+		entry.binding, entry.decodeErr = a.open(kr, entry.token)
+		if entry.decodeErr != nil {
+			continue
+		}
+		bindingKey := ackBindingIndexKey{
+			kind:       entry.binding.kind,
+			locator:    entry.binding.locator,
+			ruleDigest: entry.binding.ruleDigest,
+		}
+		bucket := a.bindingIndex[bindingKey]
+		if bucket == nil {
+			bucket = &ackBindingBucket{
+				byMatch: make(map[ackMatchIndexKey][]int),
+				cursors: make(map[ackMatchIndexKey]int),
+			}
+			a.bindingIndex[bindingKey] = bucket
+		}
+		matchKey := ackMatchIndexKey{snapshot: entry.binding.snapshot, contentSHA: entry.binding.contentSHA}
+		bucket.byMatch[matchKey] = append(bucket.byMatch[matchKey], i)
+	}
 }
 
 // match finds one unconsumed token that binds exactly this finding under this
@@ -224,28 +288,24 @@ func newAckSet(tokens []string) *ackSet {
 // a stale content digest is left UNCONSUMED and surfaced as a stale rejection by
 // the caller's surplus sweep.
 func (a *ackSet) match(kr *crypto.Keyring, kind, locator, ruleDigest, snapshot string, cSHA [32]byte, now time.Time) (string, bool) {
-	for i, tok := range a.tokens {
-		if a.used[i] {
+	a.decode(kr)
+	bucket := a.bindingIndex[ackBindingIndexKey{kind: kind, locator: locator, ruleDigest: ruleDigest}]
+	if bucket == nil {
+		return "", false
+	}
+	matchKey := ackMatchIndexKey{snapshot: snapshot, contentSHA: cSHA}
+	indices := bucket.byMatch[matchKey]
+	for cursor := bucket.cursors[matchKey]; cursor < len(indices); cursor++ {
+		bucket.cursors[matchKey] = cursor + 1
+		entry := &a.entries[indices[cursor]]
+		if entry.used {
 			continue
 		}
-		b, err := openAck(kr, tok)
-		if err != nil {
-			continue
+		if now.Sub(time.Unix(0, entry.binding.mintNano)) > ackTTL {
+			continue // expired; retained for rejection classification
 		}
-		if b.kind != kind || b.locator != locator || b.ruleDigest != ruleDigest {
-			continue
-		}
-		if b.snapshot != snapshot {
-			continue // version skew: rejected by the surplus sweep
-		}
-		if b.contentSHA != cSHA {
-			continue // stale: content changed since minting
-		}
-		if now.Sub(time.Unix(0, b.mintNano)) > ackTTL {
-			continue // expired
-		}
-		a.used[i] = true
-		return tok, true
+		entry.used = true
+		return entry.token, true
 	}
 	return "", false
 }
@@ -255,8 +315,8 @@ func (a *ackSet) match(kr *crypto.Keyring, kind, locator, ruleDigest, snapshot s
 // standing pre-authorization is structurally impossible).
 func (a *ackSet) unconsumed() int {
 	n := 0
-	for _, u := range a.used {
-		if !u {
+	for _, entry := range a.entries {
+		if !entry.used {
 			n++
 		}
 	}
@@ -270,35 +330,40 @@ func (a *ackSet) unconsumed() int {
 // is surplus; otherwise the mismatch that kept it from matching its finding is
 // the reason — version-skew before stale before expired.
 func (a *ackSet) classifyRejections(kr *crypto.Keyring, findings []declFinding, snapshot string, now time.Time) []scanRejection {
+	a.decode(kr)
+	findingsByBinding := make(map[ackBindingIndexKey]declFinding, len(findings))
+	for _, finding := range findings {
+		key := ackBindingIndexKey{kind: ackKindDecl, locator: finding.locator, ruleDigest: finding.ruleDigest}
+		if _, exists := findingsByBinding[key]; !exists {
+			findingsByBinding[key] = finding
+		}
+	}
 	var out []scanRejection
-	for i, tok := range a.tokens {
-		if a.used[i] {
+	for i := range a.entries {
+		entry := &a.entries[i]
+		if entry.used {
 			continue
 		}
-		rej := scanRejection{Index: i}
-		b, err := openAck(kr, tok)
-		if err != nil || b.kind != ackKindDecl {
+		rej := scanRejection{Index: entry.originalIndex}
+		if entry.decodeErr != nil || entry.binding.kind != ackKindDecl {
 			rej.Reason = rejectUnreadable
 			out = append(out, rej)
 			continue
 		}
-		rej.Locator = b.locator
-		var match *declFinding
-		for j := range findings {
-			if findings[j].locator == b.locator && findings[j].ruleDigest == b.ruleDigest {
-				match = &findings[j]
-				break
-			}
-		}
+		binding := entry.binding
+		rej.Locator = binding.locator
+		match, matched := findingsByBinding[ackBindingIndexKey{
+			kind: ackKindDecl, locator: binding.locator, ruleDigest: binding.ruleDigest,
+		}]
 		switch {
-		case match == nil:
+		case !matched:
 			// No current finding shares this token's locator+rule.
 			rej.Reason = rejectSurplus
-		case b.snapshot != snapshot:
+		case binding.snapshot != snapshot:
 			rej.Reason, rej.RuleID = rejectVersionSkew, match.ruleID
-		case b.contentSHA != match.cSHA:
+		case binding.contentSHA != match.cSHA:
 			rej.Reason, rej.RuleID = rejectStale, match.ruleID
-		case now.Sub(time.Unix(0, b.mintNano)) > ackTTL:
+		case now.Sub(time.Unix(0, binding.mintNano)) > ackTTL:
 			rej.Reason, rej.RuleID = rejectExpired, match.ruleID
 		default:
 			// Binds an exact current finding yet stayed unconsumed: a second token

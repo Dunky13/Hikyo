@@ -1,12 +1,11 @@
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
-import { zGrantResult, zServiceAccountList, zWhoAmI } from '@hikyo/zod';
+import { zServiceAccountList } from '@hikyo/zod';
 import { z } from 'zod';
 
 import { expectPinnedAssertionSet, expectStatusIsTextAndAria } from '../fixtures/assertions.ts';
 import {
   browserApi,
   readSeed,
-  refreshSharedSession,
   STORAGE_STATE,
 } from '../fixtures/instance.ts';
 
@@ -124,12 +123,11 @@ test.describe('members and grants', () => {
     const answer = page.locator('.inspect__answer');
     await expect(answer).toContainText('grant line');
 
-    // Production holds no `read` line of its own, and nothing inside the org
-    // covers it — the honest answer is nobody, with the caveat that an
-    // instance-scope holder would not appear.
+    // The creator's org-admin template is org-scoped, so it covers production
+    // even though production holds no narrower `read` line of its own.
     await page.getByLabel('On', { exact: true }).selectOption(`env:${seed.project}:${seed.prod}`);
-    await expect(answer).toContainText('Nobody');
-    await expect(answer).toContainText('instance-scope holder would not appear');
+    await expect(answer).toContainText('1 grant line');
+    await expect(answer).toContainText(seed.principal);
   });
 
   test('does not answer Nobody before the grant listing succeeds', async ({ page }) => {
@@ -324,7 +322,7 @@ test.describe('members and grants', () => {
       await dialog.getByLabel('Scope').selectOption(`env:${seed.project}:${seed.dev}`);
       await dialog.getByRole('button', { name: 'Grant', exact: true }).click();
 
-      const partial = page.getByRole('alert').filter({ hasText: 'Granted: read, edit' });
+      const partial = page.getByRole('alert').filter({ hasText: 'Completed 2 of 3' });
       await expect(partial).toContainText('2 of 3');
       await expect(partial).toContainText('pin was refused');
       await expect(partial).toContainText('live and listed below');
@@ -348,9 +346,12 @@ test.describe('members and grants', () => {
       await dialog.getByLabel('Scope').selectOption(`env:${seed.project}:${seed.dev}`);
       await dialog.getByRole('button', { name: 'Grant', exact: true }).click();
 
-      const feedback = page.locator('.notice').filter({ hasText: 'Granted' });
+      const feedback = page.locator('.notice').filter({ hasText: 'Grant results' });
       await expectStatusIsTextAndAria(page, feedback);
-      await expect(feedback).toContainText('separate lines');
+      await expect(feedback).toContainText('Created: read, edit');
+      await expect(feedback).toContainText('Origin added: none');
+      await expect(feedback).toContainText('Unchanged: none');
+      await expect(feedback).toContainText('independently revocable');
 
       // Two independent rows, not a bundle.
       const row = page.getByRole('row').filter({ hasText: principal });
@@ -385,45 +386,11 @@ test.describe('members and grants', () => {
     await expect(page.getByRole('alert').filter({ hasText: 'second factor' })).toHaveCount(0);
   });
 
-  test('switches real organisation membership from a project route without leaking the old org', async ({
+  test('switches creator membership from a project route without leaking the old org', async ({
     browser,
-    page,
   }) => {
-    const principal = (await browserApi(page, 'GET', '/api/v1/auth/whoami', zWhoAmI)).principal.id;
-    let grantedA = false;
-    let grantedB = false;
-
-    const change = async (method: 'POST' | 'DELETE', org: string) => {
-      const fresh = await freshPage(browser);
-      try {
-        const query = `principal=${encodeURIComponent(principal)}&capability=read`;
-        await browserApi(
-          fresh.page,
-          method,
-          `/api/v1/orgs/${org}/grants${method === 'DELETE' ? `?${query}` : ''}`,
-          method === 'POST' ? zGrantResult : z.null(),
-          method === 'POST' ? { principal, capability: 'read' } : undefined,
-        );
-      } catch (error) {
-        if (method === 'DELETE' && error instanceof Error && error.message.includes('answered 404:')) {
-          return;
-        }
-        throw error;
-      } finally {
-        await fresh.context.close();
-      }
-    };
-
+    const view = await freshPage(browser);
     try {
-      await change('POST', seed.org);
-      grantedA = true;
-      await refreshSharedSession();
-      await change('POST', seed.orgB);
-      grantedB = true;
-      await refreshSharedSession();
-
-      const view = await freshPage(browser);
-      try {
         await view.page.goto(`/orgs/${seed.org}/projects/${seed.project}/matrix`);
         const rail = view.page.getByRole('navigation', { name: 'Organisations' });
         await expect(rail.getByRole('button', { name: `Organisation ${seed.orgName}` })).toHaveAttribute(
@@ -458,18 +425,8 @@ test.describe('members and grants', () => {
         await expect(
           rail.getByRole('button', { name: `Organisation ${seed.orgBName}` }),
         ).toHaveAttribute('aria-current', 'true');
-      } finally {
-        await view.context.close();
-      }
     } finally {
-      if (grantedA) {
-        await change('DELETE', seed.org);
-        await refreshSharedSession();
-      }
-      if (grantedB) {
-        await change('DELETE', seed.orgB);
-        await refreshSharedSession();
-      }
+      await view.context.close();
     }
   });
 

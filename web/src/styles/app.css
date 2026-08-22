@@ -369,6 +369,52 @@ select {
   color: var(--danger);
 }
 
+/* Viewport feedback for failures that settle after a modal closes. The source
+   surface may be far above the restored focus position, so a normal in-flow
+   alert is present but visually unreachable at exactly the wrong moment. */
+.toast {
+  position: fixed;
+  inset: 16px 16px auto auto;
+  z-index: 30;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+  width: min(440px, calc(100vw - 32px));
+  padding: 12px;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-container);
+  color: var(--tx);
+  background: color-mix(in oklch, var(--bg-raise), var(--danger) 8%);
+  box-shadow: 0 12px 36px color-mix(in srgb, black 30%, transparent);
+}
+
+.toast--success {
+  border-color: var(--accent);
+  background: color-mix(in oklch, var(--bg-raise), var(--accent) 8%);
+}
+
+.toast--success .alert__glyph {
+  color: var(--accent);
+}
+
+.toast__dismiss {
+  display: grid;
+  place-items: center;
+  min-width: 32px;
+  min-height: 32px;
+  margin: -6px -6px 0 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--tx);
+  cursor: pointer;
+}
+
+.toast__dismiss:hover {
+  background: color-mix(in oklch, var(--bg-raise), var(--tx) 8%);
+}
+
 /* --- Chrome -------------------------------------------------------------- */
 
 .chrome {
@@ -1776,6 +1822,12 @@ select {
   display: flex;
   gap: 12px;
   flex-wrap: wrap;
+}
+
+.ceremony > form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .ceremony__totp {

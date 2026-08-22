@@ -13,7 +13,7 @@ fi
 event=$1
 results=$2
 plan=$3
-expected_results='["changes","client","compose-demo","dco","docs","fuzz","generated","headline-guarantee","k8s-e2e","lint","race","release-snapshot","supply-chain-checks","test","web"]'
+expected_results='["changes","client","compose-demo","dco","docs","fuzz","generated","headline-guarantee","k8s-e2e","lint","no-egress","race","release-snapshot","supply-chain-checks","test","web"]'
 expected_plan='["client","compose_demo","docs","fuzz","generated","headline_guarantee","k8s_e2e","lint","race","release_snapshot","supply_chain_checks","test","web"]'
 
 case "$event" in
@@ -42,6 +42,8 @@ if ! jq -en \
 	else
 		$results.dco.result == "success"
 	end) and
+	($results["no-egress"].result ==
+		(if $plan.web then "success" else "skipped" end)) and
 	all($plan | to_entries[];
 		. as $entry |
 		$results[($entry.key | result_key)].result ==

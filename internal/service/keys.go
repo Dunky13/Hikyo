@@ -216,24 +216,24 @@ func checkKeySpec(spec KeySpec) error {
 	return nil
 }
 
-// checkDeclaration runs the two declaration authorities together: the rules
-// must compile, and the presence rules must be well-formed and free of the
-// statically decidable required∧forbidden conflict.
-func checkDeclaration(d schema.Declaration, p schema.PresenceRules) error {
-	if _, err := schema.Compile(d); err != nil {
-		return fmt.Errorf("%w: %s", domain.ErrInvalid, err)
+// checkClassifiedDeclaration runs the declaration and presence authorities
+// together and returns the normalized artifact boundary callers persist.
+func checkClassifiedDeclaration(classification string, d schema.Declaration, p schema.PresenceRules) (*schema.Compiled, error) {
+	compiled, err := schema.CompileClassified(schema.Classification(classification), d)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s", domain.ErrInvalid, err)
 	}
+	if err := checkPresenceRules(p); err != nil {
+		return nil, err
+	}
+	return compiled, nil
+}
+
+func checkPresenceRules(p schema.PresenceRules) error {
 	if err := schema.CheckPresence(p.Required, p.Forbidden); err != nil {
 		return fmt.Errorf("%w: %s", domain.ErrInvalid, err)
 	}
 	return nil
-}
-
-func checkClassifiedDeclaration(classification string, d schema.Declaration, p schema.PresenceRules) error {
-	if err := schema.CheckDeclarationClassification(schema.Classification(classification), d); err != nil {
-		return fmt.Errorf("%w: %s", domain.ErrInvalid, err)
-	}
-	return checkDeclaration(d, p)
 }
 
 // keyOf converts a store row plus its presence rows into the service key.
@@ -310,31 +310,6 @@ func presenceEqual(a, b schema.PresenceRules) bool {
 		return slices.Equal(xs, ys)
 	}
 	return same(a.Required, b.Required) && same(a.Forbidden, b.Forbidden)
-}
-
-// checkGroupPresence enforces the group's all-or-none presence STATICALLY:
-// one member required where another is forbidden can never hold, so the pair
-// is refused at declaration rather than discovered at publish. It runs on both
-// a presence change and a membership change, because either side can create
-// the pair.
-//
-// The closure algorithm and the runtime all-or-none evaluation are publish's
-// (#51); this is only the half that is decidable without any value.
-func checkGroupPresence(groupID, selfID string, self schema.PresenceRules, members []store.CatalogueKey, presence []store.KeyPresence) error {
-	if groupID == "" {
-		return nil
-	}
-	for _, member := range members {
-		if member.ID == selfID || member.GroupID != groupID {
-			continue
-		}
-		other := presenceOf(member.ID, member.RequiredMode, member.ForbiddenMode, presence)
-		if err := schema.CheckGroupPresence(self, other); err != nil {
-			// Rejection messages name groups and key names only, never values.
-			return fmt.Errorf("%w: %s (with key %q)", domain.ErrInvalid, err, member.Name)
-		}
-	}
-	return nil
 }
 
 // cascadeEnvironmentPresence removes a deleted environment's id from every
@@ -547,10 +522,11 @@ func (s *Keys) Create(ctx context.Context, actor Actor, scope domain.Scope, spec
 	if err := checkKeySpec(spec); err != nil {
 		return Key{}, err
 	}
-	if err := checkClassifiedDeclaration(spec.Classification, spec.Declaration, spec.Presence); err != nil {
+	compiled, err := checkClassifiedDeclaration(spec.Classification, spec.Declaration, spec.Presence)
+	if err != nil {
 		return Key{}, err
 	}
-	canonical, err := schema.Canonical(spec.Declaration)
+	canonical, err := compiled.Canonical()
 	if err != nil {
 		return Key{}, fmt.Errorf("%w: %s", domain.ErrInvalid, err)
 	}
@@ -559,10 +535,7 @@ func (s *Keys) Create(ctx context.Context, actor Actor, scope domain.Scope, spec
 	// the JSON Schema re-encoded — so echoing the request would hand back a
 	// declaration that differs from the one a later read returns, byte for
 	// byte, on exactly the values the canonicalization exists to normalize.
-	stored, err := schema.ParseDeclaration(canonical)
-	if err != nil {
-		return Key{}, fmt.Errorf("service: canonical declaration unreadable: %w", err)
-	}
+	stored := compiled.Declaration()
 	id, err := newID("key")
 	if err != nil {
 		return Key{}, err
@@ -689,15 +662,11 @@ func checkGroupMembership(ctx context.Context, r store.Repos, p authz.Proof, gro
 	if _, err := r.Catalogue().GetGroup(ctx, p, groupID); err != nil {
 		return err
 	}
-	members, err := r.Catalogue().List(ctx, p)
+	index, err := loadGroupIndex(ctx, r.Catalogue(), p)
 	if err != nil {
 		return err
 	}
-	rows, err := r.Catalogue().ListPresence(ctx, p)
-	if err != nil {
-		return err
-	}
-	return checkGroupPresence(groupID, selfID, presence, members, rows)
+	return index.validateStaticMembership(groupID, selfID, presence)
 }
 
 // Get reads one key with its presence rules.
@@ -1061,10 +1030,11 @@ func (s *Keys) UpdateDeclaration(ctx context.Context, actor Actor, scope domain.
 		}
 
 		// Only now is the new declaration examined at all.
-		if err := checkClassifiedDeclaration(before.Classification, u.Declaration, u.Presence); err != nil {
+		compiled, err := checkClassifiedDeclaration(before.Classification, u.Declaration, u.Presence)
+		if err != nil {
 			return err
 		}
-		canonical, err := schema.Canonical(u.Declaration)
+		canonical, err := compiled.Canonical()
 		if err != nil {
 			return fmt.Errorf("%w: %s", domain.ErrInvalid, err)
 		}
@@ -1079,7 +1049,11 @@ func (s *Keys) UpdateDeclaration(ctx context.Context, actor Actor, scope domain.
 		if err != nil {
 			return err
 		}
-		if err := checkGroupPresence(before.GroupID, id, u.Presence, members, presence); err != nil {
+		index, err := newGroupIndex(members, presence)
+		if err != nil {
+			return err
+		}
+		if err := index.validateStaticMembership(before.GroupID, id, u.Presence); err != nil {
 			return err
 		}
 		// Re-saving a canonically identical declaration writes NOTHING: it is a
@@ -1094,10 +1068,8 @@ func (s *Keys) UpdateDeclaration(ctx context.Context, actor Actor, scope domain.
 		// scanning declaration TEXT touches no stored value, so it opens no
 		// abort/success channel, and an unchanged declaration is never re-scanned
 		// (no retro-scan, ADR §6.1).
-		if stored, perr := schema.ParseDeclaration(canonical); perr == nil {
-			if err := applyDeclarationScan(ctx, r, p, az, s.Keyring, s.Scan, caller.Principal, scope, declarationLeaves(stored), newAckSet(acks), ingressEdit); err != nil {
-				return err
-			}
+		if err := applyDeclarationScan(ctx, r, p, az, s.Keyring, s.Scan, caller.Principal, scope, declarationLeaves(compiled.Declaration()), newAckSet(acks), ingressEdit); err != nil {
+			return err
 		}
 		if err := r.Catalogue().UpdateDeclaration(ctx, p, id, store.KeyDeclaration{
 			Declaration:   string(canonical),
@@ -1214,14 +1186,12 @@ func (s *Keys) Reclassify(ctx context.Context, actor Actor, scope domain.Scope, 
 			// happened.
 			return fmt.Errorf("%w: the key is already classified %q", domain.ErrInvalid, classification)
 		}
-		if classification == string(schema.Secret) {
-			decl, err := schema.ParseDeclaration([]byte(before.Declaration))
-			if err != nil {
-				return fmt.Errorf("service: key %s: stored declaration unreadable: %w", id, err)
-			}
-			if err := schema.CheckDeclarationClassification(schema.Secret, decl); err != nil {
-				return fmt.Errorf("%w: key %q cannot be classified secret: %s", domain.ErrInvalid, before.Name, err)
-			}
+		decl, err := schema.ParseDeclaration([]byte(before.Declaration))
+		if err != nil {
+			return fmt.Errorf("service: key %s: stored declaration unreadable: %w", id, err)
+		}
+		if _, err := schema.CompileClassified(schema.Classification(classification), decl); err != nil {
+			return fmt.Errorf("%w: key %q cannot be classified %s: %s", domain.ErrInvalid, before.Name, classification, err)
 		}
 		if classification == string(schema.Config) {
 			// The ATTEMPT record rides the rollback-surviving settlement path;
@@ -1380,10 +1350,6 @@ func (s *Keys) SetGroup(ctx context.Context, actor Actor, scope domain.Scope, id
 		if err != nil {
 			return err
 		}
-		presence, err := r.Catalogue().ListPresence(ctx, p)
-		if err != nil {
-			return err
-		}
 		// Setting the membership a key already has is an IDEMPOTENT SUCCESS,
 		// not a refusal: it writes nothing, moves no revision and emits no
 		// event, exactly as re-saving an identical declaration does. The one
@@ -1391,12 +1357,42 @@ func (s *Keys) SetGroup(ctx context.Context, actor Actor, scope domain.Scope, id
 		// and only because a ceremony that changed nothing would still write a
 		// disclosure-class audit record.
 		if before.GroupID == groupID {
+			presence, err := r.Catalogue().ListPresence(ctx, p)
+			if err != nil {
+				return err
+			}
 			out, err = keyOf(before, presence)
 			return err
 		}
-		self := presenceOf(id, before.RequiredMode, before.ForbiddenMode, presence)
-		if err := checkGroupMembership(ctx, r, p, groupID, id, self); err != nil {
-			return err
+		var presence []store.KeyPresence
+		if groupID == "" {
+			presence, err = r.Catalogue().ListPresence(ctx, p)
+			if err != nil {
+				return err
+			}
+		} else {
+			if _, err := r.Catalogue().GetGroup(ctx, p, groupID); err != nil {
+				return err
+			}
+			members, err := r.Catalogue().List(ctx, p)
+			if err != nil {
+				return err
+			}
+			presence, err = r.Catalogue().ListPresence(ctx, p)
+			if err != nil {
+				return err
+			}
+			index, err := newGroupIndex(members, presence)
+			if err != nil {
+				return err
+			}
+			self, err := index.presenceFor(id)
+			if err != nil {
+				return err
+			}
+			if err := index.validateStaticMembership(groupID, id, self); err != nil {
+				return err
+			}
 		}
 		if err := r.Catalogue().SetGroup(ctx, p, id, groupID); err != nil {
 			return err

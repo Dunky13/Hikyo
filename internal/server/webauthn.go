@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 
 	"github.com/Hikyo-Org/hikyo/api/apigen"
@@ -22,30 +21,6 @@ import (
 // minted, reissued or rotated session is a browser session: its token is
 // delivered on the `__Host-hikyo` cookie exactly as the OIDC callback delivers
 // one, and the JSON body carries the same session for a fetch-based caller.
-
-// webauthnPrecondition reports a loud structural refusal on a caller acting on
-// their OWN authenticated account — WebAuthn unavailable on this instance, no
-// live ceremony, no usable passkey, a passkey-only-floor violation, or no
-// pre-existing credential to prove the change. A bad assertion or proof stays
-// the uniform 401.
-func webauthnPrecondition(err error) bool {
-	return errors.Is(err, service.ErrWebAuthnUnavailable) ||
-		errors.Is(err, service.ErrNoWebAuthnCeremony) ||
-		errors.Is(err, service.ErrNoPasskey) ||
-		errors.Is(err, service.ErrPasskeyOnlyViolation) ||
-		errors.Is(err, service.ErrNoProofCredential)
-}
-
-// loginPrecondition is the login-endpoint precondition: ONLY the instance-wide
-// "WebAuthn not configured" refusal is a loud 400 — it carries no per-account
-// signal. Every other login outcome (missing/disabled/unowned/invalid
-// credential, no live ceremony) normalises to the uniform 401 so login-start
-// and finish cannot be probed for whether a discoverable passkey exists or which
-// credential ids are enrolled (B3). Structural 400s stay on the OWN-account
-// surfaces (enrol/step-up/reauth/remove), never on pre-auth login.
-func loginPrecondition(err error) bool {
-	return errors.Is(err, service.ErrWebAuthnUnavailable)
-}
 
 // webauthnOptions decodes the opaque service options bytes into the free-form
 // wire object. Round-tripping through a map preserves every field verbatim.
@@ -84,7 +59,7 @@ func (a *API) EnrolPasskeyStart(ctx context.Context, req apigen.EnrolPasskeyStar
 		if webauthnPrecondition(err) {
 			return apigen.EnrolPasskeyStart400JSONResponse{BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, ""))}, nil
 		}
-		switch classify(err) {
+		switch wireErrorFor(err).code {
 		case apigen.ErrorCodeUnauthenticated:
 			return apigen.EnrolPasskeyStart401JSONResponse{UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, ""))}, nil
 		case apigen.ErrorCodeTooManyRequests:
@@ -112,7 +87,7 @@ func (a *API) EnrolPasskeyFinish(ctx context.Context, req apigen.EnrolPasskeyFin
 		if webauthnPrecondition(err) {
 			return apigen.EnrolPasskeyFinish400JSONResponse{BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, ""))}, nil
 		}
-		switch classify(err) {
+		switch wireErrorFor(err).code {
 		case apigen.ErrorCodeUnauthenticated:
 			return apigen.EnrolPasskeyFinish401JSONResponse{UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, ""))}, nil
 		case apigen.ErrorCodeTooManyRequests:
@@ -135,7 +110,7 @@ func (a *API) PasskeyLoginStart(ctx context.Context, _ apigen.PasskeyLoginStartR
 		if loginPrecondition(err) {
 			return apigen.PasskeyLoginStart400JSONResponse{BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, ""))}, nil
 		}
-		switch classify(err) {
+		switch wireErrorFor(err).code {
 		case apigen.ErrorCodeUnauthenticated:
 			return apigen.PasskeyLoginStart401JSONResponse{UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, ""))}, nil
 		case apigen.ErrorCodeTooManyRequests:
@@ -163,7 +138,7 @@ func (a *API) PasskeyLoginFinish(ctx context.Context, req apigen.PasskeyLoginFin
 		if loginPrecondition(err) {
 			return apigen.PasskeyLoginFinish400JSONResponse{BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, ""))}, nil
 		}
-		switch classify(err) {
+		switch wireErrorFor(err).code {
 		case apigen.ErrorCodeUnauthenticated:
 			return apigen.PasskeyLoginFinish401JSONResponse{UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, ""))}, nil
 		case apigen.ErrorCodeTooManyRequests:
@@ -186,7 +161,7 @@ func (a *API) StepUpPasskeyStart(ctx context.Context, _ apigen.StepUpPasskeyStar
 		if webauthnPrecondition(err) {
 			return apigen.StepUpPasskeyStart400JSONResponse{BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, ""))}, nil
 		}
-		switch classify(err) {
+		switch wireErrorFor(err).code {
 		case apigen.ErrorCodeUnauthenticated:
 			return apigen.StepUpPasskeyStart401JSONResponse{UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, ""))}, nil
 		case apigen.ErrorCodeTooManyRequests:
@@ -214,7 +189,7 @@ func (a *API) StepUpPasskeyFinish(ctx context.Context, req apigen.StepUpPasskeyF
 		if webauthnPrecondition(err) {
 			return apigen.StepUpPasskeyFinish400JSONResponse{BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, ""))}, nil
 		}
-		switch classify(err) {
+		switch wireErrorFor(err).code {
 		case apigen.ErrorCodeUnauthenticated:
 			return apigen.StepUpPasskeyFinish401JSONResponse{UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, ""))}, nil
 		case apigen.ErrorCodeTooManyRequests:
@@ -235,25 +210,35 @@ func (a *API) ReauthPasskeyStart(ctx context.Context, req apigen.ReauthPasskeySt
 	if req.Body == nil {
 		return apigen.ReauthPasskeyStart400JSONResponse{BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, ""))}, nil
 	}
-	var raw []byte
+	var intent service.ReauthIntent
 	var err error
 	if req.Body.Operation == apigen.ReauthPurposeAdapter {
-		if req.Body.AdapterOperation == nil || req.Body.EnvironmentIds == nil {
+		if req.Body.AdapterOperation == nil || req.Body.EnvironmentIds == nil || len(req.Body.KeyIds) != 0 {
 			return apigen.ReauthPasskeyStart400JSONResponse{BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, ""))}, nil
 		}
 		environments := make([]string, 0, len(*req.Body.EnvironmentIds))
 		for _, environmentID := range *req.Body.EnvironmentIds {
 			environments = append(environments, string(environmentID))
 		}
-		raw, err = a.Auth.ReauthAdapterPasskeyStartWire(ctx, bearer(ctx), string(*req.Body.AdapterOperation), req.Body.EnvironmentId, environments)
+		intent, err = service.NewAdapterReauthIntent(string(*req.Body.AdapterOperation), environments)
+		if err == nil {
+			intent, err = intent.ForEnvironment(req.Body.EnvironmentId)
+		}
 	} else {
-		raw, err = a.Auth.ReauthPasskeyStart(ctx, bearer(ctx), service.ReauthPurpose(req.Body.Operation), req.Body.EnvironmentId, req.Body.KeyIds)
+		if req.Body.AdapterOperation != nil || req.Body.EnvironmentIds != nil {
+			return apigen.ReauthPasskeyStart400JSONResponse{BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, ""))}, nil
+		}
+		intent, err = service.NewDisclosureReauthIntent(service.ReauthPurpose(req.Body.Operation), []string{req.Body.EnvironmentId}, req.Body.KeyIds)
 	}
+	if err != nil {
+		return apigen.ReauthPasskeyStart400JSONResponse{BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, ""))}, nil
+	}
+	raw, err := a.Auth.ReauthPasskeyStart(ctx, bearer(ctx), intent)
 	if err != nil {
 		if webauthnPrecondition(err) {
 			return apigen.ReauthPasskeyStart400JSONResponse{BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, ""))}, nil
 		}
-		switch classify(err) {
+		switch wireErrorFor(err).code {
 		case apigen.ErrorCodeUnauthenticated:
 			return apigen.ReauthPasskeyStart401JSONResponse{UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, ""))}, nil
 		case apigen.ErrorCodeTooManyRequests:
@@ -292,7 +277,7 @@ func (a *API) ReauthPasskeyFinish(ctx context.Context, req apigen.ReauthPasskeyF
 		if webauthnPrecondition(err) {
 			return apigen.ReauthPasskeyFinish400JSONResponse{BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, ""))}, nil
 		}
-		switch classify(err) {
+		switch wireErrorFor(err).code {
 		case apigen.ErrorCodeUnauthenticated:
 			return apigen.ReauthPasskeyFinish401JSONResponse{UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, ""))}, nil
 		case apigen.ErrorCodeTooManyRequests:
@@ -329,7 +314,7 @@ func (a *API) ReauthPasskeyFinish(ctx context.Context, req apigen.ReauthPasskeyF
 func (a *API) ListPasskeys(ctx context.Context, _ apigen.ListPasskeysRequestObject) (apigen.ListPasskeysResponseObject, error) {
 	rows, err := a.Auth.ListPasskeys(ctx, bearer(ctx))
 	if err != nil {
-		switch classify(err) {
+		switch wireErrorFor(err).code {
 		case apigen.ErrorCodeUnauthenticated:
 			return apigen.ListPasskeys401JSONResponse{UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, ""))}, nil
 		case apigen.ErrorCodeTooManyRequests:
@@ -358,7 +343,7 @@ func (a *API) RemovePasskey(ctx context.Context, req apigen.RemovePasskeyRequest
 		if webauthnPrecondition(err) {
 			return apigen.RemovePasskey400JSONResponse{BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, ""))}, nil
 		}
-		switch classify(err) {
+		switch wireErrorFor(err).code {
 		case apigen.ErrorCodeUnauthenticated:
 			return apigen.RemovePasskey401JSONResponse{UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, ""))}, nil
 		case apigen.ErrorCodeTooManyRequests:

@@ -1,4 +1,7 @@
-import { getMachineReveal, setMachineReveal } from '@hikyo/client';
+import {
+  getMachineRevealOp,
+  setMachineRevealOp,
+} from '@hikyo/operations';
 import { zMachineRevealSettings } from '@hikyo/zod';
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import type { z } from 'zod';
@@ -18,7 +21,7 @@ const machineRevealKey = (org: string, project: string) => ['machine-reveal', or
 export function machineRevealQueryOptions(org: string, project: string) {
   return {
     queryKey: machineRevealKey(org, project),
-    queryFn: () => parsed(getMachineReveal({ path: { org, project } }), zMachineRevealSettings),
+    queryFn: () => parsed(getMachineRevealOp, { path: { org, project } }),
     enabled: org !== '' && project !== '',
     retry: false,
   };
@@ -35,10 +38,7 @@ export function useSetMachineReveal(org: string, project: string) {
   const queries = useQueryClient();
   return useMutation({
     mutationFn: (enabled: boolean) =>
-      parsed(
-        setMachineReveal({ path: { org, project }, body: { enabled } }),
-        zMachineRevealSettings,
-      ),
+      parsed(setMachineRevealOp, { path: { org, project }, body: { enabled } }),
     onSuccess: () => queries.invalidateQueries({ queryKey: machineRevealKey(org, project) }),
   });
 }

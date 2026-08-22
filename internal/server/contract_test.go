@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -53,7 +54,7 @@ func (emptyAccountReads) ListIdentities(context.Context, string) ([]service.Exte
 	return nil, nil
 }
 
-func (cliReauthAuth) StartCLIReauth(context.Context, string, string, string, []string, []string, string, string) (service.CLIReauthStart, error) {
+func (cliReauthAuth) StartCLIReauth(context.Context, string, service.ReauthIntent, string, string) (service.CLIReauthStart, error) {
 	return service.CLIReauthStart{State: "front-channel-state", ExpiresAt: time.Date(2026, 8, 17, 4, 5, 0, 0, time.UTC)}, nil
 }
 func (cliReauthAuth) CLIReauthTransaction(context.Context, service.Actor, string) (service.CLIReauthTransaction, error) {
@@ -201,10 +202,7 @@ func (s stubAuth) StepUpPasskeyFinish(context.Context, string, []byte) (service.
 	return service.LoginResult{}, domain.ErrUnauthenticated
 }
 
-func (s stubAuth) ReauthPasskeyStart(context.Context, string, service.ReauthPurpose, string, []string) ([]byte, error) {
-	return nil, domain.ErrUnauthenticated
-}
-func (s stubAuth) ReauthAdapterPasskeyStartWire(context.Context, string, string, string, []string) ([]byte, error) {
+func (s stubAuth) ReauthPasskeyStart(context.Context, string, service.ReauthIntent) ([]byte, error) {
 	return nil, domain.ErrUnauthenticated
 }
 
@@ -212,13 +210,13 @@ func (s stubAuth) ReauthPasskeyFinish(context.Context, string, []byte) (service.
 	return service.ReauthResult{}, domain.ErrUnauthenticated
 }
 
-func (s stubAuth) ReauthTOTP(context.Context, string, string, string) (service.ReauthResult, error) {
+func (s stubAuth) ReauthTOTP(context.Context, string, service.ReauthIntent, string) (service.ReauthResult, error) {
 	return service.ReauthResult{}, domain.ErrUnauthenticated
 }
-func (s stubAuth) ReauthAdapterTOTP(context.Context, string, string, []string, string) ([]service.ReauthResult, error) {
+func (s stubAuth) ReauthAdapterTOTP(context.Context, string, service.ReauthIntent, string) ([]service.ReauthResult, error) {
 	return nil, domain.ErrUnauthenticated
 }
-func (s stubAuth) StartCLIReauth(context.Context, string, string, string, []string, []string, string, string) (service.CLIReauthStart, error) {
+func (s stubAuth) StartCLIReauth(context.Context, string, service.ReauthIntent, string, string) (service.CLIReauthStart, error) {
 	return service.CLIReauthStart{}, domain.ErrUnauthenticated
 }
 func (s stubAuth) CLIReauthTransaction(context.Context, service.Actor, string) (service.CLIReauthTransaction, error) {
@@ -256,6 +254,25 @@ func (stubProviders) List(context.Context, service.Actor) ([]service.ProviderVie
 }
 func (stubProviders) Delete(context.Context, service.Actor, string) error {
 	return domain.ErrUnauthorized
+}
+
+type stubWorkspace struct {
+	server.WorkspaceService
+	start  func(context.Context, service.HandoffRequest) (service.HandoffStart, error)
+	show   func(context.Context, service.Actor, string) (service.HandoffView, error)
+	redeem func(context.Context, string, string, string) (service.WorkspaceSession, error)
+}
+
+func (s stubWorkspace) StartHandoff(ctx context.Context, request service.HandoffRequest) (service.HandoffStart, error) {
+	return s.start(ctx, request)
+}
+
+func (s stubWorkspace) ShowHandoff(ctx context.Context, actor service.Actor, state string) (service.HandoffView, error) {
+	return s.show(ctx, actor, state)
+}
+
+func (s stubWorkspace) RedeemHandoff(ctx context.Context, code, verifier, origin string) (service.WorkspaceSession, error) {
+	return s.redeem(ctx, code, verifier, origin)
 }
 
 type stubOrgs struct {
@@ -493,6 +510,50 @@ func TestCLIReauthOnlyRedeemDisclosesRotatedBearer(t *testing.T) {
 	}
 	if !bytes.Contains(redeemed, []byte(`"session_token":"rotated-secret"`)) {
 		t.Fatalf("redeem omitted rotated bearer: %s", redeemed)
+	}
+}
+
+func TestReauthBoundaryRejectsMixedIntentVariants(t *testing.T) {
+	srv := newTestServer(t, stubAuth{}, stubOrgs{})
+	environment := "env_00000000-0000-0000-0000-000000000001"
+	requests := []struct {
+		name string
+		path string
+		body map[string]any
+	}{
+		{
+			name: "TOTP adapter plus disclosure environment",
+			path: api.PathPrefix + "/auth/reauth/totp",
+			body: map[string]any{"code": "123456", "purpose": "adapter", "operation": "adapter.sync", "environment_ids": []string{environment}, "environment_id": environment},
+		},
+		{
+			name: "passkey adapter plus key set",
+			path: api.PathPrefix + "/auth/webauthn/reauth/start",
+			body: map[string]any{"operation": "adapter", "adapter_operation": "adapter.sync", "environment_id": environment, "environment_ids": []string{environment}, "key_ids": []string{"key_a"}},
+		},
+		{
+			name: "passkey disclosure plus adapter fields",
+			path: api.PathPrefix + "/auth/webauthn/reauth/start",
+			body: map[string]any{"operation": "reveal", "adapter_operation": "adapter.sync", "environment_id": environment, "environment_ids": []string{environment}, "key_ids": []string{"key_a"}},
+		},
+		{
+			name: "CLI disclosure plus adapter operation",
+			path: api.PathPrefix + "/auth/cli-reauth/start",
+			body: map[string]any{"purpose": "reveal", "operation": "adapter.sync", "environment_ids": []string{environment}, "key_ids": []string{"key_a"}, "pkce_challenge": strings.Repeat("a", 43), "redirect_uri": "http://127.0.0.1:40123/callback"},
+		},
+		{
+			name: "CLI adapter plus key set",
+			path: api.PathPrefix + "/auth/cli-reauth/start",
+			body: map[string]any{"purpose": "adapter", "operation": "adapter.sync", "environment_ids": []string{environment}, "key_ids": []string{"key_a"}, "pkce_challenge": strings.Repeat("a", 43), "redirect_uri": "http://127.0.0.1:40123/callback"},
+		},
+	}
+	for _, request := range requests {
+		t.Run(request.name, func(t *testing.T) {
+			response, _ := call(t, srv, http.MethodPost, request.path, "live", request.body)
+			if response.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400 before service dispatch", response.StatusCode)
+			}
+		})
 	}
 }
 
@@ -1556,6 +1617,138 @@ func TestConflictAndLimitRenderUniformly(t *testing.T) {
 				t.Errorf("the limit refusal does not name its bound: %q", body.Error.Message)
 			}
 		})
+	}
+}
+
+type unknownSafeDetailError struct {
+	cause error
+}
+
+func (e unknownSafeDetailError) Error() string      { return "private storage failure: must not escape" }
+func (e unknownSafeDetailError) Unwrap() error      { return e.cause }
+func (e unknownSafeDetailError) SafeDetail() string { return "private row tenant-secret-7c31" }
+
+func TestUnknownHandlerErrorsFailClosedOnTheWire(t *testing.T) {
+	unknown := errors.New("private storage failure")
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{"plain", unknown},
+		{"wrapped", fmt.Errorf("query project: %w", unknown)},
+		{"safe detail carrier", unknownSafeDetailError{cause: unknown}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := hierarchyServer(t, tc.err)
+			resp, payload := call(t, srv, http.MethodPost,
+				api.PathPrefix+"/orgs/"+testOrgID+"/projects", "hik_1_cli_x",
+				apigen.CreateProjectRequest{Name: "p"})
+			if resp.StatusCode != http.StatusInternalServerError {
+				t.Fatalf("status %d, want 500", resp.StatusCode)
+			}
+			body := decodeError(t, payload)
+			if body.Error.Code != apigen.ErrorCodeInternal || body.Error.Message != "internal error" {
+				t.Fatalf("body = %+v, want uniform internal refusal", body)
+			}
+			if body.Error.Detail != nil || bytes.Contains(payload, []byte("storage")) || bytes.Contains(payload, []byte("tenant-secret")) {
+				t.Fatalf("internal refusal leaked cause or detail: %s", payload)
+			}
+		})
+	}
+}
+
+func TestWorkspaceHandoffInvalidPreservesContextualRefusals(t *testing.T) {
+	workspace := stubWorkspace{
+		show: func(context.Context, service.Actor, string) (service.HandoffView, error) {
+			return service.HandoffView{}, fmt.Errorf("lookup: %w", service.ErrHandoffInvalid)
+		},
+		redeem: func(context.Context, string, string, string) (service.WorkspaceSession, error) {
+			return service.WorkspaceSession{}, fmt.Errorf("redeem: %w", service.ErrHandoffInvalid)
+		},
+	}
+	srv := httptest.NewServer(server.New(stubReady{}, &server.API{
+		Auth: stubAuth{identity: liveIdentityFn}, Orgs: stubOrgs{}, Providers: stubProviders{},
+		Projects: stubHierarchy{}, Environments: stubEnvs{}, Values: stubValues{}, Folders: stubFolders{},
+		Workspace: workspace, Version: "test",
+	}, nil))
+	t.Cleanup(srv.Close)
+
+	showResp, showPayload := call(t, srv, http.MethodGet,
+		api.PathPrefix+"/auth/workspace/transactions/stale-state", "hik_1_cli_x", nil)
+	if showResp.StatusCode != http.StatusNotFound || decodeError(t, showPayload).Error.Code != apigen.ErrorCodeNotFound {
+		t.Fatalf("show refusal = %d %s, want 404 not_found", showResp.StatusCode, showPayload)
+	}
+
+	redeemResp, redeemPayload := call(t, srv, http.MethodPost,
+		api.PathPrefix+"/auth/workspace/redeem", "", apigen.RedeemWorkspaceHandoffRequest{
+			Code: "spent-code", PkceVerifier: strings.Repeat("a", 43), Origin: "https://shell.example",
+		})
+	if redeemResp.StatusCode != http.StatusForbidden || decodeError(t, redeemPayload).Error.Code != apigen.ErrorCodeForbidden {
+		t.Fatalf("redeem refusal = %d %s, want 403 forbidden", redeemResp.StatusCode, redeemPayload)
+	}
+}
+
+func TestWorkspaceHandoffResponseUsesDisclosureOperationSpelling(t *testing.T) {
+	workspace := stubWorkspace{show: func(context.Context, service.Actor, string) (service.HandoffView, error) {
+		return service.HandoffView{
+			Purpose: service.HandoffStepUp, Operation: string(service.PurposeReveal),
+			EnvID: testEnvID, KeySet: []string{testKeyID}, ExpiresAt: time.Now().UTC().Add(time.Minute),
+		}, nil
+	}}
+	srv := httptest.NewServer(server.New(stubReady{}, &server.API{
+		Auth: stubAuth{identity: liveIdentityFn}, Orgs: stubOrgs{}, Providers: stubProviders{},
+		Projects: stubHierarchy{}, Environments: stubEnvs{}, Values: stubValues{}, Folders: stubFolders{},
+		Workspace: workspace, Version: "test",
+	}, nil))
+	t.Cleanup(srv.Close)
+
+	resp, payload := call(t, srv, http.MethodGet,
+		api.PathPrefix+"/auth/workspace/transactions/live-state", "hik_1_cli_x", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", resp.StatusCode, payload)
+	}
+	var body apigen.WorkspaceHandoffTransaction
+	if err := json.Unmarshal(payload, &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Operation == nil || *body.Operation != apigen.WorkspaceHandoffTransactionOperationReveal {
+		t.Fatalf("operation = %v, want reveal", body.Operation)
+	}
+}
+
+func TestWorkspaceStepUpBoundaryRejectsMixedIntentVariants(t *testing.T) {
+	called := false
+	workspace := stubWorkspace{start: func(context.Context, service.HandoffRequest) (service.HandoffStart, error) {
+		called = true
+		return service.HandoffStart{}, errors.New("service must not receive an invalid intent")
+	}}
+	srv := httptest.NewServer(server.New(stubReady{}, &server.API{
+		Auth: stubAuth{}, Orgs: stubOrgs{}, Providers: stubProviders{},
+		Projects: stubHierarchy{}, Environments: stubEnvs{}, Values: stubValues{}, Folders: stubFolders{},
+		Workspace: workspace, Version: "test",
+	}, nil))
+	t.Cleanup(srv.Close)
+
+	base := map[string]any{
+		"origin": "https://shell.example", "redirect_uri": "https://shell.example/workspace/callback",
+		"pkce_challenge": strings.Repeat("a", 43),
+	}
+	requests := []map[string]any{
+		{"purpose": "establishment", "operation": "reveal", "environment": "env_00000000-0000-0000-0000-000000000001"},
+		{"purpose": "step-up", "session": "ses_00000000-0000-0000-0000-000000000001", "operation": "adapter.sync", "environment": "env_00000000-0000-0000-0000-000000000001"},
+	}
+	for _, fields := range requests {
+		body := maps.Clone(base)
+		for key, value := range fields {
+			body[key] = value
+		}
+		response, _ := call(t, srv, http.MethodPost, api.PathPrefix+"/auth/workspace/start", "", body)
+		if response.StatusCode != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400 before service dispatch", response.StatusCode)
+		}
+	}
+	if called {
+		t.Fatal("workspace service received a mixed intent variant")
 	}
 }
 

@@ -76,12 +76,10 @@ func Normalize(value string) string { return strings.TrimSpace(value) }
 // delivery — the value is a string, so `01` is not normalized to `1`.
 var integerRe = regexp.MustCompile(`\A-?[0-9]+\z`)
 
-// Validate runs the declaration against one value.
-//
-// The classification is an input because it decides what a failure may say,
-// not whether the value is valid: the same value gets the same verdict either
-// way, and only the reporting narrows.
-func (c *Compiled) Validate(value string, cls Classification) Verdict {
+// Validate runs the declaration against one value. Failure disclosure uses
+// the classification fixed by CompileClassified, so callers cannot compile
+// under one classification and validate under another.
+func (c *Compiled) Validate(value string) Verdict {
 	trimmed := Normalize(value)
 	var v Verdict
 
@@ -109,7 +107,7 @@ func (c *Compiled) Validate(value string, cls Classification) Verdict {
 		if single {
 			index = -1
 		}
-		failures := alt.validate(trimmed, cls, index)
+		failures := alt.validate(trimmed, c.classification, index)
 		if len(failures) == 0 {
 			// At least one alternative accepts, so the value is valid.
 			// Overlapping alternatives are explicitly fine and never an error;

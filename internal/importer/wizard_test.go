@@ -247,13 +247,13 @@ func TestWizardCreatesEnvironment(t *testing.T) {
 
 	// The bundle carries the create-environment line.
 	foundEnv := false
-	for _, e := range wiz.Bundle.Environments {
+	for _, e := range wiz.Bundle.WireBundle().Environments {
 		if e.Name == "staging" {
 			foundEnv = true
 		}
 	}
 	if !foundEnv {
-		t.Errorf("bundle environments = %+v, want a `staging` create line", wiz.Bundle.Environments)
+		t.Errorf("bundle environments = %+v, want a `staging` create line", wiz.Bundle.WireBundle().Environments)
 	}
 
 	// The manifest names it under created_environments, with no occurrence rows.

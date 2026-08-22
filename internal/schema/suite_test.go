@@ -77,7 +77,7 @@ func TestJSONSchemaConformanceBaseline(t *testing.T) {
 		}
 		file := strings.TrimSuffix(entry.Name(), ".json")
 		for _, group := range groups {
-			compiled, err := schema.Compile(schema.Declaration{Rule: &schema.Rule{
+			compiled, err := schema.CompileClassified(schema.Config, schema.Declaration{Rule: &schema.Rule{
 				Type: schema.TypeJSON, JSONSchema: group.Schema,
 			}})
 			if err != nil {
@@ -96,7 +96,7 @@ func TestJSONSchemaConformanceBaseline(t *testing.T) {
 					continue
 				}
 				ran++
-				got := compiled.Validate(string(tc.Data), schema.Config)
+				got := compiled.Validate(string(tc.Data))
 				if got.Valid != tc.Valid {
 					t.Errorf("%s: valid=%v, suite says %v (errors %+v)", name, got.Valid, tc.Valid, got.Errors)
 				}

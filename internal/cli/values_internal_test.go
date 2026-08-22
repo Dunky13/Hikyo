@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"io"
 	"strings"
 	"testing"
 
@@ -17,16 +16,16 @@ import (
 // it is refused by the print triad BEFORE the request goes out — never
 // downgraded to stdout, and never after a round-trip that has already disclosed.
 //
-// It reaches no server: the refusal is the "nowhere to go" preflight, which runs
-// ahead of target resolution, so an OpenTerminal that fails (no controlling
-// terminal) is enough to prove the ordering.
+// It reaches no server: the refusal is destination preparation, which runs
+// ahead of target resolution, so an absent TerminalSession is enough to prove
+// the ordering.
 func TestRevealingDiffIsRefusedBeforeAnyRequestWithoutASink(t *testing.T) {
 	ios := IO{
-		Stdin:        strings.NewReader(""),
-		Stdout:       &bytes.Buffer{},
-		Stderr:       &bytes.Buffer{},
-		Env:          Env{Getenv: func(k string) string { return statePathFor(t, k) }},
-		OpenTerminal: func() (io.WriteCloser, error) { return nil, errors.New("no controlling terminal") },
+		Stdin:         strings.NewReader(""),
+		Stdout:        &bytes.Buffer{},
+		Stderr:        &bytes.Buffer{},
+		Env:           Env{Getenv: func(k string) string { return statePathFor(t, k) }},
+		TerminalError: errors.New("open /dev/tty: device vanished"),
 	}
 	err := runValues(context.Background(), ios,
 		[]string{"diff", "--left", "dev", "--right", "prod", "--reveal"})
@@ -36,6 +35,21 @@ func TestRevealingDiffIsRefusedBeforeAnyRequestWithoutASink(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "nowhere to go") {
 		t.Fatalf("err = %v, want the print-triad refusal (before any request)", err)
+	}
+	if !strings.Contains(err.Error(), "device vanished") {
+		t.Fatalf("err = %v, want preserved terminal construction failure", err)
+	}
+}
+
+func TestReadValueUsesCommandTerminalSession(t *testing.T) {
+	terminalErr := errors.New("open /dev/tty: device vanished")
+	_, err := readValue(IO{TerminalError: terminalErr}, false, "", "DATABASE_PASSWORD")
+	if !strings.Contains(err.Error(), terminalErr.Error()) {
+		t.Fatalf("err = %v, want preserved terminal construction error", err)
+	}
+	var cliErr *Error
+	if !asCLIError(err, &cliErr) || cliErr.Code != ExitRefused {
+		t.Fatalf("err = %v, want terminal refusal rather than usage", err)
 	}
 }
 
@@ -68,8 +82,8 @@ func TestRollbackTableShowsFullImpactPreview(t *testing.T) {
 	}
 }
 
-// statePathFor gives NewState a writable state dir so the test reaches the
-// preflight rather than failing to open state first.
+// statePathFor gives NewState a writable state dir so the test reaches
+// destination preparation rather than failing to open state first.
 func statePathFor(t *testing.T, key string) string {
 	if key == "HIKYO_STATE_DIR" {
 		return t.TempDir()

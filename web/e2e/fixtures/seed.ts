@@ -42,15 +42,12 @@ export type Seeded = {
   /** The fixture tenant's name, which the chrome surfaces render. */
   orgName: string;
   /**
-   * A SECOND real organisation, holding nothing.
+   * A SECOND real organisation, holding no projects.
    *
    * It exists so the org rail has something to switch TO and so the instance
-   * administration surface has more than one row to list. It is created and
-   * left ungranted on purpose: `listMyOrgs` projects the organisations a
-   * caller's own grants NAME, and every grant in this fixture is
-   * instance-scoped — so neither organisation appears in the bootstrap
-   * administrator's rail, and the shell flow's zero-organisation state (a
-   * locked #56 surface state) survives this ticket untouched.
+   * administration surface has more than one row to list. Creation grants the
+   * creator org-admin access, so both organisations honestly appear in the
+   * creator's rail.
    */
   orgB: string;
   orgBName: string;
@@ -311,7 +308,8 @@ export async function grantReveal(token: string, principal: string): Promise<voi
 
 /**
  * Creates the tenant corpus and explicitly grants the bootstrap administrator
- * only the authority each flow needs; organisation creation seeds no member.
+ * the additional instance authority each flow needs. Organisation creation
+ * supplies the creator's org-scoped admin grants atomically.
  */
 export async function seedTenant(
   runAdminGrant: (args: readonly string[]) => void,
@@ -332,11 +330,9 @@ export async function seedTenant(
   // each one its own visible, revocable row, reaching this org by the ordinary
   // downward inheritance every scope has.
   //
-  // Instance rather than org scope for a reason worth keeping: `listMyOrgs`
-  // projects the orgs a caller's own grants NAME, so org-scoped grants would
-  // put this fixture's org in the bootstrap administrator's rail and quietly
-  // delete the shell flow's zero-organisation state — a locked surface state
-  // that has nothing to do with this ticket.
+  // Instance scope makes these fixture grants usable across both organisations
+  // without adding more org-scoped origins. The creator's automatic admin
+  // grants are what name the organisations in `listMyOrgs`.
   //
   // `reveal` is deliberately NOT here: it is granted through the API below, so
   // it carries a `manual` origin. Break-glass grants carry a `break-glass`
@@ -365,10 +361,10 @@ export async function seedTenant(
     runAdminGrant(['--principal', principal, '--capability', capability]);
   }
 
-  // Now the MFA session. `instance-config` (which creates the org) and
-  // `manage-members` (which grants `reveal`) are the only MFA-mandatory acts
-  // in this fixture, and they share one stepped-up session because every TOTP
-  // presentation costs a wait for a free time step.
+  // Now the MFA sessions. Every org creation grants its creator org-admin
+  // authority and therefore invalidates the session that created it. The
+  // fixture reauthenticates after each create, exactly as the product tells a
+  // human to do.
   let token = await signIn();
   const { otpauth_uri: uri } = await call(
     token,
@@ -389,9 +385,11 @@ export async function seedTenant(
   const { id: org } = await call(token, 'POST', '/api/v1/orgs', zCreated, {
     name: ORG_NAME,
   });
+  token = await consumeCode(await signIn(), uri, '/api/v1/auth/totp/step-up');
   const { id: orgB } = await call(token, 'POST', '/api/v1/orgs', zCreated, {
     name: ORG_B_NAME,
   });
+  token = await consumeCode(await signIn(), uri, '/api/v1/auth/totp/step-up');
 
   // The federation issuer is instance-scoped configuration, so it is
   // `instance-config` and belongs in this same stepped-up session. Static JWKS

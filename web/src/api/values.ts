@@ -1,24 +1,20 @@
 import {
-  copyValues,
-  getRevealWindow,
-  listEnvironments,
-  listValues,
-  reauthPasskeyFinish,
-  reauthPasskeyStart,
-  reauthTotp,
-  revealValue,
-  revealValues,
-  setValue,
-} from '@hikyo/client';
+  copyValuesOp,
+  getRevealWindowOp,
+  listEnvironmentsOp,
+  listValuesOp,
+  reauthPasskeyFinishOp,
+  reauthPasskeyStartOp,
+  reauthTotpOp,
+  revealValueOp,
+  revealValuesOp,
+  setValueOp,
+} from '@hikyo/operations';
 import {
-  zCopyValuesResult,
   zEnvironmentList,
-  zPendingChange,
   zRevealWindow,
   zValueCell,
   zValueList,
-  zWebauthnOptions,
-  zReauthResult,
 } from '@hikyo/zod';
 import type { Client } from '@hikyo/runtime-core';
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
@@ -64,10 +60,7 @@ export function useEnvironments(env: EnvRef): UseQueryResult<EnvironmentList> {
   return useQuery({
     queryKey: ['environments', env.org, env.project] as const,
     queryFn: () =>
-      parsed(
-        listEnvironments({ path: { org: env.org, project: env.project }, ...transport }),
-        zEnvironmentList,
-      ),
+      parsed(listEnvironmentsOp, { path: { org: env.org, project: env.project }, ...transport }),
     retry: false,
   });
 }
@@ -78,8 +71,7 @@ export function useValues(env: EnvRef): UseQueryResult<ValueList> {
   return useQuery({
     queryKey: valuesKey(env),
     queryFn: () =>
-      parsed(
-        listValues({
+      parsed(listValuesOp, {
           path: {
             org: env.org,
             project: env.project,
@@ -87,8 +79,6 @@ export function useValues(env: EnvRef): UseQueryResult<ValueList> {
           },
           ...transport,
         }),
-        zValueList,
-      ),
     retry: false,
   });
 }
@@ -109,13 +99,10 @@ export async function fetchRevealWindow(
   // server; a workspace client means the remote's window, over the bearer.
   client?: Client,
 ): Promise<RevealWindow> {
-  return parsed(
-    getRevealWindow({
+  return parsed(getRevealWindowOp, {
       path: { org: env.org, project: env.project, environment: env.environment },
       client,
-    }),
-    zRevealWindow,
-  );
+    });
 }
 
 /**
@@ -131,8 +118,7 @@ export function useRevealWindow(env: EnvRef): UseQueryResult<RevealWindow> {
   return useQuery({
     queryKey: windowKey(env),
     queryFn: () =>
-      parsed(
-        getRevealWindow({
+      parsed(getRevealWindowOp, {
           path: {
             org: env.org,
             project: env.project,
@@ -140,8 +126,6 @@ export function useRevealWindow(env: EnvRef): UseQueryResult<RevealWindow> {
           },
           ...transport,
         }),
-        zRevealWindow,
-      ),
     retry: false,
   });
 }
@@ -202,16 +186,13 @@ export type PasskeyCeremonyInput = {
  * keys below" exists to prevent.
  */
 export async function runPasskeyCeremony(input: PasskeyCeremonyInput): Promise<void> {
-  const options = await parsed(
-    reauthPasskeyStart({
+  const options = await parsed(reauthPasskeyStartOp, {
       body: {
         operation: input.operation,
         environment_id: input.environmentId,
         key_ids: [...input.keyIds],
       },
-    }),
-    zWebauthnOptions,
-  );
+    });
   const request = requestOptions(options);
   const assertion = await navigator.credentials.get({ publicKey: request });
   if (assertion === null || !(assertion instanceof PublicKeyCredential)) {
@@ -221,8 +202,7 @@ export async function runPasskeyCeremony(input: PasskeyCeremonyInput): Promise<v
   if (!(response instanceof AuthenticatorAssertionResponse)) {
     throw new Error('the authenticator returned the wrong response type');
   }
-  await parsed(
-    reauthPasskeyFinish({
+  await parsed(reauthPasskeyFinishOp, {
       body: {
         id: assertion.id,
         rawId: toBase64URL(assertion.rawId),
@@ -234,9 +214,7 @@ export async function runPasskeyCeremony(input: PasskeyCeremonyInput): Promise<v
           userHandle: response.userHandle === null ? null : toBase64URL(response.userHandle),
         },
       },
-    }),
-    zReauthResult,
-  );
+    });
 }
 
 /** Run one adapter-purpose passkey ceremony over one zero-window environment. */
@@ -245,8 +223,7 @@ export async function runAdapterPasskeyCeremony(input: {
   environmentId: string;
   environmentIds: readonly string[];
 }): Promise<void> {
-  const options = await parsed(
-    reauthPasskeyStart({
+  const options = await parsed(reauthPasskeyStartOp, {
       body: {
         operation: 'adapter',
         adapter_operation: input.operation,
@@ -254,9 +231,7 @@ export async function runAdapterPasskeyCeremony(input: {
         environment_ids: [...input.environmentIds],
         key_ids: [],
       },
-    }),
-    zWebauthnOptions,
-  );
+    });
   const request = requestOptions(options);
   const assertion = await navigator.credentials.get({ publicKey: request });
   if (assertion === null || !(assertion instanceof PublicKeyCredential)) {
@@ -266,8 +241,7 @@ export async function runAdapterPasskeyCeremony(input: {
   if (!(response instanceof AuthenticatorAssertionResponse)) {
     throw new Error('the authenticator returned the wrong response type');
   }
-  await parsed(
-    reauthPasskeyFinish({
+  await parsed(reauthPasskeyFinishOp, {
       body: {
         id: assertion.id,
         rawId: toBase64URL(assertion.rawId),
@@ -279,9 +253,7 @@ export async function runAdapterPasskeyCeremony(input: {
           userHandle: response.userHandle === null ? null : toBase64URL(response.userHandle),
         },
       },
-    }),
-    zReauthResult,
-  );
+    });
 }
 
 /** One TOTP proof opens the adapter-bound windows for every nonzero environment. */
@@ -290,12 +262,9 @@ export async function runAdapterTOTPCeremony(
   environmentIds: readonly string[],
   code: string,
 ): Promise<void> {
-  await parsed(
-    reauthTotp({
+  await parsed(reauthTotpOp, {
       body: { purpose: 'adapter', operation, environment_ids: [...environmentIds], code },
-    }),
-    zReauthResult,
-  );
+    });
 }
 
 /**
@@ -351,10 +320,7 @@ export function requestOptions(blob: unknown): PublicKeyCredentialRequestOptions
 
 /** runTOTPCeremony opens a sliding window with a code. */
 export async function runTOTPCeremony(environmentId: string, code: string): Promise<void> {
-  await parsed(
-    reauthTotp({ body: { environment_id: environmentId, code } }),
-    zReauthResult,
-  );
+  await parsed(reauthTotpOp, { body: { environment_id: environmentId, code } });
 }
 
 /**
@@ -414,8 +380,7 @@ export function useRevealOne(env: EnvRef) {
   const transport = useTransport();
   return useMutation({
     mutationFn: (key: string) =>
-      parsed(
-        revealValue({
+      parsed(revealValueOp, {
           path: {
             org: env.org,
             project: env.project,
@@ -424,8 +389,6 @@ export function useRevealOne(env: EnvRef) {
           },
           ...transport,
         }),
-        zValueCell,
-      ),
     // The window slid (or was spent), so the chip's input has moved.
     onSettled: () => queries.invalidateQueries({ queryKey: windowKey(env) }),
   });
@@ -437,8 +400,7 @@ export function useRevealAll(env: EnvRef) {
   const transport = useTransport();
   return useMutation({
     mutationFn: () =>
-      parsed(
-        revealValues({
+      parsed(revealValuesOp, {
           path: {
             org: env.org,
             project: env.project,
@@ -446,8 +408,6 @@ export function useRevealAll(env: EnvRef) {
           },
           ...transport,
         }),
-        zValueList,
-      ),
     onSettled: () => queries.invalidateQueries({ queryKey: windowKey(env) }),
   });
 }
@@ -466,8 +426,7 @@ export function useSetValue(env: EnvRef) {
   const transport = useTransport();
   return useMutation({
     mutationFn: (input: { key: string; value: string }) =>
-      parsed(
-        setValue({
+      parsed(setValueOp, {
           path: {
             org: env.org,
             project: env.project,
@@ -477,8 +436,6 @@ export function useSetValue(env: EnvRef) {
           body: { value: input.value },
           ...transport,
         }),
-        zPendingChange,
-      ),
     onSuccess: () => queries.invalidateQueries({ queryKey: valuesKey(env) }),
   });
 }
@@ -489,8 +446,7 @@ export function useCopyValues(env: EnvRef) {
   const transport = useTransport();
   return useMutation({
     mutationFn: (input: { keys: readonly string[]; destinations: readonly string[] }) =>
-      parsed(
-        copyValues({
+      parsed(copyValuesOp, {
           path: { org: env.org, project: env.project },
           body: {
             source_environment_id: env.environment,
@@ -500,8 +456,6 @@ export function useCopyValues(env: EnvRef) {
           },
           ...transport,
         }),
-        zCopyValuesResult,
-      ),
     onSuccess: (result, input) =>
       invalidateAfterCopy(queries, env, [
         ...new Set([

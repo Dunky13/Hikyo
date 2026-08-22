@@ -27,14 +27,14 @@ import (
 // exists for — the server is unreachable, so the box cannot reconstruct the
 // full AAD tuple (revision, projection, issuance, expiry). The container
 // therefore stores that tuple as a cleartext, AEAD-authenticated header and the
-// caller supplies only the SnapshotContext it knows offline (identity, org,
-// project, environment, credential fingerprint of the presented token,
-// config-only mode, target set).
+// caller supplies one validated scope-only SnapshotBinding containing what it
+// knows offline (identity, org, project, environment, credential fingerprint of
+// the presented token, config-only mode, target set).
 //
 //	container = "HKS1" ‖ uint32-BE(len(header)) ‖ header ‖ sealed-payload
 //
-// where `header` is crypto.SnapshotAAD.Canonical() and the sealed payload's AAD
-// IS those exact header bytes, so tampering the header fails the open.
+// where `header` is SnapshotBinding.CanonicalAAD() and the sealed payload's AAD
+// IS those exact legacy-compatible bytes, so tampering the header fails the open.
 //
 // Two guards beyond the AEAD:
 //   - a high-water mark of (issuance, header-digest): an older issuance is
@@ -88,18 +88,26 @@ type hwm struct {
 	Digest   string `json:"digest"`
 }
 
-// SaveSnapshot seals payload under keys with the AAD's canonical header, frames
+// SaveSnapshot seals payload under keys with the binding's canonical AAD, frames
 // the self-describing container, and writes snapshot.bin atomically (0600). It
 // advances snapshot.hwm to (issued_at, header-digest) and REFUSES to save an
 // issuance older than the current high-water mark (a rollback attempt).
-func SaveSnapshot(stateDir string, keys *crypto.LocalKeys, aad crypto.SnapshotAAD, payload SnapshotPayload) error {
+func SaveSnapshot(keys *crypto.LocalKeys, binding crypto.SnapshotBinding, payload SnapshotPayload) error {
+	stateDir, err := binding.StorageDir()
+	if err != nil {
+		return err
+	}
+	header, err := binding.CanonicalAAD()
+	if err != nil {
+		return err
+	}
+	aad, err := binding.AAD()
+	if err != nil {
+		return err
+	}
 	issued, err := time.Parse(time.RFC3339, aad.IssuedAt)
 	if err != nil {
 		return fmt.Errorf("compose: snapshot issued_at %q is not RFC3339: %w", aad.IssuedAt, err)
-	}
-	header, err := aad.Canonical()
-	if err != nil {
-		return err
 	}
 	// The container writes the header length as a 4-byte prefix, so a header
 	// beyond uint32 range cannot be framed. It never happens (the AAD is a
@@ -150,55 +158,65 @@ func SaveSnapshot(stateDir string, keys *crypto.LocalKeys, aad crypto.SnapshotAA
 	return nil
 }
 
-// LoadSnapshot reads snapshot.bin, parses its self-describing header, checks the
-// offline-known context against `expect`, enforces rollback and expiry, then
-// decrypts. It returns the payload and the full header (revision, projection,
-// issuance and expiry are taken FROM the header, not reconstructed). maxAge is
-// the per-stack downward override; the effective expiry is the earlier bound.
-func LoadSnapshot(stateDir string, keys *crypto.LocalKeys, expect crypto.SnapshotContext, now time.Time, maxAge time.Duration) (SnapshotPayload, crypto.SnapshotAAD, error) {
+// LoadSnapshot validates the expected binding before reading snapshot.bin,
+// parses its self-describing header into a delivery-complete binding, checks the
+// offline-known scope, enforces rollback and expiry, then decrypts. maxAge is the
+// per-stack downward override; the effective expiry is the earlier bound.
+func LoadSnapshot(keys *crypto.LocalKeys, expect crypto.SnapshotBinding, now time.Time, maxAge time.Duration) (SnapshotPayload, crypto.SnapshotBinding, error) {
 	var zeroP SnapshotPayload
-	var zeroA crypto.SnapshotAAD
+	var zeroB crypto.SnapshotBinding
+	if err := expect.ValidateScope(); err != nil {
+		return zeroP, zeroB, err
+	}
+	stateDir, err := expect.StorageDir()
+	if err != nil {
+		return zeroP, zeroB, err
+	}
 
 	record, err := os.ReadFile(filepath.Join(stateDir, snapshotFile))
 	if err != nil {
-		return zeroP, zeroA, fmt.Errorf("compose: read snapshot: %w", err)
+		return zeroP, zeroB, fmt.Errorf("compose: read snapshot: %w", err)
 	}
 	header, sealed, err := unframeSnapshot(record)
 	if err != nil {
-		return zeroP, zeroA, err
+		return zeroP, zeroB, err
 	}
-	aad, err := crypto.ParseSnapshotHeader(header)
+	binding, err := crypto.ParseSnapshotBinding(stateDir, header)
 	if err != nil {
-		return zeroP, zeroA, err
+		return zeroP, zeroB, err
 	}
 	// Refuse a transplanted snapshot by name before any crypto work.
-	if err := aad.ContextMatches(expect); err != nil {
-		return zeroP, zeroA, fmt.Errorf("%w: %v", ErrSnapshotContext, err)
+	if err := binding.ContextMatches(expect); err != nil {
+		return zeroP, zeroB, fmt.Errorf("%w: %v", ErrSnapshotContext, err)
+	}
+	aad, err := binding.AAD()
+	if err != nil {
+		return zeroP, zeroB, err
 	}
 
 	issued, err := time.Parse(time.RFC3339, aad.IssuedAt)
 	if err != nil {
-		return zeroP, zeroA, fmt.Errorf("compose: snapshot issued_at %q is not RFC3339: %w", aad.IssuedAt, err)
+		return zeroP, binding, fmt.Errorf("compose: snapshot issued_at %q is not RFC3339: %w", aad.IssuedAt, err)
 	}
 	expires, err := time.Parse(time.RFC3339, aad.ExpiresAt)
 	if err != nil {
-		return zeroP, zeroA, fmt.Errorf("compose: snapshot expires_at %q is not RFC3339: %w", aad.ExpiresAt, err)
+		return zeroP, binding, fmt.Errorf("compose: snapshot expires_at %q is not RFC3339: %w", aad.ExpiresAt, err)
 	}
 
 	mark, err := readHWM(stateDir)
 	if err != nil {
-		return zeroP, zeroA, err
+		return zeroP, binding, err
 	}
 	if mark != nil {
 		markTime, err := time.Parse(time.RFC3339, mark.IssuedAt)
 		if err != nil {
-			return zeroP, zeroA, fmt.Errorf("compose: high-water mark %q is not RFC3339: %w", mark.IssuedAt, err)
+			return zeroP, binding, fmt.Errorf("compose: high-water mark %q is not RFC3339: %w", mark.IssuedAt, err)
 		}
 		if issued.Before(markTime) {
-			return zeroP, zeroA, fmt.Errorf("%w (issued %s < hwm %s)", ErrSnapshotRollback, issued, markTime)
+			return zeroP, binding, fmt.Errorf("%w (issued %s < hwm %s)", ErrSnapshotRollback, issued, markTime)
 		}
 		if issued.Equal(markTime) && headerDigest(header) != mark.Digest {
-			return zeroP, zeroA, fmt.Errorf("%w (issued %s equals hwm but header identity differs)", ErrSnapshotRollback, issued)
+			return zeroP, binding, fmt.Errorf("%w (issued %s equals hwm but header identity differs)", ErrSnapshotRollback, issued)
 		}
 	}
 
@@ -208,20 +226,20 @@ func LoadSnapshot(stateDir string, keys *crypto.LocalKeys, expect crypto.Snapsho
 		effective = capped
 	}
 	if now.After(effective) {
-		return zeroP, zeroA, fmt.Errorf("%w (expired at %s, now %s)", ErrSnapshotExpired, effective, now)
+		return zeroP, binding, fmt.Errorf("%w (expired at %s, now %s)", ErrSnapshotExpired, effective, now)
 	}
 
 	plaintext, err := keys.OpenSnapshot(header, sealed)
 	if err != nil {
-		return zeroP, zeroA, err // crypto.ErrDecrypt on any tamper/AEAD failure
+		return zeroP, binding, err // crypto.ErrDecrypt on any tamper/AEAD failure
 	}
 	var payload SnapshotPayload
 	dec := json.NewDecoder(bytes.NewReader(plaintext))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&payload); err != nil {
-		return zeroP, zeroA, fmt.Errorf("compose: parse snapshot payload: %w", err)
+		return zeroP, binding, fmt.Errorf("compose: parse snapshot payload: %w", err)
 	}
-	return payload, aad, nil
+	return payload, binding, nil
 }
 
 func headerDigest(header []byte) string {

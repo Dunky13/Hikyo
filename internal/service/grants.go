@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Hikyo-Org/hikyo/api"
 	"github.com/Hikyo-Org/hikyo/internal/audit"
 	"github.com/Hikyo-Org/hikyo/internal/authz"
 	"github.com/Hikyo-Org/hikyo/internal/domain"
@@ -134,16 +135,17 @@ type GrantSpec struct {
 	Scope domain.Scope
 }
 
-// GrantResult reports what a create actually did, so the caller can render
-// "granted" versus "already held, now also held by you" without a second read.
+type GrantOutcome = api.GrantOutcome
+
+func GrantCreated() GrantOutcome     { return api.GrantOutcomeCreated() }
+func GrantOriginAdded() GrantOutcome { return api.GrantOutcomeOriginAdded() }
+func GrantUnchanged() GrantOutcome   { return api.GrantOutcomeUnchanged() }
+
+// GrantResult reports what a create actually did, so callers can render the
+// result without interpreting combinations of independently-set booleans.
 type GrantResult struct {
 	GrantID string
-	// Created is false when an existing row was deduplicated and this call
-	// only attached an origin to it.
-	Created bool
-	// OriginAdded is false when the caller's own origin already held the row —
-	// a genuinely idempotent repeat.
-	OriginAdded bool
+	Outcome GrantOutcome
 }
 
 // grantOps maps an addressed scope depth to the (create, revoke, list,
@@ -253,12 +255,29 @@ func insertGrantEvent(ctx context.Context, r store.Repos, p authz.Proof, actor d
 }
 
 // grantOne is the whole create path minus transport and audit writing: every
-// refusal rule, the dedup, the origin attach and the session kill. The
-// template path calls it once per expanded capability, so a template can never
-// take a shortcut past a rule an individual grant must satisfy.
+// refusal rule, the dedup, the origin attach and the session kill.
 func (s *Grants) grantOne(
 	ctx context.Context, az *authz.TxAuthorizer, caller authz.Identity,
 	spec GrantSpec, level domain.Level, template domain.Template,
+) (GrantResult, []grantEventInput, error) {
+	return s.grantOneWithInvalidation(ctx, az, caller, spec, level, template, true)
+}
+
+// grantOneDeferredInvalidation applies every individual-grant rule while
+// leaving session invalidation to the enclosing atomic operation. Templates
+// use it once per expanded capability, then invalidate once if any row was
+// created.
+func (s *Grants) grantOneDeferredInvalidation(
+	ctx context.Context, az *authz.TxAuthorizer, caller authz.Identity,
+	spec GrantSpec, level domain.Level, template domain.Template,
+) (GrantResult, []grantEventInput, error) {
+	return s.grantOneWithInvalidation(ctx, az, caller, spec, level, template, false)
+}
+
+func (s *Grants) grantOneWithInvalidation(
+	ctx context.Context, az *authz.TxAuthorizer, caller authz.Identity,
+	spec GrantSpec, level domain.Level, template domain.Template,
+	invalidateSessions bool,
 ) (GrantResult, []grantEventInput, error) {
 	var zero GrantResult
 	grantor := caller.Principal
@@ -299,21 +318,30 @@ func (s *Grants) grantOne(
 	}
 
 	origin := authz.Origin{Kind: domain.OriginManual, Subject: string(grantor)}
-	out, err := writeGrantRow(ctx, az, spec, origin, now)
+	out, err := writeGrantRowState(ctx, az, spec, origin, now)
 	if err != nil {
 		return zero, nil, err
 	}
+	if invalidateSessions && out.Outcome == GrantCreated() {
+		if err := invalidateGrantChange(ctx, az, spec.Target); err != nil {
+			return zero, nil, err
+		}
+	}
 
 	// F5: the lifecycle event must match the state transition. A repeat that
-	// created no row and attached no origin changed nothing — emitting
-	// `grant.modified` for it would put a modification in the trail that never
-	// happened, and an investigator counting modifications would count polls.
-	if !out.Created && !out.OriginAdded {
+	// changed nothing emits no event, or an investigator would count polls as
+	// modifications.
+	if out.Outcome == GrantUnchanged() {
 		return out, nil, nil
 	}
-	typ := audit.EventGrantModified
-	if out.Created {
+	var typ audit.EventType
+	switch out.Outcome {
+	case GrantCreated():
 		typ = audit.EventGrantCreated
+	case GrantOriginAdded():
+		typ = audit.EventGrantModified
+	default:
+		return zero, nil, fmt.Errorf("invalid grant outcome %q", out.Outcome)
 	}
 	payload := audit.Payload{
 		"target_principal": string(spec.Target),
@@ -481,13 +509,16 @@ func (s *Auth) RequireDisclosureAuthority(
 		}
 	}
 	for _, env := range union(current, historical) {
-		// No operation is named and no key set is enumerated: this conjunct is
-		// about reaching plaintext through a credential, not about one named
-		// disclosure. An UNBOUND window (every #54 ceremony) satisfies it; a
-		// window BOUND to a step-up's exact operation does not, and that refusal
-		// is correct — consent to reveal DATABASE_URL in a foreign shell is not
-		// consent to widen a machine credential's reach.
-		err := s.ConsumeReauthWindow(ctx, az, caller.SessionID, PurposeMint, string(env), "", nil, now)
+		// Credential minting is its own closed intent with no enumerated key set.
+		// An UNBOUND window (every #54 ceremony) satisfies it; a window BOUND to a
+		// different step-up operation does not, and that refusal is correct —
+		// consent to reveal DATABASE_URL in a foreign shell is not consent to
+		// widen a machine credential's reach.
+		intent, err := NewMintReauthIntent(string(env), nil)
+		if err != nil {
+			return err
+		}
+		err = s.ConsumeReauthWindow(ctx, az, caller.SessionID, intent, now)
 		switch {
 		case err == nil:
 		case errors.Is(err, ErrNoReauthWindow), errors.Is(err, ErrReauthWindowExpired),
@@ -703,13 +734,26 @@ func checkMachineProject(ctx context.Context, az *authz.TxAuthorizer, target dom
 // them one body is not tidiness: the divergence is what let a swallowed read
 // error live in one caller and not the other.
 func writeGrantRow(ctx context.Context, az *authz.TxAuthorizer, spec GrantSpec, origin authz.Origin, now time.Time) (GrantResult, error) {
+	out, err := writeGrantRowState(ctx, az, spec, origin, now)
+	if err != nil {
+		return GrantResult{}, err
+	}
+	if out.Outcome == GrantCreated() {
+		if err := invalidateGrantChange(ctx, az, spec.Target); err != nil {
+			return GrantResult{}, err
+		}
+	}
+	return out, nil
+}
+
+func writeGrantRowState(ctx context.Context, az *authz.TxAuthorizer, spec GrantSpec, origin authz.Origin, now time.Time) (GrantResult, error) {
 	var out GrantResult
 	rows, err := az.GrantRowsForPrincipal(ctx, spec.Target)
 	if err != nil {
 		return GrantResult{}, err
 	}
 	existing := findGrant(rows, spec.Capability, spec.Scope)
-	out.Created = existing == nil
+	out.Outcome = GrantUnchanged()
 	if existing != nil {
 		out.GrantID = existing.ID
 	} else {
@@ -736,6 +780,7 @@ func writeGrantRow(ctx context.Context, az *authz.TxAuthorizer, spec GrantSpec, 
 			return GrantResult{}, err
 		}
 		out.GrantID = grantID
+		out.Outcome = GrantCreated()
 	}
 
 	// Attaching an origin that already holds the row is a genuine no-op, not
@@ -757,29 +802,24 @@ func writeGrantRow(ctx context.Context, az *authz.TxAuthorizer, spec GrantSpec, 
 		if err := az.AddGrantOrigin(ctx, originID, out.GrantID, spec.Target, origin, now); err != nil {
 			return GrantResult{}, err
 		}
-		out.OriginAdded = true
+		if existing != nil {
+			out.Outcome = GrantOriginAdded()
+		}
 	}
 
-	// Every EFFECTIVE authority change kills the grantee's sessions in the
-	// same transaction (human-auth ADR: grant addition/widening/revocation
-	// each invalidate sessions).
-	//
-	// A new row is such a change: the capability becomes held. A second
-	// origin joining a row that ALREADY holds the capability is not — the
-	// grantee's authority is identical before and after, so killing their
-	// sessions would be a denial of service triggered by somebody else's
-	// bookkeeping. The trail still records it as `grant.modified`, which is
-	// what it is. (Symmetric with revoke, where the advance is gated on the
-	// row actually dying.)
-	if out.Created {
-		if err := az.AdvanceGeneration(ctx, spec.Target); err != nil {
-			return GrantResult{}, err
-		}
-		if err := az.RevokeAllSessionsFor(ctx, spec.Target); err != nil {
-			return GrantResult{}, err
-		}
-	}
 	return out, nil
+}
+
+// Every EFFECTIVE authority change kills the grantee's sessions in the same
+// transaction (human-auth ADR: grant addition/widening/revocation each
+// invalidate sessions). A template is one authority change, so it batches the
+// generation advance after all its new rows instead of repeating it per row.
+// Origin-only changes do not call this: held authority is unchanged.
+func invalidateGrantChange(ctx context.Context, az *authz.TxAuthorizer, target domain.PrincipalID) error {
+	if err := az.AdvanceGeneration(ctx, target); err != nil {
+		return err
+	}
+	return az.RevokeAllSessionsFor(ctx, target)
 }
 
 // Revoke releases the calling surface's origins from one grant, and deletes
@@ -1033,10 +1073,6 @@ func (s *Grants) ApplyTemplate(ctx context.Context, actor Actor, template domain
 		if err != nil {
 			return err
 		}
-		caps, err := domain.ExpandTemplate(template, level)
-		if err != nil {
-			return fmt.Errorf("%w: %s", domain.ErrInvalid, err)
-		}
 		caller, err := actor.resolve(ctx, az, s.now())
 		if err != nil {
 			return err
@@ -1045,61 +1081,91 @@ func (s *Grants) ApplyTemplate(ctx context.Context, actor Actor, template domain
 		if err != nil {
 			return err
 		}
-
-		events := make([]grantEventInput, 0, len(caps)+1)
-		results := make([]GrantResult, 0, len(caps))
-		created, joined, unchanged := 0, 0, 0
-		names := make([]string, 0, len(caps))
-		for _, capability := range caps {
-			res, evs, err := s.grantOne(ctx, az, caller, GrantSpec{
-				Target: target, Capability: capability, Scope: scope,
-			}, level, template)
-			if err != nil {
-				return err
-			}
-			results = append(results, res)
-			events = append(events, evs...)
-			names = append(names, string(capability))
-			switch {
-			case res.Created:
-				created++
-			case res.OriginAdded:
-				joined++
-			default:
-				unchanged++
-			}
-		}
-		out = results
-
-		// The template event records ONE administrator performing ONE act;
-		// the per-capability rows above record what it produced. Without the
-		// first the trail can say ten capabilities appeared but not why.
-		summary := grantEventInput{
-			typ:    audit.EventGrantTemplateApplied,
-			object: audit.Object{Type: "principal", ID: string(target)},
-			payload: audit.Payload{
-				"template":         string(template),
-				"target_principal": string(target),
-				"scope":            renderScope(scope),
-				"capability_count": len(caps),
-				"grants_created":   created,
-				"grants_deduped":   joined + unchanged,
-				"grants_joined":    joined,
-				"grants_unchanged": unchanged,
-				"self_grant":       target == caller.Principal,
-				"capabilities":     strings.Join(names, ","),
-			},
-		}
-		for i, capability := range caps {
-			_, cured, err := cureIfMemberManagement(ctx, az, retentionAttentionClearer(r, p), capability, scope, results[i])
-			if err != nil {
-				return err
-			}
-			events = append(events, cured...)
-		}
-		return insertGrantEvent(ctx, r, p, caller.Principal, level, append([]grantEventInput{summary}, events...)...)
+		out, err = s.applyTemplate(ctx, r, az, p, caller, template, target, scope, level)
+		return err
 	})
 	return out, err
+}
+
+// applyTemplate is the transaction-internal template writer shared by the
+// ordinary grant endpoint and organisation creation. The latter must publish
+// the org and its creator's first membership atomically: an org with no way in
+// is not a valid intermediate state another request should have to repair.
+func (s *Grants) applyTemplate(
+	ctx context.Context,
+	r store.Repos,
+	az *authz.TxAuthorizer,
+	p authz.Proof,
+	caller authz.Identity,
+	template domain.Template,
+	target domain.PrincipalID,
+	scope domain.Scope,
+	level domain.Level,
+) ([]GrantResult, error) {
+	caps, err := domain.ExpandTemplate(template, level)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s", domain.ErrInvalid, err)
+	}
+	events := make([]grantEventInput, 0, len(caps)+1)
+	results := make([]GrantResult, 0, len(caps))
+	created, joined, unchanged := 0, 0, 0
+	names := make([]string, 0, len(caps))
+	for _, capability := range caps {
+		res, evs, err := s.grantOneDeferredInvalidation(ctx, az, caller, GrantSpec{
+			Target: target, Capability: capability, Scope: scope,
+		}, level, template)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, res)
+		events = append(events, evs...)
+		names = append(names, string(capability))
+		switch res.Outcome {
+		case GrantCreated():
+			created++
+		case GrantOriginAdded():
+			joined++
+		case GrantUnchanged():
+			unchanged++
+		default:
+			return nil, fmt.Errorf("invalid grant outcome %q", res.Outcome)
+		}
+	}
+	if created > 0 {
+		if err := invalidateGrantChange(ctx, az, target); err != nil {
+			return nil, err
+		}
+	}
+
+	// The template event records ONE administrator performing ONE act; the
+	// per-capability rows above record what it produced.
+	summary := grantEventInput{
+		typ:    audit.EventGrantTemplateApplied,
+		object: audit.Object{Type: "principal", ID: string(target)},
+		payload: audit.Payload{
+			"template":         string(template),
+			"target_principal": string(target),
+			"scope":            renderScope(scope),
+			"capability_count": len(caps),
+			"grants_created":   created,
+			"grants_deduped":   joined + unchanged,
+			"grants_joined":    joined,
+			"grants_unchanged": unchanged,
+			"self_grant":       target == caller.Principal,
+			"capabilities":     strings.Join(names, ","),
+		},
+	}
+	for i, capability := range caps {
+		_, cured, err := cureIfMemberManagement(ctx, az, retentionAttentionClearer(r, p), capability, scope, results[i])
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, cured...)
+	}
+	if err := insertGrantEvent(ctx, r, p, caller.Principal, level, append([]grantEventInput{summary}, events...)...); err != nil {
+		return nil, err
+	}
+	return results, nil
 }
 
 // Membership is one capability line on the membership surface: a principal,
@@ -1395,6 +1461,15 @@ func (s *Grants) BreakGlassGrant(ctx context.Context, spec GrantSpec) (GrantResu
 		// break-glass credential reset does: there is no proof to bind it to,
 		// and it commits in the same transaction as the grant, so durability
 		// holds.
+		var grantCreated bool
+		switch out.Outcome {
+		case GrantCreated():
+			grantCreated = true
+		case GrantOriginAdded(), GrantUnchanged():
+			grantCreated = false
+		default:
+			return fmt.Errorf("invalid grant outcome %q", out.Outcome)
+		}
 		e, err := newAuditEvent(ctx, audit.EventBreakGlassGrant, "",
 			audit.Object{Type: "grant", ID: out.GrantID}, audit.OutcomeSuccess, "",
 			audit.Payload{
@@ -1402,7 +1477,7 @@ func (s *Grants) BreakGlassGrant(ctx context.Context, spec GrantSpec) (GrantResu
 				"capability":       string(spec.Capability),
 				"scope":            renderScope(spec.Scope),
 				"authority":        "local-host",
-				"grant_created":    out.Created,
+				"grant_created":    grantCreated,
 			})
 		if err != nil {
 			return err
@@ -1477,10 +1552,17 @@ func cureIfMemberManagement(
 	ctx context.Context, az *authz.TxAuthorizer, clear clearRetentionAttention,
 	capability domain.Capability, scope domain.Scope, res GrantResult,
 ) ([]CureResult, []grantEventInput, error) {
-	if capability != domain.CapManageMembers || !res.Created {
+	if capability != domain.CapManageMembers {
 		return nil, nil, nil
 	}
-	return cureLockoutRetentions(ctx, az, clear, res.GrantID, scope)
+	switch res.Outcome {
+	case GrantCreated():
+		return cureLockoutRetentions(ctx, az, clear, res.GrantID, scope)
+	case GrantOriginAdded(), GrantUnchanged():
+		return nil, nil, nil
+	default:
+		return nil, nil, fmt.Errorf("invalid grant outcome %q", res.Outcome)
+	}
 }
 
 // retentionAttentionClearer builds the cure's audited exit path for a caller

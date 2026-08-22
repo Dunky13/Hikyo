@@ -198,11 +198,14 @@ func runRemoteLifecycle(t *testing.T, db *store.DB) {
 	// remote.workspace_handoff_read. Only START + READ here — the elevation
 	// itself needs the reauthentication seam this lifecycle deliberately leaves
 	// unwired; the read does not, and it is the audited act under test.
+	intent, err := service.NewRevealReauthIntent("env_lifecycle", []string{"key_x"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	stepUp, err := workspace.StartHandoff(ctx, service.HandoffRequest{
 		Origin: "https://shell.example", RedirectURI: "https://shell.example/workspace/callback",
 		PKCEChallenge: challenge, Purpose: authn.HandoffStepUp,
-		SessionID: ws.SessionID, Operation: string(authz.OpValueReveal),
-		EnvID: "env_lifecycle", KeySet: "key_x",
+		SessionID: ws.SessionID, ReauthIntent: &intent,
 	})
 	if err != nil {
 		t.Fatalf("start step-up handoff: %v", err)
@@ -365,10 +368,11 @@ func seedCLISession(t *testing.T, db *store.DB, p domain.PrincipalID) string {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
+	generation := queryInt(t, db, "SELECT session_generation FROM principals WHERE id = '"+string(p)+"'")
 	err = tx.Write(t.Context(), db, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
 		return az.MintSession(ctx, authn.NewSession{
 			ID: "ses_" + base64.RawURLEncoding.EncodeToString(id), PrincipalID: p,
-			Verifier: verifier, Artifact: "cli", SessionGeneration: 1, CredentialEpoch: 1,
+			Verifier: verifier, Artifact: "cli", SessionGeneration: generation, CredentialEpoch: 1,
 			AuthMethod: "local-password", Factors: `["password"]`,
 			AuthenticatedAt: now, CreatedAt: now,
 			IdleExpiresAt: now.Add(time.Hour), AbsoluteExpiresAt: now.Add(24 * time.Hour),

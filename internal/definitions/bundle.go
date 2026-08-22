@@ -14,6 +14,7 @@
 package definitions
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/Hikyo-Org/hikyo/internal/domain"
@@ -76,8 +77,10 @@ type Key struct {
 	ForbiddenIn     Presence           `json:"forbidden_in"`
 }
 
-// Bundle is the canonical definitions bundle. BaseRevision is a pointer so its
-// absence — which makes the bundle *additive* (ADR § Additive bundles) — is
+// Bundle is the mutable definitions wire/import DTO. Construct it only at an
+// import or test boundary, then immediately pass it to Canonicalize. Application
+// paths encode CanonicalBundle instead. BaseRevision is a pointer so its absence
+// — which makes the bundle *additive* (ADR § Additive bundles) — is
 // distinguishable from a zero base revision.
 type Bundle struct {
 	FormatVersion int           `json:"format_version"`
@@ -85,6 +88,38 @@ type Bundle struct {
 	Environments  []Environment `json:"environments"`
 	KeyGroups     []KeyGroup    `json:"key_groups"`
 	Keys          []Key         `json:"keys"`
+}
+
+// CanonicalBundle is a validated, normalized bundle snapshot. Its fields stay
+// private so only Parse and Canonicalize can create an encodable value.
+// WireBundle returns a detached copy for review and for non-encoding domain
+// operations; mutating that copy cannot alter this canonical snapshot.
+type CanonicalBundle struct {
+	encoded  []byte
+	additive bool
+	valid    bool
+}
+
+// WireBundle returns a detached copy of the canonical wire model.
+func (b CanonicalBundle) WireBundle() Bundle {
+	b.requireValid()
+	var out Bundle
+	if err := json.Unmarshal(b.encoded, &out); err != nil {
+		panic(fmt.Sprintf("definitions: corrupt canonical bundle invariant: %v", err))
+	}
+	return out
+}
+
+// Additive reports whether the canonical bundle has no base revision.
+func (b CanonicalBundle) Additive() bool {
+	b.requireValid()
+	return b.additive
+}
+
+func (b CanonicalBundle) requireValid() {
+	if !b.valid {
+		panic("definitions: canonical bundle was not produced by Parse or Canonicalize")
+	}
 }
 
 // Additive reports whether the bundle carries no base revision, in which case

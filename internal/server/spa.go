@@ -163,18 +163,25 @@ func reservedFromFallback(p string) bool {
 	return false
 }
 
-// securityHeaders applies the baseline to every response, API answers
-// included: `nosniff` on a JSON error body is as load-bearing as it is on the
-// document, and a single writer means no surface can be forgotten.
-func securityHeaders(remoteOrigins func(context.Context) []string) func(http.Handler) http.Handler {
+// securityHeaders applies the STATIC baseline to every response, API answers
+// and refusals included: `nosniff` on a JSON error body is as load-bearing as
+// it is on the document, and a single writer means no surface can be
+// forgotten. The ops-spec ADR calls this set carried, so it is carried —
+// including on the legs that never render anything.
+//
+// What it deliberately does NOT do is read the configured remotes (#211). The
+// dynamic `connect-src` extension is a datastore read behind the authorizer,
+// and only a served document can act on the answer: a probe, a metrics scrape,
+// a hashed asset and every refusal would spend the query to describe
+// connections they can never make. Non-document responses therefore carry the
+// BASELINE policy — the header is still there, self-only, and that is the
+// explicit behaviour rather than a silent omission — and the extension is
+// applied once, by the document writer in serveSPA.
+func securityHeaders() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			h := w.Header()
-			policy := contentSecurityPolicy
-			if remoteOrigins != nil {
-				policy = policyWithRemotes(remoteOrigins(r.Context()))
-			}
-			h.Set("Content-Security-Policy", policy)
+			h.Set("Content-Security-Policy", contentSecurityPolicy)
 			h.Set("X-Content-Type-Options", "nosniff")
 			h.Set("Referrer-Policy", "no-referrer")
 			next.ServeHTTP(w, r)
@@ -268,10 +275,16 @@ func serveAsset(ui fs.FS, w http.ResponseWriter, r *http.Request) {
 // serveSPA is the not-found leg once assets exist: an HTML navigation to a
 // non-reserved path renders the application, anything else gets the
 // contract's uniform nonexistent answer.
-func serveSPA(ui fs.FS, w http.ResponseWriter, r *http.Request) {
+//
+// It is also the ONE document writer. The root and every application route
+// arrive here through the same not-found handler, so the dynamic
+// `connect-src` extension is spelled once, at the bottom, and neither path can
+// drift from the other. `remoteOrigins` is nil for a build with no directory
+// surface, which leaves the baseline exactly as it was.
+func serveSPA(ui fs.FS, remoteOrigins func(context.Context) []string, w http.ResponseWriter, r *http.Request) {
 	if reservedFromFallback(r.URL.Path) ||
 		(r.Method != http.MethodGet && r.Method != http.MethodHead) {
-		writeError(w, apigen.ErrorCodeNotFound, "")
+		writeError(w, wirePolicyForCode(apigen.ErrorCodeNotFound), "")
 		return
 	}
 	// A root-relative file the build emitted (favicon, manifest) is served as
@@ -297,14 +310,22 @@ func serveSPA(ui fs.FS, w http.ResponseWriter, r *http.Request) {
 	// Everything past here is the application's own routing, and only a
 	// navigation should receive a document.
 	if !wantsHTML(r) {
-		writeError(w, apigen.ErrorCodeNotFound, "")
+		writeError(w, wirePolicyForCode(apigen.ErrorCodeNotFound), "")
 		return
 	}
 	body, err := fs.ReadFile(ui, indexPath)
 	if err != nil {
 		// An asset tree without a document is a broken build, not a route.
-		writeError(w, apigen.ErrorCodeNotFound, "")
+		writeError(w, wirePolicyForCode(apigen.ErrorCodeNotFound), "")
 		return
+	}
+	// Past here the response IS a document, which is the only response whose
+	// reader can use the answer — so this is where the configured remotes are
+	// read (#71, #211). Read per document, never cached: a removed remote must
+	// stop being reachable on the next navigation, which is the whole
+	// revocation story of the workspace tier.
+	if remoteOrigins != nil {
+		w.Header().Set("Content-Security-Policy", policyWithRemotes(remoteOrigins(r.Context())))
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	// The document names the hashed assets, so it is the one file that must

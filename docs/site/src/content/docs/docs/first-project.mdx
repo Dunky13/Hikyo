@@ -34,18 +34,11 @@ hikyo org create --name demo -o json
 ```
 
 Copy the organisation `id`. Also copy `principal.id` from `hikyo whoami -o
-json`, then grant the first administrator tenant access:
+json` if you need it for later membership administration. Creation atomically
+grants the creator the organisation `admin` template.
 
-```bash
-hikyo access grant template \
-  --org <org-id> \
-  --principal <principal-id> \
-  --template admin \
-  -o json
-```
-
-Changing your own grants revokes your current session. Log in and step up again
-before continuing:
+Changing your own grants revokes your current session. Organisation creation
+performs that change automatically. Log in and step up again before continuing:
 
 ```bash
 hikyo login http://127.0.0.1:8080 --local --as admin

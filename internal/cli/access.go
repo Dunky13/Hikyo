@@ -176,8 +176,12 @@ func runAccessGrant(ctx context.Context, ios IO, args []string) error {
 		if err != nil {
 			return err
 		}
+		row, err := grantResultRow(res)
+		if err != nil {
+			return err
+		}
 		return Render(ios.Stdout, f, Table{
-			Columns: grantResultColumns, Rows: [][]string{grantResultRow(res)}, JSON: res,
+			Columns: grantResultColumns, Rows: [][]string{row}, JSON: res,
 		})
 
 	case "remove":
@@ -197,7 +201,11 @@ func runAccessGrant(ctx context.Context, ios IO, args []string) error {
 		}
 		rows := make([][]string, 0, len(res.Items))
 		for _, r := range res.Items {
-			rows = append(rows, grantResultRow(r))
+			row, err := grantResultRow(r)
+			if err != nil {
+				return err
+			}
+			rows = append(rows, row)
 		}
 		return Render(ios.Stdout, f, Table{Columns: grantResultColumns, Rows: rows, JSON: res})
 	}
@@ -531,15 +539,19 @@ func grantTable(list apigen.GrantList) Table {
 	return Table{Columns: grantColumns, Rows: rows, JSON: list}
 }
 
-func grantResultRow(r apigen.GrantResult) []string {
-	outcome := "joined"
-	switch {
-	case r.Created:
+func grantResultRow(r apigen.GrantResult) ([]string, error) {
+	var outcome string
+	switch r.Outcome {
+	case api.GrantOutcomeCreated():
 		outcome = "created"
-	case !r.OriginAdded:
+	case api.GrantOutcomeOriginAdded():
+		outcome = "origin added"
+	case api.GrantOutcomeUnchanged():
 		outcome = "unchanged"
+	default:
+		return nil, fmt.Errorf("server returned invalid grant outcome")
 	}
-	return []string{r.Capability, r.GrantId, outcome}
+	return []string{r.Capability, r.GrantId, outcome}, nil
 }
 
 // memberTable collapses the capability lines into one row per principal — the

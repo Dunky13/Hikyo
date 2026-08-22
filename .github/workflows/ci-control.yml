@@ -9,6 +9,7 @@ on:
   pull_request_target:
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -19,6 +20,7 @@ jobs:
   validation:
     uses: ./.github/workflows/ci.yml
     permissions:
+      actions: read
       contents: read
 
   # Permanent required context. This job and its success criteria are loaded

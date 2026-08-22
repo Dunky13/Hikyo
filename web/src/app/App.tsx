@@ -20,6 +20,7 @@ import { WorkspaceApprove } from '../routes/WorkspaceApprove.tsx';
 import { WorkspaceCallback } from '../routes/WorkspaceCallback.tsx';
 import { WorkspaceScope } from '../routes/WorkspaceScope.tsx';
 import { CHROMELESS, SURFACES, surfaceById, type Surface, type SurfaceId } from './navigation.ts';
+import { ToastViewport } from './notifications.tsx';
 
 /**
  * ELEMENTS is what each locked surface renders.
@@ -105,15 +106,11 @@ export function App() {
   if (session.isPending) {
     // Deliberately quiet: this resolves in one round trip against a local
     // server, and a spinner that appears for 20ms is noise, not feedback.
-    return (
-      <p className="login" role="status">
-        Loading…
-      </p>
-    );
+    return <><p className="login" role="status">Loading…</p><ToastViewport /></>;
   }
 
   if (session.isError) {
-    return (
+    return <>
       <main className="login">
         <p className="alert" role="alert">
           <span className="alert__glyph" aria-hidden="true">
@@ -122,12 +119,13 @@ export function App() {
           <span>Could not reach the server. Reload once it is back.</span>
         </p>
       </main>
-    );
+      <ToastViewport />
+    </>;
   }
 
   const live = session.data;
 
-  return (
+  return <>
     <BrowserRouter>
       {live === null ? (
         <Routes>
@@ -156,5 +154,6 @@ export function App() {
         </Routes>
       )}
     </BrowserRouter>
-  );
+    <ToastViewport />
+  </>;
 }

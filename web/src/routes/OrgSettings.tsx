@@ -20,6 +20,7 @@ import {
   type SettingsOperation,
 } from '../api/settings.ts';
 import { surfaceById } from '../app/navigation.ts';
+import { notifySuccess } from '../app/notifications.tsx';
 import { Alert, Done, JumpIndex, Panel, TypedNameConfirm } from './Sections.tsx';
 import { useFeedback } from './useModalDialog.ts';
 
@@ -53,7 +54,9 @@ export function OrgSettings() {
     projects.isSuccess ? projects.data.items : [],
   );
   const rename = useRenameOrg();
-  const remove = useDeleteOrg();
+  const remove = useDeleteOrg(() =>
+    notifySuccess('Organisation deleted. Sign in again to continue.'),
+  );
   const setRetention = useSetOrgRetention(org);
   const nameId = useId();
 
@@ -205,15 +208,14 @@ export function OrgSettings() {
           busy={remove.isPending}
           hint={
             <>
-              Deletion never cascades: an organisation still holding projects, or grants pointing
-              into it, is refused. Emptying a tenant is explicit, separately audited work.
+              Deletion never cascades into projects or their contents. Authority scoped inside an
+              otherwise empty organisation is removed with it, and affected sessions are revoked.
             </>
           }
           onConfirm={() =>
             remove.mutate(
               { org },
               {
-                onSuccess: () => feedback.ok('Organisation deleted.'),
                 onError: (error) => report('delete-org', error),
               },
             )

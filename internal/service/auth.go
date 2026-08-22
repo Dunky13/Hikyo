@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"crypto/subtle"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -406,18 +405,13 @@ func (s *Auth) attemptLogin(ctx context.Context, username, password string, arti
 	// Phase 3 — write. The refusal travels out of the closure beside the
 	// return value, because returning it would roll the transaction back —
 	// and the transaction is what makes the failure event durable.
-	var (
-		result  LoginResult
-		refused error
-	)
-	err = tx.Write(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
-		refused = nil
+	committed, err := writeCommittedSessionAttempt(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer, attempt *sessionCompletionAttempt) error {
 		now := s.now()
 		if cause != "" {
 			if ferr := s.failLogin(ctx, az, now, accountIDOf(resolved, account), resolved, artifact, cause); ferr != nil {
 				return ferr // audit not durable: roll back and fail loud
 			}
-			refused = domain.ErrUnauthenticated
+			attempt.refused = sessionRefusedUnauthenticated
 			return nil
 		}
 		// Re-read under the write transaction: the credential must not have
@@ -428,7 +422,7 @@ func (s *Auth) attemptLogin(ctx context.Context, username, password string, arti
 				if ferr := s.failLogin(ctx, az, now, account.ID, true, artifact, "credential-removed"); ferr != nil {
 					return ferr
 				}
-				refused = domain.ErrUnauthenticated
+				attempt.refused = sessionRefusedUnauthenticated
 				return nil
 			}
 			return err
@@ -441,7 +435,7 @@ func (s *Auth) attemptLogin(ctx context.Context, username, password string, arti
 			if ferr := s.failLogin(ctx, az, now, account.ID, true, artifact, "credential-changed"); ferr != nil {
 				return ferr
 			}
-			refused = domain.ErrUnauthenticated
+			attempt.refused = sessionRefusedUnauthenticated
 			return nil
 		}
 		if upgrade {
@@ -460,16 +454,16 @@ func (s *Auth) attemptLogin(ctx context.Context, username, password string, arti
 				}
 			}
 		}
-		result, err = s.mintSession(ctx, az, account, artifact, now)
+		attempt.result, err = s.mintSession(ctx, az, account, artifact, now)
 		return err
 	})
 	if err != nil {
 		return LoginResult{}, err
 	}
-	if refused != nil {
+	if refused := committed.refused.err(); refused != nil {
 		return LoginResult{}, refused
 	}
-	return result, nil
+	return committed.result, nil
 }
 
 // rehash re-derives a verifier under the instance's configured parameters
@@ -512,49 +506,16 @@ func accountIDOf(resolved bool, a authz.Account) string {
 // slice, and recording something stronger would be a lie the chokepoint later
 // acts on.
 func (s *Auth) mintSession(ctx context.Context, az *authz.TxAuthorizer, account authz.Account, artifact Artifact, now time.Time) (LoginResult, error) {
-	value, verifier, err := crypto.NewArtifact(artifact.bearerKind())
-	if err != nil {
-		return LoginResult{}, err
-	}
-	// A browser session authenticates on a cookie the browser attaches by
-	// itself, so it needs a second value the browser will NOT attach by
-	// itself. A CLI session has no cookie channel and therefore no CSRF
-	// contract; minting a token it can never be asked for would be noise.
-	var csrfValue string
-	var csrfVerifier []byte
+	csrf := sessionWithoutCSRF
 	if artifact == ArtifactBrowser {
-		csrfValue, csrfVerifier, err = crypto.NewArtifact(crypto.ArtifactCSRF)
-		if err != nil {
-			return LoginResult{}, err
-		}
+		csrf = sessionWithCSRF
 	}
-	id, err := newID("ses")
+	result, err := s.completeSession(ctx, az, CreateSession{
+		account: account, artifact: artifact,
+		assurance: Assurance{Method: MethodLocalPassword, Factors: []string{"password"}, AuthenticatedAt: now},
+		csrf:      csrf,
+	}, now)
 	if err != nil {
-		return LoginResult{}, err
-	}
-	generation, err := az.PrincipalGeneration(ctx, account.PrincipalID)
-	if err != nil {
-		return LoginResult{}, err
-	}
-	epoch, err := az.CredentialEpoch(ctx)
-	if err != nil {
-		return LoginResult{}, err
-	}
-	factors, err := json.Marshal([]string{"password"})
-	if err != nil {
-		return LoginResult{}, err
-	}
-	wire := audit.FromContext(ctx)
-	sess := authz.NewSession{
-		ID: id, PrincipalID: account.PrincipalID, Verifier: verifier,
-		Artifact: artifact.String(), SessionGeneration: generation, CredentialEpoch: epoch,
-		AuthMethod: MethodLocalPassword, Factors: string(factors),
-		AuthenticatedAt: now, CreatedAt: now,
-		IdleExpiresAt: now.Add(artifact.idle()), AbsoluteExpiresAt: now.Add(artifact.absolute()),
-		SourceIP: wire.SourceIP, UserAgent: wire.UserAgent,
-		CSRFVerifier: csrfVerifier,
-	}
-	if err := az.MintSession(ctx, sess); err != nil {
 		return LoginResult{}, err
 	}
 
@@ -567,12 +528,12 @@ func (s *Auth) mintSession(ctx context.Context, az *authz.TxAuthorizer, account 
 			"subject_resolved": true, "account_id": account.ID, "assurance": "single-factor",
 		}},
 		{audit.EventAuthSessionCreated, audit.Payload{
-			"session_id": id, "artifact": artifact.String(),
+			"session_id": result.SessionID, "artifact": artifact.String(),
 			"method": MethodLocalPassword, "assurance": "single-factor",
 		}},
 	} {
 		e, err := newAuditEvent(ctx, ev.typ, account.PrincipalID,
-			audit.Object{Type: "session", ID: id}, audit.OutcomeSuccess, "", ev.payload)
+			audit.Object{Type: "session", ID: result.SessionID}, audit.OutcomeSuccess, "", ev.payload)
 		if err != nil {
 			return LoginResult{}, err
 		}
@@ -581,14 +542,7 @@ func (s *Auth) mintSession(ctx context.Context, az *authz.TxAuthorizer, account 
 		}
 	}
 
-	return LoginResult{
-		SessionToken: value, SessionID: id, Artifact: artifact, CSRFToken: csrfValue,
-		CreatedAt: now, IdleExpires: sess.IdleExpiresAt, AbsExpires: sess.AbsoluteExpiresAt,
-		Principal: account.PrincipalID, AccountID: account.ID, DisplayName: account.DisplayName,
-		Assurance: Assurance{
-			Method: MethodLocalPassword, Factors: []string{"password"}, AuthenticatedAt: now,
-		},
-	}, nil
+	return result, nil
 }
 
 // failLogin stages the failure event in the caller's transaction. It returns

@@ -23,9 +23,9 @@ func rule(r schema.Rule) schema.Declaration {
 	return schema.Declaration{Rule: &r}
 }
 
-func compile(t *testing.T, d schema.Declaration) *schema.Compiled {
+func compile(t *testing.T, classification schema.Classification, d schema.Declaration) *schema.Compiled {
 	t.Helper()
-	c, err := schema.Compile(d)
+	c, err := schema.CompileWithoutCompatibilityCheckForTest(classification, d)
 	if err != nil {
 		t.Fatalf("Compile(%+v): %v", d, err)
 	}
@@ -107,8 +107,8 @@ func TestValueFixtures(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			c := compile(t, tc.decl)
-			v := c.Validate(tc.value, schema.Secret)
+			c := compile(t, schema.Secret, tc.decl)
+			v := c.Validate(tc.value)
 			if v.Valid != tc.valid {
 				t.Fatalf("Validate(%q) valid=%v, want %v (errors: %+v)", tc.value, v.Valid, tc.valid, v.Errors)
 			}
@@ -141,11 +141,11 @@ func TestValueFixtures(t *testing.T) {
 // The probe value is a distinctive token, so a leak is detectable by search.
 func TestSecretFailuresCarryNoInstanceData(t *testing.T) {
 	const marker = "AKIALEAKCANARY"
-	c := compile(t, rule(schema.Rule{
+	c := compile(t, schema.Secret, rule(schema.Rule{
 		Type:       schema.TypeJSON,
 		JSONSchema: []byte(`{"type":"object","additionalProperties":false,"properties":{"declared":{"type":"string"}}}`),
 	}))
-	v := c.Validate(`{"`+marker+`":"x"}`, schema.Secret)
+	v := c.Validate(`{"` + marker + `":"x"}`)
 	if v.Valid {
 		t.Fatal("additionalProperties:false accepted an undeclared property")
 	}
@@ -162,11 +162,11 @@ func TestSecretFailuresCarryNoInstanceData(t *testing.T) {
 // A config key is readable under ordinary environment read, so its failures
 // may carry the instance path the operator needs.
 func TestConfigFailuresMayCarryInstancePaths(t *testing.T) {
-	c := compile(t, rule(schema.Rule{
+	c := compile(t, schema.Config, rule(schema.Rule{
 		Type:       schema.TypeJSON,
 		JSONSchema: []byte(`{"type":"object","properties":{"a":{"type":"integer"}}}`),
 	}))
-	v := c.Validate(`{"a":"nope"}`, schema.Config)
+	v := c.Validate(`{"a":"nope"}`)
 	if v.Valid {
 		t.Fatal("expected a type failure")
 	}
@@ -189,13 +189,13 @@ func TestAnyOf(t *testing.T) {
 		{Type: schema.TypeInteger, Min: i64p(1)},
 		{Type: schema.TypeEnum, Members: []string{"auto"}},
 	}}
-	c := compile(t, d)
+	c := compile(t, schema.Secret, d)
 	for _, ok := range []string{"4", "auto"} {
-		if v := c.Validate(ok, schema.Secret); !v.Valid {
+		if v := c.Validate(ok); !v.Valid {
 			t.Fatalf("Validate(%q) refused: %+v", ok, v.Errors)
 		}
 	}
-	v := c.Validate("banana", schema.Secret)
+	v := c.Validate("banana")
 	if v.Valid {
 		t.Fatal("banana satisfied neither alternative but was accepted")
 	}
@@ -210,19 +210,19 @@ func TestAnyOf(t *testing.T) {
 
 // allow_empty lives on the string alternative, never on the union.
 func TestAnyOfEmptyRidesTheStringAlternative(t *testing.T) {
-	c := compile(t, schema.Declaration{AnyOf: []schema.Rule{
+	c := compile(t, schema.Secret, schema.Declaration{AnyOf: []schema.Rule{
 		{Type: schema.TypeInteger},
 		{Type: schema.TypeString, AllowEmpty: true},
 	}})
-	if v := c.Validate("", schema.Secret); !v.Valid {
+	if v := c.Validate(""); !v.Valid {
 		t.Fatalf("empty refused despite an allow_empty string alternative: %+v", v.Errors)
 	}
 }
 
 // The instance-byte budget fails loud; it never degrades to "assume valid".
 func TestInstanceByteBudget(t *testing.T) {
-	c := compile(t, rule(schema.Rule{Type: schema.TypeString}))
-	v := c.Validate(strings.Repeat("a", schema.MaxValueBytes+1), schema.Secret)
+	c := compile(t, schema.Secret, rule(schema.Rule{Type: schema.TypeString}))
+	v := c.Validate(strings.Repeat("a", schema.MaxValueBytes+1))
 	if v.Valid {
 		t.Fatal("an over-budget value was accepted")
 	}
@@ -242,8 +242,8 @@ func TestErrorCapsHold(t *testing.T) {
 	for range schema.MaxAnyOfAlternatives {
 		alts = append(alts, schema.Rule{Type: schema.TypeEnum, Members: members})
 	}
-	c := compile(t, schema.Declaration{AnyOf: alts})
-	v := c.Validate("nothing-matches", schema.Secret)
+	c := compile(t, schema.Secret, schema.Declaration{AnyOf: alts})
+	v := c.Validate("nothing-matches")
 	if v.Valid {
 		t.Fatal("expected a total failure")
 	}
@@ -266,8 +266,8 @@ func TestNormalizeIsTheWriteTimeTrim(t *testing.T) {
 	if got := schema.Normalize("  padded\t\n"); got != "padded" {
 		t.Fatalf("Normalize = %q, want %q", got, "padded")
 	}
-	c := compile(t, rule(schema.Rule{Type: schema.TypeString}))
-	if v := c.Validate("  padded\t\n", schema.Config); !v.Valid {
+	c := compile(t, schema.Config, rule(schema.Rule{Type: schema.TypeString}))
+	if v := c.Validate("  padded\t\n"); !v.Valid {
 		t.Fatalf("a value valid after the trim was refused: %+v", v.Errors)
 	}
 }
@@ -289,9 +289,9 @@ func TestWholeSecretVerdictCarriesNoPlaintext(t *testing.T) {
 		{"enum", rule(schema.Rule{Type: schema.TypeEnum, Members: []string{"a"}})},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			c := compile(t, tc.decl)
+			c := compile(t, schema.Secret, tc.decl)
 			for _, value := range []string{marker, `{"` + marker + `":"x"}`} {
-				v := c.Validate(value, schema.Secret)
+				v := c.Validate(value)
 				if v.Valid {
 					continue
 				}
@@ -317,11 +317,11 @@ func TestErrorCapIsOnEncodedBytes(t *testing.T) {
 	// what the message reports — the escaping pressure comes from the schema
 	// location instead, which is where instance-independent text can grow.
 	heavy := strings.Repeat(`\u0001\u2028`, 900)
-	c := compile(t, rule(schema.Rule{
+	c := compile(t, schema.Config, rule(schema.Rule{
 		Type:       schema.TypeJSON,
 		JSONSchema: []byte(`{"type":"object","required":["` + heavy + `"]}`),
 	}))
-	v := c.Validate(`{}`, schema.Config)
+	v := c.Validate(`{}`)
 	if v.Valid {
 		t.Fatal("a missing required property was accepted")
 	}

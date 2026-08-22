@@ -817,7 +817,8 @@
     "class": "instance",
     "level": "instance",
     "formula": [
-      "instance-config@instance"
+      "instance-config@instance",
+      "manage-members@instance"
     ]
   },
   {

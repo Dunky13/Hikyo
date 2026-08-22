@@ -946,6 +946,7 @@ func runPositiveControls(t *testing.T, db *store.DB) {
 	if _, err := orgs.Rename(tctx(t), service.LocalPrincipal(root), domain.OrgID(org.ID), "root-org-renamed"); err != nil {
 		t.Fatalf("root renaming the created org: %v", err)
 	}
+	clearOrgGrants(t, db, org.ID)
 	if err := orgs.Delete(tctx(t), service.LocalPrincipal(root), domain.OrgID(org.ID)); err != nil {
 		t.Fatalf("root deleting the org it just created: %v", err)
 	}

@@ -27,8 +27,8 @@ import (
 )
 
 // admin is the corpus's fixture principal: seeded at instance scope with
-// instance-config (org create/list/rename/delete) and read (the tenant-class
-// org read), which is the pair the real first administrator's template seeds.
+// instance-config plus manage-members (org creation atomically grants its
+// creator admin access) and read (the tenant-class org read).
 // Tenant-scoped scenarios seed their own grants. There is no test-only mint
 // hook — every store call in this suite goes through authorize() exactly as
 // production does.
@@ -56,6 +56,8 @@ func seedAdmin(t *testing.T, db *store.DB) {
 		`INSERT INTO principals (id, kind, created_at) VALUES ('usr_conformance_admin', 'human', '2026-01-01T00:00:00Z')`,
 		`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at)
 		 VALUES ('grt_conformance_admin', 'usr_conformance_admin', 'instance-config', NULL, NULL, NULL, '2026-01-01T00:00:00Z')`,
+		`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at)
+		 VALUES ('grt_conformance_admin_members', 'usr_conformance_admin', 'manage-members', NULL, NULL, NULL, '2026-01-01T00:00:00Z')`,
 		`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at)
 		 VALUES ('grt_conformance_admin_read', 'usr_conformance_admin', 'read', NULL, NULL, NULL, '2026-01-01T00:00:00Z')`,
 	})
@@ -87,6 +89,7 @@ var corpus = []scenario{
 	{"secret_rule_change_needs_reveal", scenarioSecretRuleChangeNeedsReveal},
 	{"presence_rules_and_environment_cascade", scenarioPresenceRules},
 	{"key_groups_declaration_side", scenarioKeyGroups},
+	{"group_membership_rebuilds_publish_index", scenarioGroupMembershipRebuildsPublishIndex},
 	{"concurrent_writes_all_succeed", scenarioConcurrent},
 }
 

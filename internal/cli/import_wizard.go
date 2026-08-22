@@ -305,10 +305,10 @@ func (p *terminalPrompter) readLine() (string, error) {
 
 // writeProjectArtifacts emits the three committable artifacts once and one
 // values file per environment that writes anything. Every values path is
-// preflighted before anything is written, and the committable artifacts are
+// reserved before anything is written, and the committable artifacts are
 // created O_EXCL with a cleanup that covers every file this run created — a
 // collision on any artifact must not leave a half-authored migration on disk.
-func writeProjectArtifacts(ios IO, outDir string, plan *importer.ProjectPlan) ([]string, error) {
+func writeProjectArtifacts(ios IO, outDir string, plan *importer.ProjectPlan) (valuesPaths []string, returnErr error) {
 	if err := os.MkdirAll(outDir, 0o700); err != nil {
 		return nil, failf(ExitRefused, "preparing the output directory: %v", err)
 	}
@@ -317,6 +317,7 @@ func writeProjectArtifacts(ios IO, outDir string, plan *importer.ProjectPlan) ([
 		path   string
 		file   importer.ValuesFile
 		envRef string
+		sink   *disclose.PreparedSink
 	}
 	var valuesTargets []valuesTarget
 	for _, env := range plan.Envs {
@@ -332,12 +333,17 @@ func writeProjectArtifacts(ios IO, outDir string, plan *importer.ProjectPlan) ([
 		})
 	}
 
-	// Preflight every values path before writing anything.
-	for _, vt := range valuesTargets {
-		deliver := disclose.Options{OutputFile: vt.path, Stdout: ios.Stdout, OpenTerminal: ios.OpenTerminal}
-		if err := disclose.Preflight(deliver); err != nil {
+	// Reserve every values path before writing anything. If a later
+	// reservation or artifact fails, deferred aborts remove unused empty files.
+	for i := range valuesTargets {
+		vt := &valuesTargets[i]
+		deliver := disclose.Options{OutputFile: vt.path, Stdout: ios.Stdout}
+		sink, err := ios.prepareDisclosure(deliver)
+		if err != nil {
 			return nil, failf(ExitRefused, "the values file for %s has nowhere to go: %v", vt.envRef, err)
 		}
+		vt.sink = sink
+		defer sink.AbortOnReturn(&returnErr)
 	}
 
 	bundleBody, err := definitions.Encode(plan.Bundle)
@@ -389,7 +395,7 @@ func writeProjectArtifacts(ios IO, outDir string, plan *importer.ProjectPlan) ([
 		}
 	}
 
-	var valuesPaths []string
+	valuesPaths = nil
 	for _, vt := range valuesTargets {
 		body, err := importer.Encode(vt.file)
 		if err != nil {
@@ -402,8 +408,7 @@ func writeProjectArtifacts(ios IO, outDir string, plan *importer.ProjectPlan) ([
 				"the values file for %s would be %d bytes, exceeding the %d-byte per-file cap; split the import",
 				vt.envRef, len(body), importer.MaxFileBytes)
 		}
-		deliver := disclose.Options{OutputFile: vt.path, Stdout: ios.Stdout, OpenTerminal: ios.OpenTerminal}
-		if _, err := disclose.Emit("values for "+vt.envRef, strings.TrimRight(string(body), "\n"), deliver); err != nil {
+		if _, err := vt.sink.WriteOnce("values for "+vt.envRef, strings.TrimRight(string(body), "\n")); err != nil {
 			cleanup()
 			return nil, failf(ExitRefused, "writing the values file for %s: %v", vt.envRef, err)
 		}

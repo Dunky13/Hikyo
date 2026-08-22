@@ -443,7 +443,7 @@ func (a *TxAuthorizer) authenticateResolvedSession(ctx context.Context, row auth
 // enumerate exactly which operations will need an adequate session once
 // factors exist.
 func FormulaDemandsMFA(op Operation) bool {
-	spec, ok := operations[op]
+	spec, ok := registry.authorizationSpec(op)
 	if !ok {
 		return false
 	}

@@ -47,7 +47,7 @@ func Verify(p Proof, op StoreOp, tok *TxToken) (domain.Scope, error) {
 			return domain.Scope{}, fmt.Errorf("authz: system proof from site %q may not invoke %q", c.site, op)
 		}
 	default:
-		if !operations[c.op].storeOps[op] {
+		if !registry.permitsStoreOp(c.op, op) {
 			return domain.Scope{}, fmt.Errorf("authz: proof minted for %q may not invoke %q", c.op, op)
 		}
 	}
@@ -81,12 +81,12 @@ func VerifyEvent(p Proof, op StoreOp, tok *TxToken, et audit.EventType) (domain.
 	if !ok || c == nil {
 		return domain.Scope{}, errors.New("authz: non-canonical proof")
 	}
-	licensed := operations[c.op].events
 	if c.kind == kindSystem {
-		licensed = systemSiteEvents[c.site]
+		if slices.Contains(systemSiteEvents[c.site], et) {
+			return chain, nil
+		}
+	} else if registry.permitsEvent(c.op, et) {
+		return chain, nil
 	}
-	if !slices.Contains(licensed, et) {
-		return domain.Scope{}, fmt.Errorf("authz: proof minted for %q may not emit audit event %q", c.op, et)
-	}
-	return chain, nil
+	return domain.Scope{}, fmt.Errorf("authz: proof minted for %q may not emit audit event %q", c.op, et)
 }

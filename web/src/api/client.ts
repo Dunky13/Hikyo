@@ -1,6 +1,7 @@
+import type { BodylessOperation, BodyOperation, Options, TDataShape } from '@hikyo/operations';
 import { client } from '@hikyo/runtime';
 import { zError } from '@hikyo/zod';
-import type { ZodType } from 'zod';
+import type { z, ZodObject, ZodRawShape, ZodType } from 'zod';
 
 /**
  * The one place the SPA talks to the server.
@@ -71,13 +72,7 @@ export class ApiError extends Error {
   }
 }
 
-type SdkResult<T> = {
-  data?: T | undefined;
-  error?: unknown;
-  response?: Response | undefined;
-};
-
-function requireResponse(result: SdkResult<unknown>): Response {
+function requireResponse(result: { response?: Response | undefined }): Response {
   if (result.response === undefined) {
     throw new Error('SDK call completed without an HTTP response');
   }
@@ -85,45 +80,95 @@ function requireResponse(result: SdkResult<unknown>): Response {
 }
 
 /**
- * parsed runs a generated SDK call and returns its response parsed by the
- * generated schema. A non-2xx becomes an ApiError carrying the status; a 2xx
- * whose body does not satisfy the contract throws from Zod, loudly, because a
- * silently-accepted wrong shape is the bug this whole chain exists to stop.
+ * refusal turns any non-2xx into the ApiError the SPA renders. `detail` survives
+ * only when the generated error contract parsed an explicitly caller-safe detail
+ * from the body; a malformed or uniform refusal carries none. Both `parsed` and
+ * `ok` route their non-2xx here so a bodyless call surfaces the same safe detail
+ * a body-bearing one does.
  */
-export async function parsed<T>(
-  call: Promise<SdkResult<unknown>>,
-  schema: ZodType<T>,
-): Promise<T> {
-  const result = await call;
-  const response = requireResponse(result);
-  if (!response.ok) {
-    const refusal = zError.safeParse(result.error);
-    throw new ApiError(
-      response.status,
-      `request failed with ${response.status}`,
-      refusal.success ? refusal.data.error.detail ?? undefined : undefined,
-    );
-  }
-  return schema.parse(result.data);
+function refusal(response: Response, error: unknown): ApiError {
+  const parsed = zError.safeParse(error);
+  return new ApiError(
+    response.status,
+    `request failed with ${response.status}`,
+    parsed.success ? parsed.data.error.detail ?? undefined : undefined,
+  );
 }
 
 /**
- * ok runs a generated SDK call whose success is BODYLESS.
- *
- * It is deliberately narrow: anything with a body must go through `parsed` so
- * the contract's schema sees it. A 200 reaching here means the contract grew a
- * body this caller is ignoring, which is a bug in the caller and is refused as
- * loudly as a failed request rather than silently discarded.
+ * parsed runs a body-bearing operation and returns its response parsed by the
+ * operation's OWN generated schema. The descriptor binds the call and that
+ * schema together, so no caller can pair an operation with another's model. A
+ * non-2xx becomes an ApiError carrying the status; a 2xx whose body does not
+ * satisfy the contract throws from Zod, loudly, because a silently-accepted
+ * wrong shape is the bug this whole chain exists to stop.
  */
-export async function ok(call: Promise<SdkResult<unknown>>): Promise<void> {
-  const result = await call;
+export async function parsed<TData extends TDataShape, TSchema extends ZodType>(
+  operation: BodyOperation<TData, TSchema>,
+  options: Options<TData, false>,
+): Promise<z.infer<TSchema>> {
+  const result = await operation.call(options);
   const response = requireResponse(result);
   if (!response.ok) {
-    throw new ApiError(response.status, `request failed with ${response.status}`);
+    throw refusal(response, result.error);
   }
-  if (response.status !== 204) {
+  if (!operation.successStatuses.includes(response.status)) {
     throw new Error(
-      `expected a bodyless 204, got ${response.status}: parse this response instead of discarding it`,
+      `expected a body-bearing ${operation.successStatuses.join(' or ')}, got ${response.status}: refuse an unbound success response`,
+    );
+  }
+  return operation.response.parse(result.data);
+}
+
+/**
+ * parsedPick validates a narrow projection of an operation's OWN object schema.
+ * Display-once responses use this when unrelated metadata drift must not hide
+ * an irretrievable value. The caller supplies keys, never another schema, so
+ * operation-to-parser binding remains closed.
+ */
+export async function parsedPick<
+  TData extends TDataShape,
+  TShape extends ZodRawShape,
+  TMask extends z.util.Mask<keyof TShape>,
+>(
+  operation: BodyOperation<TData, ZodObject<TShape>>,
+  options: Options<TData, false>,
+  mask: TMask & Record<Exclude<keyof TMask, keyof TShape>, never>,
+) {
+  const result = await operation.call(options);
+  const response = requireResponse(result);
+  if (!response.ok) {
+    throw refusal(response, result.error);
+  }
+  if (!operation.successStatuses.includes(response.status)) {
+    throw new Error(
+      `expected a body-bearing ${operation.successStatuses.join(' or ')}, got ${response.status}: refuse an unbound success response`,
+    );
+  }
+  return operation.response.pick(mask).parse(result.data);
+}
+
+/**
+ * ok runs a bodyless operation - one whose success is a status alone.
+ *
+ * It is deliberately narrow: anything with a body must go through `parsed` so
+ * the contract's schema sees it. A success status other than the descriptor's
+ * bodyless one means the contract grew a body this caller is ignoring, which is
+ * a bug in the caller and is refused as loudly as a failed request rather than
+ * silently discarded.
+ */
+export async function ok<TData extends TDataShape>(
+  operation: BodylessOperation<TData>,
+  options: Options<TData, false>,
+): Promise<void> {
+  const result = await operation.call(options);
+  const response = requireResponse(result);
+  if (!response.ok) {
+    throw refusal(response, result.error);
+  }
+  if (!operation.successStatuses.includes(response.status)) {
+    throw new Error(
+      `expected a bodyless ${operation.successStatuses.join(' or ')}, got ${response.status}: parse this response instead of discarding it`,
     );
   }
 }

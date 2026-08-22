@@ -159,7 +159,7 @@ func passkeyCeremony(t *testing.T, auth *service.Auth, ctx context.Context, toke
 	purpose service.ReauthPurpose, envID string, keyIDs []string,
 	dev *webauthntest.Device) service.ReauthResult {
 	t.Helper()
-	opts, err := auth.ReauthPasskeyStart(ctx, token, purpose, envID, keyIDs)
+	opts, err := auth.ReauthPasskeyStart(ctx, token, disclosureReauthIntent(t, purpose, envID, keyIDs))
 	if err != nil {
 		t.Fatalf("reauth start: %v", err)
 	}
@@ -238,7 +238,7 @@ func runTOTPOpensARevealWindow(t *testing.T, db *store.DB) {
 	// A code opens a SLIDING window — never a single decision, because TOTP
 	// cannot bind a challenge to the enumerated unit.
 	clk = base.Add(90 * time.Second)
-	res, err := auth.ReauthTOTP(ctx, token, string(envA1), ceremonyCode(t, uri, clk))
+	res, err := auth.ReauthTOTP(ctx, token, unboundReauthIntent(t, string(envA1)), ceremonyCode(t, uri, clk))
 	if err != nil {
 		t.Fatalf("totp reauth: %v", err)
 	}
@@ -392,7 +392,7 @@ func runZeroWindowForcesAPasskeyPerDisclosure(t *testing.T, db *store.DB) {
 	// is why the ceremony modal must not offer the option. The sentinel is
 	// asserted EXACTLY — "not unauthenticated" would also pass on success,
 	// which is the one outcome this must never see.
-	if _, err := auth.ReauthTOTP(ctx, token, string(envA1), "000000"); !errors.Is(err, service.ErrReauthWindowClosed) {
+	if _, err := auth.ReauthTOTP(ctx, token, unboundReauthIntent(t, string(envA1)), "000000"); !errors.Is(err, service.ErrReauthWindowClosed) {
 		t.Fatalf("a 0-window TOTP reauth = %v, want ErrReauthWindowClosed", err)
 	}
 
@@ -848,11 +848,11 @@ func runTheTOTPRouteIsNotAnEnvironmentOracle(t *testing.T, db *store.DB) {
 
 	// env_b1 belongs to org B: a real environment this principal cannot reach.
 	// A nonexistent id is the control, and the two must be indistinguishable.
-	_, unreachable := auth.ReauthTOTP(ctx, token, "env_b1", "000000")
+	_, unreachable := auth.ReauthTOTP(ctx, token, unboundReauthIntent(t, "env_b1"), "000000")
 	if unreachable == nil {
 		t.Fatal("a TOTP reauth against another org's environment must be refused")
 	}
-	_, missing := auth.ReauthTOTP(ctx, token, "env_does_not_exist", "000000")
+	_, missing := auth.ReauthTOTP(ctx, token, unboundReauthIntent(t, "env_does_not_exist"), "000000")
 	if missing == nil {
 		t.Fatal("a TOTP reauth against a nonexistent environment must be refused")
 	}
@@ -860,7 +860,7 @@ func runTheTOTPRouteIsNotAnEnvironmentOracle(t *testing.T, db *store.DB) {
 
 	// And neither leaks the policy the caller cannot see: an environment they
 	// CAN reach is the only one that ever answers with the window's state.
-	if _, err := auth.ReauthTOTP(ctx, token, string(envA1), "000000"); errors.Is(err, domain.ErrNotFound) {
+	if _, err := auth.ReauthTOTP(ctx, token, unboundReauthIntent(t, string(envA1)), "000000"); errors.Is(err, domain.ErrNotFound) {
 		t.Fatal("a reachable environment must not answer the nonexistent shape")
 	}
 }
@@ -1041,11 +1041,11 @@ func runThePasskeyRouteIsNotAnEnvironmentOracle(t *testing.T, db *store.DB) {
 
 	// env_b1 is org B's: real, reachable by someone, not by this principal.
 	// env_does_not_exist is the control, and the two must be indistinguishable.
-	_, unreachable := auth.ReauthPasskeyStart(ctx, token, service.PurposeReveal, "env_b1", nil)
+	_, unreachable := auth.ReauthPasskeyStart(ctx, token, disclosureReauthIntent(t, service.PurposeReveal, "env_b1", nil))
 	if unreachable == nil {
 		t.Fatal("a passkey reauth against another org's environment must be refused")
 	}
-	_, missing := auth.ReauthPasskeyStart(ctx, token, service.PurposeReveal, "env_does_not_exist", nil)
+	_, missing := auth.ReauthPasskeyStart(ctx, token, disclosureReauthIntent(t, service.PurposeReveal, "env_does_not_exist", nil))
 	if missing == nil {
 		t.Fatal("a passkey reauth against a nonexistent environment must be refused")
 	}
@@ -1053,7 +1053,7 @@ func runThePasskeyRouteIsNotAnEnvironmentOracle(t *testing.T, db *store.DB) {
 
 	// A reachable environment is the only one that gets past the gate, and it
 	// answers with a ceremony rather than the nonexistent shape.
-	if _, err := auth.ReauthPasskeyStart(ctx, token, service.PurposeReveal, string(envA1), nil); err != nil {
+	if _, err := auth.ReauthPasskeyStart(ctx, token, disclosureReauthIntent(t, service.PurposeReveal, string(envA1), nil)); err != nil {
 		t.Fatalf("a reachable environment must open a ceremony: %v", err)
 	}
 	// And nothing was written for the refused ones: a ceremony row for an

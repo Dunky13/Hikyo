@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Hikyo-Org/hikyo/api/apigen"
+	"github.com/Hikyo-Org/hikyo/internal/disclose"
 )
 
 // `remote add`'s CEREMONY ORDER (#71, multi-instance ADR § The connection
@@ -57,14 +58,16 @@ func fakePeer(t *testing.T, meta *apigen.Meta, hits *int) *httptest.Server {
 // asked for. Every case below must refuse before that point.
 func addRemoteIO(t *testing.T) IO {
 	t.Helper()
+	session, err := disclose.NewTerminalSession(&answeringTTY{in: strings.NewReader("y\n")})
+	if err != nil {
+		t.Fatal(err)
+	}
 	return IO{
-		Stdout:  io.Discard,
-		Stderr:  io.Discard,
-		Env:     Env{Getenv: func(string) string { return "" }},
-		Workdir: t.TempDir(),
-		OpenTerminal: func() (io.WriteCloser, error) {
-			return &answeringTTY{in: strings.NewReader("y\n")}, nil
-		},
+		Stdout:          io.Discard,
+		Stderr:          io.Discard,
+		Env:             Env{Getenv: func(string) string { return "" }},
+		Workdir:         t.TempDir(),
+		TerminalSession: session,
 		ReadPassword: func(string) (string, error) {
 			t.Fatal("the credential was asked for before the peer had proven it speaks this protocol")
 			return "", nil
@@ -176,11 +179,6 @@ func TestRemoteAddRefusesPlaintext(t *testing.T) {
 		Stdout: io.Discard, Stderr: io.Discard,
 		Env:     Env{Getenv: func(string) string { return "" }},
 		Workdir: t.TempDir(),
-		OpenTerminal: func() (io.WriteCloser, error) {
-			t.Fatal("a fingerprint confirmation was offered for a plaintext origin — " +
-				"there is no key to pin, so there is nothing to confirm")
-			return nil, nil
-		},
 		ReadPassword: func(string) (string, error) {
 			t.Fatal("a credential was asked for over a plaintext origin")
 			return "", nil

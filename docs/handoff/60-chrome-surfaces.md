@@ -113,13 +113,11 @@ one.
    `TestListMineNeedsNoSecondFactor*` and their siblings; what #60 owns is the
    INTERACTION (a circle changes the active organisation, the breadcrumb and
    the org-scoped destinations), and both organisations behind the switch load
-   real data from the real server. The alternative — granting the bootstrap
-   administrator into an organisation — would delete the shell flow's locked
-   zero-organisation state for the whole suite, because `listMyOrgs` projects
-   the organisations a caller's grants NAME and every fixture grant is
-   instance-scoped precisely to keep that state reachable. Precedent for
-   intercepting a read to reach a presentational state: the shell flow's own
-   retention-health tests.
+   real data from the real server. Organisation creation now grants the creator
+   admin access, so the fixture organisations appear honestly in the rail. The
+   shell's zero-organisation test controls only `listMyOrgs` to keep that
+   supported presentational state reachable. Precedent for intercepting a read:
+   the shell flow's own retention-health tests.
 7. **`settings` moved from the shell flow to the account flow.** A surface with
    six panels is not a navigation destination the chrome flow can cover in
    passing. `shell.spec.ts`'s deep-link test now loads `/projects`.

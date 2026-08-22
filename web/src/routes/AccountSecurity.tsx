@@ -19,6 +19,7 @@ import {
 import { useRevokeSession, useSessions, type ActiveSession } from '../api/remotes.ts';
 import { useSession } from '../api/session.ts';
 import { themeLabel, useThemeChoice, type ThemeChoice } from '../app/theme.ts';
+import { clearNotification, notifyFailure } from '../app/notifications.tsx';
 import { Alert, Done, JumpIndex, Panel } from './Sections.tsx';
 import { useFeedback, useModalDialog } from './useModalDialog.ts';
 
@@ -68,7 +69,15 @@ export function AccountSecurity() {
   const link = useLinkIdentity();
 
   const [proof, setProof] = useState<ProofRequest | null>(null);
-  const { failure, done, report, ok } = useFeedback(accountFailureText);
+  const { done, report: recordFailure, ok: recordSuccess } = useFeedback(accountFailureText);
+  const report = (error: unknown) => {
+    notifyFailure(accountFailureText(error));
+    recordFailure(error);
+  };
+  const ok = (message: string) => {
+    clearNotification();
+    recordSuccess(message);
+  };
   const [otpauth, setOtpauth] = useState<string | null>(null);
   const [codes, setCodes] = useState<readonly string[] | null>(null);
   const [totpCode, setTotpCode] = useState('');
@@ -182,7 +191,6 @@ export function AccountSecurity() {
         ]}
       />
 
-      {failure !== null ? <Alert>{failure}</Alert> : null}
       {done !== null ? <Done>{done}</Done> : null}
 
       <Panel id="account-profile" title="Profile">
@@ -279,9 +287,9 @@ export function AccountSecurity() {
           </p>
         ) : null}
         <p>
-          Starting an enrolment while one already stands is refused by name, and removing one asks
-          for your password — never for the code itself, so a stolen phone cannot drop the factor it
-          is.
+          A second enrolment is unavailable while an authenticator already stands. Removing one
+          asks for your password — never for the code itself, so a stolen phone cannot drop the
+          factor it is.
         </p>
         {otpauth !== null && totpEnrolmentInProgress ? (
           <div className="enrolment">
@@ -331,7 +339,9 @@ export function AccountSecurity() {
           <button
             type="button"
             className="btn"
-            disabled={totpStart.isPending}
+            disabled={
+              totpStart.isPending || (totpStatus.isSuccess && totpStatus.data.confirmed)
+            }
             onClick={() => setProof({ kind: 'totp-start' })}
           >
             Enrol an authenticator
@@ -574,29 +584,31 @@ function ProofDialog({
     >
       <h2 id="proof-title">{copy.title}</h2>
       <p className="ceremony__lede">{copy.hint}</p>
-      <div className="field">
-        <label htmlFor={inputId}>{copy.label}</label>
-        <input
-          id={inputId}
-          type="password"
-          autoComplete="current-password"
-          value={value}
-          onChange={(event) => setValue(event.target.value)}
-        />
-      </div>
-      <div className="ceremony__actions">
-        <button type="button" className="btn" onClick={onCancel}>
-          Cancel
-        </button>
-        <button
-          type="button"
-          className="btn btn--primary"
-          disabled={value === ''}
-          onClick={() => onSubmit(value)}
-        >
-          Confirm
-        </button>
-      </div>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSubmit(value);
+        }}
+      >
+        <div className="field">
+          <label htmlFor={inputId}>{copy.label}</label>
+          <input
+            id={inputId}
+            type="password"
+            autoComplete="current-password"
+            value={value}
+            onChange={(event) => setValue(event.target.value)}
+          />
+        </div>
+        <div className="ceremony__actions">
+          <button type="button" className="btn" onClick={onCancel}>
+            Cancel
+          </button>
+          <button type="submit" className="btn btn--primary" disabled={value === ''}>
+            Confirm
+          </button>
+        </div>
+      </form>
     </dialog>
   );
 }

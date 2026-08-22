@@ -321,7 +321,7 @@ func runSCIMMapping(ctx context.Context, ios IO, args []string) error {
 // credential
 // ---------------------------------------------------------------------------
 
-func runSCIMCredential(ctx context.Context, ios IO, args []string) error {
+func runSCIMCredential(ctx context.Context, ios IO, args []string) (returnErr error) {
 	sub, rest, err := subverb("scim credential", args, "mint", "list", "show", "revoke")
 	if err != nil {
 		return err
@@ -362,16 +362,19 @@ func runSCIMCredential(ctx context.Context, ios IO, args []string) error {
 		return err
 	}
 
-	// The print triad is checked BEFORE the mint, so a credential is never
-	// created and then dropped on the floor for want of somewhere to put it.
+	// Reserve the print-triad destination BEFORE the mint, so a credential is
+	// never created and then dropped on the floor.
 	deliver := disclose.Options{
 		OutputFile: outputFile, DangerouslyPrint: dangerous,
-		Stdout: ios.Stdout, OpenTerminal: ios.OpenTerminal,
+		Stdout: ios.Stdout,
 	}
+	var sink *disclose.PreparedSink
 	if sub == "mint" {
-		if err := disclose.Preflight(deliver); err != nil {
+		sink, err = ios.prepareDisclosure(deliver)
+		if err != nil {
 			return failf(ExitRefused, "the provisioning credential has nowhere to go: %v", err)
 		}
+		defer sink.AbortOnReturn(&returnErr)
 	}
 
 	client, _, resolved, err := authenticatedTarget(st, ios, flags)
@@ -401,9 +404,9 @@ func runSCIMCredential(ctx context.Context, ios IO, args []string) error {
 		if err := client.Do(ctx, http.MethodPost, path, body, &res); err != nil {
 			return err
 		}
-		if _, err := disclose.Emit(
+		if _, err := sink.WriteOnce(
 			fmt.Sprintf("SCIM provisioning credential %s (display-once)", res.Credential.Id),
-			res.Token, deliver); err != nil {
+			res.Token); err != nil {
 			return failf(ExitRefused, "disclosing the provisioning credential: %v", err)
 		}
 		if res.Rotated {

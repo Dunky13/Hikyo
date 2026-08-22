@@ -12,11 +12,26 @@ set -euo pipefail
 command -v strace >/dev/null || { echo "no-egress: strace is required"; exit 2; }
 
 work="$(mktemp -d)"
-pgid=""
-trap 'rm -rf "$work"; [ -n "$pgid" ] && kill -TERM "-${pgid}" 2>/dev/null || true' EXIT
+child=""
+cleanup() {
+	if [ -n "$child" ]; then
+		kill -KILL "$child" 2>/dev/null || true
+		wait "$child" 2>/dev/null || true
+	fi
+	rm -rf "$work"
+}
+trap cleanup EXIT
 
-bin="$work/hikyo"
-go build -o "$bin" ./cmd/hikyo
+if [ -n "${HIKYO_NO_EGRESS_BIN:-}" ]; then
+	bin="$HIKYO_NO_EGRESS_BIN"
+	if [ ! -x "$bin" ]; then
+		echo "no-egress: prebuilt binary is not executable: $bin"
+		exit 2
+	fi
+else
+	bin="$work/hikyo"
+	go build -o "$bin" ./cmd/hikyo
+fi
 
 port=47811
 origin="http://127.0.0.1:${port}"
@@ -38,10 +53,14 @@ fi
 
 # Trace TCP connect(2) AND UDP sendto/sendmsg(2): both are outbound paths, and a
 # UDP send needs no connect(), so tracing connect alone would miss it.
-setsid strace -f -e trace=connect,sendto,sendmsg -o "$trace" \
+# --kill-on-exit makes strace terminate every tracee when the tracer exits. Stop
+# only strace's exact PID below: a negative process-group signal can also reach
+# the GitHub runner when setsid forks before exec on a hosted runner. SIGKILL is
+# intentional: strace defers SIGTERM while tracing, whereas PTRACE_O_EXITKILL
+# guarantees that a killed tracer cannot leave the server behind.
+strace --kill-on-exit -f -e trace=connect,sendto,sendmsg -o "$trace" \
 	"$bin" server --dev --listen "127.0.0.1:${port}" >"$serverlog" 2>&1 &
 child=$!
-pgid="$(ps -o pgid= "$child" | tr -d ' ')"
 
 # Boots AND serves with outbound unavailable (CI invariant 4): both liveness
 # (/healthz) and readiness (/readyz = DB reachable + keyring loaded + migrations
@@ -70,9 +89,9 @@ fi
 sleep 3
 curl -sf "${origin}/readyz" >/dev/null 2>&1 || true
 
-kill -TERM "-${pgid}" 2>/dev/null || true
-pgid=""
+kill -KILL "$child" 2>/dev/null || true
 wait "$child" 2>/dev/null || true
+child=""
 
 # strace must actually have traced — a missing file or an attach error means we
 # proved nothing about egress and must not report a green result.

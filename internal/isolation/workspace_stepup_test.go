@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -165,11 +166,15 @@ func stepUpFor(
 	t.Helper()
 	ctx := t.Context()
 	verifier, challenge := pkcePair("stepup-" + sessionID + envID + operation + keySet)
+	var intent *service.ReauthIntent
+	if envID != "" {
+		parsed := workspaceReauthIntent(t, operation, envID, keySet)
+		intent = &parsed
+	}
 	started, err := ws.StartHandoff(ctx, service.HandoffRequest{
 		Origin: stepUpOrigin, RedirectURI: stepUpOrigin + "/workspace/callback",
 		PKCEChallenge: challenge, Purpose: service.HandoffStepUp,
-		SessionID: sessionID, Operation: operation, EnvID: envID,
-		KeySet: keySet,
+		SessionID: sessionID, ReauthIntent: intent,
 	})
 	if err != nil {
 		return service.WorkspaceSession{}, err
@@ -180,6 +185,30 @@ func stepUpFor(
 		return service.WorkspaceSession{}, err
 	}
 	return ws.RedeemHandoff(ctx, code, verifier, stepUpOrigin)
+}
+
+func workspaceReauthIntent(t *testing.T, operation, environmentID, keySet string) service.ReauthIntent {
+	t.Helper()
+	var purpose service.ReauthPurpose
+	switch authz.Operation(operation) {
+	case authz.OpValueReveal:
+		purpose = service.PurposeReveal
+	case authz.OpValueCopySource:
+		purpose = service.PurposeCopy
+	case authz.OpValueCopyDestination:
+		purpose = service.PurposePublish
+	default:
+		t.Fatalf("unsupported workspace reauthentication operation %q", operation)
+	}
+	keys := []string(nil)
+	if keySet != "" {
+		keys = strings.Split(keySet, "\n")
+	}
+	intent, err := service.NewDisclosureReauthIntent(purpose, []string{environmentID}, keys)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return intent
 }
 
 // sessionFactors reads a session row's stored assurance record. Read from the
@@ -486,14 +515,17 @@ func runShowHandoffReturnsBoundPolicy(t *testing.T, db *store.DB) {
 	established := establishWorkspace(t, ws, approver)
 
 	_, challenge := pkcePair("show-handoff")
+	intent := workspaceReauthIntent(t, string(authz.OpValueReveal), string(envProd), "key_one\nkey_two")
 	started, err := ws.StartHandoff(ctx, service.HandoffRequest{
 		Origin: stepUpOrigin, RedirectURI: stepUpOrigin + "/workspace/callback",
 		PKCEChallenge: challenge, Purpose: service.HandoffStepUp,
-		SessionID: established.SessionID, Operation: string(authz.OpValueReveal),
-		EnvID: string(envProd), KeySet: "key_one\nkey_two",
+		SessionID: established.SessionID, ReauthIntent: &intent,
 	})
 	if err != nil {
 		t.Fatalf("start step-up handoff: %v", err)
+	}
+	if got := queryString(t, db, "SELECT operation FROM workspace_handoffs WHERE id = '"+started.HandoffID+"'"); got != string(authz.OpValueReveal) {
+		t.Fatalf("stored operation = %q, want derived authz operation %q", got, authz.OpValueReveal)
 	}
 
 	view, err := ws.ShowHandoff(ctx, service.Bearer(approver), started.State)
@@ -503,8 +535,8 @@ func runShowHandoffReturnsBoundPolicy(t *testing.T, db *store.DB) {
 	if view.Purpose != service.HandoffStepUp {
 		t.Errorf("purpose = %q, want step-up", view.Purpose)
 	}
-	if view.Operation != string(authz.OpValueReveal) {
-		t.Errorf("operation = %q, want %q", view.Operation, authz.OpValueReveal)
+	if view.Operation != string(service.PurposeReveal) {
+		t.Errorf("wire operation = %q, want %q", view.Operation, service.PurposeReveal)
 	}
 	if view.EnvID != string(envProd) {
 		t.Errorf("environment = %q, want %q", view.EnvID, envProd)
@@ -668,11 +700,11 @@ func TestStepUpDemandsARealFactorVerification(t *testing.T) {
 	}
 
 	verifier, challenge := pkcePair("real-totp-stepup")
+	intent := workspaceReauthIntent(t, string(authz.OpValueReveal), string(envProd), "DATABASE_URL")
 	started, err := ws.StartHandoff(ctx, service.HandoffRequest{
 		Origin: stepUpOrigin, RedirectURI: stepUpOrigin + "/workspace/callback",
 		PKCEChallenge: challenge, Purpose: service.HandoffStepUp,
-		SessionID: established.SessionID, Operation: string(authz.OpValueReveal),
-		EnvID: string(envProd), KeySet: "DATABASE_URL",
+		SessionID: established.SessionID, ReauthIntent: &intent,
 	})
 	if err != nil {
 		t.Fatalf("start step-up: %v", err)
@@ -687,7 +719,7 @@ func TestStepUpDemandsARealFactorVerification(t *testing.T) {
 	// Now the ceremony: a real TOTP code, verified by the real reauth path,
 	// which rotates the approving session's bearer as every reauth does.
 	clk = base.Add(90 * time.Second)
-	res, err := auth.ReauthTOTP(ctx, approver, string(envProd), totpCode(t, uri, clk))
+	res, err := auth.ReauthTOTP(ctx, approver, unboundReauthIntent(t, string(envProd)), totpCode(t, uri, clk))
 	if err != nil {
 		t.Fatalf("TOTP reauth: %v", err)
 	}

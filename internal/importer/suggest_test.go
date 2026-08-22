@@ -47,12 +47,12 @@ func TestSuggestionIsAlwaysAcceptedByTheDeclaration(t *testing.T) {
 	for _, values := range sets {
 		typ := SuggestType(values)
 		rule := schema.Rule{Type: typ}
-		compiled, err := schema.Compile(schema.Declaration{Rule: &rule})
+		compiled, err := schema.CompileClassified(schema.Secret, schema.Declaration{Rule: &rule})
 		if err != nil {
 			t.Fatalf("suggested type %s does not compile: %v", typ, err)
 		}
 		for _, v := range values {
-			if verdict := compiled.Validate(v, schema.Secret); !verdict.Valid {
+			if verdict := compiled.Validate(v); !verdict.Valid {
 				t.Errorf("suggested %s for %q but the declaration rejects it: %+v", typ, v, verdict.Errors)
 			}
 		}

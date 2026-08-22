@@ -312,7 +312,11 @@ func (s *Revisions) PublishPlanned(ctx context.Context, actor Actor, scope domai
 			proofs[envID] = ep
 		}
 
-		selection, closed, err := selectVersions(ctx, r, p, caller.Principal, selected, byID)
+		groupIndex, err := loadGroupIndex(ctx, r.Catalogue(), p)
+		if err != nil {
+			return err
+		}
+		selection, closed, err := selectVersions(ctx, r, p, caller.Principal, selected, byID, groupIndex)
 		if err != nil {
 			return err
 		}
@@ -383,7 +387,11 @@ func (s *Revisions) PublishPlanned(ctx context.Context, actor Actor, scope domai
 			for _, apply := range selection[envID] {
 				unit = append(unit, apply.keyID)
 			}
-			if err := requireCeremony(ctx, s.Auth, az, caller, PurposePublish, envID, unit); err != nil {
+			intent, err := NewPublishReauthIntent(envID, unit)
+			if err != nil {
+				return err
+			}
+			if err := requireCeremony(ctx, s.Auth, az, caller, intent); err != nil {
 				return err
 			}
 		}
@@ -392,7 +400,7 @@ func (s *Revisions) PublishPlanned(ctx context.Context, actor Actor, scope domai
 			envScope := domain.Scope{Org: scope.Org, Project: scope.Project, Env: domain.EnvID(envID)}
 			ep := proofs[envID]
 			applies := selection[envID]
-			if err := checkFreshness(ctx, r, ep, applies); err != nil {
+			if err := checkFreshness(ctx, r, ep, applies, groupIndex); err != nil {
 				return err
 			}
 			if s.PublishProbe != nil {
@@ -410,7 +418,7 @@ func (s *Revisions) PublishPlanned(ctx context.Context, actor Actor, scope domai
 				applies[i].value = string(plain)
 			}
 			published, err := materialize(ctx, r, ep, sealer, s.Keyring, envScope,
-				caller.Principal, now, applies, s.storageLimit())
+				caller.Principal, now, applies, s.storageLimit(), groupIndex)
 			if err != nil {
 				return err
 			}
@@ -527,7 +535,11 @@ func buildImpactPreview(ctx context.Context, r store.Repos, p authz.Proof, seale
 	if err != nil {
 		return ImpactPreview{}, err
 	}
-	selection, _, err := selectVersions(ctx, r, p, caller.Principal, selected, byID)
+	groupIndex, err := loadGroupMembershipIndex(ctx, r.Catalogue(), p)
+	if err != nil {
+		return ImpactPreview{}, err
+	}
+	selection, _, err := selectVersions(ctx, r, p, caller.Principal, selected, byID, groupIndex)
 	if err != nil {
 		return ImpactPreview{}, err
 	}
@@ -546,14 +558,6 @@ func buildImpactPreview(ctx context.Context, r store.Repos, p authz.Proof, seale
 		schemaRevision, err := r.Catalogue().SchemaRevision(ctx, ep)
 		if err != nil {
 			return ImpactPreview{}, err
-		}
-		keys, err := r.Catalogue().List(ctx, ep)
-		if err != nil {
-			return ImpactPreview{}, err
-		}
-		keyByID := make(map[string]store.CatalogueKey, len(keys))
-		for _, key := range keys {
-			keyByID[key.ID] = key
 		}
 		entries, err := r.Values().List(ctx, ep)
 		if err != nil {
@@ -577,7 +581,10 @@ func buildImpactPreview(ctx context.Context, r store.Repos, p authz.Proof, seale
 			Protected: settings.Protected,
 		}
 		for _, apply := range applies {
-			key := keyByID[apply.keyID]
+			key, ok := groupIndex.key(apply.keyID)
+			if !ok {
+				return ImpactPreview{}, fmt.Errorf("service: group index: key %s is not indexed", apply.keyID)
+			}
 			_, beforeSet := entryByKey[apply.keyID]
 			status := "edited"
 			switch {
@@ -687,15 +694,19 @@ func recordPublish(ctx context.Context, r store.Repos, p authz.Proof, principal 
 // a check performed earlier in the same transaction is not that.
 func republish(ctx context.Context, r store.Repos, az *authz.TxAuthorizer, caller authz.Identity,
 	sealer *crypto.ProjectSealer, kr *crypto.Keyring, scope domain.Scope,
-	now time.Time, trigger string) (PublishedEnvironment, error) {
+	now time.Time, trigger string, groups *groupIndexPhase) (PublishedEnvironment, error) {
 	p, err := az.Authorize(ctx, caller, authz.OpValuePublish, scope)
+	if err != nil {
+		return PublishedEnvironment{}, err
+	}
+	groupIndex, err := groups.snapshot(ctx, r.Catalogue(), p)
 	if err != nil {
 		return PublishedEnvironment{}, err
 	}
 	// republish covers the non-draft payload-advancing paths (declare-into-env,
 	// import, copy, clone, env creation, schema fan-out); each enforces the
 	// production high-water — only the direct publish path is conformance-tunable.
-	published, err := materialize(ctx, r, p, sealer, kr, scope, caller.Principal, now, nil, MaxProjectStorageBytes)
+	published, err := materialize(ctx, r, p, sealer, kr, scope, caller.Principal, now, nil, MaxProjectStorageBytes, groupIndex)
 	if err != nil {
 		return PublishedEnvironment{}, err
 	}
@@ -744,9 +755,10 @@ func fanOutSchemaPublish(ctx context.Context, r store.Repos, az *authz.TxAuthori
 		return nil, err
 	}
 	out := make([]PublishedEnvironment, 0, len(environments))
+	groupPhase := &groupIndexPhase{}
 	for _, env := range environments {
 		envScope := domain.Scope{Org: scope.Org, Project: scope.Project, Env: domain.EnvID(env.ID)}
-		published, err := republish(ctx, r, az, caller, sealer, kr, envScope, now, trigger)
+		published, err := republish(ctx, r, az, caller, sealer, kr, envScope, now, trigger, groupPhase)
 		if err != nil {
 			return nil, err
 		}
@@ -787,19 +799,7 @@ func resolveVersions(ctx context.Context, r store.Repos, p authz.Proof,
 }
 
 func selectVersions(ctx context.Context, r store.Repos, p authz.Proof,
-	principal domain.PrincipalID, selected, byID map[string]store.PendingChange) (map[string][]pendingApply, []string, error) {
-	keys, err := r.Catalogue().List(ctx, p)
-	if err != nil {
-		return nil, nil, err
-	}
-	keyByID := make(map[string]store.CatalogueKey, len(keys))
-	groupMembers := map[string][]store.CatalogueKey{}
-	for _, k := range keys {
-		keyByID[k.ID] = k
-		if k.GroupID != "" {
-			groupMembers[k.GroupID] = append(groupMembers[k.GroupID], k)
-		}
-	}
+	principal domain.PrincipalID, selected, byID map[string]store.PendingChange, groups *groupIndex) (map[string][]pendingApply, []string, error) {
 	markers, err := r.Pending().ListMarkers(ctx, p)
 	if err != nil {
 		return nil, nil, err
@@ -819,7 +819,7 @@ func selectVersions(ctx context.Context, r store.Repos, p authz.Proof,
 	for grew := true; grew; {
 		grew = false
 		for _, change := range sortedChanges(selected) {
-			key, ok := keyByID[change.KeyID]
+			key, ok := groups.key(change.KeyID)
 			if !ok {
 				return nil, nil, fmt.Errorf("%w: pending change %s names key %s, which is no longer declared",
 					ErrStalePending, change.ID, change.KeyID)
@@ -827,7 +827,7 @@ func selectVersions(ctx context.Context, r store.Repos, p authz.Proof,
 			if key.GroupID == "" {
 				continue
 			}
-			for _, member := range groupMembers[key.GroupID] {
+			for _, member := range groups.members(key.GroupID) {
 				for _, marker := range markers {
 					if marker.KeyID != member.ID || marker.EnvironmentID != change.EnvironmentID {
 						continue
@@ -912,7 +912,7 @@ func sortedChanges(selected map[string]store.PendingChange) []store.PendingChang
 // The superseded half of the rule needs no code here: a superseded version is
 // collected the moment its successor is staged, so it has no id left to name
 // and the selection lookup already refused it.
-func checkFreshness(ctx context.Context, r store.Repos, p authz.Proof, applies []pendingApply) error {
+func checkFreshness(ctx context.Context, r store.Repos, p authz.Proof, applies []pendingApply, groups *groupIndex) error {
 	entries, err := r.Values().List(ctx, p)
 	if err != nil {
 		return err
@@ -921,20 +921,17 @@ func checkFreshness(ctx context.Context, r store.Repos, p authz.Proof, applies [
 	for _, entry := range entries {
 		published[entry.KeyID] = entry.ID
 	}
-	keys, err := r.Catalogue().List(ctx, p)
-	if err != nil {
-		return err
-	}
-	names := make(map[string]string, len(keys))
-	for _, key := range keys {
-		names[key.ID] = key.Name
-	}
 	for _, apply := range applies {
 		if published[apply.keyID] == apply.stagedFromEntry {
 			continue
 		}
+		key, ok := groups.key(apply.keyID)
+		if !ok {
+			return fmt.Errorf("%w: version %s names key %s, which is no longer declared",
+				ErrStalePending, apply.versionID, apply.keyID)
+		}
 		return fmt.Errorf("%w: version %s targets key %q, whose published value has changed since the draft was staged at revision %d: restage the edit against the current state",
-			ErrStalePending, apply.versionID, names[apply.keyID], apply.stagedFrom)
+			ErrStalePending, apply.versionID, key.Name, apply.stagedFrom)
 	}
 	return nil
 }
@@ -962,15 +959,8 @@ func currentRevision(ctx context.Context, r store.Repos, p authz.Proof) (int64, 
 // and is that legal".
 func materialize(ctx context.Context, r store.Repos, p authz.Proof, sealer *crypto.ProjectSealer,
 	kr *crypto.Keyring, scope domain.Scope, publisher domain.PrincipalID, now time.Time,
-	applies []pendingApply, storageLimit int64) (PublishedEnvironment, error) {
-	keys, err := r.Catalogue().List(ctx, p)
-	if err != nil {
-		return PublishedEnvironment{}, err
-	}
-	presence, err := r.Catalogue().ListPresence(ctx, p)
-	if err != nil {
-		return PublishedEnvironment{}, err
-	}
+	applies []pendingApply, storageLimit int64, groups *groupIndex) (PublishedEnvironment, error) {
+	keys := groups.catalogueKeys()
 	schemaRevision, err := r.Catalogue().SchemaRevision(ctx, p)
 	if err != nil {
 		return PublishedEnvironment{}, err
@@ -1016,7 +1006,7 @@ func materialize(ctx context.Context, r store.Repos, p authz.Proof, sealer *cryp
 		cells = append(cells, cell)
 	}
 
-	if err := validateResolved(cells, presence, string(scope.Env)); err != nil {
+	if err := groups.validateResolvedPublish(cells, string(scope.Env)); err != nil {
 		return PublishedEnvironment{}, err
 	}
 
@@ -1211,54 +1201,6 @@ func checkRenderTotal(cells []resolvedCell, envID string) error {
 		if total > MaxRenderBytesPerTarget {
 			return fmt.Errorf("%w: environment %s renders more than the %d-byte per-target limit",
 				domain.ErrLimitExceeded, envID, MaxRenderBytesPerTarget)
-		}
-	}
-	return nil
-}
-
-// validateResolved is publish's authority, run on the RESOLVED values at the
-// current schema revision regardless of any stored draft verdict.
-func validateResolved(cells []resolvedCell, presence []store.KeyPresence, envID string) error {
-	groups := map[string][]resolvedCell{}
-	for _, cell := range cells {
-		rules := presenceOfKey(cell.key, presence)
-		switch {
-		case rules.Required.Covers(envID) && !cell.set:
-			// mvp-boundary C2, verbatim: a `required_in` key left `absent`
-			// vetoes the publish, naming key AND environment.
-			return invalidDetail("key %q is `required_in` environment %s and resolves to absent: publish is vetoed",
-				cell.key.Name, envID)
-		case rules.Forbidden.Covers(envID) && cell.set:
-			return invalidDetail("key %q is `forbidden_in` environment %s and resolves to set: publish is vetoed",
-				cell.key.Name, envID)
-		}
-		if cell.set {
-			if err := validateValue(cell.key, cell.value); err != nil {
-				return err
-			}
-		}
-		if cell.key.GroupID != "" {
-			groups[cell.key.GroupID] = append(groups[cell.key.GroupID], cell)
-		}
-	}
-	// ALL-OR-NONE RESOLVED PRESENCE per environment, always on, no flag: in
-	// each environment either every member of a group resolves to `set` or none
-	// do. Co-publish closure closes the timing hole; this closes the state one.
-	// The message names groups and key names only, never values.
-	for groupID, members := range groups {
-		set, absent := []string{}, []string{}
-		for _, member := range members {
-			if member.set {
-				set = append(set, member.key.Name)
-			} else {
-				absent = append(absent, member.key.Name)
-			}
-		}
-		if len(set) > 0 && len(absent) > 0 {
-			slices.Sort(set)
-			slices.Sort(absent)
-			return invalidDetail("key group %s resolves partially in environment %s: set %v, absent %v: a group's presence is all-or-none",
-				groupID, envID, set, absent)
 		}
 	}
 	return nil

@@ -75,40 +75,41 @@ func (a *API) ReauthTotp(ctx context.Context, req apigen.ReauthTotpRequestObject
 		for _, environmentID := range *req.Body.EnvironmentIds {
 			rawIDs = append(rawIDs, string(environmentID))
 		}
-		results, err = a.Auth.ReauthAdapterTOTP(ctx, bearer(ctx), string(*req.Body.Operation), rawIDs, req.Body.Code)
+		intent, intentErr := service.NewAdapterReauthIntent(string(*req.Body.Operation), rawIDs)
+		if intentErr != nil {
+			return apigen.ReauthTotp400JSONResponse{BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, ""))}, nil
+		}
+		results, err = a.Auth.ReauthAdapterTOTP(ctx, bearer(ctx), intent, req.Body.Code)
 	} else {
 		if req.Body.Purpose != nil || req.Body.Operation != nil || req.Body.EnvironmentIds != nil || req.Body.EnvironmentId == nil {
 			return apigen.ReauthTotp400JSONResponse{BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, ""))}, nil
 		}
+		intent, intentErr := service.NewUnboundReauthIntent(string(*req.Body.EnvironmentId))
+		if intentErr != nil {
+			return apigen.ReauthTotp400JSONResponse{BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, ""))}, nil
+		}
 		var result service.ReauthResult
-		result, err = a.Auth.ReauthTOTP(ctx, bearer(ctx), string(*req.Body.EnvironmentId), req.Body.Code)
+		result, err = a.Auth.ReauthTOTP(ctx, bearer(ctx), intent, req.Body.Code)
 		if err == nil {
 			results = []service.ReauthResult{result}
 		}
 	}
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrReauthWindowClosed):
+		policy := wireErrorFor(err)
+		switch policy.code {
+		case apigen.ErrorCodeConflict:
+			// Single-use and closed-window refusals are post-authentication
+			// conflicts. Only an explicit SafeDetail carrier can add detail.
 			return apigen.ReauthTotp409JSONResponse{
-				ConflictJSONResponse: apigen.ConflictJSONResponse(errorBody(apigen.ErrorCodeConflict, "")),
+				ConflictJSONResponse: apigen.ConflictJSONResponse(policy.body(err)),
 			}, nil
-		case errors.Is(err, service.ErrTOTPCodeAlreadyUsed):
-			// Single-use per (account, step): the code already opened its window,
-			// so the caller waits for the next one. Post-authentication on the
-			// caller's OWN factor, so it rides the SafeDetail channel errorBody
-			// honours for conflict rather than the uniform 401 a wrong code gets.
-			return apigen.ReauthTotp409JSONResponse{
-				ConflictJSONResponse: apigen.ConflictJSONResponse(errorBody(apigen.ErrorCodeConflict, safeDetailOf(err))),
-			}, nil
-		case errors.Is(err, service.ErrNoTOTPFactor):
+		case apigen.ErrorCodeBadRequest:
 			return apigen.ReauthTotp400JSONResponse{
-				BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, "")),
+				BadRequestJSONResponse: apigen.BadRequestJSONResponse(policy.body(err)),
 			}, nil
-		}
-		switch classify(err) {
 		case apigen.ErrorCodeUnauthenticated:
 			return apigen.ReauthTotp401JSONResponse{
-				UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, "")),
+				UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(policy.body(err)),
 			}, nil
 		case apigen.ErrorCodeNotFound:
 			// An environment the caller cannot reach answers the uniform
@@ -120,10 +121,6 @@ func (a *API) ReauthTotp(ctx context.Context, req apigen.ReauthTotpRequestObject
 			}, nil
 		case apigen.ErrorCodeTooManyRequests:
 			return apigen.ReauthTotp429JSONResponse{TooManyRequestsJSONResponse: tooMany()}, nil
-		case apigen.ErrorCodeBadRequest:
-			return apigen.ReauthTotp400JSONResponse{
-				BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, "")),
-			}, nil
 		default:
 			a.fault(ctx, "totp reauth", err)
 			return apigen.ReauthTotp500JSONResponse{

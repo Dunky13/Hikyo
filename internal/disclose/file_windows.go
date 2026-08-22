@@ -7,49 +7,113 @@ import (
 	"fmt"
 	"io"
 	"os"
+
+	"golang.org/x/sys/windows"
 )
 
-// The Windows leg of the triad. CREATE_NEW is expressed as O_CREATE|O_EXCL,
-// which the runtime maps to it, so the never-overwrite property holds.
-//
-// Stated limitation, not a silent one: the owner-only DACL and the
-// dirfd-relative create the unix path uses have no direct equivalent here,
-// so this leg gives exclusivity but not the parent-directory ownership check.
-// Windows is a CLIENT platform for Hikyo — the server, and therefore every
-// bootstrap and reset disclosure, runs on unix — so the weaker leg is not on
-// the bootstrap path. Closing it needs the Windows security APIs and belongs
-// with the ticket that ships a supported Windows client.
-func writeExclusive(path, content string) error {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-	if err != nil {
-		if errors.Is(err, os.ErrExist) {
-			return ErrFileExists
-		}
-		return fmt.Errorf("refusing to disclose: cannot create %q: %w", path, err)
-	}
-	defer f.Close()
-	if _, err := io.WriteString(f, content); err != nil {
-		return err
-	}
-	if err := f.Sync(); err != nil {
-		return err
-	}
-	return f.Close()
+type preparedFile struct {
+	f    *os.File
+	path string
 }
 
-// preflightFile reports whether the target is free. The parent-ownership
-// half has no Windows equivalent here, as documented above.
-func preflightFile(path string) error {
-	if _, err := os.Lstat(path); err == nil {
-		return ErrFileExists
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("refusing to disclose: cannot inspect %q: %w", path, err)
+// windowsTerminal presents the console's separate input and output handles as
+// one owned read/write/close handle. Windows cannot use one CONOUT$ descriptor
+// for both directions; TerminalSession keeps that platform fact private.
+type windowsTerminal struct {
+	input  io.ReadCloser
+	output io.WriteCloser
+}
+
+func newWindowsTerminal(input io.ReadCloser, output io.WriteCloser) io.WriteCloser {
+	return &windowsTerminal{input: input, output: output}
+}
+
+func (t *windowsTerminal) Read(p []byte) (int, error)  { return t.input.Read(p) }
+func (t *windowsTerminal) Write(p []byte) (int, error) { return t.output.Write(p) }
+func (t *windowsTerminal) terminalPasswordFD() int {
+	input, ok := t.input.(*os.File)
+	if !ok {
+		return -1
+	}
+	return int(input.Fd())
+}
+func (t *windowsTerminal) Close() error {
+	return errors.Join(t.input.Close(), t.output.Close())
+}
+
+// prepareFile uses CREATE_NEW with no sharing, so the reserved handle cannot
+// be reopened, replaced, or deleted before WriteOnce/Abort consumes it. The
+// owner-only DACL and dirfd-relative parent checks used on Unix still have no
+// equivalent here; Windows remains a client platform, not a bootstrap host.
+func prepareFile(path string) (*preparedFile, error) {
+	pathp, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return nil, fmt.Errorf("refusing to disclose: invalid output path %q: %w", path, err)
+	}
+	handle, err := windows.CreateFile(
+		pathp,
+		windows.GENERIC_WRITE|windows.DELETE,
+		0,
+		nil,
+		windows.CREATE_NEW,
+		windows.FILE_ATTRIBUTE_NORMAL,
+		0,
+	)
+	if err != nil {
+		if errors.Is(err, windows.ERROR_FILE_EXISTS) || errors.Is(err, windows.ERROR_ALREADY_EXISTS) {
+			return nil, ErrFileExists
+		}
+		return nil, fmt.Errorf("refusing to disclose: cannot create %q: %w", path, err)
+	}
+	return &preparedFile{f: os.NewFile(uintptr(handle), path), path: path}, nil
+}
+
+func (p *preparedFile) deleteOnClose() error {
+	deleteFile := byte(1)
+	if err := windows.SetFileInformationByHandle(
+		windows.Handle(p.f.Fd()), windows.FileDispositionInfo, &deleteFile, 1,
+	); err != nil {
+		return fmt.Errorf("remove disclosure reservation %q: %w", p.path, err)
 	}
 	return nil
 }
 
-// openControllingTerminal opens the console output device, the Windows
-// counterpart of /dev/tty: a redirected stdout does not reach it.
+func (p *preparedFile) write(content string) error {
+	_, writeErr := io.WriteString(p.f, content)
+	if writeErr == nil {
+		writeErr = p.f.Sync()
+	}
+	if writeErr != nil {
+		writeErr = errors.Join(writeErr, p.deleteOnClose())
+	}
+	writeErr = errors.Join(writeErr, p.f.Close())
+	p.f = nil
+	return writeErr
+}
+
+func (p *preparedFile) abort() error {
+	info, err := p.f.Stat()
+	if err != nil || info.Size() != 0 {
+		closeErr := p.f.Close()
+		p.f = nil
+		return errors.Join(ErrReservationChanged, err, closeErr)
+	}
+	err = errors.Join(p.deleteOnClose(), p.f.Close())
+	p.f = nil
+	return err
+}
+
+// openControllingTerminal owns both Windows console handles behind one
+// session handle: CONIN$ for confirmations and CONOUT$ for prompts and
+// disclosures. Redirected stdin/stdout never receive either direction.
 func openControllingTerminal() (io.WriteCloser, error) {
-	return os.OpenFile("CONOUT$", os.O_RDWR, 0)
+	input, err := os.OpenFile("CONIN$", os.O_RDONLY, 0)
+	if err != nil {
+		return nil, err
+	}
+	output, err := os.OpenFile("CONOUT$", os.O_WRONLY, 0)
+	if err != nil {
+		return nil, errors.Join(err, input.Close())
+	}
+	return newWindowsTerminal(input, output), nil
 }

@@ -49,6 +49,41 @@ func TestAdapterTargetSchemaCarriesPendingConflictArtifacts(t *testing.T) {
 	}
 }
 
+func TestGrantResultUsesClosedOutcome(t *testing.T) {
+	doc, err := api.Doc()
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema := doc.Components.Schemas["GrantResult"].Value
+	if schema == nil {
+		t.Fatal("GrantResult schema is missing")
+	}
+	if !slices.Contains(schema.Required, "outcome") {
+		t.Fatalf("GrantResult required fields = %v, want outcome", schema.Required)
+	}
+	for _, legacy := range []string{"created", "origin_added"} {
+		if _, exists := schema.Properties[legacy]; exists {
+			t.Errorf("GrantResult still exposes legacy boolean %q", legacy)
+		}
+	}
+	outcome := schema.Properties["outcome"]
+	if outcome == nil || outcome.Value == nil {
+		t.Fatal("GrantResult outcome schema is missing")
+	}
+	got := make([]string, 0, len(outcome.Value.Enum))
+	for _, value := range outcome.Value.Enum {
+		text, ok := value.(string)
+		if !ok {
+			t.Fatalf("GrantResult outcome enum contains non-string %T", value)
+		}
+		got = append(got, text)
+	}
+	want := []string{"created", "origin_added", "unchanged"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("GrantResult outcomes = %v, want %v", got, want)
+	}
+}
+
 func TestCollectedRevisionOperationsDeclareConflict(t *testing.T) {
 	doc, err := api.Doc()
 	if err != nil {
@@ -269,7 +304,7 @@ func TestRequestValidationRefusesUnknownMembers(t *testing.T) {
 		bytes.NewReader([]byte(`{"name":"acme","typo":true}`)))
 	req.Header.Set("Content-Type", "application/json")
 	var verr *api.ValidationError
-	err := api.ValidateRequest(req)
+	_, err := api.ValidateRequest(req)
 	if !errors.As(err, &verr) {
 		t.Fatalf("unknown member accepted: %v", err)
 	}
@@ -288,7 +323,7 @@ func TestRequestValidationAcceptsAbsentNullAndValue(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, api.PathPrefix+"/orgs",
 				bytes.NewReader([]byte(body)))
 			req.Header.Set("Content-Type", "application/json")
-			if err := api.ValidateRequest(req); err != nil {
+			if _, err := api.ValidateRequest(req); err != nil {
 				t.Fatalf("rejected: %v", err)
 			}
 		})
@@ -300,7 +335,7 @@ func TestRequestValidationReportsTheOffendingMember(t *testing.T) {
 		bytes.NewReader([]byte(`{"username":"","password":"x"}`)))
 	req.Header.Set("Content-Type", "application/json")
 	var verr *api.ValidationError
-	if !errors.As(api.ValidateRequest(req), &verr) {
+	if _, err := api.ValidateRequest(req); !errors.As(err, &verr) {
 		t.Fatal("empty username accepted")
 	}
 	if verr.Member != "username" {
@@ -310,7 +345,7 @@ func TestRequestValidationReportsTheOffendingMember(t *testing.T) {
 
 func TestUnroutedRequestIsDistinguishableFromMalformed(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, api.PathPrefix+"/nothing-here", nil)
-	if !errors.Is(api.ValidateRequest(req), api.ErrNoRoute) {
+	if _, err := api.ValidateRequest(req); !errors.Is(err, api.ErrNoRoute) {
 		t.Fatal("an undescribed path must be reported as unrouted, not as a bad body")
 	}
 }

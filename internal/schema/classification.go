@@ -5,11 +5,11 @@ import (
 	"sort"
 )
 
-// CheckDeclarationClassification enforces the source-of-truth ADR's
+// checkDeclarationClassification enforces the source-of-truth ADR's
 // classification boundary. A secret declaration may constrain a shape with a
 // pattern, but it may not carry value literals through enum members or through
 // const/enum/examples anywhere in an embedded JSON Schema document.
-func CheckDeclarationClassification(classification Classification, d Declaration) error {
+func checkDeclarationClassification(classification Classification, d Declaration) error {
 	if classification != Secret {
 		return nil
 	}

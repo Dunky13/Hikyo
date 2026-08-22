@@ -2,7 +2,7 @@ package server
 
 import (
 	"context"
-	"errors"
+	"fmt"
 
 	"github.com/Hikyo-Org/hikyo/api/apigen"
 	"github.com/Hikyo-Org/hikyo/internal/domain"
@@ -20,7 +20,27 @@ func (a *API) StartCLIReauth(ctx context.Context, req apigen.StartCLIReauthReque
 			keyIDs = append(keyIDs, string(keyID))
 		}
 	}
-	result, err := a.Auth.StartCLIReauth(ctx, bearer(ctx), string(req.Body.Purpose), string(req.Body.Operation), environments, keyIDs, req.Body.PkceChallenge, req.Body.RedirectUri)
+	var intent service.ReauthIntent
+	var err error
+	if req.Body.Purpose == apigen.CLIReauthStartRequestPurposeAdapter {
+		if len(keyIDs) != 0 {
+			return nil, fmt.Errorf("%w: adapter reauthentication does not carry key ids", domain.ErrInvalid)
+		}
+		intent, err = service.NewAdapterReauthIntent(string(req.Body.Operation), environments)
+	} else {
+		intent, err = service.NewDisclosureReauthIntent(service.ReauthPurpose(req.Body.Purpose), environments, keyIDs)
+		if err == nil {
+			operation, operationErr := intent.Operation()
+			err = operationErr
+			if operationErr == nil && string(operation) != string(req.Body.Operation) {
+				err = fmt.Errorf("%w: reauthentication purpose and operation disagree", domain.ErrInvalid)
+			}
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+	result, err := a.Auth.StartCLIReauth(ctx, bearer(ctx), intent, req.Body.PkceChallenge, req.Body.RedirectUri)
 	if err != nil {
 		return nil, err
 	}
@@ -30,7 +50,7 @@ func (a *API) StartCLIReauth(ctx context.Context, req apigen.StartCLIReauthReque
 func (a *API) ShowCLIReauthTransaction(ctx context.Context, req apigen.ShowCLIReauthTransactionRequestObject) (apigen.ShowCLIReauthTransactionResponseObject, error) {
 	result, err := a.Auth.CLIReauthTransaction(ctx, service.Bearer(bearer(ctx)), req.State)
 	if err != nil {
-		if errors.Is(err, service.ErrCLIReauthInvalid) || errors.Is(err, service.ErrReauthRequired) {
+		if wireErrorFor(err).code == apigen.ErrorCodeConflict {
 			return apigen.ShowCLIReauthTransaction409JSONResponse{ConflictJSONResponse: apigen.ConflictJSONResponse(errorBody(apigen.ErrorCodeConflict, ""))}, nil
 		}
 		return nil, err
@@ -49,7 +69,7 @@ func (a *API) ShowCLIReauthTransaction(ctx context.Context, req apigen.ShowCLIRe
 func (a *API) ApproveCLIReauth(ctx context.Context, req apigen.ApproveCLIReauthRequestObject) (apigen.ApproveCLIReauthResponseObject, error) {
 	approved, err := a.Auth.ApproveCLIReauth(ctx, service.Bearer(bearer(ctx)), req.Body.State)
 	if err != nil {
-		if errors.Is(err, service.ErrReauthRequired) || errors.Is(err, service.ErrCLIReauthInvalid) {
+		if wireErrorFor(err).code == apigen.ErrorCodeConflict {
 			return apigen.ApproveCLIReauth409JSONResponse{ConflictJSONResponse: apigen.ConflictJSONResponse(errorBody(apigen.ErrorCodeConflict, ""))}, nil
 		}
 		return nil, err
@@ -60,10 +80,10 @@ func (a *API) ApproveCLIReauth(ctx context.Context, req apigen.ApproveCLIReauthR
 func (a *API) RedeemCLIReauth(ctx context.Context, req apigen.RedeemCLIReauthRequestObject) (apigen.RedeemCLIReauthResponseObject, error) {
 	result, err := a.Auth.RedeemCLIReauth(ctx, req.Body.Code, req.Body.PkceVerifier)
 	if err != nil {
-		if errors.Is(err, service.ErrCLIReauthInvalid) {
+		switch wireErrorFor(err).code {
+		case apigen.ErrorCodeConflict:
 			return apigen.RedeemCLIReauth409JSONResponse{ConflictJSONResponse: apigen.ConflictJSONResponse(errorBody(apigen.ErrorCodeConflict, ""))}, nil
-		}
-		if errors.Is(err, domain.ErrUnauthenticated) {
+		case apigen.ErrorCodeUnauthenticated:
 			return apigen.RedeemCLIReauth401JSONResponse{UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, ""))}, nil
 		}
 		return nil, err

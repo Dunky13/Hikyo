@@ -156,6 +156,11 @@ type CopyResult struct {
 	Findings []Finding
 }
 
+type copyWriteResult struct {
+	copy      CopyResult
+	published []PublishedEnvironment
+}
+
 // CopiedValue is one cell that landed.
 type CopiedValue struct {
 	KeyName                string
@@ -341,11 +346,11 @@ func validateValue(key store.CatalogueKey, value string) error {
 	if err != nil {
 		return fmt.Errorf("service: key %s: stored declaration unreadable: %w", key.ID, err)
 	}
-	compiled, err := schema.Compile(decl)
+	compiled, err := schema.CompileClassified(schema.Classification(key.Classification), decl)
 	if err != nil {
 		return fmt.Errorf("service: key %s: stored declaration does not compile: %w", key.ID, err)
 	}
-	verdict := compiled.Validate(value, schema.Classification(key.Classification))
+	verdict := compiled.Validate(value)
 	if verdict.Valid {
 		return nil
 	}
@@ -467,6 +472,13 @@ func (s *Values) Unset(ctx context.Context, actor Actor, scope domain.Scope, key
 	return s.stage(ctx, actor, scope, keyName, store.PendingUnset, "", nil)
 }
 
+type stageWriteResult struct {
+	change  StagedChange
+	keyID   string
+	keyName string
+	owner   domain.PrincipalID
+}
+
 func (s *Values) stage(ctx context.Context, actor Actor, scope domain.Scope, keyName string,
 	operation store.PendingOperation, value string, acks []string) (StagedChange, error) {
 	if scope.Env == "" {
@@ -476,28 +488,24 @@ func (s *Values) stage(ctx context.Context, actor Actor, scope domain.Scope, key
 	if err != nil {
 		return StagedChange{}, err
 	}
-	var out StagedChange
-	var keyID, keyNameOut string
-	var owner domain.PrincipalID
-	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
-		out = StagedChange{}
+	result, err := tx.WriteResult(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) (stageWriteResult, error) {
 		caller, err := actor.resolve(ctx, az, time.Now().UTC())
 		if err != nil {
-			return err
+			return stageWriteResult{}, err
 		}
 		p, err := az.Authorize(ctx, caller, authz.OpValueStage, scope)
 		if err != nil {
-			return err
+			return stageWriteResult{}, err
 		}
 		// One serialization domain per project: the draft records the published
 		// entry it was staged against, and a concurrent publish must not slip
 		// between reading that entry and writing the row that pins it.
 		if err := r.Projects().Lock(ctx, p); err != nil {
-			return err
+			return stageWriteResult{}, err
 		}
 		key, err := findKey(ctx, r.Catalogue(), p, keyName)
 		if err != nil {
-			return err
+			return stageWriteResult{}, err
 		}
 		// The per-project pending cap (ops-spec § 8: ≤ 100 pending versions per
 		// project, loud). Counted under the project lock, excluding this cell —
@@ -505,15 +513,15 @@ func (s *Values) stage(ctx context.Context, actor Actor, scope domain.Scope, key
 		// grows the count, and only a genuinely new cell can breach the cap.
 		pending, err := r.Pending().CountForProjectExcludingCell(ctx, p, key.ID, string(caller.Principal))
 		if err != nil {
-			return err
+			return stageWriteResult{}, err
 		}
 		if pending >= MaxPendingPerProject {
-			return fmt.Errorf("%w: a project holds at most %d pending changes",
+			return stageWriteResult{}, fmt.Errorf("%w: a project holds at most %d pending changes",
 				domain.ErrLimitExceeded, MaxPendingPerProject)
 		}
 		revision, err := currentRevision(ctx, r, p)
 		if err != nil {
-			return err
+			return stageWriteResult{}, err
 		}
 		baseline := ""
 		switch entry, err := r.Values().Get(ctx, p, key.ID); {
@@ -522,25 +530,25 @@ func (s *Values) stage(ctx context.Context, actor Actor, scope domain.Scope, key
 			// is a real value here rather than a missing one: a cell that gains
 			// a published value after this point makes the draft stale.
 		case err != nil:
-			return err
+			return stageWriteResult{}, err
 		default:
 			baseline = entry.ID
 		}
 		versionID, err := newID("pcv")
 		if err != nil {
-			return err
+			return stageWriteResult{}, err
 		}
 		var sealed []byte
 		if operation == store.PendingSet {
 			if sealed, err = sealer.SealField(
 				pendingAAD(string(scope.Org), string(scope.Project), string(scope.Env), key.ID, versionID),
 				[]byte(schema.Normalize(value))); err != nil {
-				return err
+				return stageWriteResult{}, err
 			}
 			// Writer fence: refuse if the sealer's DEK version was retired by a
 			// rotate-dek since it was built (invariant 7).
 			if err := fenceProject(ctx, r, p, sealer, scope); err != nil {
-				return err
+				return stageWriteResult{}, err
 			}
 		}
 		now := store.CanonTime(time.Now())
@@ -552,7 +560,7 @@ func (s *Values) stage(ctx context.Context, actor Actor, scope domain.Scope, key
 			Secret:         key.Classification == string(schema.Secret),
 			MaterialSecret: key.Classification == string(schema.Secret),
 		}); err != nil {
-			return err
+			return stageWriteResult{}, err
 		}
 		ev, err := domainEvent(ctx, audit.EventValueStaged, caller.Principal,
 			audit.Object{Type: "key", ID: key.ID}, audit.Payload{
@@ -563,10 +571,10 @@ func (s *Values) stage(ctx context.Context, actor Actor, scope domain.Scope, key
 				"version_id":     versionID,
 			})
 		if err != nil {
-			return err
+			return stageWriteResult{}, err
 		}
 		if err := r.Audit().InsertTenant(ctx, p, ev); err != nil {
-			return err
+			return stageWriteResult{}, err
 		}
 		// Surface-1 warn (#74). Only a Set of a config-classified key scans; the
 		// dismissal store ops this path authorizes make stage the sole dismissal-
@@ -579,17 +587,18 @@ func (s *Values) stage(ctx context.Context, actor Actor, scope domain.Scope, key
 				key.Classification, []byte(schema.Normalize(value)), surfaceValueWrite,
 				caller.Principal, newAckSet(acks), true, &total)
 			if err != nil {
-				return err
+				return stageWriteResult{}, err
 			}
 		}
-		keyID, keyNameOut, owner = key.ID, key.Name, caller.Principal
-		out = StagedChange{
-			VersionID: versionID, KeyID: key.ID, Name: key.Name,
-			Classification: key.Classification, Operation: string(operation),
-			StagedFromRevision: revision, CreatedAt: now,
-			Findings: findings,
-		}
-		return nil
+		return stageWriteResult{
+			change: StagedChange{
+				VersionID: versionID, KeyID: key.ID, Name: key.Name,
+				Classification: key.Classification, Operation: string(operation),
+				StagedFromRevision: revision, CreatedAt: now,
+				Findings: findings,
+			},
+			keyID: key.ID, keyName: key.Name, owner: caller.Principal,
+		}, nil
 	})
 	if err != nil {
 		return StagedChange{}, err
@@ -597,8 +606,8 @@ func (s *Values) stage(ctx context.Context, actor Actor, scope domain.Scope, key
 	// Post-commit: the matrix's quieter "another user has a pending change here"
 	// marker is exactly this fact, and it must not be announced for a draft
 	// whose transaction rolled back.
-	s.Advisory.staged(scope, keyID, keyNameOut, owner)
-	return out, nil
+	s.Advisory.staged(scope, result.keyID, result.keyName, result.owner)
+	return result.change, nil
 }
 
 // Declare is declare-into-environments: ONE supplied plaintext into several
@@ -614,6 +623,12 @@ func (s *Values) Declare(ctx context.Context, actor Actor, scope domain.Scope, e
 	// The empty/blank/duplicate checks live in declare (below), which Set shares:
 	// stating them twice invites the two spellings to drift.
 	return s.declare(ctx, actor, scope, envIDs, keyName, value)
+}
+
+type declareWriteResult struct {
+	cells     []ValueCell
+	findings  []Finding
+	published []PublishedEnvironment
 }
 
 func (s *Values) declare(ctx context.Context, actor Actor, scope domain.Scope, envIDs []string, keyName, value string) ([]ValueCell, []Finding, error) {
@@ -633,45 +648,42 @@ func (s *Values) declare(ctx context.Context, actor Actor, scope domain.Scope, e
 	if err != nil {
 		return nil, nil, err
 	}
-	var out []ValueCell
-	var findings []Finding
-	var advanced []PublishedEnvironment
-	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
-		out, advanced, findings = nil, nil, nil
+	result, err := tx.WriteResult(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) (declareWriteResult, error) {
+		var result declareWriteResult
 		total := 0
 		caller, err := actor.resolve(ctx, az, time.Now().UTC())
 		if err != nil {
-			return err
+			return declareWriteResult{}, err
 		}
 		for _, envID := range envIDs {
 			envScope := domain.Scope{Org: scope.Org, Project: scope.Project, Env: domain.EnvID(envID)}
 			p, err := az.Authorize(ctx, caller, authz.OpValueSet, envScope)
 			if err != nil {
-				return err
+				return declareWriteResult{}, err
 			}
 			// One serialization domain per project: the value is validated
 			// against the key's declaration, and a concurrent declaration
 			// change must not slip between the read and the write.
 			if err := r.Projects().Lock(ctx, p); err != nil {
-				return err
+				return declareWriteResult{}, err
 			}
 			key, err := findKey(ctx, r.Catalogue(), p, keyName)
 			if err != nil {
-				return err
+				return declareWriteResult{}, err
 			}
 			rows, err := r.Catalogue().ListPresence(ctx, p)
 			if err != nil {
-				return err
+				return declareWriteResult{}, err
 			}
 			if err := checkNotForbidden(key, presenceOfKey(key, rows), envID); err != nil {
-				return err
+				return declareWriteResult{}, err
 			}
 			if err := validateValue(key, value); err != nil {
-				return err
+				return declareWriteResult{}, err
 			}
 			updatedAt, err := writeCell(ctx, r, p, sealer, envScope, key, caller.Principal, value)
 			if err != nil {
-				return err
+				return declareWriteResult{}, err
 			}
 			ev, err := domainEvent(ctx, audit.EventValueSet, caller.Principal,
 				audit.Object{Type: "key", ID: key.ID}, audit.Payload{
@@ -680,10 +692,10 @@ func (s *Values) declare(ctx context.Context, actor Actor, scope domain.Scope, e
 					"classification": key.Classification,
 				})
 			if err != nil {
-				return err
+				return declareWriteResult{}, err
 			}
 			if err := r.Audit().InsertTenant(ctx, p, ev); err != nil {
-				return err
+				return declareWriteResult{}, err
 			}
 			// Surface-1 warn (#74), warn-only: declare's operation does not
 			// authorize the dismissal store ops, so a finding rides the response
@@ -692,31 +704,31 @@ func (s *Values) declare(ctx context.Context, actor Actor, scope domain.Scope, e
 				key.Classification, []byte(schema.Normalize(value)), surfaceValueWrite,
 				caller.Principal, nil, false, &total)
 			if err != nil {
-				return err
+				return declareWriteResult{}, err
 			}
-			findings = append(findings, envFindings...)
+			result.findings = append(result.findings, envFindings...)
 			// Declare is a supplied-plaintext write that DELIVERS -- its locked
 			// formula carries `publish` on every destination, and #50 shipped it
 			// as an immediate write. It therefore materializes each destination
 			// rather than staging: a value that is authorized as delivered and
 			// then does not deliver would be a third state nobody asked for.
-			env, err := republish(ctx, r, az, caller, sealer, s.Keyring, envScope, time.Now().UTC(), "declare")
+			env, err := republish(ctx, r, az, caller, sealer, s.Keyring, envScope, time.Now().UTC(), "declare", &groupIndexPhase{})
 			if err != nil {
-				return err
+				return declareWriteResult{}, err
 			}
-			advanced = append(advanced, env)
-			out = append(out, ValueCell{
+			result.published = append(result.published, env)
+			result.cells = append(result.cells, ValueCell{
 				KeyID: key.ID, Name: key.Name, Classification: key.Classification,
 				Set: true, UpdatedAt: updatedAt, UpdatedBy: string(caller.Principal),
 			})
 		}
-		return nil
+		return result, nil
 	})
 	if err != nil {
 		return nil, nil, err
 	}
-	s.Advisory.published(scope, advanced)
-	return out, findings, nil
+	s.Advisory.published(scope, result.published)
+	return result.cells, result.findings, nil
 }
 
 // Get reads one cell. reveal asks for `secret` plaintext and carries the
@@ -761,21 +773,24 @@ func (s *Values) read(ctx context.Context, actor Actor, scope domain.Scope, keyN
 	}
 	var out []ValueCell
 	if reveal {
-		err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+		out, err = tx.WriteResult(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) ([]ValueCell, error) {
 			caller, err := actor.resolve(ctx, az, time.Now().UTC())
 			if err != nil {
-				return err
+				return nil, err
 			}
 			p, err := az.Authorize(ctx, caller, op, scope)
 			if err != nil {
-				return err
+				return nil, err
 			}
-			out, err = readCells(ctx, r.Catalogue(), r.Values(), p, sealer, keyName, true,
-				ceremonyGate(ctx, s.Auth, az, caller, PurposeReveal, string(scope.Env)))
+			cells, err := readCells(ctx, r.Catalogue(), r.Values(), p, sealer, keyName, true,
+				ceremonyGate(ctx, s.Auth, az, caller, revealIntentBuilder(string(scope.Env))))
 			if err != nil {
-				return err
+				return nil, err
 			}
-			return auditDisclosures(ctx, r.Audit(), p, caller.Principal, out, "cell")
+			if err := auditDisclosures(ctx, r.Audit(), p, caller.Principal, cells, "cell"); err != nil {
+				return nil, err
+			}
+			return cells, nil
 		})
 	} else {
 		err = tx.Read(ctx, s.DB, func(ctx context.Context, r store.ReadRepos, az *authz.TxAuthorizer) error {
@@ -945,7 +960,7 @@ func (s *Values) Diff(ctx context.Context, actor Actor, scope domain.Scope, left
 	// key per side, so it takes a write transaction; the presence-only diff
 	// stays on the read pool.
 	sides := func(ctx context.Context, cat store.CatalogueReader, vals store.ValueReader, trail store.AuditRepo,
-		az *authz.TxAuthorizer, caller authz.Identity) error {
+		az *authz.TxAuthorizer, caller authz.Identity) ([]DiffRow, error) {
 		read := func(envID string) ([]ValueCell, error) {
 			envScope := domain.Scope{Org: scope.Org, Project: scope.Project, Env: domain.EnvID(envID)}
 			op := authz.OpValueList
@@ -964,7 +979,7 @@ func (s *Values) Diff(ctx context.Context, actor Actor, scope domain.Scope, left
 			// per-environment: a window open on staging authorizes nothing in
 			// production, which is the whole point of capping production at 0.
 			cells, err := readCells(ctx, cat, vals, p, sealer, "", reveal,
-				ceremonyGate(ctx, s.Auth, az, caller, PurposeReveal, envID))
+				ceremonyGate(ctx, s.Auth, az, caller, revealIntentBuilder(envID)))
 			if err != nil {
 				return nil, err
 			}
@@ -977,20 +992,19 @@ func (s *Values) Diff(ctx context.Context, actor Actor, scope domain.Scope, left
 		}
 		left, err := read(leftEnv)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		right, err := read(rightEnv)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		out = diffRows(left, right)
-		return nil
+		return diffRows(left, right), nil
 	}
 	if reveal {
-		err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+		out, err = tx.WriteResult(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) ([]DiffRow, error) {
 			caller, err := actor.resolve(ctx, az, time.Now().UTC())
 			if err != nil {
-				return err
+				return nil, err
 			}
 			return sides(ctx, r.Catalogue(), r.Values(), r.Audit(), az, caller)
 		})
@@ -1000,7 +1014,8 @@ func (s *Values) Diff(ctx context.Context, actor Actor, scope domain.Scope, left
 			if err != nil {
 				return err
 			}
-			return sides(ctx, r.Catalogue(), r.Values(), nil, az, caller)
+			out, err = sides(ctx, r.Catalogue(), r.Values(), nil, az, caller)
+			return err
 		})
 	}
 	if err != nil {
@@ -1095,22 +1110,19 @@ func (s *Values) Copy(ctx context.Context, actor Actor, scope domain.Scope, req 
 		return CopyResult{}, err
 	}
 	defer release()
-	var out CopyResult
-	var advanced []PublishedEnvironment
-	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
-		out = CopyResult{}
-		advanced = nil
+	result, err := tx.WriteResult(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) (copyWriteResult, error) {
+		var result copyWriteResult
 		total := 0
 		caller, err := actor.resolve(ctx, az, time.Now().UTC())
 		if err != nil {
-			return err
+			return copyWriteResult{}, err
 		}
 		// Classify the named keys under the source read — nothing is opened here.
 		// This decides which destination legs the copy will need, and supplies
 		// the units the two ceremonies enumerate.
 		hasConfig, secretKeyIDs, allKeyIDs, err := classifyCopyKeys(ctx, r, az, caller, sourceScope, req.KeyNames)
 		if err != nil {
-			return err
+			return copyWriteResult{}, err
 		}
 		// PREFLIGHT every destination — the copy formula and the protected-
 		// destination ceremony — BEFORE any source secret is opened. A
@@ -1124,8 +1136,8 @@ func (s *Values) Copy(ctx context.Context, actor Actor, scope domain.Scope, req 
 			destScope := domain.Scope{Org: scope.Org, Project: scope.Project, Env: domain.EnvID(destID)}
 			if err := authorizeDestination(ctx, r, az, caller, destScope,
 				req.ConfirmProtected, hasConfig, len(secretKeyIDs) > 0, allKeyIDs,
-				ceremonyGate(ctx, s.Auth, az, caller, PurposePublish, destID)); err != nil {
-				return err
+				ceremonyGate(ctx, s.Auth, az, caller, publishIntentBuilder(destID))); err != nil {
+				return copyWriteResult{}, err
 			}
 		}
 		// The SOURCE ceremony. A copy carries `reveal(source E)` in the locked
@@ -1134,33 +1146,33 @@ func (s *Values) Copy(ctx context.Context, actor Actor, scope domain.Scope, req 
 		// destination rather than to a screen and is a disclosure either way.
 		material, _, err := readSourceMaterial(ctx, r, az, caller, sealer, scope,
 			req.SourceEnvironmentID, req.KeyNames, false, copyOpCopy,
-			ceremonyGate(ctx, s.Auth, az, caller, PurposeCopy, req.SourceEnvironmentID))
+			ceremonyGate(ctx, s.Auth, az, caller, copyIntentBuilder(req.SourceEnvironmentID)))
 		if err != nil {
-			return err
+			return copyWriteResult{}, err
 		}
 		for _, destID := range req.DestinationEnvironmentIDs {
 			destScope := domain.Scope{Org: scope.Org, Project: scope.Project, Env: domain.EnvID(destID)}
 			copied, f, err := applyMaterial(ctx, r, az, caller, sealer, s.Keyring, s.Scan, destScope,
 				req.SourceEnvironmentID, material, operation, &total)
-			out.Copied = append(out.Copied, copied...)
-			out.Findings = append(out.Findings, f...)
+			result.copy.Copied = append(result.copy.Copied, copied...)
+			result.copy.Findings = append(result.copy.Findings, f...)
 			if err != nil {
-				return err
+				return copyWriteResult{}, err
 			}
 			published, err := republish(ctx, r, az, caller, sealer, s.Keyring, destScope,
-				store.CanonTime(time.Now()), operation)
+				store.CanonTime(time.Now()), operation, &groupIndexPhase{})
 			if err != nil {
-				return err
+				return copyWriteResult{}, err
 			}
-			advanced = append(advanced, published)
+			result.published = append(result.published, published)
 		}
-		return nil
+		return result, nil
 	})
 	if err != nil {
 		return CopyResult{}, err
 	}
-	s.Advisory.published(scope, advanced)
-	return out, nil
+	s.Advisory.published(scope, result.published)
+	return result.copy, nil
 }
 
 // classifyCopyKeys resolves the named keys under the source read and reports

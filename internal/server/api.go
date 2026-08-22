@@ -53,12 +53,11 @@ type AuthService interface {
 	PasskeyLoginFinish(ctx context.Context, responseJSON []byte) (service.LoginResult, error)
 	StepUpPasskeyStart(ctx context.Context, presented string) ([]byte, error)
 	StepUpPasskeyFinish(ctx context.Context, presented string, responseJSON []byte) (service.LoginResult, error)
-	ReauthPasskeyStart(ctx context.Context, presented string, purpose service.ReauthPurpose, environmentID string, keyIDs []string) ([]byte, error)
-	ReauthAdapterPasskeyStartWire(ctx context.Context, presented, operation, environmentID string, environmentIDs []string) ([]byte, error)
+	ReauthPasskeyStart(ctx context.Context, presented string, intent service.ReauthIntent) ([]byte, error)
 	ReauthPasskeyFinish(ctx context.Context, presented string, responseJSON []byte) (service.ReauthResult, error)
-	ReauthTOTP(ctx context.Context, presented, environmentID, code string) (service.ReauthResult, error)
-	ReauthAdapterTOTP(ctx context.Context, presented, operation string, environmentIDs []string, code string) ([]service.ReauthResult, error)
-	StartCLIReauth(ctx context.Context, presented, purpose, operation string, environmentIDs, keyIDs []string, pkceChallenge, redirectURI string) (service.CLIReauthStart, error)
+	ReauthTOTP(ctx context.Context, presented string, intent service.ReauthIntent, code string) (service.ReauthResult, error)
+	ReauthAdapterTOTP(ctx context.Context, presented string, intent service.ReauthIntent, code string) ([]service.ReauthResult, error)
+	StartCLIReauth(ctx context.Context, presented string, intent service.ReauthIntent, pkceChallenge, redirectURI string) (service.CLIReauthStart, error)
 	CLIReauthTransaction(ctx context.Context, actor service.Actor, state string) (service.CLIReauthTransaction, error)
 	ApproveCLIReauth(ctx context.Context, actor service.Actor, state string) (service.CLIReauthApproval, error)
 	RedeemCLIReauth(ctx context.Context, code, pkceVerifier string) (service.CLIReauthRedeemed, error)
@@ -254,7 +253,7 @@ func (a *API) EstablishCredential(ctx context.Context, req apigen.EstablishCrede
 	switch {
 	case err == nil:
 		return apigen.EstablishCredential204Response{}, nil
-	case errors.Is(err, service.ErrWeakPassword), errors.Is(err, service.ErrCommonPassword):
+	case passwordPrecondition(err):
 		// The one loud refusal on this path: it is the caller's own input,
 		// evaluated before anything is looked up, so naming the rule helps
 		// the human and reveals nothing.
@@ -314,17 +313,6 @@ func (a *API) Logout(ctx context.Context, _ apigen.LogoutRequestObject) (apigen.
 // mutations reissue the acting session and step-up rotates it, so each returns
 // a fresh token the client must persist in place of the old one.
 
-// factorPrecondition reports a loud structural refusal — a caller acting on
-// their OWN authenticated account, so the state (already enrolled, nothing to
-// confirm, no factor) is theirs to know and 400 names it. A bad code or
-// password stays the uniform 401.
-func factorPrecondition(err error) bool {
-	return errors.Is(err, service.ErrTOTPAlreadyEnrolled) ||
-		errors.Is(err, service.ErrNoPendingTOTP) ||
-		errors.Is(err, service.ErrNoTOTPFactor) ||
-		errors.Is(err, service.ErrNoProofCredential)
-}
-
 func (a *API) EnrolTotpStart(ctx context.Context, req apigen.EnrolTotpStartRequestObject) (apigen.EnrolTotpStartResponseObject, error) {
 	uri, err := a.Auth.EnrolTOTPStart(ctx, bearer(ctx), req.Body.Password)
 	if err != nil {
@@ -382,7 +370,7 @@ func (a *API) RemoveTotp(ctx context.Context, req apigen.RemoveTotpRequestObject
 func (a *API) GetTotpStatus(ctx context.Context, _ apigen.GetTotpStatusRequestObject) (apigen.GetTotpStatusResponseObject, error) {
 	status, err := a.Auth.TOTPStatus(ctx, bearer(ctx))
 	if err != nil {
-		switch classify(err) {
+		switch wireErrorFor(err).code {
 		case apigen.ErrorCodeUnauthenticated:
 			return apigen.GetTotpStatus401JSONResponse{UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, ""))}, nil
 		case apigen.ErrorCodeTooManyRequests:
@@ -425,7 +413,7 @@ func (a *API) BeginRecovery(ctx context.Context, req apigen.BeginRecoveryRequest
 		// passwordless account is refused loudly. Only a caller holding a VALID
 		// code reaches it, so naming the structural state reveals nothing an
 		// enumerator could not already learn — and the refusal is non-destructive.
-		if errors.Is(err, service.ErrPasskeyOnlyViolation) {
+		if recoveryPrecondition(err) {
 			return apigen.BeginRecovery400JSONResponse{BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, ""))}, nil
 		}
 		return nil, err
@@ -498,7 +486,7 @@ func (a *API) CreateOrg(ctx context.Context, req apigen.CreateOrgRequestObject) 
 func (a *API) ListMyOrgs(ctx context.Context, _ apigen.ListMyOrgsRequestObject) (apigen.ListMyOrgsResponseObject, error) {
 	orgs, err := a.Orgs.ListMine(ctx, service.Bearer(bearer(ctx)))
 	if err != nil {
-		if classify(err) == apigen.ErrorCodeUnauthenticated {
+		if wireErrorFor(err).code == apigen.ErrorCodeUnauthenticated {
 			return apigen.ListMyOrgs401JSONResponse{UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, ""))}, nil
 		}
 		return nil, err
@@ -707,53 +695,60 @@ func (a *API) extractBearer(next http.Handler) http.Handler {
 const MaxRequestBytes = 1 << 20
 
 func (a *API) validateAgainstContract(next http.Handler) http.Handler {
+	return a.validateAgainstContractWith(api.MatchRequest, next)
+}
+
+func (a *API) validateAgainstContractWith(
+	matchRequest func(*http.Request) (*api.MatchedRequest, error),
+	next http.Handler,
+) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// ONE route match per request, here. Everything downstream — the SCIM
+		// wire decision, shape validation, the artifact allowlist enforced at
+		// the authorization chokepoint — consumes this one matched row, so no
+		// two lookups can disagree about which operation a request is.
+		match, err := matchRequest(r)
+		if err != nil {
+			if errors.Is(err, api.ErrNoRoute) {
+				// A path the contract does not describe. 404, like any other
+				// thing that is not there.
+				writeError(w, wirePolicyForCode(apigen.ErrorCodeNotFound), "")
+				return
+			}
+			writeError(w, wirePolicyForCode(apigen.ErrorCodeInternal), "")
+			return
+		}
 		// The SCIM wire bounds and shape-checks its own body, BEFORE contract
 		// validation and with its refusal ranked behind authentication.
 		// http.MaxBytesReader cannot be used there: it fails the read, and the
 		// contract validator's own body handling turns that into a
 		// pre-authentication Hikyo 400 describing the request — which is the
 		// thing the wire must never do.
-		wire := isSCIMWireRequest(r)
-		if wire {
+		operation := match.Operation()
+		if api.IsSCIMWireOperation(operation.ID) {
 			if !a.scimBodyIsOneValue(w, r) {
 				return
 			}
 		} else if r.Body != nil {
 			r.Body = http.MaxBytesReader(w, r.Body, MaxRequestBytes)
 		}
-		err := api.ValidateRequest(r)
-		switch {
-		case err == nil:
-			ctx, ok := api.WithRequestOperation(r.Context(), r)
-			if !ok {
-				writeError(w, apigen.ErrorCodeInternal, "")
-				return
-			}
-			next.ServeHTTP(w, r.WithContext(ctx))
-		case errors.Is(err, api.ErrNoRoute):
-			// A path the contract does not describe. 404, like any other
-			// thing that is not there.
-			writeError(w, apigen.ErrorCodeNotFound, "")
-		default:
+		validated, err := match.Validate()
+		if err != nil {
 			var verr *api.ValidationError
 			detail := ""
 			if errors.As(err, &verr) {
 				detail = verr.Member
 			}
-			writeError(w, apigen.ErrorCodeBadRequest, detail)
+			writeError(w, wirePolicyForCode(apigen.ErrorCodeBadRequest), detail)
+			return
 		}
+		next.ServeHTTP(w, validated.Request())
 	})
 }
 
 // scimBodyIsOneValue enforces the single-JSON-value rule on a SCIM wire body
 // and answers the request itself when it is broken. It reports whether the
 // chain may continue.
-func isSCIMWireRequest(r *http.Request) bool {
-	operation, ok := api.OperationIDFor(r)
-	return ok && api.IsSCIMWireOperation(operation)
-}
-
 func (a *API) scimBodyIsOneValue(w http.ResponseWriter, r *http.Request) bool {
 	if r.Body == nil {
 		return true

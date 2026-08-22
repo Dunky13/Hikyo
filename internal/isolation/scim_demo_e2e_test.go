@@ -25,7 +25,7 @@ import (
 // It deliberately does NOT re-login at the end: nothing here grants the acting
 // administrator anything, so their session survives — which is itself the
 // point that a sync grants the PROVISIONED human, not the operator.
-func runSCIMDemo(t *testing.T, db *store.DB, ios func() cli.IO, baseURL string) {
+func runSCIMDemo(t *testing.T, db *store.DB, ios func() cli.IO, baseURL, orgID string) {
 	t.Helper()
 
 	run := func(args ...string) (string, int) {
@@ -54,11 +54,7 @@ func runSCIMDemo(t *testing.T, db *store.DB, ios func() cli.IO, baseURL string) 
 		}
 	}
 
-	var org struct{ Id string }
-	decode(mustRun("org", "create", "--name", "scim-demo", "-o", "json"), &org)
-	// An org create is an instance-config act and does not touch the acting
-	// session; the SCIM verbs need `manage-members`, which the bootstrapped
-	// operator template already carries at instance scope.
+	org := struct{ Id string }{Id: orgID}
 	seedSCIMProvider(t, db, "demo-idp", "https://demo-idp.example.test", true)
 
 	// 1. Create the binding.
@@ -87,7 +83,7 @@ func runSCIMDemo(t *testing.T, db *store.DB, ios func() cli.IO, baseURL string) 
 	}
 
 	// 2. Mint the display-once credential through the print triad. The
-	//    preflight runs BEFORE the mint, so a credential is never created and
+	//    destination preparation runs BEFORE the mint, so a credential is never created and
 	//    then dropped for want of somewhere to put it (the refusal leg itself
 	//    is #54's fixture; this demo has a terminal available, which is the
 	//    triad's third leg).

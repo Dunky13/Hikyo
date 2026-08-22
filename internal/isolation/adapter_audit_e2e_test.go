@@ -182,7 +182,7 @@ func runAdapterAuditLifecycle(t *testing.T, db *store.DB) {
 	// The CLI/browser handoff is part of #65's adapter surface. An invalid
 	// start exercises its rollback-surviving failure settlement without
 	// introducing a second factor-account fixture into the audit-core suite.
-	if _, err := (&service.Auth{DB: db}).StartCLIReauth(ctx, "", "invalid", "invalid", nil, nil, "invalid", "invalid"); err == nil {
+	if _, err := (&service.Auth{DB: db}).StartCLIReauth(ctx, "", service.ReauthIntent{}, "invalid", "invalid"); err == nil {
 		t.Fatal("invalid CLI reauthentication handoff start succeeded")
 	}
 

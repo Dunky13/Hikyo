@@ -7,6 +7,7 @@ import {
   defaultScopeValue,
   expandTemplate,
   grantFailureText,
+  grantOutcomeSummary,
   grantScopeLabel,
   membershipFailureText,
   membershipRows,
@@ -493,7 +494,7 @@ function GrantModal({
         {
           onSuccess: (result) =>
             onDone(
-              `Applied ${draft.template} to ${principal} on ${chosen.label}: ${result.count} independent grant ${result.count === 1 ? 'line' : 'lines'}, each revocable on its own.`,
+              `Applied ${draft.template} to ${principal} on ${chosen.label}: ${grantOutcomeSummary(result.items)} Each grant line remains independently revocable.`,
             ),
           onError: (error) => {
             onStage('grant');
@@ -508,7 +509,7 @@ function GrantModal({
       {
         onSuccess: (done) =>
           onDone(
-            `Granted ${done.join(', ')} to ${principal} on ${chosen.label}. ${done.length === 1 ? 'It is' : 'They are'} separate lines and revocable one at a time.`,
+            `Grant results for ${principal} on ${chosen.label}: ${grantOutcomeSummary(done)} Each grant line remains independently revocable.`,
           ),
         onError: (error) => {
           onStage('grant');

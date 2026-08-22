@@ -346,6 +346,11 @@ func newSweepEnv(t *testing.T, db *store.DB) sweepEnv {
 	if err != nil {
 		t.Fatalf("create org: %v", err)
 	}
+	login, err := auth.LocalLogin(ctx, waAdmin, password, service.ArtifactCLI)
+	if err != nil {
+		t.Fatalf("login after org create: %v", err)
+	}
+	token = stepUpPasskey(t, auth, ctx, login.SessionToken, dev)
 
 	// The administrator gets every capability the swept writes need, at org
 	// scope, seeded directly as the harness seeds fixture grants elsewhere.

@@ -1,30 +1,24 @@
 import {
-  authMethods,
-  enrolPasskeyFinish,
-  enrolPasskeyStart,
-  enrolTotpConfirm,
-  enrolTotpStart,
-  getTotpStatus,
-  listIdentities,
-  listPasskeys,
-  linkIdentity,
-  regenerateRecoveryCodes,
-  removePasskey,
-  removeTotp,
-  samlStart,
-  unlinkIdentity,
-} from '@hikyo/client';
+  authMethodsOp,
+  enrolPasskeyFinishOp,
+  enrolPasskeyStartOp,
+  enrolTotpConfirmOp,
+  enrolTotpStartOp,
+  getTotpStatusOp,
+  linkIdentityOp,
+  listIdentitiesOp,
+  listPasskeysOp,
+  regenerateRecoveryCodesOp,
+  removePasskeyOp,
+  removeTotpOp,
+  samlStartOp,
+  unlinkIdentityOp,
+} from '@hikyo/operations';
 import {
   zAuthMethods,
   zIdentityList,
-  zLoginResult,
-  zOidcStartResult,
   zPasskeyList,
-  zRecoveryCodesResult,
-  zSamlStartResult,
-  zTotpEnrolStartResult,
   zTotpStatus,
-  zWebauthnOptions,
 } from '@hikyo/zod';
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import type { z } from 'zod';
@@ -70,7 +64,7 @@ const totpStatusKey = ['totp-status'] as const;
 export function usePasskeys(): UseQueryResult<PasskeyList> {
   return useQuery({
     queryKey: passkeysKey,
-    queryFn: () => parsed(listPasskeys(), zPasskeyList),
+    queryFn: () => parsed(listPasskeysOp, {}),
     retry: false,
   });
 }
@@ -84,7 +78,7 @@ export function usePasskeys(): UseQueryResult<PasskeyList> {
 export function useTotpStatus(): UseQueryResult<TotpStatus> {
   return useQuery({
     queryKey: totpStatusKey,
-    queryFn: () => parsed(getTotpStatus(), zTotpStatus),
+    queryFn: () => parsed(getTotpStatusOp, {}),
     retry: false,
   });
 }
@@ -92,7 +86,7 @@ export function useTotpStatus(): UseQueryResult<TotpStatus> {
 export function useIdentities(): UseQueryResult<IdentityList> {
   return useQuery({
     queryKey: identitiesKey,
-    queryFn: () => parsed(listIdentities(), zIdentityList),
+    queryFn: () => parsed(listIdentitiesOp, {}),
     retry: false,
   });
 }
@@ -106,7 +100,7 @@ export function useIdentities(): UseQueryResult<IdentityList> {
 export function useAuthMethods(): UseQueryResult<AuthMethods> {
   return useQuery({
     queryKey: authMethodsKey,
-    queryFn: () => parsed(authMethods(), zAuthMethods),
+    queryFn: () => parsed(authMethodsOp, {}),
     retry: false,
   });
 }
@@ -123,7 +117,7 @@ export function useEnrolTotpStart() {
   const queries = useQueryClient();
   return useMutation({
     mutationFn: (input: { password: string }) =>
-      parsed(enrolTotpStart({ body: { password: input.password } }), zTotpEnrolStartResult),
+      parsed(enrolTotpStartOp, { body: { password: input.password } }),
     // A start stages a pending row but reissues no session, so it does not go
     // through the blanket invalidation — refresh only the factor state, which
     // now reads as pending beside the freshly shown QR.
@@ -137,7 +131,7 @@ export function useConfirmTotp() {
   const after = useAfterAccountMutation();
   return useMutation({
     mutationFn: (input: { code: string }) =>
-      parsed(enrolTotpConfirm({ body: { code: input.code } }), zLoginResult),
+      parsed(enrolTotpConfirmOp, { body: { code: input.code } }),
     onSettled: after,
   });
 }
@@ -146,7 +140,7 @@ export function useRemoveTotp() {
   const after = useAfterAccountMutation();
   return useMutation({
     mutationFn: (input: { password: string }) =>
-      parsed(removeTotp({ body: { password: input.password } }), zLoginResult),
+      parsed(removeTotpOp, { body: { password: input.password } }),
     onSettled: after,
   });
 }
@@ -155,10 +149,7 @@ export function useRemovePasskey() {
   const after = useAfterAccountMutation();
   return useMutation({
     mutationFn: (input: { id: string; password: string }) =>
-      parsed(
-        removePasskey({ path: { id: input.id }, body: { password: input.password } }),
-        zLoginResult,
-      ),
+      parsed(removePasskeyOp, { path: { id: input.id }, body: { password: input.password } }),
     onSettled: after,
   });
 }
@@ -167,7 +158,7 @@ export function useRegenerateRecoveryCodes() {
   const after = useAfterAccountMutation();
   return useMutation({
     mutationFn: (input: { proof: string }) =>
-      parsed(regenerateRecoveryCodes({ body: { proof: input.proof } }), zRecoveryCodesResult),
+      parsed(regenerateRecoveryCodesOp, { body: { proof: input.proof } }),
     onSettled: after,
   });
 }
@@ -176,10 +167,7 @@ export function useUnlinkIdentity() {
   const after = useAfterAccountMutation();
   return useMutation({
     mutationFn: (input: { id: string; password: string }) =>
-      parsed(
-        unlinkIdentity({ path: { id: input.id }, body: { proof: input.password } }),
-        zLoginResult,
-      ),
+      parsed(unlinkIdentityOp, { path: { id: input.id }, body: { proof: input.password } }),
     onSettled: after,
   });
 }
@@ -188,19 +176,13 @@ export function useLinkIdentity() {
   return useMutation({
     mutationFn: async (input: { provider: string; kind: 'oidc' | 'saml'; proof: string }) => {
       if (input.kind === 'saml') {
-        const result = await parsed(
-          samlStart({
+        const result = await parsed(samlStartOp, {
             path: { provider: input.provider },
             body: { purpose: 'link', proof: input.proof },
-          }),
-          zSamlStartResult,
-        );
+          });
         return result.redirect_url;
       }
-      const result = await parsed(
-        linkIdentity({ body: { provider: input.provider, proof: input.proof } }),
-        zOidcStartResult,
-      );
+      const result = await parsed(linkIdentityOp, { body: { provider: input.provider, proof: input.proof } });
       return result.authorization_url;
     },
   });
@@ -221,10 +203,7 @@ export function useEnrolPasskey() {
   const after = useAfterAccountMutation();
   return useMutation({
     mutationFn: async (input: { password: string }) => {
-      const options = await parsed(
-        enrolPasskeyStart({ body: { password: input.password } }),
-        zWebauthnOptions,
-      );
+      const options = await parsed(enrolPasskeyStartOp, { body: { password: input.password } });
       const credential = await navigator.credentials.create({
         publicKey: passkeyCreationOptions(options),
       });
@@ -235,8 +214,7 @@ export function useEnrolPasskey() {
       if (!(attestation instanceof AuthenticatorAttestationResponse)) {
         throw new Error('the authenticator produced the wrong response type');
       }
-      return parsed(
-        enrolPasskeyFinish({
+      return parsed(enrolPasskeyFinishOp, {
           body: {
             id: credential.id,
             rawId: toBase64URL(credential.rawId),
@@ -246,9 +224,7 @@ export function useEnrolPasskey() {
               attestationObject: toBase64URL(attestation.attestationObject),
             },
           },
-        }),
-        zLoginResult,
-      );
+        });
     },
     onSettled: after,
   });

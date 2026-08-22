@@ -1,26 +1,25 @@
 import {
-  createEnvironment,
-  createOrg,
-  createProject,
-  deleteOrg,
-  deleteProject,
-  getEnvironmentSettings,
-  getOrg,
-  getOrgRetention,
-  getProject,
-  getProjectRetention,
-  listEnvironments,
-  listOrgs,
-  listProjects,
-  renameOrg,
-  renameProject,
-  rotateTokenKey,
-  setEnvironmentSettings,
-  setOrgRetention,
-  setProjectRetention,
-} from '@hikyo/client';
+  createEnvironmentOp,
+  createOrgOp,
+  createProjectOp,
+  deleteOrgOp,
+  deleteProjectOp,
+  getEnvironmentSettingsOp,
+  getOrgOp,
+  getOrgRetentionOp,
+  getProjectOp,
+  getProjectRetentionOp,
+  listEnvironmentsOp,
+  listOrgsOp,
+  listProjectsOp,
+  renameOrgOp,
+  renameProjectOp,
+  rotateTokenKeyOp,
+  setEnvironmentSettingsOp,
+  setOrgRetentionOp,
+  setProjectRetentionOp,
+} from '@hikyo/operations';
 import {
-  zEnvironment,
   zEnvironmentList,
   zEnvironmentSettings,
   zOrg,
@@ -76,7 +75,7 @@ const projectRetentionKey = (org: string, project: string) =>
 export function useOrg(org: string): UseQueryResult<Org> {
   return useQuery({
     queryKey: orgKey(org),
-    queryFn: () => parsed(getOrg({ path: { org } }), zOrg),
+    queryFn: () => parsed(getOrgOp, { path: { org } }),
     enabled: org !== '',
     retry: false,
   });
@@ -85,7 +84,7 @@ export function useOrg(org: string): UseQueryResult<Org> {
 export function useProject(org: string, project: string): UseQueryResult<Project> {
   return useQuery({
     queryKey: projectKey(org, project),
-    queryFn: () => parsed(getProject({ path: { org, project } }), zProject),
+    queryFn: () => parsed(getProjectOp, { path: { org, project } }),
     enabled: org !== '' && project !== '',
     retry: false,
   });
@@ -102,7 +101,7 @@ export function useEnvironments(
 function environmentListQueryOptions(org: string, project: string, client?: Client) {
   return {
     queryKey: environmentsKey(org, project),
-    queryFn: () => parsed(listEnvironments({ path: { org, project }, client }), zEnvironmentList),
+    queryFn: () => parsed(listEnvironmentsOp, { path: { org, project }, client }),
     enabled: org !== '' && project !== '',
     retry: false,
   } as const;
@@ -113,7 +112,7 @@ export function useProjects(org: string): UseQueryResult<z.infer<typeof zProject
   const transport = useTransport();
   return useQuery({
     queryKey: projectsKey(org),
-    queryFn: () => parsed(listProjects({ path: { org }, ...transport }), zProjectList),
+    queryFn: () => parsed(listProjectsOp, { path: { org }, ...transport }),
     enabled: org !== '',
     retry: false,
   });
@@ -122,7 +121,7 @@ export function useProjects(org: string): UseQueryResult<z.infer<typeof zProject
 export function useOrgRetention(org: string): UseQueryResult<RetentionPolicy> {
   return useQuery({
     queryKey: orgRetentionKey(org),
-    queryFn: () => parsed(getOrgRetention({ path: { org } }), zRetentionPolicy),
+    queryFn: () => parsed(getOrgRetentionOp, { path: { org } }),
     enabled: org !== '',
     retry: false,
   });
@@ -135,7 +134,7 @@ export function useProjectRetention(
   return useQuery({
     queryKey: projectRetentionKey(org, project),
     queryFn: () =>
-      parsed(getProjectRetention({ path: { org, project } }), zProjectRetentionPolicy),
+      parsed(getProjectRetentionOp, { path: { org, project } }),
     enabled: org !== '' && project !== '',
     retry: false,
   });
@@ -155,10 +154,7 @@ export function useProjectRetentions(
     queries: projects.map((project) => ({
       queryKey: projectRetentionKey(org, project.id),
       queryFn: () =>
-        parsed(
-          getProjectRetention({ path: { org, project: project.id } }),
-          zProjectRetentionPolicy,
-        ),
+        parsed(getProjectRetentionOp, { path: { org, project: project.id } }),
       enabled: org !== '',
       retry: false,
     })),
@@ -242,10 +238,7 @@ export function environmentSettingsQueryOptions(
   return {
     queryKey: environmentSettingsKey(org, project, environment),
     queryFn: () =>
-      parsed(
-        getEnvironmentSettings({ path: { org, project, environment }, client }),
-        zEnvironmentSettings,
-      ),
+      parsed(getEnvironmentSettingsOp, { path: { org, project, environment }, client }),
     enabled: org !== '' && project !== '' && environment !== '',
     retry: false,
   } as const;
@@ -391,24 +384,29 @@ export function useOrgTopology(org: string): {
 export function useInstanceOrgs(): UseQueryResult<OrgList> {
   return useQuery({
     queryKey: orgsListKey,
-    queryFn: () => parsed(listOrgs(), zOrgList),
+    queryFn: () => parsed(listOrgsOp, {}),
     retry: false,
   });
 }
 
-export function useCreateOrg() {
+export function useCreateOrg(onCreated?: (org: Org) => void) {
   const queries = useQueryClient();
-  return useMutation({
-    mutationFn: (input: { name: string }) =>
-      parsed(createOrg({ body: { name: input.name } }), zOrg),
-    onSettled: () => queries.invalidateQueries(),
+	return useMutation({
+		mutationFn: (input: { name: string }) =>
+			parsed(createOrgOp, { body: { name: input.name } }),
+		// A successful create invalidates the creator's session. Hook-level
+		// success runs before query invalidation unmounts the caller; a per-call
+		// mutate callback is not guaranteed to run after that unmount.
+		onSuccess: onCreated,
+		onSettled: () => queries.invalidateQueries(),
   });
 }
 
-export function useDeleteOrg() {
+export function useDeleteOrg(onDeleted?: () => void) {
   const queries = useQueryClient();
   return useMutation({
-    mutationFn: (input: { org: string }) => ok(deleteOrg({ path: { org: input.org } })),
+    mutationFn: (input: { org: string }) => ok(deleteOrgOp, { path: { org: input.org } }),
+    onSuccess: onDeleted,
     onSettled: () => queries.invalidateQueries(),
   });
 }
@@ -417,7 +415,7 @@ export function useRenameOrg() {
   const queries = useQueryClient();
   return useMutation({
     mutationFn: (input: { org: string; name: string }) =>
-      parsed(renameOrg({ path: { org: input.org }, body: { name: input.name } }), zOrg),
+      parsed(renameOrgOp, { path: { org: input.org }, body: { name: input.name } }),
     onSettled: () => queries.invalidateQueries(),
   });
 }
@@ -426,10 +424,7 @@ export function useRenameProject(org: string) {
   const queries = useQueryClient();
   return useMutation({
     mutationFn: (input: { project: string; name: string }) =>
-      parsed(
-        renameProject({ path: { org, project: input.project }, body: { name: input.name } }),
-        zProject,
-      ),
+      parsed(renameProjectOp, { path: { org, project: input.project }, body: { name: input.name } }),
     onSettled: () => queries.invalidateQueries(),
   });
 }
@@ -438,7 +433,7 @@ export function useDeleteProject(org: string) {
   const queries = useQueryClient();
   return useMutation({
     mutationFn: (input: { project: string }) =>
-      ok(deleteProject({ path: { org, project: input.project } })),
+      ok(deleteProjectOp, { path: { org, project: input.project } }),
     onSettled: () => queries.invalidateQueries(),
   });
 }
@@ -456,7 +451,7 @@ export function useCreateProject(org: string) {
   const queries = useQueryClient();
   return useMutation({
     mutationFn: (input: { name: string }) =>
-      parsed(createProject({ path: { org }, body: { name: input.name } }), zProject),
+      parsed(createProjectOp, { path: { org }, body: { name: input.name } }),
     onSuccess: () => queries.invalidateQueries({ queryKey: projectsKey(org) }),
   });
 }
@@ -472,10 +467,7 @@ export function useCreateEnvironment(org: string, project: string) {
   const queries = useQueryClient();
   return useMutation({
     mutationFn: (input: { name: string }) =>
-      parsed(
-        createEnvironment({ path: { org, project }, body: { name: input.name } }),
-        zEnvironment,
-      ),
+      parsed(createEnvironmentOp, { path: { org, project }, body: { name: input.name } }),
     onSuccess: () => queries.invalidateQueries({ queryKey: environmentsKey(org, project) }),
   });
 }
@@ -543,7 +535,7 @@ export function createEnvironmentRefusalText(error: unknown): string {
  * than showing controls that could not exist.
  */
 export function useRotateTokenKey() {
-  return useMutation({ mutationFn: () => ok(rotateTokenKey()) });
+  return useMutation({ mutationFn: () => parsed(rotateTokenKeyOp, {}) });
 }
 
 // --- environment policy -----------------------------------------------------
@@ -556,16 +548,13 @@ export function useSetEnvironmentSettings(org: string, project: string) {
       protectedFlag: boolean;
       reauthWindowSeconds: number | null;
     }) =>
-      parsed(
-        setEnvironmentSettings({
+      parsed(setEnvironmentSettingsOp, {
           path: { org, project, environment: input.environment },
           body: {
             protected: input.protectedFlag,
             reauth_window_seconds: input.reauthWindowSeconds,
           },
         }),
-        zEnvironmentSettings,
-      ),
     onSettled: () => queries.invalidateQueries(),
   });
 }
@@ -576,7 +565,7 @@ export function useSetOrgRetention(org: string) {
   const queries = useQueryClient();
   return useMutation({
     mutationFn: (policy: RetentionPolicy) =>
-      parsed(setOrgRetention({ path: { org }, body: policy }), zRetentionPolicy),
+      parsed(setOrgRetentionOp, { path: { org }, body: policy }),
     onSettled: () => queries.invalidateQueries(),
   });
 }
@@ -589,8 +578,7 @@ export function useSetProjectRetention(org: string, project: string) {
       maxAgeSeconds: number | null;
       lastRevisions: number | null;
     }) =>
-      parsed(
-        setProjectRetention({
+      parsed(setProjectRetentionOp, {
           path: { org, project },
           body: {
             inherited: input.inherited,
@@ -598,8 +586,6 @@ export function useSetProjectRetention(org: string, project: string) {
             last_revisions: input.lastRevisions,
           },
         }),
-        zProjectRetentionPolicy,
-      ),
     onSettled: () => queries.invalidateQueries(),
   });
 }

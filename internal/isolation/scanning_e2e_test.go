@@ -64,6 +64,11 @@ func runScanningLifecycle(t *testing.T, db *store.DB) {
 	keys := &service.Keys{DB: db, Keyring: kr, Scan: rs}
 	values := &service.Values{DB: db, Keyring: kr, Scan: rs, Auth: authServiceWithKeyring(t, db)}
 
+	// The backup lifecycle immediately before this one reconstructs the
+	// instance corpus. Seed the second conjunct org creation now requires so
+	// this emitter fixture does not depend on which grants that restore retained.
+	execRaw(t, db, `INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) `+
+		`VALUES ('grt_scan_root_members', 'usr_root', 'manage-members', NULL, NULL, NULL, `+ts+`)`)
 	org, err := orgs.Create(ctx, service.LocalPrincipal(root), "scanning-audit-org", true, []byte(`{}`))
 	if err != nil {
 		t.Fatalf("create org: %v", err)

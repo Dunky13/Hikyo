@@ -41,30 +41,32 @@ case "$native_version" in
 	"hikyo $version ("*) ;;
 	*) printf 'snapshot manifest fixture: binary version does not match archive version\n' >&2; exit 1 ;;
 esac
-rm -f "$dist/artifacts.json" "$dist/config.yaml" "$dist/metadata.json"
+fixture_dist="$fixture_dir/dist"
+cp -R "$dist" "$fixture_dist"
+rm -f "$fixture_dist/artifacts.json" "$fixture_dist/config.yaml" "$fixture_dist/metadata.json"
 
-printf '{"spdxVersion":"SPDX-2.3"}\n' >"$dist/hikyo-source.spdx.json"
-printf '{"spdxVersion":"SPDX-2.3"}\n' >"$dist/hikyo-image.spdx.json"
-printf '#!/bin/sh\nexit 0\n' >"$dist/install.sh"
+printf '{"spdxVersion":"SPDX-2.3"}\n' >"$fixture_dist/hikyo-source.spdx.json"
+printf '{"spdxVersion":"SPDX-2.3"}\n' >"$fixture_dist/hikyo-image.spdx.json"
+printf '#!/bin/sh\nexit 0\n' >"$fixture_dist/install.sh"
 image_digest=sha256:1111111111111111111111111111111111111111111111111111111111111111
 chart_digest=sha256:2222222222222222222222222222222222222222222222222222222222222222
 jq -n --arg digest "$image_digest" '{critical:{identity:{"docker-reference":"ghcr.io/hikyo-org/hikyo"},image:{"docker-manifest-digest":$digest}}}' \
-	>"$dist/image-index.oci-payload.json"
+	>"$fixture_dist/image-index.oci-payload.json"
 jq -n --arg digest "$chart_digest" '{critical:{identity:{"docker-reference":"ghcr.io/hikyo-org/charts/hikyo"},image:{"docker-manifest-digest":$digest}}}' \
-	>"$dist/chart-index.oci-payload.json"
+	>"$fixture_dist/chart-index.oci-payload.json"
 mkdir -p "$fixture_dir/hikyo"
 printf 'name: hikyo\nversion: %s\nappVersion: %s\n' "$version" "$version" >"$fixture_dir/hikyo/Chart.yaml"
 printf 'image:\n  digest: %s\n' "$image_digest" >"$fixture_dir/hikyo/values.yaml"
-tar -czf "$dist/hikyo-$version.tgz" -C "$fixture_dir" hikyo
+tar -czf "$fixture_dist/hikyo-$version.tgz" -C "$fixture_dir" hikyo
 printf '{"releases":[{"version":"%s","sequence":1}]}\n' "$version" >"$fixture_dir/trust-metadata.json"
 
 "$script_dir/create-manifest.sh" "$version" "$commit" primary-1 \
 	ghcr.io/hikyo-org/hikyo "$image_digest" ghcr.io/hikyo-org/charts/hikyo "$chart_digest" \
-	"$dist" "$fixture_dir/trust-metadata.json" >/dev/null
+	"$fixture_dist" "$fixture_dir/trust-metadata.json" >/dev/null
 
 jq -e '
 	([.artifacts[] | select(.kind == "binary")] | length) == 6 and
 	([.artifacts[] | select(.kind == "chart")] | length) == 1 and
 	([.artifacts[] | select(.kind == "oci-payload")] | length) == 2
-' "$dist/release-manifest.json" >/dev/null
+' "$fixture_dist/release-manifest.json" >/dev/null
 printf 'snapshot manifest fixture: complete GoReleaser output classified\n'

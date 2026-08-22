@@ -113,9 +113,10 @@ func ParseStamp(s string) error {
 	return nil
 }
 
-// SnapshotAAD binds an offline snapshot to its full context (compose ADR
-// § "AAD binds the container to its context"). A snapshot is therefore not
-// transplantable across environments, projects, principals, or projections.
+// SnapshotAAD is the stable serialized form derived from SnapshotBinding. Its
+// field names and declaration order are persisted protocol data for HKS1
+// containers. Runtime save/load code accepts SnapshotBinding instead, so this
+// mutable serialization DTO cannot bypass binding validation.
 //
 // The list fields (Projection, TargetNames) are sorted and deduplicated INSIDE
 // Canonical(), so a caller-visible ordering choice or an accidental duplicate
@@ -134,8 +135,8 @@ type SnapshotAAD struct {
 	EnvironmentID  string `json:"environment_id"`
 	// CredentialID is the server-asserted credential id. It is authenticated
 	// metadata (bound into the AAD, returned to the caller for the offline
-	// records' credential_id) but is NOT part of SnapshotContext: it is a mutable
-	// on-disk value the box could rewrite, so it supplies no offline expectation.
+	// records' credential_id) but is not locally knowable: it is a mutable on-disk
+	// value the box could rewrite, so it supplies no offline expectation.
 	CredentialID string `json:"credential_id"`
 	// CredentialFingerprint is the LOCAL, offline-derivable identity of the
 	// credential the snapshot was fetched with — hex(sha256(domain ‖ token)). The
@@ -159,31 +160,13 @@ type SnapshotAAD struct {
 	// current snapshots with the same issuance but different content. Binding the
 	// token into the header makes the header — and therefore the HWM digest over
 	// it — differ whenever the delivered content differs (compose ADR § Expiry,
-	// clocks and rollback). It is NOT part of SnapshotContext: the offline box
-	// cannot reconstruct it without the server.
+	// clocks and rollback). The offline box cannot reconstruct it without the
+	// server; ParseSnapshotBinding recovers it from the authenticated header.
 	ChangeToken string `json:"change_token"`
 	// Projection is the authorized delivery capability list.
 	Projection []string `json:"projection"`
 	IssuedAt   string   `json:"issued_at"`
 	ExpiresAt  string   `json:"expires_at"`
-}
-
-// SnapshotContext is the offline-known subset of the AAD: the identity, org,
-// project, environment, credential FINGERPRINT, config-only mode, and target set
-// the box can reconstruct WITHOUT reaching the server. The credential is bound
-// by its local fingerprint (recomputed from the presented token), NOT by the
-// server-asserted credential id, which is mutable on disk. LoadSnapshot compares
-// it against the stored header; the remaining fields
-// (revision/projection/issued/expires) are taken from the header and returned to
-// the caller.
-type SnapshotContext struct {
-	InstanceOrigin        string
-	OrgID                 string
-	ProjectID             string
-	EnvironmentID         string
-	CredentialFingerprint string
-	ConfigOnly            bool
-	TargetNames           []string
 }
 
 // Canonical is the deterministic header-bytes encoding of the full AAD tuple:
@@ -209,41 +192,6 @@ func ParseSnapshotHeader(b []byte) (SnapshotAAD, error) {
 		return SnapshotAAD{}, fmt.Errorf("crypto: parse snapshot header: %w", err)
 	}
 	return a, nil
-}
-
-// ContextMatches checks the offline-known local context against the header,
-// field by field, comparing the target set as a sorted/deduplicated set. A
-// mismatch is refused BY NAME (not as a decrypt failure) so the operator sees
-// which coordinate a transplanted snapshot disagrees on.
-func (a SnapshotAAD) ContextMatches(expect SnapshotContext) error {
-	for _, f := range []struct {
-		name     string
-		got, exp string
-	}{
-		{"instance", a.InstanceOrigin, expect.InstanceOrigin},
-		{"org", a.OrgID, expect.OrgID},
-		{"project", a.ProjectID, expect.ProjectID},
-		{"environment", a.EnvironmentID, expect.EnvironmentID},
-		{"credential", a.CredentialFingerprint, expect.CredentialFingerprint},
-	} {
-		if f.got != f.exp {
-			return fmt.Errorf("crypto: snapshot %s %q does not match local context %q", f.name, f.got, f.exp)
-		}
-	}
-	if a.ConfigOnly != expect.ConfigOnly {
-		return fmt.Errorf("crypto: snapshot config_only=%v does not match local context config_only=%v", a.ConfigOnly, expect.ConfigOnly)
-	}
-	got := CanonicalStringSet(a.TargetNames)
-	exp := CanonicalStringSet(expect.TargetNames)
-	if len(got) != len(exp) {
-		return fmt.Errorf("crypto: snapshot target set %v does not match local context %v", got, exp)
-	}
-	for i := range got {
-		if got[i] != exp[i] {
-			return fmt.Errorf("crypto: snapshot target set %v does not match local context %v", got, exp)
-		}
-	}
-	return nil
 }
 
 // SealSnapshot encrypts plaintext under the snapshot key with headerCanonical as

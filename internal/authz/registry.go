@@ -1,6 +1,7 @@
 package authz
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 
@@ -908,6 +909,78 @@ const (
 // CI invariant 2): an operation may skip audit mapping only when every store
 // op it can invoke is in this set. A wrongly listed op is caught by review
 // of this pinned table, exactly like the formula pins.
+// storeOpCatalogue is the closed set of store operations the registry may name.
+// It is the in-package half of "known store operations": the constructor
+// rejects any operation naming a StoreOp absent here, before initialization
+// succeeds. Adding a StoreOp const means adding it here too. That the method
+// actually exists on the store is invariant 6's reflection cross-check
+// (internal/isolation), which needs internal/store this package must not import.
+var storeOpCatalogue = map[StoreOp]bool{
+	StoreAdaptersAddTarget: true, StoreAdaptersAdopt: true, StoreAdaptersBeginConfigureEffect: true, StoreAdaptersCancelMove: true,
+	StoreAdaptersConfiguration: true, StoreAdaptersConflicts: true, StoreAdaptersCreate: true, StoreAdaptersEnqueueManual: true,
+	StoreAdaptersEnqueuePublished: true, StoreAdaptersEnvironments: true, StoreAdaptersFinishConfigureEffect: true, StoreAdaptersGet: true,
+	StoreAdaptersList: true, StoreAdaptersListForReencrypt: true, StoreAdaptersListMovesForReencrypt: true, StoreAdaptersListTargets: true,
+	StoreAdaptersMapping: true, StoreAdaptersMove: true, StoreAdaptersMoveOrigin: true, StoreAdaptersMoveTarget: true,
+	StoreAdaptersPlanMaterial: true, StoreAdaptersRecordCredentialExpiry: true, StoreAdaptersRecordPlan: true, StoreAdaptersReencrypt: true,
+	StoreAdaptersReencryptMove: true, StoreAdaptersReplaceCredential: true, StoreAdaptersReplaceMoveOrigin: true, StoreAdaptersReplaceMoveTarget: true,
+	StoreAdaptersRevokeCredential: true, StoreAdaptersTarget: true, StoreAdaptersTargetEnvironments: true, StoreAdaptersTargetKeyIDs: true,
+	StoreAdaptersTeardownAdapter: true, StoreAdaptersTeardownTarget: true, StoreAdaptersUpdateTarget: true, StoreAuditClaimOfflineRecord: true,
+	StoreAuditInstanceInsert: true, StoreAuditInstancePage: true, StoreAuditTenantInsert: true, StoreAuditTenantPage: true,
+	StoreCatalogueAdapterPins: true, StoreCatalogueCount: true, StoreCatalogueCreate: true, StoreCatalogueDelete: true,
+	StoreCatalogueGet: true, StoreCatalogueGroupClearMembers: true, StoreCatalogueGroupCount: true, StoreCatalogueGroupCreate: true,
+	StoreCatalogueGroupDelete: true, StoreCatalogueGroupGet: true, StoreCatalogueGroupList: true, StoreCatalogueGroupRename: true,
+	StoreCatalogueList: true, StoreCataloguePresenceCascade: true, StoreCataloguePresenceList: true, StoreCataloguePresenceReplace: true,
+	StoreCatalogueRename: true, StoreCatalogueRevisionBump: true, StoreCatalogueRevisionGet: true, StoreCatalogueSetClassification: true,
+	StoreCatalogueSetGroup: true, StoreCatalogueUpdateDeclaration: true, StoreCatalogueUpdateMetadata: true, StoreDefinitionsLatestAppliedPlan: true,
+	StoreDefinitionsPlanApply: true, StoreDefinitionsPlanCountOpen: true, StoreDefinitionsPlanCreate: true, StoreDefinitionsPlanGet: true,
+	StoreDefinitionsPlanPrune: true, StoreEnvironmentsCount: true, StoreEnvironmentsCreate: true, StoreEnvironmentsDelete: true,
+	StoreEnvironmentsGet: true, StoreEnvironmentsGetSettings: true, StoreEnvironmentsList: true, StoreEnvironmentsListProtection: true,
+	StoreEnvironmentsNextOrder: true, StoreEnvironmentsRename: true, StoreEnvironmentsSetOrder: true, StoreEnvironmentsSetSettings: true,
+	StoreEnvironmentsUpdateNote: true, StoreFoldersCreate: true, StoreFoldersDelete: true, StoreFoldersGet: true,
+	StoreFoldersList: true, StoreFoldersRename: true, StoreKeysAcquireHierarchyGeneration: true, StoreKeysActiveMasterWrappers: true,
+	StoreKeysActiveTier3: true, StoreKeysAllOpenableTier3: true, StoreKeysAssertActiveDEKVersion: true, StoreKeysInsertMaster: true,
+	StoreKeysInsertScopeGeneration: true, StoreKeysInsertTier3: true, StoreKeysRetireRetiringTier3: true, StoreKeysRootRotateFinalize: true,
+	StoreKeysRootRotatePrepare: true, StoreKeysRotateDEK: true, StoreKeysRotateMasterKey: true, StoreKeysRotateScanningKey: true,
+	StoreKeysRotateTokenKey: true, StoreKeysTier3Versions: true, StoreOrgsCount: true, StoreOrgsCreate: true,
+	StoreOrgsDelete: true, StoreOrgsGet: true, StoreOrgsList: true, StoreOrgsLock: true,
+	StoreOrgsRename: true, StoreOrgsSetRetention: true, StorePendingCountForProjectExcludingCell: true, StorePendingDiscard: true,
+	StorePendingDiscardEnvironment: true, StorePendingDiscardKey: true, StorePendingListForOwner: true, StorePendingListForOwnerInEnvironment: true,
+	StorePendingListForReencrypt: true, StorePendingListMarkers: true, StorePendingReencrypt: true, StorePendingStage: true,
+	StorePinsCountProject: true, StorePinsDelete: true, StorePinsDeleteEnvironment: true, StorePinsGetForWorkload: true,
+	StorePinsInsert: true, StorePinsList: true, StoreProjectsCreate: true, StoreProjectsDelete: true,
+	StoreProjectsGet: true, StoreProjectsList: true, StoreProjectsListAll: true, StoreProjectsLock: true,
+	StoreProjectsRename: true, StoreProjectsSetDefinitionsSource: true, StoreProjectsSetMachineReveal: true, StoreProjectsSetRetention: true,
+	StoreReencryptListOidcProviders: true, StoreReencryptListPasswordCreds: true, StoreReencryptListRecoveryCodes: true, StoreReencryptListRemotes: true,
+	StoreReencryptListSamlKeys: true, StoreReencryptListTotpCreds: true, StoreReencryptOidcProvider: true, StoreReencryptPasswordCred: true,
+	StoreReencryptRecoveryCodes: true, StoreReencryptRemote: true, StoreReencryptSamlKey: true, StoreReencryptTotpCred: true,
+	StoreRemoteSnapshotsFail: true, StoreRemoteSnapshotsGet: true, StoreRemoteSnapshotsList: true, StoreRemoteSnapshotsWrite: true,
+	StoreRemotesCount: true, StoreRemotesCreate: true, StoreRemotesDelete: true, StoreRemotesGet: true,
+	StoreRemotesGetByName: true, StoreRemotesList: true, StoreRemotesRename: true, StoreRemotesSealed: true,
+	StoreRetentionDeleteEntries: true, StoreRetentionEligible: true, StoreRetentionLastSuccess: true, StoreRetentionMarkCollected: true,
+	StoreRetentionSetLastSuccess: true, StoreSCIMAddGroupMember: true, StoreSCIMAttention: true, StoreSCIMBinding: true,
+	StoreSCIMBindings: true, StoreSCIMClearAttention: true, StoreSCIMClearGroupMembers: true, StoreSCIMCreateBinding: true,
+	StoreSCIMCreateCredential: true, StoreSCIMCreateGroup: true, StoreSCIMCreateMapping: true, StoreSCIMCreateUser: true,
+	StoreSCIMCredential: true, StoreSCIMCredentials: true, StoreSCIMDeleteAttentionForBinding: true, StoreSCIMDeleteBinding: true,
+	StoreSCIMDeleteCredentialsForBinding: true, StoreSCIMDeleteGroup: true, StoreSCIMDeleteGroupMembersForBinding: true, StoreSCIMDeleteGroupsForBinding: true,
+	StoreSCIMDeleteMapping: true, StoreSCIMDeleteMappingsForBinding: true, StoreSCIMDeleteUser: true, StoreSCIMDeleteUsersForBinding: true,
+	StoreSCIMEnterAttention: true, StoreSCIMGroup: true, StoreSCIMGroupMembers: true, StoreSCIMGroups: true,
+	StoreSCIMGroupsByDisplayName: true, StoreSCIMGroupsByExternalID: true, StoreSCIMLockBinding: true, StoreSCIMMapping: true,
+	StoreSCIMMappings: true, StoreSCIMMappingsForGroup: true, StoreSCIMMembershipsForUser: true, StoreSCIMPageGroups: true,
+	StoreSCIMPageUsers: true, StoreSCIMRemoveGroupMember: true, StoreSCIMRemoveMembershipsForUser: true, StoreSCIMRetireConnection: true,
+	StoreSCIMRevokeCredential: true, StoreSCIMRevokeCredentialsForBinding: true, StoreSCIMSetMappingInert: true, StoreSCIMTouchBinding: true,
+	StoreSCIMUpdateGroup: true, StoreSCIMUpdateMappingTemplate: true, StoreSCIMUpdateUser: true, StoreSCIMUser: true,
+	StoreSCIMUserByAccount: true, StoreSCIMUserBySubject: true, StoreSCIMUserByUserName: true, StoreSCIMUsers: true,
+	StoreSCIMUsersByExternalID: true, StoreScanningDismissalsDeleteAll: true, StoreScanningDismissalsDeleteByKey: true, StoreScanningDismissalsDeleteByProject: true,
+	StoreScanningDismissalsExists: true, StoreScanningDismissalsInsert: true, StoreSnapshotsAtRevision: true, StoreSnapshotsChanges: true,
+	StoreSnapshotsDeleteEnvironment: true, StoreSnapshotsEntries: true, StoreSnapshotsInsert: true, StoreSnapshotsInsertChange: true,
+	StoreSnapshotsInsertEntry: true, StoreSnapshotsInstancePayloadByProject: true, StoreSnapshotsLatest: true, StoreSnapshotsList: true,
+	StoreSnapshotsListForReencrypt: true, StoreSnapshotsPayloadBytesForProject: true, StoreSnapshotsProjectRevisions: true, StoreSnapshotsRecordSecretValueOccurrence: true,
+	StoreSnapshotsReencrypt: true, StoreSnapshotsSecretValueOccurrenceIDs: true, StoreValuesClear: true, StoreValuesClearEnvironment: true,
+	StoreValuesClearKey: true, StoreValuesCountEnvironment: true, StoreValuesEnvironmentsWithValue: true, StoreValuesGet: true,
+	StoreValuesInstancePayloadByProject: true, StoreValuesList: true, StoreValuesListForReencrypt: true, StoreValuesPayloadBytesForProject: true,
+	StoreValuesPut: true, StoreValuesReencrypt: true,
+}
+
 var readOnlyStoreOps = map[StoreOp]bool{
 	StoreOrgsGet:         true,
 	StoreOrgsList:        true,
@@ -1049,28 +1122,260 @@ type opSpec struct {
 	// reauthentication windows; failure is a reachable, non-enumerating 403.
 	postGrantForbidden bool
 
-	// events maps the operation to the audit event type(s) it emits, or —
-	// exactly one of the two — auditedNone declares a proof-scoped pure read
-	// whose result the trail would only duplicate. auditedNone is
-	// default-deny (audit-model ADR CI invariant 2): the completeness
-	// invariant permits it only for tenant-class, non-empty read-only formulas,
-	// non-mutating operations, and refuses it everywhere else.
-	events      []audit.EventType
-	auditedNone bool
+	// events maps the operation to the audit event type(s) it emits. Exactly one
+	// audit disposition holds per row: events, auditedNone, or reviewExempt.
+	// auditedNone declares a proof-scoped pure read whose result the trail would
+	// only duplicate; it is default-deny (audit-model ADR CI invariant 2), the
+	// completeness invariant permitting it only for tenant-class, non-empty
+	// read-only formulas mutating nothing. reviewExempt marks the handful of rows
+	// the ADR exempts by name (definitions.plan.get, scim-discovery.read): they
+	// emit no event yet fail the audited-none permit rule, so the completeness
+	// invariant pins them in testdata/audited_exemptions.json. The marker makes
+	// that reviewed disposition explicit in the row rather than implicit in the
+	// absence of the other two.
+	events       []audit.EventType
+	auditedNone  bool
+	reviewExempt bool
 }
 
-// operations is the operation registry. Every formula is built from capability
-// atoms the permission-model ADR already fixes — this ticket adds no atom and
-// invents no capability. Registry completeness is invariant 6.
-var operations = map[Operation]opSpec{
-	// The Org aggregate (#48). Creation and enumeration are instance-scoped
-	// under the operator set's instance-config atom: a create has no parent
-	// tenant to authorize against, and an enumeration of every org is
-	// cross-tenant by definition, so there is no tenant object whose
-	// nonexistence a refusal could mimic.
+// Registry is the validated, immutable operation registry. newRegistry is the
+// only way to build one, and mustNewRegistry installs it at package init, so a
+// malformed policy table aborts initialization instead of surfacing later as a
+// runtime authorization anomaly. Production lookups read this, never the raw
+// table.
+type Registry struct {
+	ops map[Operation]opSpec
+}
+
+// authorizationSpec is the read-only portion needed to mint a proof. Its only
+// mutable field is defensively copied by authorizationSpec(), so a caller
+// cannot alter the installed registry after validation.
+type authorizationSpec struct {
+	class   Class
+	level   domain.Level
+	formula Formula
+}
+
+func (r *Registry) authorizationSpec(op Operation) (authorizationSpec, bool) {
+	spec, ok := r.ops[op]
+	if !ok {
+		return authorizationSpec{}, false
+	}
+	return authorizationSpec{
+		class:   spec.class,
+		level:   spec.level,
+		formula: append(Formula(nil), spec.formula...),
+	}, true
+}
+
+// permitsStoreOp keeps the mutable store-op set inside Registry. Unknown
+// operations and store ops both return false, preserving fail-closed lookups.
+func (r *Registry) permitsStoreOp(operation Operation, storeOp StoreOp) bool {
+	spec, ok := r.ops[operation]
+	return ok && spec.storeOps[storeOp]
+}
+
+// permitsEvent keeps the mutable event slice inside Registry. Unknown
+// operations and events both return false.
+func (r *Registry) permitsEvent(operation Operation, event audit.EventType) bool {
+	spec, ok := r.ops[operation]
+	return ok && slices.Contains(spec.events, event)
+}
+
+// registrableClasses is the set of classes an operation registry row may carry.
+// Production mints only tenant- and instance-class operations; the
+// unauthenticated, system and stub classes are wire/verb classifications
+// (classify.go), never operation rows, so a row bearing one is a registry
+// programming error.
+var registrableClasses = map[Class]bool{
+	ClassTenant:   true,
+	ClassInstance: true,
+}
+
+// tenantLevel reports whether l is a chain depth a tenant operation may address.
+func tenantLevel(l domain.Level) bool {
+	return l == domain.LevelOrg || l == domain.LevelProject || l == domain.LevelEnv
+}
+
+// validLevel reports whether l is one of the four scope depths.
+func validLevel(l domain.Level) bool {
+	return l == domain.LevelNone || tenantLevel(l)
+}
+
+// validateSpec enforces every in-package registry invariant for one row.
+func validateSpec(op Operation, spec opSpec) error {
+	if !registrableClasses[spec.class] {
+		return fmt.Errorf("authz registry: operation %q has unregisterable class %d", op, spec.class)
+	}
+	// Class/level pairing: a tenant operation addresses one of the three tenant
+	// depths; an instance operation addresses no tenant object, so its level is
+	// none.
+	switch spec.class {
+	case ClassTenant:
+		if !tenantLevel(spec.level) {
+			return fmt.Errorf("authz registry: tenant operation %q has non-tenant level %d", op, spec.level)
+		}
+	case ClassInstance:
+		if spec.level != domain.LevelNone {
+			return fmt.Errorf("authz registry: instance operation %q must address level none, has %d", op, spec.level)
+		}
+	}
+	// Deny-by-default: no formula, no operation.
+	if len(spec.formula) == 0 {
+		return fmt.Errorf("authz registry: operation %q has an empty formula", op)
+	}
+	for _, atom := range spec.formula {
+		if !domain.IsCapability(atom.Cap) {
+			return fmt.Errorf("authz registry: operation %q names unknown capability %q", op, atom.Cap)
+		}
+		if !validLevel(atom.At) {
+			return fmt.Errorf("authz registry: operation %q has an atom at invalid level %d", op, atom.At)
+		}
+		// An atom cannot sit deeper than the capability's own deepest grantable
+		// level or the chain the operation addresses. Instance operations address
+		// LevelNone, so this also keeps every InstanceProof formula instance-scoped.
+		if deepest, _ := domain.DeepestLevel(atom.Cap); atom.At > deepest {
+			return fmt.Errorf("authz registry: operation %q has capability %q at level %d deeper than its deepest %d", op, atom.Cap, atom.At, deepest)
+		}
+		if atom.At > spec.level {
+			return fmt.Errorf("authz registry: operation %q (depth %d) has an atom at deeper level %d", op, spec.level, atom.At)
+		}
+	}
+	// Store ops: presence in the map must mean licensed (no `false` entries), and
+	// every key must be a known store operation. That the method exists on the
+	// store is invariant 6's reflection cross-check, which needs internal/store
+	// and so stays in internal/isolation; the closed catalogue here is the
+	// in-package half.
+	for so, licensed := range spec.storeOps {
+		if !licensed {
+			return fmt.Errorf("authz registry: operation %q has a false store-op entry %q — presence must mean licensed", op, so)
+		}
+		if !storeOpCatalogue[so] {
+			return fmt.Errorf("authz registry: operation %q names unknown store op %q", op, so)
+		}
+	}
+	if err := validateAuditDisposition(op, spec); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateAuditDisposition requires exactly one audit disposition — events,
+// auditedNone, or reviewExempt — and enforces the shape rules that go with each.
+func validateAuditDisposition(op Operation, spec opSpec) error {
+	n := 0
+	if len(spec.events) > 0 {
+		n++
+	}
+	if spec.auditedNone {
+		n++
+	}
+	if spec.reviewExempt {
+		n++
+	}
+	if n != 1 {
+		return fmt.Errorf("authz registry: operation %q must carry exactly one audit disposition (events, audited-none, or reviewed exemption), has %d", op, n)
+	}
+	if spec.reviewExempt && op != OpDefinitionsPlanGet && op != OpSCIMDiscovery {
+		return fmt.Errorf("authz registry: operation %q claims an unreviewed audit exemption", op)
+	}
+	// Each declared event must be a non-empty, registered type, and no type may
+	// be declared twice. Registration is the closed audit registry (audit.Spec).
+	seen := map[audit.EventType]bool{}
+	for _, et := range spec.events {
+		if et == "" {
+			return fmt.Errorf("authz registry: operation %q declares an empty audit event type", op)
+		}
+		if _, ok := audit.Spec(et); !ok {
+			return fmt.Errorf("authz registry: operation %q declares unregistered audit event %q", op, et)
+		}
+		if seen[et] {
+			return fmt.Errorf("authz registry: operation %q declares duplicate audit event %q", op, et)
+		}
+		seen[et] = true
+	}
+	// audited-none only under the default-deny permit rule: tenant class, a
+	// non-empty read-only conjunction, mutating nothing.
+	if spec.auditedNone {
+		if spec.class != ClassTenant {
+			return fmt.Errorf("authz registry: operation %q is audited-none on a non-tenant class", op)
+		}
+		for _, atom := range spec.formula {
+			if atom.Cap != domain.CapRead {
+				return fmt.Errorf("authz registry: operation %q is audited-none with a non-read atom %q", op, atom.Cap)
+			}
+		}
+		for so := range spec.storeOps {
+			if !readOnlyStoreOps[so] {
+				return fmt.Errorf("authz registry: operation %q is audited-none but mutates through %q", op, so)
+			}
+		}
+	}
+	return nil
+}
+
+// cloneSpec deep-copies the mutable fields of a spec so the immutable registry
+// shares no slice or map with operationTable or a caller's fixture: a later
+// mutation of the source cannot reach through into an installed row.
+func cloneSpec(spec opSpec) opSpec {
+	out := spec
+	out.formula = append(Formula(nil), spec.formula...)
+	out.events = append([]audit.EventType(nil), spec.events...)
+	if spec.storeOps != nil {
+		out.storeOps = make(map[StoreOp]bool, len(spec.storeOps))
+		for so, v := range spec.storeOps {
+			out.storeOps[so] = v
+		}
+	}
+	return out
+}
+
+// newRegistry validates the policy table and returns the immutable registry.
+// Adding an operation therefore meets every invariant here, in one place. Key
+// uniqueness is enforced one step earlier: operationTable is a map literal, so
+// the compiler rejects a duplicate operation key.
+func newRegistry(table map[Operation]opSpec) (*Registry, error) {
+	ops := make(map[Operation]opSpec, len(table))
+	for op, spec := range table {
+		if op == "" {
+			return nil, fmt.Errorf("authz registry: empty operation key")
+		}
+		if err := validateSpec(op, spec); err != nil {
+			return nil, err
+		}
+		ops[op] = cloneSpec(spec)
+	}
+	return &Registry{ops: ops}, nil
+}
+
+func mustNewRegistry(table map[Operation]opSpec) *Registry {
+	r, err := newRegistry(table)
+	if err != nil {
+		panic(err)
+	}
+	return r
+}
+
+// registry is the one installed operation registry. A validation failure here
+// aborts package initialization, so no importer can wire up an invalid registry.
+var registry = mustNewRegistry(operationTable)
+
+// operationTable is the reviewable operation policy table. Every formula is
+// built from capability atoms the permission-model ADR already fixes — this
+// ticket adds no atom and invents no capability. Registry completeness is
+// invariant 6. The table is never read directly: newRegistry validates it into
+// the immutable registry below, so no lookup can observe an unvalidated row.
+var operationTable = map[Operation]opSpec{
+	// The Org aggregate (#48). Creation and enumeration are instance-scoped: a
+	// create has no parent tenant to authorize against, and an enumeration of
+	// every org is cross-tenant by definition. Creation also needs
+	// manage-members because it atomically grants the creator org-admin access.
 	OpOrgCreate: {
-		class:    ClassInstance,
-		formula:  Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
+		class: ClassInstance,
+		formula: Formula{
+			{Cap: domain.CapInstanceConfig, At: domain.LevelNone},
+			{Cap: domain.CapManageMembers, At: domain.LevelNone},
+		},
 		storeOps: map[StoreOp]bool{StoreOrgsCreate: true, StoreAuditInstanceInsert: true},
 		// Org names are not secret-scanned (#74, ADR §2 Surface 2 is bundle
 		// content; an org is not) — no scanning.* event is emitted here.
@@ -1667,10 +1972,11 @@ var operations = map[Operation]opSpec{
 	// apply carry the events — so it is name-pinned in the audit exemption fixture
 	// rather than emitting a read event once per poll.
 	OpDefinitionsPlanGet: {
-		class:    ClassTenant,
-		level:    domain.LevelProject,
-		formula:  Formula{{Cap: domain.CapDefinitionsEdit, At: domain.LevelProject}},
-		storeOps: map[StoreOp]bool{StoreDefinitionsPlanGet: true},
+		class:        ClassTenant,
+		level:        domain.LevelProject,
+		formula:      Formula{{Cap: domain.CapDefinitionsEdit, At: domain.LevelProject}},
+		storeOps:     map[StoreOp]bool{StoreDefinitionsPlanGet: true},
+		reviewExempt: true, // audited_exemptions.json — immutable plan read, no event
 	},
 	// Apply is the one write path a git-mode project allows. It executes the
 	// whole final definition set through the STORE layer inside one transaction,
@@ -3203,10 +3509,11 @@ var operations = map[Operation]opSpec{
 	// exemption entry: one for this operation and one per discovery route, each
 	// carrying its reason, each failing the build if removed without a mapping.
 	OpSCIMDiscovery: {
-		class:    ClassTenant,
-		level:    domain.LevelOrg,
-		formula:  scimWireFormula,
-		storeOps: scimDiscoveryOps(),
+		class:        ClassTenant,
+		level:        domain.LevelOrg,
+		formula:      scimWireFormula,
+		storeOps:     scimDiscoveryOps(),
+		reviewExempt: true, // audited_exemptions.json — discovery docs carry no tenant data
 	},
 	// The serving side of the directory tier (#71). The formula is bare
 	// `instance-directory` at instance scope, evaluated on the CONNECTION
@@ -3552,8 +3859,8 @@ type RegistryFacts struct{}
 
 // Operations lists every registered operation and its class.
 func (RegistryFacts) Operations() map[Operation]Class {
-	out := make(map[Operation]Class, len(operations))
-	for op, spec := range operations {
+	out := make(map[Operation]Class, len(registry.ops))
+	for op, spec := range registry.ops {
 		out[op] = spec.class
 	}
 	return out
@@ -3563,7 +3870,7 @@ func (RegistryFacts) Operations() map[Operation]Class {
 // addresses, for registry well-formedness checks.
 func (RegistryFacts) TenantOperations() map[Operation]domain.Level {
 	out := map[Operation]domain.Level{}
-	for op, spec := range operations {
+	for op, spec := range registry.ops {
 		if spec.class == ClassTenant {
 			out[op] = spec.level
 		}
@@ -3575,7 +3882,7 @@ func (RegistryFacts) TenantOperations() map[Operation]domain.Level {
 // operation registry, keyed by which operations may invoke them.
 func (RegistryFacts) StoreOps() map[StoreOp][]Operation {
 	out := make(map[StoreOp][]Operation)
-	for op, spec := range operations {
+	for op, spec := range registry.ops {
 		for so := range spec.storeOps {
 			out[so] = append(out[so], op)
 		}
@@ -3586,8 +3893,8 @@ func (RegistryFacts) StoreOps() map[StoreOp][]Operation {
 // Formulas returns each operation's formula; a registered operation with an
 // empty formula fails invariant 6.
 func (RegistryFacts) Formulas() map[Operation]Formula {
-	out := make(map[Operation]Formula, len(operations))
-	for op, spec := range operations {
+	out := make(map[Operation]Formula, len(registry.ops))
+	for op, spec := range registry.ops {
 		out[op] = append(Formula(nil), spec.formula...)
 	}
 	return out
@@ -3633,8 +3940,8 @@ type AuditMapping struct {
 
 // AuditMappings returns every registered operation's audit linkage.
 func (RegistryFacts) AuditMappings() map[Operation]AuditMapping {
-	out := make(map[Operation]AuditMapping, len(operations))
-	for op, spec := range operations {
+	out := make(map[Operation]AuditMapping, len(registry.ops))
+	for op, spec := range registry.ops {
 		ro := true
 		for so := range spec.storeOps {
 			if !readOnlyStoreOps[so] {
@@ -3678,8 +3985,8 @@ var levelNames = map[domain.Level]string{
 // FormulaPins returns the whole operation registry in a stable, diffable
 // shape, sorted by operation name.
 func (RegistryFacts) FormulaPins() []FormulaPin {
-	out := make([]FormulaPin, 0, len(operations))
-	for op, spec := range operations {
+	out := make([]FormulaPin, 0, len(registry.ops))
+	for op, spec := range registry.ops {
 		pin := FormulaPin{
 			Operation:          string(op),
 			Class:              classNames[spec.class],

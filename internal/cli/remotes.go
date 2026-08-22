@@ -93,11 +93,14 @@ func runRemote(ctx context.Context, ios IO, args []string) error {
 		// A TYPED-NAME confirmation (ADR § Parity), because removal destroys
 		// the stored credential and the snapshot with the entry, and re-adding
 		// costs the whole ceremony again on both instances.
-		ok, err := disclose.ConfirmName(
+		session, err := ios.terminalSession()
+		if err != nil {
+			return failf(ExitRefused, "confirming the removal: %v", err)
+		}
+		ok, err := session.ConfirmName(
 			fmt.Sprintf("removing remote %q destroys its stored credential and its snapshot.\n"+
 				"the URL and pin are immutable, so re-adding means the full ceremony again.", positional[0]),
-			positional[0],
-			disclose.Options{Stdout: ios.Stdout, OpenTerminal: ios.OpenTerminal})
+			positional[0])
 		if err != nil {
 			return failf(ExitRefused, "confirming the removal: %v", err)
 		}
@@ -145,8 +148,6 @@ func addRemote(ctx context.Context, ios IO, st *State, flags commonFlags, f Form
 			"    the directory channel is TLS with a pinned key; there is no fingerprint to "+
 			"confirm without it, and the credential would cross an unencrypted wire.", rawURL)
 	}
-	deliver := disclose.Options{Stdout: ios.Stdout, OpenTerminal: ios.OpenTerminal}
-
 	pin, err := FetchIdentity(origin)
 	if err != nil {
 		return failf(ExitRefused, "hikyo remote add: connecting to %s: %v", origin, err)
@@ -160,8 +161,12 @@ func addRemote(ctx context.Context, ios IO, st *State, flags commonFlags, f Form
 	// The fingerprint goes to the TERMINAL and the answer comes back from it,
 	// so a log-capturing pipe sees neither the key being trusted nor the
 	// intent to trust it.
-	ok, err := disclose.Confirm(
-		fmt.Sprintf("%s presents key fingerprint\n    %s\ntrust it?", origin, pin), deliver)
+	session, err := ios.terminalSession()
+	if err != nil {
+		return failf(ExitRefused, "hikyo remote add: %v (this command is interactive-only)", err)
+	}
+	ok, err := session.Confirm(
+		fmt.Sprintf("%s presents key fingerprint\n    %s\ntrust it?", origin, pin))
 	if err != nil {
 		return failf(ExitRefused, "hikyo remote add: %v (this command is interactive-only)", err)
 	}
@@ -226,7 +231,7 @@ func addRemote(ctx context.Context, ios IO, st *State, flags commonFlags, f Form
 	return Render(ios.Stdout, f, remoteTable(apigen.RemoteList{Items: []apigen.Remote{out}, Count: 1}))
 }
 
-func runRemoteCredential(ctx context.Context, ios IO, args []string) error {
+func runRemoteCredential(ctx context.Context, ios IO, args []string) (returnErr error) {
 	sub, rest, err := subverb("remote-credential", args, "create", "list", "show", "revoke")
 	if err != nil {
 		return err
@@ -293,18 +298,19 @@ func runRemoteCredential(ctx context.Context, ios IO, args []string) error {
 		}
 	}
 
-	// Preflight BEFORE the mint, for the reason every display-once path
-	// preflights: a credential minted with nowhere to put it has been
-	// destroyed and the side effect performed, because the server will never
-	// hand it back.
+	// Reserve the destination BEFORE the mint. The server will never return
+	// this display-once value again.
 	deliver := disclose.Options{
 		OutputFile: outputFile, DangerouslyPrint: dangerous,
-		Stdout: ios.Stdout, OpenTerminal: ios.OpenTerminal,
+		Stdout: ios.Stdout,
 	}
+	var sink *disclose.PreparedSink
 	if sub == "create" {
-		if err := disclose.Preflight(deliver); err != nil {
+		sink, err = ios.prepareDisclosure(deliver)
+		if err != nil {
 			return failf(ExitRefused, "the credential has nowhere to go: %v", err)
 		}
+		defer sink.AbortOnReturn(&returnErr)
 	}
 
 	client, _, _, err := authenticatedTarget(st, ios, flags)
@@ -335,7 +341,7 @@ func runRemoteCredential(ctx context.Context, ios IO, args []string) error {
 	if err := client.Do(ctx, http.MethodPost, connectionsPath, want, &out); err != nil {
 		return err
 	}
-	if _, err := disclose.Emit("hikyo directory credential (shown once)", out.Value, deliver); err != nil {
+	if _, err := sink.WriteOnce("hikyo directory credential (shown once)", out.Value); err != nil {
 		return failf(ExitRefused, "disclosing the credential: %v", err)
 	}
 	if out.Clamped {

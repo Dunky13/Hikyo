@@ -252,17 +252,17 @@ func scenarioDeclarationFixtures(t *testing.T, db *store.DB) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		compiled, err := schema.Compile(stored.Declaration)
+		compiled, err := schema.CompileClassified(schema.Classification(stored.Classification), stored.Declaration)
 		if err != nil {
 			t.Fatalf("%s: the STORED declaration no longer compiles: %v", tc.name, err)
 		}
 		for _, value := range tc.valid {
-			if v := compiled.Validate(value, schema.Config); !v.Valid {
+			if v := compiled.Validate(value); !v.Valid {
 				t.Errorf("%s: %q refused: %+v", tc.name, value, v.Errors)
 			}
 		}
 		for _, value := range tc.invalid {
-			if v := compiled.Validate(value, schema.Config); v.Valid {
+			if v := compiled.Validate(value); v.Valid {
 				t.Errorf("%s: %q accepted", tc.name, value)
 			}
 		}
@@ -761,6 +761,52 @@ func scenarioKeyGroups(t *testing.T, db *store.DB) {
 	}
 	if err := keys.Delete(t.Context(), actor, scope, user.ID); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// scenarioGroupMembershipRebuildsPublishIndex proves a membership write cannot
+// leave the transaction-local group snapshot stale. The second move makes an
+// already-set group partial in the same transaction; publish must see the new
+// member, refuse, and roll the membership back.
+func scenarioGroupMembershipRebuildsPublishIndex(t *testing.T, db *store.DB) {
+	keys := &service.Keys{DB: db, Keyring: sharedKeyring(t, db)}
+	groups := &service.KeyGroups{DB: db, Keyring: sharedKeyring(t, db)}
+	envs := &service.Environments{DB: db, Keyring: sharedKeyring(t, db)}
+	values := &service.Values{DB: db, Keyring: sharedKeyring(t, db)}
+	who, scope := tenantFixture(t, db, "group-index-rebuild")
+	actor := service.LocalPrincipal(who)
+
+	env, err := envs.Create(t.Context(), actor, scope, "prod", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	envScope := scope
+	envScope.Env = domain.EnvID(env.ID)
+	group, err := groups.Create(t.Context(), actor, scope, "database", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	user := mustKey(t, keys, actor, scope, "DB_USER", string(schema.Config), schema.DefaultPresenceRules())
+	password := mustKey(t, keys, actor, scope, "DB_PASSWORD", string(schema.Config), schema.DefaultPresenceRules())
+	publishValue(t, db, values, actor, envScope, user.Name, "app")
+
+	if _, err := keys.SetGroup(t.Context(), actor, scope, user.ID, group.ID); err != nil {
+		t.Fatalf("moving the set key into an inert group: %v", err)
+	}
+	if _, err := keys.SetGroup(t.Context(), actor, scope, password.ID, group.ID); !errors.Is(err, domain.ErrInvalid) {
+		t.Fatalf("same-transaction membership snapshot missed a new absent member: %v", err)
+	}
+	afterRefusal, err := keys.Get(t.Context(), actor, scope, password.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterRefusal.GroupID != "" {
+		t.Fatalf("refused membership move committed group %q", afterRefusal.GroupID)
+	}
+
+	publishValue(t, db, values, actor, envScope, password.Name, "pw")
+	if _, err := keys.SetGroup(t.Context(), actor, scope, password.ID, group.ID); err != nil {
+		t.Fatalf("moving the now-set member into the group: %v", err)
 	}
 }
 

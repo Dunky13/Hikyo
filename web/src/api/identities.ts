@@ -1,27 +1,19 @@
 import {
-  createEnvGrant,
-  createFederatedBinding,
-  listKeys,
-  listMachineCredentials,
-  listProjectGrants,
-  listServiceAccounts,
-  mintMachineCredential,
-  revokeMachineCredential,
-  type FederatedClaimPin,
-} from '@hikyo/client';
-import {
-  zFederatedBinding,
-  zGrantList,
-  zGrantResult,
-  zKeyList,
-  zMachineCredentialList,
-  zMintCredentialResult,
-  zServiceAccountList,
-} from '@hikyo/zod';
+  createEnvGrantOp,
+  createFederatedBindingOp,
+  listKeysOp,
+  listMachineCredentialsOp,
+  listProjectGrantsOp,
+  listServiceAccountsOp,
+  mintMachineCredentialOp,
+  revokeMachineCredentialOp,
+} from '@hikyo/operations';
+import type { FederatedClaimPin } from '@hikyo/client';
+import { zGrantList, zKeyList, zMachineCredentialList, zServiceAccountList } from '@hikyo/zod';
 import { useMutation, useQueries, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import type { z } from 'zod';
 
-import { ApiError, ok, parsed } from './client.ts';
+import { ApiError, ok, parsed, parsedPick } from './client.ts';
 import { useTransport } from './transport.tsx';
 
 /**
@@ -72,10 +64,7 @@ export function useServiceAccounts(
   return useQuery({
     queryKey: accountsKey(p),
     queryFn: () =>
-      parsed(
-        listServiceAccounts({ path: { org: p.org, project: p.project }, ...transport }),
-        zServiceAccountList,
-      ),
+      parsed(listServiceAccountsOp, { path: { org: p.org, project: p.project }, ...transport }),
     retry: false,
   });
 }
@@ -93,7 +82,7 @@ export function useProjectGrants(p: ProjectRef): UseQueryResult<z.infer<typeof z
   return useQuery({
     queryKey: projectGrantsKey(p),
     queryFn: () =>
-      parsed(listProjectGrants({ path: { org: p.org, project: p.project } }), zGrantList),
+      parsed(listProjectGrantsOp, { path: { org: p.org, project: p.project } }),
     retry: false,
   });
 }
@@ -112,7 +101,7 @@ export function useProjectGrants(p: ProjectRef): UseQueryResult<z.infer<typeof z
 export function useKeyCatalogue(p: ProjectRef): UseQueryResult<z.infer<typeof zKeyList>> {
   return useQuery({
     queryKey: ['key-catalogue', p.org, p.project] as const,
-    queryFn: () => parsed(listKeys({ path: { org: p.org, project: p.project } }), zKeyList),
+    queryFn: () => parsed(listKeysOp, { path: { org: p.org, project: p.project } }),
     retry: false,
   });
 }
@@ -138,12 +127,9 @@ export function useCredentials(
     queries: accounts.map((sa) => ({
       queryKey: credentialsKey(p, sa.id),
       queryFn: () =>
-        parsed(
-          listMachineCredentials({
+        parsed(listMachineCredentialsOp, {
             path: { org: p.org, project: p.project, serviceAccount: sa.id },
           }),
-          zMachineCredentialList,
-        ),
       retry: false,
     })),
     combine: (results) => ({
@@ -166,7 +152,7 @@ export function useCredentials(
  * operator has to be told the ceiling shortened what they asked for rather than
  * discover it when the credential dies early.
  */
-const zMinted = zMintCredentialResult.pick({ value: true, clamped: true });
+const zMinted = mintMachineCredentialOp.response.pick({ value: true, clamped: true });
 
 /**
  * mintCredential is the display-once mint, and it is deliberately NOT a
@@ -183,12 +169,13 @@ export async function mintCredential(
   p: ProjectRef,
   serviceAccount: string,
 ): Promise<z.infer<typeof zMinted>> {
-  return parsed(
-    mintMachineCredential({
+  return parsedPick(
+    mintMachineCredentialOp,
+    {
       path: { org: p.org, project: p.project, serviceAccount },
       body: {},
-    }),
-    zMinted,
+    },
+    { value: true, clamped: true },
   );
 }
 
@@ -229,16 +216,14 @@ export function useRevokeCredential(p: ProjectRef) {
   const queries = useQueryClient();
   return useMutation({
     mutationFn: async (input: { serviceAccount: string; credential: string }) => {
-      await ok(
-        revokeMachineCredential({
+      await ok(revokeMachineCredentialOp, {
           path: {
             org: p.org,
             project: p.project,
             serviceAccount: input.serviceAccount,
             credential: input.credential,
           },
-        }),
-      );
+        });
     },
     onSuccess: (_void, input) => {
       void queries.invalidateQueries({ queryKey: credentialsKey(p, input.serviceAccount) });
@@ -259,8 +244,7 @@ export function useCreateBinding(p: ProjectRef) {
       requiredClaims: readonly FederatedClaimPin[];
       lifetimeSeconds?: number;
     }) =>
-      parsed(
-        createFederatedBinding({
+      parsed(createFederatedBindingOp, {
           path: { org: p.org, project: p.project, serviceAccount: input.serviceAccount },
           body: {
             issuer: input.issuer,
@@ -272,8 +256,6 @@ export function useCreateBinding(p: ProjectRef) {
               : { lifetime_seconds: input.lifetimeSeconds }),
           },
         }),
-        zFederatedBinding,
-      ),
     onSuccess: (_result, input) => {
       void queries.invalidateQueries({ queryKey: credentialsKey(p, input.serviceAccount) });
       // A binding IS a live credential, so the account's `live_credentials` —
@@ -293,13 +275,10 @@ export function useGrantEnvironment(p: ProjectRef) {
   const queries = useQueryClient();
   return useMutation({
     mutationFn: (input: { environment: string; principal: string; capability: string }) =>
-      parsed(
-        createEnvGrant({
+      parsed(createEnvGrantOp, {
           path: { org: p.org, project: p.project, environment: input.environment },
           body: { principal: input.principal, capability: input.capability },
         }),
-        zGrantResult,
-      ),
     onSuccess: () => queries.invalidateQueries({ queryKey: projectGrantsKey(p) }),
   });
 }

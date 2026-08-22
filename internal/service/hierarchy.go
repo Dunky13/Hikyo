@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -146,7 +147,12 @@ type Orgs struct {
 	DB *store.DB
 }
 
-// Create publishes a new org through the transactional boundary.
+// Create publishes a new org and applies the org-admin template to its creator
+// through one transactional boundary. Creation requires both instance-config
+// and instance manage-members: without the second conjunct, an instance-config
+// holder could create a tenant and self-escalate into its secrets. The grant
+// invalidates the creator's sessions like every privilege increase; the new
+// authority becomes usable on their next login.
 //
 // Org names and metadata are NOT secret-scanned (#74, ADR §2 Surface 2): the
 // scan surface is "any string in the DEFINITIONS MODEL", and an org is not
@@ -163,15 +169,21 @@ func (s *Orgs) Create(ctx context.Context, actor Actor, name string, active bool
 	if err != nil {
 		return Org{}, err
 	}
+	now := time.Now().UTC()
 	org := store.Org{
 		ID:        id,
 		Name:      name,
 		Active:    active,
 		Metadata:  metadata,
-		CreatedAt: store.CanonTime(time.Now()),
+		CreatedAt: store.CanonTime(now),
 	}
-	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
-		caller, err := actor.resolve(ctx, az, time.Now().UTC())
+	// Session invalidation updates the creator's shared generation row. Admit
+	// org creates before postgres takes a SERIALIZABLE snapshot so concurrent
+	// creates do not spend their bounded retries waiting on stale snapshots.
+	// This is a low-rate control-plane operation; sqlite already admits one
+	// writer at a time through BEGIN IMMEDIATE.
+	err = tx.WriteSerialized(ctx, s.DB, "hikyo:org-create", func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+		caller, err := actor.resolve(ctx, az, now)
 		if err != nil {
 			return err
 		}
@@ -188,7 +200,24 @@ func (s *Orgs) Create(ctx context.Context, actor Actor, name string, active bool
 		if err != nil {
 			return err
 		}
-		return r.Audit().InsertInstance(ctx, p, ev)
+		if err := r.Audit().InsertInstance(ctx, p, ev); err != nil {
+			return err
+		}
+
+		scope := domain.Scope{Org: domain.OrgID(org.ID)}
+		ops, level, err := opsFor(scope)
+		if err != nil {
+			return err
+		}
+		grantProof, err := az.Authorize(ctx, caller, ops.template, scope)
+		if err != nil {
+			return err
+		}
+		grants := &Grants{DB: s.DB, Now: func() time.Time { return now }}
+		_, err = grants.applyTemplate(
+			ctx, r, az, grantProof, caller, domain.TemplateAdmin, caller.Principal, scope, level,
+		)
+		return err
 	})
 	if err != nil {
 		return Org{}, err
@@ -385,10 +414,11 @@ func (s *Orgs) Rename(ctx context.Context, actor Actor, org domain.OrgID, name s
 	return orgOf(out), nil
 }
 
-// Delete removes an org. It never cascades: an org that still has projects (or
-// grants pointing into it) is refused by the ancestry constraints, which
-// surface as a conflict. Deleting a tenant's contents out from under it is a
-// different, auditable operation and not one this ticket invents.
+// Delete removes an org. Authority scoped inside the org is part of the org,
+// so it is released in the same transaction; otherwise the creator-admin
+// grants installed by Create would make even a brand-new org undeletable.
+// Other descendants still do not cascade: a project (or any content below it)
+// keeps the ancestry constraint live and the whole transaction rolls back.
 func (s *Orgs) Delete(ctx context.Context, actor Actor, org domain.OrgID) error {
 	return tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		caller, err := actor.resolve(ctx, az, time.Now().UTC())
@@ -402,6 +432,40 @@ func (s *Orgs) Delete(ctx context.Context, actor Actor, org domain.OrgID) error 
 		before, err := r.Orgs().Get(ctx, p)
 		if err != nil {
 			return err
+		}
+		lines, err := az.GrantLinesInOrg(ctx, string(org))
+		if err != nil {
+			return err
+		}
+		principals := make([]domain.PrincipalID, 0, len(lines))
+		seen := make(map[domain.PrincipalID]struct{}, len(lines))
+		for _, line := range lines {
+			if _, ok := seen[line.Principal]; ok {
+				continue
+			}
+			seen[line.Principal] = struct{}{}
+			principals = append(principals, line.Principal)
+		}
+		slices.Sort(principals)
+		for _, principal := range principals {
+			if err := az.LockTargetPrincipal(ctx, principal); err != nil {
+				return err
+			}
+		}
+		for _, line := range lines {
+			for _, origin := range line.Origins {
+				if _, err := az.ReleaseGrantOrigin(ctx, line.ID, line.Principal, origin); err != nil {
+					return err
+				}
+			}
+			if _, err := az.DeleteGrantRow(ctx, line.ID, line.Principal); err != nil {
+				return err
+			}
+		}
+		for _, principal := range principals {
+			if err := invalidateGrantChange(ctx, az, principal); err != nil {
+				return err
+			}
 		}
 		if err := r.Orgs().Delete(ctx, p); err != nil {
 			return err
@@ -800,7 +864,7 @@ func (s *Environments) create(ctx context.Context, actor Actor, scope domain.Sco
 			// can be evaluated against the environment being created — which
 			// is what the ADR requires it to be evaluated against.
 			clone, err = cloneInto(ctx, r, az, caller, sealer, s.Keyring, s.Scan, scope, sourceEnvID, created.ID,
-				ceremonyGate(ctx, s.Auth, az, caller, PurposeCopy, sourceEnvID))
+				ceremonyGate(ctx, s.Auth, az, caller, copyIntentBuilder(sourceEnvID)))
 			if err != nil {
 				return err
 			}
@@ -813,7 +877,7 @@ func (s *Environments) create(ctx context.Context, actor Actor, scope domain.Sco
 		// environment born invalid.
 		newScope := domain.Scope{Org: scope.Org, Project: scope.Project, Env: domain.EnvID(created.ID)}
 		published, err = republish(ctx, r, az, caller, sealer, s.Keyring, newScope,
-			store.CanonTime(time.Now()), "environment-create")
+			store.CanonTime(time.Now()), "environment-create", &groupIndexPhase{})
 		return err
 	})
 	if err != nil {

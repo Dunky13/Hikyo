@@ -75,12 +75,16 @@ func (a *API) writeRequestError(w http.ResponseWriter, r *http.Request, _ error)
 	// credential, or the wrong one, gets the uniform 401 and learns nothing
 	// about the shape of what it sent. Only an authenticated caller is told the
 	// body was malformed, and then in the RFC 7644 shape rather than Hikyo's.
-	if operation, ok := api.OperationIDFor(r); ok && api.IsSCIMWireOperation(operation) {
+	//
+	// The operation is read from the CONTEXT the admission middleware attached,
+	// not matched again: this leg only ever runs on a request that already
+	// passed contract validation, and one match per request is the rule.
+	if operation, ok := api.OperationFromContext(r.Context()); ok && api.IsSCIMWireOperation(operation.ID) {
 		a.writeSCIMRequestError(w, r,
 			scimproto.ErrInvalidSyntax("The request body is not a valid SCIM resource."))
 		return
 	}
-	writeError(w, apigen.ErrorCodeBadRequest, "body")
+	writeError(w, wirePolicyForCode(apigen.ErrorCodeBadRequest), "body")
 }
 
 // writeSCIMRequestError renders a pre-handler refusal on a SCIM wire route,
@@ -105,13 +109,14 @@ func (a *API) writeSCIMRequestError(w http.ResponseWriter, r *http.Request, refu
 // login", "list orgs"), which is a second name for the operation that can drift
 // from the first; the contract already has the authoritative one.
 func (a *API) writeHandlerError(w http.ResponseWriter, r *http.Request, err error) {
-	code := classify(err)
-	if code == apigen.ErrorCodeInternal {
-		operation, ok := api.OperationIDFor(r)
+	policy := wireErrorFor(err)
+	if policy.code == apigen.ErrorCodeInternal {
+		op, ok := api.OperationFromContext(r.Context())
+		name := op.ID
 		if !ok {
-			operation = "unrouted request"
+			name = "unrouted request"
 		}
-		a.fault(r.Context(), operation, err)
+		a.fault(r.Context(), name, err)
 	}
 	// A service refusal may carry a caller-safe detail (the clone abort names
 	// the stranded keys; a duplicate-item refusal names the duplicate; the
@@ -119,27 +124,22 @@ func (a *API) writeHandlerError(w http.ResponseWriter, r *http.Request, err erro
 	// errorBody honours it only for bad_request and conflict, so a detail on any
 	// other code is dropped — and detail is only ever set by an explicit
 	// SafeDetail carrier, so a plain refusal on those codes still stays uniform.
-	detail := ""
-	var sd interface{ SafeDetail() string }
-	if errors.As(err, &sd) {
-		detail = sd.SafeDetail()
-	}
 	// A Surface-2 secret-scanning refusal (#74) carries a typed findings array
 	// alongside the bad_request code: each blocked field's locator, rule id and a
 	// fresh content-bound acknowledgement token. It is machine-consumable and
 	// frozen; never the matched text.
 	var sf interface{ Findings() []service.Finding }
 	if errors.As(err, &sf) {
-		body := errorBody(code, detail)
+		body := policy.body(err)
 		if fs := wireScanFindings(sf.Findings()); len(fs) > 0 {
 			body.Error.Findings = &fs
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(statuses[code])
+		w.WriteHeader(policy.status)
 		_ = json.NewEncoder(w).Encode(body)
 		return
 	}
-	writeError(w, code, detail)
+	writeError(w, policy, safeDetailOf(err))
 }
 
 // ---------------------------------------------------------------------------
