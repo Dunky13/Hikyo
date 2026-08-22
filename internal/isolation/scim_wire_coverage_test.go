@@ -30,7 +30,7 @@ func runSCIMWirePaging(t *testing.T, db *store.DB) {
 
 	const total = 5
 	for i := range total {
-		if _, err := s.CreateUser(ctx, wire, orgA, bindingID, service.SCIMUserInput{
+		if _, err := s.CreateUser(ctx, wire, orgA, bindingID, service.DesiredUser{Active: true,
 			UserName:   fmt.Sprintf("page-%d@example.test", i),
 			ExternalID: fmt.Sprintf("page-%d", i), SubjectRaw: fmt.Sprintf("page-%d", i),
 		}); err != nil {
@@ -166,7 +166,7 @@ func runSCIMPatchAtomicityOverTheWire(t *testing.T, db *store.DB) {
 	bindingID, token := newSCIMBinding(t, db, "okta")
 	wire := service.SCIMCredentialActor(token, bindingID)
 
-	user, err := s.CreateUser(ctx, wire, orgA, bindingID, service.SCIMUserInput{
+	user, err := s.CreateUser(ctx, wire, orgA, bindingID, service.DesiredUser{Active: true,
 		UserName: "atomic@example.test", ExternalID: "ext-atomic", SubjectRaw: "ext-atomic",
 		Attributes: map[string]any{"nickName": "before"},
 	})
@@ -197,11 +197,10 @@ func runSCIMPatchAtomicityOverTheWire(t *testing.T, db *store.DB) {
 	// operations must leave the LAST one's state, not an arbitrary one.
 	off, on := false, true
 	if _, err := s.PatchUser(ctx, wire, orgA, bindingID, user.ID,
-		service.SCIMUserInput{Active: &off, Patch: true}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.PatchUser(ctx, wire, orgA, bindingID, user.ID,
-		service.SCIMUserInput{Active: &on, Patch: true}); err != nil {
+		[]service.UserPatchCommand{
+			service.UserPatchSetActive{Active: off},
+			service.UserPatchSetActive{Active: on},
+		}); err != nil {
 		t.Fatal(err)
 	}
 	fresh, err = s.GetUser(ctx, wire, orgA, bindingID, user.ID)
@@ -228,14 +227,14 @@ func runSCIMTransitionTable(t *testing.T, db *store.DB) {
 	wire := service.SCIMCredentialActor(token, bindingID)
 	scope := domain.Scope{Org: orgA, Project: prjA1}
 
-	user, err := s.CreateUser(ctx, wire, orgA, bindingID, service.SCIMUserInput{
+	user, err := s.CreateUser(ctx, wire, orgA, bindingID, service.DesiredUser{Active: true,
 		UserName: "tt@example.test", ExternalID: "ext-tt", SubjectRaw: "ext-tt",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	group, err := s.CreateGroup(ctx, wire, orgA, bindingID, service.SCIMGroupInput{
-		DisplayName: "TT", Members: []string{user.ID}, MembersPresent: true,
+	group, err := s.CreateGroup(ctx, wire, orgA, bindingID, service.DesiredGroup{
+		DisplayName: "TT", Members: []string{user.ID},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -252,9 +251,10 @@ func runSCIMTransitionTable(t *testing.T, db *store.DB) {
 
 	// ROW: user update (attributes). Grants UNTOUCHED — the postcondition the
 	// earlier fixture had none of.
-	if _, err := s.PatchUser(ctx, wire, orgA, bindingID, user.ID, service.SCIMUserInput{
-		Patch: true, Attributes: map[string]any{"nickName": "Tee"},
-	}); err != nil {
+	if _, err := s.PatchUser(ctx, wire, orgA, bindingID, user.ID,
+		[]service.UserPatchCommand{service.UserPatchMergeAttributes{
+			Attributes: map[string]any{"nickName": "Tee"},
+		}}); err != nil {
 		t.Fatal(err)
 	}
 	if !held(t, db, principal, domain.CapRead, scope) || scimOriginCount(t, db, principal) != originsBefore {
@@ -263,7 +263,8 @@ func runSCIMTransitionTable(t *testing.T, db *store.DB) {
 
 	// ROW: active true -> false. Origins released.
 	off, on := false, true
-	if _, err := s.PatchUser(ctx, wire, orgA, bindingID, user.ID, service.SCIMUserInput{Active: &off}); err != nil {
+	if _, err := s.PatchUser(ctx, wire, orgA, bindingID, user.ID,
+		[]service.UserPatchCommand{service.UserPatchSetActive{Active: off}}); err != nil {
 		t.Fatal(err)
 	}
 	if held(t, db, principal, domain.CapRead, scope) {
@@ -277,7 +278,8 @@ func runSCIMTransitionTable(t *testing.T, db *store.DB) {
 		service.SCIMMappingSpec{GroupID: group.ID, Template: domain.TemplateRevealer, ProjectID: string(prjA1)}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.PatchUser(ctx, wire, orgA, bindingID, user.ID, service.SCIMUserInput{Active: &on}); err != nil {
+	if _, err := s.PatchUser(ctx, wire, orgA, bindingID, user.ID,
+		[]service.UserPatchCommand{service.UserPatchSetActive{Active: on}}); err != nil {
 		t.Fatal(err)
 	}
 	if !held(t, db, principal, domain.CapRead, scope) {
@@ -289,7 +291,7 @@ func runSCIMTransitionTable(t *testing.T, db *store.DB) {
 
 	// ROW: group rename. Mapping rows key on the ID, so grants do not move.
 	if _, err := s.PatchGroup(ctx, wire, orgA, bindingID, group.ID,
-		service.SCIMGroupInput{DisplayName: "TT renamed", Patch: true}); err != nil {
+		[]service.GroupPatchCommand{service.GroupPatchSetDisplayName{DisplayName: "TT renamed"}}); err != nil {
 		t.Fatal(err)
 	}
 	if !held(t, db, principal, domain.CapRead, scope) {
@@ -315,7 +317,7 @@ func runSCIMTransitionTable(t *testing.T, db *store.DB) {
 
 	// ROW: re-create after DELETE gets a FRESH id, and picks the desired state
 	// up again from zero memberships.
-	again, err := s.CreateUser(ctx, wire, orgA, bindingID, service.SCIMUserInput{
+	again, err := s.CreateUser(ctx, wire, orgA, bindingID, service.DesiredUser{Active: true,
 		UserName: "tt@example.test", ExternalID: "ext-tt", SubjectRaw: "ext-tt",
 	})
 	if err != nil {
@@ -367,7 +369,7 @@ func runSCIMZeroAuthorityOnCreate(t *testing.T, db *store.DB) {
 	}
 	wire := service.SCIMCredentialActor(mint.Token, binding.ID)
 
-	user, err := s.CreateUser(ctx, wire, orgA, binding.ID, service.SCIMUserInput{
+	user, err := s.CreateUser(ctx, wire, orgA, binding.ID, service.DesiredUser{Active: true,
 		UserName: "zero@okta.test", ExternalID: "zero-sub", SubjectRaw: "zero-sub",
 	})
 	if err != nil {
@@ -443,9 +445,8 @@ func runSCIMProvisionThenLoginSAMLEmailCarve(t *testing.T, db *store.DB) {
 	wire := service.SCIMCredentialActor(mint.Token, binding.ID)
 
 	const nameID = "pat@entra.test"
-	user, err := s.CreateUser(ctx, wire, orgA, binding.ID, service.SCIMUserInput{
+	user, err := s.CreateUser(ctx, wire, orgA, binding.ID, service.DesiredUser{Active: true,
 		UserName: nameID, ExternalID: nameID,
-		Resource: map[string]any{"userName": nameID, "externalId": nameID},
 	})
 	if err != nil {
 		t.Fatalf("provision under the email carve: %v", err)
@@ -525,7 +526,7 @@ func runSCIMManualRemainderWording(t *testing.T, db *store.DB) {
 	bindingID, token := newSCIMBinding(t, db, "okta")
 	wire := service.SCIMCredentialActor(token, bindingID)
 
-	user, err := s.CreateUser(ctx, wire, orgA, bindingID, service.SCIMUserInput{
+	user, err := s.CreateUser(ctx, wire, orgA, bindingID, service.DesiredUser{Active: true,
 		UserName: "rem@example.test", ExternalID: "ext-rem", SubjectRaw: "ext-rem",
 	})
 	if err != nil {
@@ -540,7 +541,8 @@ func runSCIMManualRemainderWording(t *testing.T, db *store.DB) {
 	}
 
 	off := false
-	if _, err := s.PatchUser(ctx, wire, orgA, bindingID, user.ID, service.SCIMUserInput{Active: &off}); err != nil {
+	if _, err := s.PatchUser(ctx, wire, orgA, bindingID, user.ID,
+		[]service.UserPatchCommand{service.UserPatchSetActive{Active: off}}); err != nil {
 		t.Fatal(err)
 	}
 

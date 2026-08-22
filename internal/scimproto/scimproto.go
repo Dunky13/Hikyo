@@ -854,7 +854,7 @@ func parseOne(op PatchOp, res Resource) (ParsedPatch, *Error) {
 	// non-array `members` through the matrix and into the fold, where they
 	// become a silent no-op instead of the mandated `invalidValue`.
 	if verb != "remove" {
-		if e := checkValueShape(kind, op.Value); e != nil {
+		if e := checkValueShape(res, kind, op.Value); e != nil {
 			return ParsedPatch{}, e
 		}
 	}
@@ -862,15 +862,24 @@ func parseOne(op PatchOp, res Resource) (ParsedPatch, *Error) {
 }
 
 // checkValueShape validates the value against the column it landed in.
-func checkValueShape(kind PathKind, raw json.RawMessage) *Error {
+func checkValueShape(res Resource, kind PathKind, raw json.RawMessage) *Error {
 	var decoded any
 	if err := json.Unmarshal(raw, &decoded); err != nil {
 		return bad(TypeInvalidValue, "The operation value is not valid JSON.")
 	}
 	switch kind {
 	case PathNone:
-		if _, ok := decoded.(map[string]any); !ok {
+		values, ok := decoded.(map[string]any)
+		if !ok {
 			return bad(TypeInvalidValue, "A pathless operation's value must be an object.")
+		}
+		if res == ResourceGroup {
+			for attribute := range values {
+				if !isGroupPatchAttribute(attribute) {
+					return bad(TypeInvalidPath,
+						"The pathless Group operation contains unsupported attribute %q.", attribute)
+				}
+			}
 		}
 	case PathActive:
 		if _, e := NormalizeActive(decoded); e != nil {
@@ -943,7 +952,16 @@ func classifyPath(raw string, res Resource) (PathKind, string, string, *Error) {
 	if !isAttrName(p) {
 		return 0, "", "", bad(TypeInvalidPath, "The path %q is not a valid attribute name.", raw)
 	}
+	if res == ResourceGroup && !isGroupPatchAttribute(p) {
+		return 0, "", "", bad(TypeInvalidPath, "The path %q is not valid on this resource.", raw)
+	}
 	return PathPlain, p, "", nil
+}
+
+func isGroupPatchAttribute(attribute string) bool {
+	return strings.EqualFold(attribute, "displayName") ||
+		strings.EqualFold(attribute, "externalId") ||
+		strings.EqualFold(attribute, "members")
 }
 
 // isAttrName is RFC 7643 §2.1's ATTRNAME: an ALPHA followed by letters, digits
