@@ -40,16 +40,20 @@ type Resolver struct {
 // NewSQLite binds a Resolver to an open sqlite transaction (or, for
 // read-only authorization, a read-pool connection's transaction).
 func NewSQLite(db sqlitegen.DBTX) *Resolver {
-	if f := queryObserver.Load(); f != nil {
-		db = observedSQLite{db: db, on: *f}
+	observer := queryObserver.Load()
+	failure := mutationFailureObserver.Load()
+	if observer != nil || failure != nil {
+		db = observedSQLite{db: db, observer: observer, failure: failure}
 	}
 	return &Resolver{sq: sqlitegen.New(db)}
 }
 
 // NewPG binds a Resolver to an open postgres transaction.
 func NewPG(db pggen.DBTX) *Resolver {
-	if f := queryObserver.Load(); f != nil {
-		db = observedPG{db: db, on: *f}
+	observer := queryObserver.Load()
+	failure := mutationFailureObserver.Load()
+	if observer != nil || failure != nil {
+		db = observedPG{db: db, observer: observer, failure: failure}
 	}
 	return &Resolver{pg: pggen.New(db)}
 }
@@ -77,6 +81,13 @@ func NewPG(db pggen.DBTX) *Resolver {
 // number.
 var queryObserver atomic.Pointer[func(string)]
 
+// mutationFailureObserver is the failure-injection half of the acceptance
+// seam. It runs before generated mutation statements and can return an error,
+// letting both real engines prove that every aggregate step rolls back the
+// surrounding transaction. Like queryObserver, it is nil in production and
+// installed only when a Resolver is constructed for the owning test.
+var mutationFailureObserver atomic.Pointer[func(string) error]
+
 // SetQueryObserver installs a test-only per-query callback and returns a
 // function that removes it. Not for production code; there is no call site
 // outside tests, and the boundary test pins that.
@@ -85,13 +96,29 @@ func SetQueryObserver(f func(sql string)) func() {
 	return func() { queryObserver.Store(nil) }
 }
 
+// SetMutationFailureObserver installs a test-only pre-mutation failure hook
+// and returns a function that removes it. The hook receives sqlc's statement
+// text, including its stable query-name header. Not for production code.
+func SetMutationFailureObserver(f func(sql string) error) func() {
+	mutationFailureObserver.Store(&f)
+	return func() { mutationFailureObserver.Store(nil) }
+}
+
 type observedSQLite struct {
-	db sqlitegen.DBTX
-	on func(string)
+	db       sqlitegen.DBTX
+	observer *func(string)
+	failure  *func(string) error
 }
 
 func (o observedSQLite) ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error) {
-	o.on(q)
+	if o.observer != nil {
+		(*o.observer)(q)
+	}
+	if o.failure != nil {
+		if err := (*o.failure)(q); err != nil {
+			return nil, err
+		}
+	}
 	return o.db.ExecContext(ctx, q, args...)
 }
 
@@ -100,32 +127,48 @@ func (o observedSQLite) PrepareContext(ctx context.Context, q string) (*sql.Stmt
 }
 
 func (o observedSQLite) QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error) {
-	o.on(q)
+	if o.observer != nil {
+		(*o.observer)(q)
+	}
 	return o.db.QueryContext(ctx, q, args...)
 }
 
 func (o observedSQLite) QueryRowContext(ctx context.Context, q string, args ...any) *sql.Row {
-	o.on(q)
+	if o.observer != nil {
+		(*o.observer)(q)
+	}
 	return o.db.QueryRowContext(ctx, q, args...)
 }
 
 type observedPG struct {
-	db pggen.DBTX
-	on func(string)
+	db       pggen.DBTX
+	observer *func(string)
+	failure  *func(string) error
 }
 
 func (o observedPG) Exec(ctx context.Context, q string, args ...any) (pgconn.CommandTag, error) {
-	o.on(q)
+	if o.observer != nil {
+		(*o.observer)(q)
+	}
+	if o.failure != nil {
+		if err := (*o.failure)(q); err != nil {
+			return pgconn.CommandTag{}, err
+		}
+	}
 	return o.db.Exec(ctx, q, args...)
 }
 
 func (o observedPG) Query(ctx context.Context, q string, args ...any) (pgx.Rows, error) {
-	o.on(q)
+	if o.observer != nil {
+		(*o.observer)(q)
+	}
 	return o.db.Query(ctx, q, args...)
 }
 
 func (o observedPG) QueryRow(ctx context.Context, q string, args ...any) pgx.Row {
-	o.on(q)
+	if o.observer != nil {
+		(*o.observer)(q)
+	}
 	return o.db.QueryRow(ctx, q, args...)
 }
 

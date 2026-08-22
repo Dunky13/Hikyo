@@ -29,12 +29,15 @@ import (
 // Re-exported so the service layer never names the resolution-surface
 // package.
 type (
-	ServiceAccount     = authn.ServiceAccount
-	MachineCredential  = authn.MachineCredential
-	CredentialPolicy   = authn.CredentialPolicy
-	AffectedCredential = authn.AffectedCredential
-	NewServiceAccount  = authn.NewServiceAccount
-	NewCredential      = authn.NewMachineCredential
+	ServiceAccount                     = authn.ServiceAccount
+	MachineCredential                  = authn.MachineCredential
+	CredentialPolicy                   = authn.CredentialPolicy
+	AffectedCredential                 = authn.AffectedCredential
+	NewServiceAccount                  = authn.NewServiceAccount
+	ServiceAccountCreation             = authn.ServiceAccountCreation
+	DeleteServiceAccountAggregateInput = authn.DeleteServiceAccountAggregateInput
+	ServiceAccountDeletion             = authn.ServiceAccountDeletion
+	NewCredential                      = authn.NewMachineCredential
 )
 
 // authenticateMachine resolves a presented machine bearer value.
@@ -119,8 +122,8 @@ func (a *TxAuthorizer) CreateMachinePrincipal(ctx context.Context, id domain.Pri
 	return a.r.CreateMachinePrincipal(ctx, id, class, at)
 }
 
-func (a *TxAuthorizer) CreateServiceAccount(ctx context.Context, sa NewServiceAccount) error {
-	return a.r.CreateServiceAccount(ctx, sa)
+func (a *TxAuthorizer) CreateServiceAccountAggregate(ctx context.Context, sa NewServiceAccount) (ServiceAccountCreation, error) {
+	return a.r.CreateServiceAccountAggregate(ctx, sa)
 }
 
 // ServiceAccountAt resolves one service account within an addressed project;
@@ -139,12 +142,8 @@ func (a *TxAuthorizer) ServiceAccountsIn(ctx context.Context, scope domain.Scope
 	return a.r.ServiceAccountsIn(ctx, scope)
 }
 
-func (a *TxAuthorizer) DeleteServiceAccount(ctx context.Context, scope domain.Scope, id string) (int64, error) {
-	return a.r.DeleteServiceAccount(ctx, scope, id)
-}
-
-func (a *TxAuthorizer) DeleteMachinePrincipal(ctx context.Context, p domain.PrincipalID) error {
-	return a.r.DeleteMachinePrincipal(ctx, p)
+func (a *TxAuthorizer) DeleteServiceAccountAggregate(ctx context.Context, in DeleteServiceAccountAggregateInput) (ServiceAccountDeletion, error) {
+	return a.r.DeleteServiceAccountAggregate(ctx, in)
 }
 
 func (a *TxAuthorizer) CreateMachineCredential(ctx context.Context, c NewCredential) error {
@@ -165,14 +164,6 @@ func (a *TxAuthorizer) LiveMachineCredentialCounts(ctx context.Context, scope do
 
 func (a *TxAuthorizer) RevokeMachineCredential(ctx context.Context, serviceAccountID, id string, at time.Time) (bool, error) {
 	return a.r.RevokeMachineCredential(ctx, serviceAccountID, id, at)
-}
-
-func (a *TxAuthorizer) RevokeAllMachineCredentials(ctx context.Context, serviceAccountID string, at time.Time) (int64, error) {
-	return a.r.RevokeAllMachineCredentials(ctx, serviceAccountID, at)
-}
-
-func (a *TxAuthorizer) DeleteMachineCredentials(ctx context.Context, serviceAccountID string) error {
-	return a.r.DeleteMachineCredentials(ctx, serviceAccountID)
 }
 
 func (a *TxAuthorizer) TouchMachineCredential(ctx context.Context, id string, at time.Time) error {

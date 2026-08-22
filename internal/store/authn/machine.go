@@ -116,6 +116,36 @@ type NewServiceAccount struct {
 	CreatedBy   domain.PrincipalID
 }
 
+// ServiceAccountCreation is the closed result of creating one service-account
+// aggregate. Account contains every identity fact the caller needs to build
+// its audit event; no follow-up read can observe only half the aggregate.
+type ServiceAccountCreation struct {
+	Account ServiceAccount
+}
+
+// DeleteServiceAccountAggregateInput is the complete storage input for one
+// deprovisioning. RevokedAt is storage data; deciding whether deletion is
+// authorized and how it is audited remains service policy.
+type DeleteServiceAccountAggregateInput struct {
+	Scope     domain.Scope
+	ID        string
+	RevokedAt time.Time
+}
+
+// ServiceAccountDeletion is the closed blast radius of one deprovisioning.
+// Account preserves the identity facts needed for audit after its rows are
+// gone; every count comes from the mutation statement that removed the rows.
+type ServiceAccountDeletion struct {
+	Account                ServiceAccount
+	CredentialsRevoked     int64
+	CredentialsDeleted     int64
+	PinGenerationsDeleted  int64
+	GrantOriginsDeleted    int64
+	GrantsDeleted          int64
+	ServiceAccountsDeleted int64
+	PrincipalsDeleted      int64
+}
+
 // NewMachineCredential is one mint of EITHER kind. Verifier is the unsalted
 // SHA-256 of the whole presented value; the value itself never reaches this
 // package. For an `oidc-federation` mint, Verifier and PrefixHint are empty and
@@ -149,22 +179,36 @@ func (r *Resolver) CreateMachinePrincipal(ctx context.Context, id domain.Princip
 	})
 }
 
-// CreateServiceAccount inserts the identity record. A name already in use
-// among the project's service accounts is an operator CONFLICT, not a fault:
-// the caller is authorized, the current state refuses.
-func (r *Resolver) CreateServiceAccount(ctx context.Context, sa NewServiceAccount) error {
+// CreateServiceAccountAggregate persists the principal and its service-account
+// identity as one transaction-local aggregate operation. The Resolver is bound
+// to the caller's transaction, so either both ordered inserts commit or both
+// roll back. Authorization, policy, and audit construction remain with the
+// service layer.
+func (r *Resolver) CreateServiceAccountAggregate(ctx context.Context, sa NewServiceAccount) (ServiceAccountCreation, error) {
+	if err := r.CreateMachinePrincipal(ctx, sa.PrincipalID, sa.Kind, sa.CreatedAt); err != nil {
+		return ServiceAccountCreation{}, err
+	}
+	var err error
 	if r.sq != nil {
-		return serviceAccountConstraint(r.sq.InsertServiceAccount(ctx, sqlitegen.InsertServiceAccountParams{
+		err = r.sq.InsertServiceAccount(ctx, sqlitegen.InsertServiceAccountParams{
 			ID: sa.ID, PrincipalID: string(sa.PrincipalID), OrgID: string(sa.Org),
 			ProjectID: string(sa.Project), Name: sa.Name, Kind: string(sa.Kind),
 			CreatedAt: encodeTime(sa.CreatedAt), CreatedBy: string(sa.CreatedBy),
-		}))
+		})
+	} else {
+		err = r.pg.InsertServiceAccount(ctx, pggen.InsertServiceAccountParams{
+			ID: sa.ID, PrincipalID: string(sa.PrincipalID), OrgID: string(sa.Org),
+			ProjectID: string(sa.Project), Name: sa.Name, Kind: string(sa.Kind),
+			CreatedAt: pgTime(sa.CreatedAt), CreatedBy: string(sa.CreatedBy),
+		})
 	}
-	return serviceAccountConstraint(r.pg.InsertServiceAccount(ctx, pggen.InsertServiceAccountParams{
-		ID: sa.ID, PrincipalID: string(sa.PrincipalID), OrgID: string(sa.Org),
-		ProjectID: string(sa.Project), Name: sa.Name, Kind: string(sa.Kind),
-		CreatedAt: pgTime(sa.CreatedAt), CreatedBy: string(sa.CreatedBy),
-	}))
+	if err := serviceAccountConstraint(err); err != nil {
+		return ServiceAccountCreation{}, err
+	}
+	return ServiceAccountCreation{Account: ServiceAccount{
+		ID: sa.ID, PrincipalID: sa.PrincipalID, Org: sa.Org, Project: sa.Project,
+		Name: sa.Name, Kind: sa.Kind, CreatedAt: sa.CreatedAt, CreatedBy: sa.CreatedBy,
+	}}, nil
 }
 
 // serviceAccountConstraint maps a duplicate name onto the one cross-engine
@@ -291,50 +335,90 @@ func (r *Resolver) ServiceAccountsIn(ctx context.Context, scope domain.Scope) ([
 	return out, nil
 }
 
-// DeleteServiceAccount removes the identity record. It is the last statement
-// of the deletion sequence — credentials and grants go first — so the
-// foreign keys pointing here are already gone.
-func (r *Resolver) DeleteServiceAccount(ctx context.Context, scope domain.Scope, id string) (int64, error) {
-	if r.sq != nil {
-		return r.sq.DeleteServiceAccount(ctx, sqlitegen.DeleteServiceAccountParams{
-			OrgID: string(scope.Org), ProjectID: string(scope.Project), ID: id,
-		})
+// DeleteServiceAccountAggregate deprovisions one service account in a fixed
+// order inside the caller's transaction:
+//
+//  1. resolve its audit facts and lock its principal against mint/grant writers;
+//  2. revoke, then remove, every credential;
+//  3. remove pin generations, grant origins, and grants;
+//  4. remove the service-account identity, then its principal.
+//
+// Locking before the first mutation makes concurrent mint/delete serialize on
+// the same row. The returned facts survive row deletion without moving audit
+// construction or authorization policy into the store.
+func (r *Resolver) DeleteServiceAccountAggregate(ctx context.Context, in DeleteServiceAccountAggregateInput) (ServiceAccountDeletion, error) {
+	sa, err := r.ServiceAccountAt(ctx, in.Scope, in.ID)
+	if err != nil {
+		return ServiceAccountDeletion{}, err
 	}
-	return r.pg.DeleteServiceAccount(ctx, pggen.DeleteServiceAccountParams{
-		OrgID: string(scope.Org), ProjectID: string(scope.Project), ID: id,
-	})
-}
+	if err := r.LockPrincipalRow(ctx, sa.PrincipalID); err != nil {
+		return ServiceAccountDeletion{}, err
+	}
 
-// DeleteMachinePrincipal removes the principal row and its whole grant set,
-// origins first because the origin FK is RESTRICT. Every statement runs in
-// the caller's transaction, which is what makes "deleting a service account
-// revokes every credential and every grant in one transaction" true.
-func (r *Resolver) DeleteMachinePrincipal(ctx context.Context, p domain.PrincipalID) error {
-	// The principal-row lock, taken before the grant reads and writes below,
-	// exactly as every other grant writer does: a concurrent grant landing on
-	// this principal must serialize against its deprovisioning rather than
-	// insert a row into a principal that is on its way out.
-	if err := r.LockPrincipalRow(ctx, p); err != nil {
-		return err
+	result := ServiceAccountDeletion{Account: sa}
+	if r.sq != nil {
+		result.CredentialsRevoked, err = r.sq.RevokeAllMachineCredentials(ctx, sqlitegen.RevokeAllMachineCredentialsParams{
+			RevokedAt: nullString(encodeTime(in.RevokedAt)), ServiceAccountID: sa.ID,
+		})
+		if err == nil {
+			result.CredentialsDeleted, err = r.sq.DeleteMachineCredentials(ctx, sa.ID)
+		}
+		if err == nil {
+			result.PinGenerationsDeleted, err = r.sq.DeletePinGenerationsForPrincipal(ctx, string(sa.PrincipalID))
+		}
+		if err != nil {
+			return ServiceAccountDeletion{}, err
+		}
+		result.GrantOriginsDeleted, err = r.sq.DeleteGrantOriginsForPrincipal(ctx, string(sa.PrincipalID))
+		if err == nil {
+			result.GrantsDeleted, err = r.sq.DeleteGrantsForPrincipal(ctx, string(sa.PrincipalID))
+		}
+	} else {
+		result.CredentialsRevoked, err = r.pg.RevokeAllMachineCredentials(ctx, pggen.RevokeAllMachineCredentialsParams{
+			RevokedAt: nullPGTime(in.RevokedAt), ServiceAccountID: sa.ID,
+		})
+		if err == nil {
+			result.CredentialsDeleted, err = r.pg.DeleteMachineCredentials(ctx, sa.ID)
+		}
+		if err == nil {
+			result.PinGenerationsDeleted, err = r.pg.DeletePinGenerationsForPrincipal(ctx, string(sa.PrincipalID))
+		}
+		if err != nil {
+			return ServiceAccountDeletion{}, err
+		}
+		result.GrantOriginsDeleted, err = r.pg.DeleteGrantOriginsForPrincipal(ctx, string(sa.PrincipalID))
+		if err == nil {
+			result.GrantsDeleted, err = r.pg.DeleteGrantsForPrincipal(ctx, string(sa.PrincipalID))
+		}
+	}
+	if err != nil {
+		return ServiceAccountDeletion{}, err
 	}
 	if r.sq != nil {
-		if _, err := r.sq.DeleteGrantOriginsForPrincipal(ctx, string(p)); err != nil {
-			return err
+		result.ServiceAccountsDeleted, err = r.sq.DeleteServiceAccount(ctx, sqlitegen.DeleteServiceAccountParams{
+			OrgID: string(in.Scope.Org), ProjectID: string(in.Scope.Project), ID: sa.ID,
+		})
+		if err == nil {
+			result.PrincipalsDeleted, err = r.sq.DeletePrincipal(ctx, string(sa.PrincipalID))
 		}
-		if _, err := r.sq.DeleteGrantsForPrincipal(ctx, string(p)); err != nil {
-			return err
+	} else {
+		result.ServiceAccountsDeleted, err = r.pg.DeleteServiceAccount(ctx, pggen.DeleteServiceAccountParams{
+			OrgID: string(in.Scope.Org), ProjectID: string(in.Scope.Project), ID: sa.ID,
+		})
+		if err == nil {
+			result.PrincipalsDeleted, err = r.pg.DeletePrincipal(ctx, string(sa.PrincipalID))
 		}
-		_, err := r.sq.DeletePrincipal(ctx, string(p))
-		return err
 	}
-	if _, err := r.pg.DeleteGrantOriginsForPrincipal(ctx, string(p)); err != nil {
-		return err
+	if err != nil {
+		return ServiceAccountDeletion{}, err
 	}
-	if _, err := r.pg.DeleteGrantsForPrincipal(ctx, string(p)); err != nil {
-		return err
+	if result.ServiceAccountsDeleted != 1 || result.PrincipalsDeleted != 1 {
+		return ServiceAccountDeletion{}, fmt.Errorf(
+			"authn: service-account aggregate deleted %d account rows and %d principal rows, want 1 each",
+			result.ServiceAccountsDeleted, result.PrincipalsDeleted,
+		)
 	}
-	_, err := r.pg.DeletePrincipal(ctx, string(p))
-	return err
+	return result, nil
 }
 
 // CreateMachineCredential persists one mint.
@@ -659,33 +743,6 @@ func (r *Resolver) RevokeMachineCredential(ctx context.Context, serviceAccountID
 		})
 	}
 	return n > 0, err
-}
-
-// RevokeAllMachineCredentials revokes every live credential of one service
-// account, returning how many it killed. Deletion calls it before removing
-// the rows, so the count is the blast radius the audit event records.
-func (r *Resolver) RevokeAllMachineCredentials(ctx context.Context, serviceAccountID string, at time.Time) (int64, error) {
-	if r.sq != nil {
-		return r.sq.RevokeAllMachineCredentials(ctx, sqlitegen.RevokeAllMachineCredentialsParams{
-			RevokedAt: nullString(encodeTime(at)), ServiceAccountID: serviceAccountID,
-		})
-	}
-	return r.pg.RevokeAllMachineCredentials(ctx, pggen.RevokeAllMachineCredentialsParams{
-		RevokedAt: nullPGTime(at), ServiceAccountID: serviceAccountID,
-	})
-}
-
-// DeleteMachineCredentials removes a deleted service account's credential
-// rows. It is a delete rather than a revoke because the service account is
-// going away with them; the revoke ran first so the audit trail records the
-// transition before the rows stop existing.
-func (r *Resolver) DeleteMachineCredentials(ctx context.Context, serviceAccountID string) error {
-	if r.sq != nil {
-		_, err := r.sq.DeleteMachineCredentials(ctx, serviceAccountID)
-		return err
-	}
-	_, err := r.pg.DeleteMachineCredentials(ctx, serviceAccountID)
-	return err
 }
 
 // TouchMachineCredential records last use. It is observability, never an
