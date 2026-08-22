@@ -1,0 +1,343 @@
+{
+  "schema": "hikyo.dev/implementation-status/v1",
+  "entries": [
+    {
+      "id": "CAP-RUNTIME-STORAGE",
+      "kind": "capability",
+      "title": "Runtime and storage",
+      "status": "implemented",
+      "implemented": "Single multicall binary, SQLite and PostgreSQL stores, migrations, and CI",
+      "evidence": [{ "label": "#42 handoff", "path": "docs/handoff/42-walking-skeleton.md" }]
+    },
+    {
+      "id": "CAP-SECURITY-FOUNDATIONS",
+      "kind": "capability",
+      "title": "Security foundations",
+      "status": "implemented",
+      "implemented": "Envelope encryption, authorization chokepoint, append-only audit trails, and gap-free PostgreSQL audit export",
+      "evidence": [
+        { "label": "#43 handoff", "path": "docs/handoff/43-crypto-core.md" },
+        { "label": "#44 handoff", "path": "docs/handoff/44-authorize-chokepoint.md" },
+        { "label": "#45 handoff", "path": "docs/handoff/45-audit-core.md" },
+        { "label": "#84 handoff", "path": "docs/handoff/84-gap-free-audit-export.md" }
+      ]
+    },
+    {
+      "id": "CAP-CORE-API-CLI",
+      "kind": "capability",
+      "title": "Core API and CLI",
+      "status": "implemented",
+      "implemented": "Bootstrap administration, local login, hierarchy CRUD, key declarations, validation, encrypted values, copy, clone, and bulk apply",
+      "evidence": [
+        { "label": "#47 handoff", "path": "docs/handoff/47-first-slice.md" },
+        { "label": "#48 handoff", "path": "docs/handoff/48-hierarchy-crud.md" },
+        { "label": "#49 handoff", "path": "docs/handoff/49-key-catalogue.md" },
+        { "label": "#50 handoff", "path": "docs/handoff/50-flat-values.md" }
+      ]
+    },
+    {
+      "id": "CAP-HUMAN-ACCESS",
+      "kind": "capability",
+      "title": "Human identity and access",
+      "status": "implemented",
+      "implemented": "OIDC, WebAuthn, TOTP, recovery, sessions, grants, role templates, and protected environments",
+      "evidence": [
+        { "label": "#54 handoff", "path": "docs/handoff/54-human-auth-full.md" },
+        { "label": "#55 handoff", "path": "docs/handoff/55-permission-model.md" }
+      ]
+    },
+    {
+      "id": "CAP-MATRIX-DISCLOSURE",
+      "kind": "capability",
+      "title": "Matrix and disclosure UI",
+      "status": "implemented",
+      "implemented": "Embedded app shell, environment matrix, row editor, problems filter, reveal/copy ceremonies, and protected publish flows",
+      "evidence": [
+        { "label": "#56 handoff", "path": "docs/handoff/56-ui-shell.md" },
+        { "label": "#57 handoff", "path": "docs/handoff/57-env-matrix.md" },
+        { "label": "#58 handoff", "path": "docs/handoff/58-reveal-ceremonies.md" }
+      ]
+    },
+    {
+      "id": "CAP-MACHINE-ACCESS",
+      "kind": "capability",
+      "title": "Machine access",
+      "status": "implemented",
+      "implemented": "Service accounts, display-once credentials, OIDC workload federation, and machine-access UI",
+      "evidence": [
+        { "label": "#61 handoff", "path": "docs/handoff/61-machine-identities.md" },
+        { "label": "#62 handoff", "path": "docs/handoff/62-oidc-federation-cursor.md" },
+        { "label": "#67 handoff", "path": "docs/handoff/67-machine-access.md" }
+      ]
+    },
+    {
+      "id": "CAP-MULTI-INSTANCE",
+      "kind": "capability",
+      "title": "Multi-instance workspaces",
+      "status": "implemented",
+      "implemented": "Directory-tier remotes and browser-direct workspace sessions",
+      "evidence": [{ "label": "#71 handoff", "path": "docs/handoff/71-multi-instance-workspace.md" }]
+    },
+    {
+      "id": "CAP-ENTERPRISE-IDENTITY",
+      "kind": "capability",
+      "title": "Enterprise identity protocols",
+      "status": "implemented",
+      "implemented": "SAML service-provider support and SCIM provisioning, fully open-source",
+      "evidence": [
+        { "label": "SAML contract", "path": "docs/adr/saml-sp.md" },
+        { "label": "#73 handoff", "path": "docs/handoff/73-scim-provisioning.md" }
+      ]
+    },
+    {
+      "id": "CAP-BACKUP-RESTORE",
+      "kind": "capability",
+      "title": "Backup and restore",
+      "status": "implemented",
+      "implemented": "Encrypted export/restore plus the cross-engine recovery drill",
+      "evidence": [{ "label": "#76 handoff", "path": "docs/handoff/76-backup-restore-drill.md" }]
+    },
+    {
+      "id": "CAP-REVISION-LIFECYCLE",
+      "kind": "capability",
+      "title": "Revision lifecycle",
+      "status": "implemented",
+      "implemented": "Drafts, snapshots, selective publish, rollback, durable pins, retention, GC, and history restore/pin lifecycle",
+      "evidence": [
+        { "label": "#51 handoff", "path": "docs/handoff/51-revisions-publish.md" },
+        { "label": "#52 handoff", "path": "docs/handoff/52-rollback-pins.md" },
+        { "label": "#53 handoff", "path": "docs/handoff/53-retention-gc.md" },
+        { "label": "#59 handoff", "path": "docs/handoff/59-history-drawer.md" }
+      ]
+    },
+    {
+      "id": "CAP-ADMINISTRATION-UI",
+      "kind": "capability",
+      "title": "Administration UI",
+      "status": "implemented",
+      "implemented": "Members, organisation/project settings, account security, instance administration, and browser step-up",
+      "evidence": [{ "label": "#60 handoff", "path": "docs/handoff/60-chrome-surfaces.md" }]
+    },
+    {
+      "id": "CAP-IMPORTS-ONBOARDING",
+      "kind": "capability",
+      "title": "Imports and onboarding",
+      "status": "implemented",
+      "implemented": "Kubernetes, SOPS, and Infisical file imports; live Kubernetes and Vault/OpenBao connectors; import wizard; dotenv scaffolding",
+      "evidence": [
+        { "label": "#68 handoff", "path": "docs/handoff/68-import-file-sources.md" },
+        { "label": "#69 handoff", "path": "docs/handoff/69-import-live-connectors.md" },
+        { "label": "#112 handoff", "path": "docs/handoff/112-import-wizard.md" }
+      ]
+    },
+    {
+      "id": "CAP-DELIVERY",
+      "kind": "capability",
+      "title": "Delivery",
+      "status": "implemented",
+      "implemented": "Compose delivery and `hikyo run`, Kubernetes operator/CRDs, Forgejo and GitHub Actions adapters, and machine-reveal opt-in",
+      "evidence": [
+        { "label": "#63 handoff", "path": "docs/handoff/63-compose-delivery.md" },
+        { "label": "#64 handoff", "path": "docs/handoff/64-k8s-operator.md" },
+        { "label": "#65 handoff", "path": "docs/handoff/65-adapter-outbox-forgejo.md" },
+        { "label": "#66 handoff", "path": "docs/handoff/66-github-actions-adapter.md" }
+      ]
+    },
+    {
+      "id": "CAP-KEY-ROTATION",
+      "kind": "capability",
+      "title": "Key rotation",
+      "status": "implemented",
+      "implemented": "Root, master, DEK, token, and scanning-key rotation plus resumable re-encryption",
+      "evidence": [{ "label": "#75 handoff", "path": "docs/handoff/75-key-rotation.md" }]
+    },
+    {
+      "id": "CAP-SECRET-SCANNING",
+      "kind": "capability",
+      "title": "Secret scanning",
+      "status": "implemented",
+      "implemented": "Surface-1 warnings and Surface-2 blocks on every CLI/API value ingress",
+      "evidence": [{ "label": "#74 handoff", "path": "docs/handoff/74-secret-scanning.md" }]
+    },
+    {
+      "id": "CAP-PRODUCTION-OPS",
+      "kind": "capability",
+      "title": "Production operations",
+      "status": "partial",
+      "implemented": "All registered operational bounds, doctor, upgrade path, no-egress posture, and pinned operator resource limits",
+      "remaining": "Record an arm64 cgroup run proving operator reconciliation within the 128 MiB limit under load",
+      "evidence": [
+        { "label": "operations contract", "path": "docs/adr/ops-spec.md" },
+        { "label": "bound registry", "path": "internal/conformance/boundregistry_test.go" },
+        { "label": "#76 handoff", "path": "docs/handoff/76-backup-restore-drill.md" }
+      ]
+    },
+    {
+      "id": "CAP-SUPPLY-CHAIN-SITE",
+      "kind": "capability",
+      "title": "Supply chain and project site",
+      "status": "implemented",
+      "implemented": "Signed release pipeline, SBOMs, documentation/governance site, matching icons, and offline-capable PWA",
+      "evidence": [
+        { "label": "#46 handoff", "path": "docs/handoff/46-release-signing.md" },
+        { "label": "#78 handoff", "path": "docs/handoff/78-docs-governance.md" }
+      ]
+    },
+    {
+      "id": "CAP-PUBLIC-RELEASE",
+      "kind": "capability",
+      "title": "Public release and distribution",
+      "status": "partial",
+      "implemented": "Cosign trust, SBOM generation, GoReleaser/Helm packaging, and installer verification",
+      "remaining": "Run full acceptance, freeze API/CLI, and publish 1.0 under [#79](https://github.com/Hikyo-Org/Hikyo/issues/79)",
+      "evidence": [
+        { "label": "#46 handoff", "path": "docs/handoff/46-release-signing.md" },
+        { "label": "1.0 blockers", "path": "docs/handoff/v1-launch-blockers.md" }
+      ]
+    },
+    {
+      "id": "CAP-BROWSER-SCANNING",
+      "kind": "capability",
+      "title": "Secret scanning in the browser",
+      "status": "partial",
+      "implemented": "CLI/API Surface-1 warnings and Surface-2 blocks",
+      "remaining": "SPA block dialog after declaration editing lands under [#183](https://github.com/Hikyo-Org/Hikyo/issues/183)",
+      "evidence": [{ "label": "#74 handoff", "path": "docs/handoff/74-secret-scanning.md" }]
+    },
+    {
+      "id": "OBL-SCAN-PERFORMANCE",
+      "kind": "obligation",
+      "title": "Pin scanning performance evidence",
+      "status": "implemented",
+      "summary": "Committed Pi-class artifact gates scan latency, compile time, and scanner boot memory.",
+      "source": "docs/spec/open-items.md",
+      "evidence": [
+        { "label": "benchmark artifact", "path": "internal/scanning/testdata/bench/pi-result.json" },
+        { "label": "#74 handoff", "path": "docs/handoff/74-secret-scanning.md" }
+      ]
+    },
+    {
+      "id": "OBL-OPERATOR-PI-FIT",
+      "kind": "obligation",
+      "title": "Record operator fit on Pi-class cgroups",
+      "status": "open",
+      "summary": "Arm64 cgroup evidence for reconciliation within the 128 MiB operator limit is still required.",
+      "source": "docs/spec/open-items.md",
+      "blocks": "CAP-PRODUCTION-OPS",
+      "evidence": [
+        { "label": "operator limits", "path": "chart/hikyo/values.yaml" },
+        { "label": "#64 handoff", "path": "docs/handoff/64-k8s-operator.md" }
+      ]
+    },
+    {
+      "id": "OBL-IMPORT-FIXTURES",
+      "kind": "obligation",
+      "title": "Pin import connector fixtures and serialization",
+      "status": "implemented",
+      "summary": "Adversarial connector fixtures, provider-error sanitization, exporter floor, and canonical JSON serialization are executable tests.",
+      "source": "docs/spec/open-items.md",
+      "evidence": [
+        { "label": "connector fixtures", "path": "internal/importer/connector_test.go" },
+        { "label": "#68 handoff", "path": "docs/handoff/68-import-file-sources.md" }
+      ]
+    },
+    {
+      "id": "OBL-ADAPTER-FIXTURES",
+      "kind": "obligation",
+      "title": "Pin deployment-adapter contract fixtures",
+      "status": "implemented",
+      "summary": "Forgejo/GitHub contract tests cover conflict behavior, sealed-box delivery, and representation refusals.",
+      "source": "docs/spec/open-items.md",
+      "evidence": [
+        { "label": "GitHub contract", "path": "internal/adapter/githubactions/contract_external_test.go" },
+        { "label": "#65 handoff", "path": "docs/handoff/65-adapter-outbox-forgejo.md" },
+        { "label": "#66 handoff", "path": "docs/handoff/66-github-actions-adapter.md" }
+      ]
+    },
+    {
+      "id": "OBL-CI-ACTION-PINS",
+      "kind": "obligation",
+      "title": "Pin CI actions and release steps",
+      "status": "implemented",
+      "summary": "CI and release workflows carry immutable action pins and executable verification.",
+      "source": "docs/spec/open-items.md",
+      "evidence": [
+        { "label": "CI workflow", "path": ".github/workflows/ci.yml" },
+        { "label": "#46 handoff", "path": "docs/handoff/46-release-signing.md" }
+      ]
+    },
+    {
+      "id": "OBL-CLI-GOLDENS",
+      "kind": "obligation",
+      "title": "Pin CLI scenarios and closed-flow registry",
+      "status": "implemented",
+      "summary": "CLI output and scenario contracts are checked against committed golden fixtures.",
+      "source": "docs/spec/open-items.md",
+      "evidence": [
+        { "label": "CLI goldens", "path": "internal/cli/golden_test.go" },
+        { "label": "walking-skeleton handoff", "path": "docs/handoff/42-walking-skeleton.md" }
+      ]
+    },
+    {
+      "id": "OBL-REPOSITORY-TRANSFER",
+      "kind": "obligation",
+      "title": "Transfer the canonical repository to Hikyo-Org",
+      "status": "implemented",
+      "summary": "Canonical repository and organization controls are hosted under Hikyo-Org.",
+      "source": "docs/spec/open-items.md",
+      "evidence": [{ "label": "transfer handoff", "path": "docs/handoff/github-org-transfer.md" }]
+    },
+    {
+      "id": "OBL-UI-SCHEMA-POLISH",
+      "kind": "obligation",
+      "title": "Polish key-declaration and schema-editing UI",
+      "status": "open",
+      "summary": "Dialog-level visual refinement remains available within the frozen UI contract.",
+      "source": "docs/spec/open-items.md",
+      "nonBlocking": "Optional dialog polish does not block the implemented matrix/disclosure capability or the 1.0 release gate.",
+      "evidence": [
+        { "label": "UI contract", "path": "docs/spec/ui-spec.md" },
+        { "label": "1.0 blocker plan", "path": "docs/handoff/v1-launch-blockers-plan.md" }
+      ]
+    },
+    {
+      "id": "OBL-OPS-SUPERSESSION",
+      "kind": "obligation",
+      "title": "Reissue ops-spec supersession wording",
+      "status": "open",
+      "summary": "Editorial consolidation remains optional when ops-spec is next reissued.",
+      "source": "docs/spec/open-items.md",
+      "nonBlocking": "The amendment banner already resolves the contract; this is editorial reissue hygiene.",
+      "evidence": [{ "label": "operations contract", "path": "docs/adr/ops-spec.md" }]
+    },
+    {
+      "id": "OBL-DOCS-SITE",
+      "kind": "obligation",
+      "title": "Publish the documentation and governance site",
+      "status": "implemented",
+      "summary": "Canonical Starlight documentation and O4-O6 governance artifacts are built and verified.",
+      "source": "docs/spec/open-items.md",
+      "blocks": "CAP-SUPPLY-CHAIN-SITE",
+      "evidence": [{ "label": "#78 handoff", "path": "docs/handoff/78-docs-governance.md" }]
+    },
+    {
+      "id": "OBL-OPS-ROW-NUMBERING",
+      "kind": "obligation",
+      "title": "Renumber duplicate ops-spec inventory rows",
+      "status": "open",
+      "summary": "Editorial row renumbering remains for the next ops-spec amendment.",
+      "source": "docs/spec/open-items.md",
+      "nonBlocking": "Rows are referenced by name, so the numbering collision does not block implementation.",
+      "evidence": [{ "label": "ops catalogue", "path": "docs/spec/ops-catalogue.md" }]
+    },
+    {
+      "id": "OBL-ACCEPTED-RESIDUALS",
+      "kind": "obligation",
+      "title": "Preserve accepted operational residuals",
+      "status": "accepted",
+      "summary": "Named residual risks stay governed by their owning ADRs and reopen triggers.",
+      "source": "docs/spec/open-items.md",
+      "evidence": [{ "label": "operations contract", "path": "docs/adr/ops-spec.md" }]
+    }
+  ]
+}

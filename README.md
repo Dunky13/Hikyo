@@ -22,109 +22,56 @@
   <p>
     <a href="https://github.com/Hikyo-Org/Hikyo/actions/workflows/ci.yml"><img alt="CI status" src="https://github.com/Hikyo-Org/Hikyo/actions/workflows/ci.yml/badge.svg?branch=main" /></a>
     <a href="./LICENSE"><img alt="Mozilla Public License 2.0" src="https://img.shields.io/badge/license-MPL--2.0-3b82f6" /></a>
-    <img alt="Active 0.x development" src="https://img.shields.io/badge/status-active%200.x-f97316" />
   </p>
 </div>
 
 > [!IMPORTANT]
-> Hikyo is in active `0.x` development. Interfaces are not frozen, and there
-> are no published binaries, images, or Helm charts yet. Build from source to
-> evaluate it today.
+> Release maturity, interface freeze, and distribution status live only under
+> [`CAP-PUBLIC-RELEASE`](./docs/status/README.md#cap-public-release) in the
+> machine-checked implementation-status ledger.
 
+<!-- implementation-status:start -->
 ## Implementation status
 
 <details>
-<summary>Show fully implemented, partially implemented, and not-started features</summary>
+<summary>Show fully implemented, partially implemented, and open features</summary>
 
-“Implemented” means the feature and its acceptance coverage are present in the
-repository. It does not mean the API is frozen or that Hikyo 1.0 has shipped.
-The source and linked implementation tickets are authoritative; [#1] and [#41]
-are planning/parent trackers rather than missing features.
+“Implemented” means the feature and its acceptance evidence are present in the
+repository. The machine-checked [implementation-status ledger](./docs/status/README.md)
+is the only current-status authority; ADRs/specs define obligations and handoffs
+remain immutable evidence.
 
 ### Fully implemented
 
 | Feature | Included |
 | --- | --- |
-| Runtime and storage | Single multicall binary, SQLite and PostgreSQL stores, migrations, and CI ([#42]) |
-| Security foundations | Envelope encryption, the authorization chokepoint, append-only audit trails, and gap-free PostgreSQL audit export ([#43], [#44], [#45], [#84]) |
-| Core API and CLI | Bootstrap administration, local login, org/project/environment/folder CRUD, key declarations, validation, encrypted values, copy, clone, and bulk apply ([#47]–[#50]) |
-| Human identity and access | OIDC, WebAuthn, TOTP, recovery, sessions, grants, role templates, and protected environments ([#54], [#55]) |
-| Matrix and disclosure UI | Embedded app shell, environment matrix, row editor, problems filter, reveal/copy ceremonies, and protected publish flows ([#56]–[#58]) |
-| Machine access | Service accounts, display-once credentials, OIDC workload federation, and the machine-access UI ([#61], [#62], [#67]) |
-| Multi-instance workspaces | Directory-tier remotes and browser-direct workspace sessions ([#71]) |
-| Enterprise identity protocols | SAML service-provider support and SCIM provisioning, fully open-source ([#72], [#73]) |
-| Backup and restore | Encrypted export/restore plus the cross-engine recovery drill ([#76]) |
-| Revision lifecycle | Drafts, snapshots, selective publish, rollback, durable pins, retention, GC, and the history drawer with restore and pin lifecycle ([#51]–[#53], [#59]) |
-| Administration UI | Members, organisation and project settings, account security, instance administration, browser step-up ([#60]) |
-| Imports and onboarding | File imports for Kubernetes, SOPS, and Infisical, live Kubernetes and Vault/OpenBao connectors, the interactive wizard, and `definitions scaffold --from .env` for an existing dotenv project ([#68], [#69], [#70], [#112]) |
-| Delivery | Docker Compose `env_file` render/sync/doctor and `hikyo run` ([#63]); Kubernetes operator and CRDs ([#64]); Forgejo and GitHub Actions deployment adapters ([#65], [#66]); the per-project machine-reveal opt-in that admits secret delivery to workloads |
-| Key rotation | Root, master, DEK, token and scanning key rotation plus the resumable re-encrypt walk ([#43], [#75]) |
-| Secret scanning | Surface-1 warnings and Surface-2 blocks on every value ingress, CLI and API ([#74]) |
-| Production operations | Bounds, doctor, upgrade path, no-egress posture, and the Pi-class floor ([#53], [#76], [#77]) |
-| Supply chain and project site | Signed release pipeline and SBOMs ([#46]); documentation/governance site ([#78]); matching brand icons and an [offline-capable PWA](./docs/site/public/manifest.webmanifest) |
+| [`CAP-RUNTIME-STORAGE`](./docs/status/README.md#cap-runtime-storage) Runtime and storage | Single multicall binary, SQLite and PostgreSQL stores, migrations, and CI |
+| [`CAP-SECURITY-FOUNDATIONS`](./docs/status/README.md#cap-security-foundations) Security foundations | Envelope encryption, authorization chokepoint, append-only audit trails, and gap-free PostgreSQL audit export |
+| [`CAP-CORE-API-CLI`](./docs/status/README.md#cap-core-api-cli) Core API and CLI | Bootstrap administration, local login, hierarchy CRUD, key declarations, validation, encrypted values, copy, clone, and bulk apply |
+| [`CAP-HUMAN-ACCESS`](./docs/status/README.md#cap-human-access) Human identity and access | OIDC, WebAuthn, TOTP, recovery, sessions, grants, role templates, and protected environments |
+| [`CAP-MATRIX-DISCLOSURE`](./docs/status/README.md#cap-matrix-disclosure) Matrix and disclosure UI | Embedded app shell, environment matrix, row editor, problems filter, reveal/copy ceremonies, and protected publish flows |
+| [`CAP-MACHINE-ACCESS`](./docs/status/README.md#cap-machine-access) Machine access | Service accounts, display-once credentials, OIDC workload federation, and machine-access UI |
+| [`CAP-MULTI-INSTANCE`](./docs/status/README.md#cap-multi-instance) Multi-instance workspaces | Directory-tier remotes and browser-direct workspace sessions |
+| [`CAP-ENTERPRISE-IDENTITY`](./docs/status/README.md#cap-enterprise-identity) Enterprise identity protocols | SAML service-provider support and SCIM provisioning, fully open-source |
+| [`CAP-BACKUP-RESTORE`](./docs/status/README.md#cap-backup-restore) Backup and restore | Encrypted export/restore plus the cross-engine recovery drill |
+| [`CAP-REVISION-LIFECYCLE`](./docs/status/README.md#cap-revision-lifecycle) Revision lifecycle | Drafts, snapshots, selective publish, rollback, durable pins, retention, GC, and history restore/pin lifecycle |
+| [`CAP-ADMINISTRATION-UI`](./docs/status/README.md#cap-administration-ui) Administration UI | Members, organisation/project settings, account security, instance administration, and browser step-up |
+| [`CAP-IMPORTS-ONBOARDING`](./docs/status/README.md#cap-imports-onboarding) Imports and onboarding | Kubernetes, SOPS, and Infisical file imports; live Kubernetes and Vault/OpenBao connectors; import wizard; dotenv scaffolding |
+| [`CAP-DELIVERY`](./docs/status/README.md#cap-delivery) Delivery | Compose delivery and `hikyo run`, Kubernetes operator/CRDs, Forgejo and GitHub Actions adapters, and machine-reveal opt-in |
+| [`CAP-KEY-ROTATION`](./docs/status/README.md#cap-key-rotation) Key rotation | Root, master, DEK, token, and scanning-key rotation plus resumable re-encryption |
+| [`CAP-SECRET-SCANNING`](./docs/status/README.md#cap-secret-scanning) Secret scanning | Surface-1 warnings and Surface-2 blocks on every CLI/API value ingress |
+| [`CAP-SUPPLY-CHAIN-SITE`](./docs/status/README.md#cap-supply-chain-site) Supply chain and project site | Signed release pipeline, SBOMs, documentation/governance site, matching icons, and offline-capable PWA |
 
 ### Partially implemented
 
 | Feature | What works now | Needed for complete implementation |
 | --- | --- | --- |
-| Public release and distribution | Cosign trust, SBOM generation, GoReleaser/Helm packaging, and installer verification exist ([#46]) | Run the full acceptance pass, freeze the API/CLI, and publish 1.0: [#79] |
-| Secret scanning in the browser | CLI/API Surface-1 warnings and Surface-2 blocks ship ([#74]) | The SPA block dialog, which waits on a declaration-editing surface: [#183] |
-| Ops-spec bounds | Every registered bound refuses by name except three registered as enforcement-pending ([#77]) | Per-project storage high-water: [#185]; schema-revision rate and audit-export budget: [#186] |
-
-Everything else in the 1.0 capability inventory — Compose delivery, the
-Kubernetes operator, deployment adapters, Git-managed definitions, key
-rotation, the import wizard, the history drawer, and the administration UI —
-is implemented. The remaining blockers of [#79] are [#183], [#185] and [#186];
-once they close, [#79] performs the full acceptance run and cuts the
-freeze/release tag.
+| [`CAP-PRODUCTION-OPS`](./docs/status/README.md#cap-production-ops) Production operations | All registered operational bounds, doctor, upgrade path, no-egress posture, and pinned operator resource limits | Record an arm64 cgroup run proving operator reconciliation within the 128 MiB limit under load |
+| [`CAP-PUBLIC-RELEASE`](./docs/status/README.md#cap-public-release) Public release and distribution | Cosign trust, SBOM generation, GoReleaser/Helm packaging, and installer verification | Run full acceptance, freeze API/CLI, and publish 1.0 under [#79](https://github.com/Hikyo-Org/Hikyo/issues/79) |
+| [`CAP-BROWSER-SCANNING`](./docs/status/README.md#cap-browser-scanning) Secret scanning in the browser | CLI/API Surface-1 warnings and Surface-2 blocks | SPA block dialog after declaration editing lands under [#183](https://github.com/Hikyo-Org/Hikyo/issues/183) |
 
 </details>
-
-[#1]: https://github.com/Hikyo-Org/Hikyo/issues/1
-[#41]: https://github.com/Hikyo-Org/Hikyo/issues/41
-[#42]: https://github.com/Hikyo-Org/Hikyo/issues/42
-[#43]: https://github.com/Hikyo-Org/Hikyo/issues/43
-[#44]: https://github.com/Hikyo-Org/Hikyo/issues/44
-[#45]: https://github.com/Hikyo-Org/Hikyo/issues/45
-[#46]: https://github.com/Hikyo-Org/Hikyo/issues/46
-[#47]: https://github.com/Hikyo-Org/Hikyo/issues/47
-[#48]: https://github.com/Hikyo-Org/Hikyo/issues/48
-[#49]: https://github.com/Hikyo-Org/Hikyo/issues/49
-[#50]: https://github.com/Hikyo-Org/Hikyo/issues/50
-[#51]: https://github.com/Hikyo-Org/Hikyo/issues/51
-[#52]: https://github.com/Hikyo-Org/Hikyo/issues/52
-[#53]: https://github.com/Hikyo-Org/Hikyo/issues/53
-[#54]: https://github.com/Hikyo-Org/Hikyo/issues/54
-[#55]: https://github.com/Hikyo-Org/Hikyo/issues/55
-[#56]: https://github.com/Hikyo-Org/Hikyo/issues/56
-[#57]: https://github.com/Hikyo-Org/Hikyo/issues/57
-[#58]: https://github.com/Hikyo-Org/Hikyo/issues/58
-[#59]: https://github.com/Hikyo-Org/Hikyo/issues/59
-[#60]: https://github.com/Hikyo-Org/Hikyo/issues/60
-[#61]: https://github.com/Hikyo-Org/Hikyo/issues/61
-[#62]: https://github.com/Hikyo-Org/Hikyo/issues/62
-[#63]: https://github.com/Hikyo-Org/Hikyo/issues/63
-[#64]: https://github.com/Hikyo-Org/Hikyo/issues/64
-[#65]: https://github.com/Hikyo-Org/Hikyo/issues/65
-[#66]: https://github.com/Hikyo-Org/Hikyo/issues/66
-[#67]: https://github.com/Hikyo-Org/Hikyo/issues/67
-[#68]: https://github.com/Hikyo-Org/Hikyo/issues/68
-[#69]: https://github.com/Hikyo-Org/Hikyo/issues/69
-[#70]: https://github.com/Hikyo-Org/Hikyo/issues/70
-[#71]: https://github.com/Hikyo-Org/Hikyo/issues/71
-[#72]: https://github.com/Hikyo-Org/Hikyo/issues/72
-[#73]: https://github.com/Hikyo-Org/Hikyo/issues/73
-[#74]: https://github.com/Hikyo-Org/Hikyo/issues/74
-[#75]: https://github.com/Hikyo-Org/Hikyo/issues/75
-[#76]: https://github.com/Hikyo-Org/Hikyo/issues/76
-[#77]: https://github.com/Hikyo-Org/Hikyo/issues/77
-[#78]: https://github.com/Hikyo-Org/Hikyo/issues/78
-[#79]: https://github.com/Hikyo-Org/Hikyo/issues/79
-[#84]: https://github.com/Hikyo-Org/Hikyo/issues/84
-[#112]: https://github.com/Hikyo-Org/Hikyo/issues/112
-[#183]: https://github.com/Hikyo-Org/Hikyo/issues/183
-[#185]: https://github.com/Hikyo-Org/Hikyo/issues/185
-[#186]: https://github.com/Hikyo-Org/Hikyo/issues/186
+<!-- implementation-status:end -->
 
 ## One matrix. No hidden inheritance.
 
