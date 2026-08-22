@@ -192,6 +192,14 @@ func runWebAuthnUVRefused(t *testing.T, db *store.DB) {
 	if _, err := discoverableLogin(t, auth, ctx, dev); !errors.Is(err, domain.ErrUnauthenticated) {
 		t.Fatalf("a UV-not-set assertion must be refused, got %v", err)
 	}
+
+	// The same enrolled credential succeeds once UV is restored. This control
+	// proves the refusal above reached the server's UV rule rather than failing
+	// earlier on malformed or zero-value fixture state.
+	dev.SetUserVerified(true)
+	if _, err := discoverableLogin(t, auth, ctx, dev); err != nil {
+		t.Fatalf("the enrolled credential with UV restored must succeed: %v", err)
+	}
 }
 
 func TestWebAuthnCloneSQLite(t *testing.T)   { runWebAuthnClone(t, seededDB(t, openSQLite)) }
