@@ -1,13 +1,40 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
 
+	"github.com/Hikyo-Org/hikyo/internal/authz"
 	"github.com/Hikyo-Org/hikyo/internal/domain"
 	"github.com/Hikyo-Org/hikyo/internal/store"
 )
+
+func TestCopySourceKeyResolverQueriesCatalogueOnce(t *testing.T) {
+	keys := []store.CatalogueKey{
+		{ID: "key_region", Name: "REGION", Classification: "config"},
+		{ID: "key_token", Name: "TOKEN", Classification: "secret"},
+	}
+	queries := 0
+	resolver := copySourceKeyResolver{
+		list: func(context.Context, authz.Proof) ([]store.CatalogueKey, error) {
+			queries++
+			return keys, nil
+		},
+	}
+
+	resolved, err := resolver.resolve(t.Context(), nil, []string{"TOKEN", "REGION"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if queries != 1 {
+		t.Fatalf("catalogue queries = %d, want 1 for the whole copy source plan", queries)
+	}
+	if len(resolved) != 2 || resolved[0].ID != "key_token" || resolved[1].ID != "key_region" {
+		t.Fatalf("resolved keys = %+v, want request order [key_token key_region]", resolved)
+	}
+}
 
 func TestValidateConfigValueReturnsSchemaLeafInCallerSafeNamedDetail(t *testing.T) {
 	const submitted = `{"unexpected":"caller-visible-config"}`
