@@ -66,7 +66,13 @@ export function MatrixPublishSheet({
     protectedEnvironmentIds.includes(environmentId),
   );
   const protectedConfirmationRequired = selectedProtectedIds.length > 0;
-  const protectedGuard = useProtectedPublishCeremony(refData);
+  const protectedGuard = useProtectedPublishCeremony(
+    refData,
+    selectedEnvironmentIds.map((environmentId) => [
+      environmentId,
+      (pendingByEnvironment.get(environmentId) ?? []).map((entry) => entry.keyId),
+    ]),
+  );
 
   const protectedTargets = (): readonly ProtectedPublishTarget[] =>
     selectedProtectedIds.map((environmentId) => {
@@ -214,6 +220,7 @@ export function MatrixPublishSheet({
       </section>
       {protectedGuard.request === null ? null : (
         <Ceremony
+          key={protectedGuard.requestKey}
           request={protectedGuard.request}
           onAuthorised={protectedGuard.onAuthorised}
           onCancel={protectedGuard.onCancel}

@@ -86,15 +86,20 @@ export function MatrixRowEditor({
   const [copyOpen, setCopyOpen] = useState(false);
   const [destinations, setDestinations] = useState<readonly string[]>([]);
   const [protectedCopyConfirmed, setProtectedCopyConfirmed] = useState(false);
-  const protectedGuard = useProtectedPublishCeremony(refData);
+  const protectedEnvironmentIds = rows.flatMap((row) =>
+    row.protected ? [row.environmentId] : [],
+  );
+  const protectedGuard = useProtectedPublishCeremony(refData, [
+    environmentId,
+    keyRecord.id,
+    destinations,
+    protectedEnvironmentIds,
+  ]);
   const sourceRow = rows.find((row) => row.environmentId === environmentId);
   if (sourceRow === undefined) {
     throw new Error(`matrix editor environment ${environmentId} is not in its keyed rows`);
   }
   const environment = sourceRow.environment;
-  const protectedEnvironmentIds = rows.flatMap((row) =>
-    row.protected ? [row.environmentId] : [],
-  );
 
   const valuesPath = generatePath(surfaceById('values').path, {
     org: refData.org,
@@ -406,6 +411,7 @@ export function MatrixRowEditor({
       </dialog>
       {protectedGuard.request === null ? null : (
         <Ceremony
+          key={protectedGuard.requestKey}
           request={protectedGuard.request}
           onAuthorised={protectedGuard.onAuthorised}
           onCancel={protectedGuard.onCancel}

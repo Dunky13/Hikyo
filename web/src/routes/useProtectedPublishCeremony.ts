@@ -1,8 +1,12 @@
-import { useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { useTransport } from '../api/transport.tsx';
 import { fetchRevealWindow, type EnvRef } from '../api/values.ts';
 import type { CeremonyPurpose, CeremonyRequest } from './Ceremony.tsx';
+import {
+  useCeremonyTask,
+  type CeremonyTaskIdentity,
+} from './useCeremonyTask.ts';
 
 export type ProtectedPublishTarget = {
   readonly environmentId: string;
@@ -28,71 +32,92 @@ export type ProtectedPublishTarget = {
  * Restore staging and historical pinning (#59) join them for the same reason —
  * one place decides whether a live sliding window already covers the act.
  */
-export function useProtectedPublishCeremony(refData: Omit<EnvRef, 'environment'>) {
-  const [request, setRequest] = useState<CeremonyRequest | null>(null);
+export function useProtectedPublishCeremony(
+  refData: Omit<EnvRef, 'environment'>,
+  scope: CeremonyTaskIdentity,
+) {
   const [error, setError] = useState<string | null>(null);
-  const resume = useRef<(() => void) | null>(null);
   const transport = useTransport();
+  const ceremony = useCeremonyTask([refData.org, refData.project, scope]);
+
+  useEffect(
+    () => setError(null),
+    [refData.org, refData.project, ceremony.scopeKey],
+  );
 
   const run = async (
     targets: readonly ProtectedPublishTarget[],
     onComplete: () => void,
     failureMessage: string,
   ): Promise<void> => {
-    const target = targets[0];
-    if (target === undefined) {
-      onComplete();
-      return;
+    for (const target of targets) {
+      if (target.keys.length === 0) {
+        throw new Error(
+          `protected publish environment ${target.environmentId} has no addressed keys`,
+        );
+      }
     }
-    if (target.keys.length === 0) {
-      throw new Error(
-        `protected publish environment ${target.environmentId} has no addressed keys`,
-      );
-    }
+
+    const operationKey = targets.map((target) => [
+        target.purpose ?? 'publish',
+        target.environmentId,
+        target.keys.map((key) => key.id),
+      ]);
+    const task = ceremony.begin(operationKey);
     setError(null);
-    try {
-      const window = await fetchRevealWindow(
-        {
-          ...refData,
-          environment: target.environmentId,
-        },
-        transport.client,
-      );
-      if (window.live && !window.single_decision) {
-        await run(targets.slice(1), onComplete, failureMessage);
+
+    const advance = async (remaining: readonly ProtectedPublishTarget[]): Promise<void> => {
+      if (!ceremony.isCurrent(task)) return;
+      const target = remaining[0];
+      if (target === undefined) {
+        if (ceremony.finish(task)) onComplete();
         return;
       }
-      resume.current = () => {
-        void run(targets.slice(1), onComplete, failureMessage);
-      };
-      setRequest({
-        purpose: target.purpose ?? 'publish',
-        environmentId: target.environmentId,
-        environmentName: target.environmentName,
-        keys: target.keys,
-        window,
-      });
-    } catch (cause) {
-      setError(`${failureMessage}: ${errorMessage(cause)}`);
-    }
+      try {
+        const window = await fetchRevealWindow(
+          {
+            ...refData,
+            environment: target.environmentId,
+          },
+          transport.client,
+          task.signal,
+        );
+        if (!ceremony.isCurrent(task)) return;
+        if (window.live && !window.single_decision) {
+          await advance(remaining.slice(1));
+          return;
+        }
+        ceremony.stage(
+          task,
+          {
+            purpose: target.purpose ?? 'publish',
+            environmentId: target.environmentId,
+            environmentName: target.environmentName,
+            keys: target.keys,
+            window,
+          },
+          () => void advance(remaining.slice(1)),
+        );
+      } catch (cause) {
+        if (ceremony.commit(task, () => {
+          setError(`${failureMessage}: ${errorMessage(cause)}`);
+        })) {
+          ceremony.finish(task);
+        }
+      }
+    };
+
+    await advance(targets);
   };
 
-  const onAuthorised = () => {
-    setRequest(null);
-    const continuation = resume.current;
-    resume.current = null;
-    if (continuation === null) {
-      throw new Error('protected publish ceremony completed without a continuation');
-    }
-    continuation();
+  return {
+    request: ceremony.request,
+    requestKey: ceremony.requestKey,
+    error,
+    run,
+    onAuthorised: ceremony.onAuthorised,
+    onCancel: ceremony.onCancel,
   };
-
-  const onCancel = () => {
-    setRequest(null);
-    resume.current = null;
-  };
-
-  return { request, error, run, onAuthorised, onCancel };
 }
 
 function errorMessage(error: unknown): string {
