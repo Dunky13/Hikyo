@@ -3,7 +3,7 @@ package app
 import (
 	"context"
 	"errors"
-	"net/netip"
+	"sync"
 
 	"github.com/Hikyo-Org/hikyo/internal/adapter"
 	"github.com/Hikyo-Org/hikyo/internal/crypto"
@@ -13,14 +13,14 @@ import (
 type adapterLoader struct {
 	runtime        *store.AdapterRuntime
 	keyring        *crypto.Keyring
-	egressPolicy   map[string][]netip.Prefix
+	moduleFactory  adapter.ModuleFactory
 	loadExecution  func(context.Context, adapter.Job) (store.AdapterExecution, error)
 	loadActivation func(context.Context, adapter.Job) (store.AdapterActivation, error)
 	openField      func(crypto.ProjectFieldAAD, []byte) ([]byte, error)
 }
 
 func (l *adapterLoader) LoadActivation(ctx context.Context, job adapter.Job, journal adapter.Journal) (adapter.LoadedActivation, error) {
-	if l == nil || (l.runtime == nil && l.loadActivation == nil) || (l.keyring == nil && l.openField == nil) {
+	if l == nil || (l.runtime == nil && l.loadActivation == nil) || (l.keyring == nil && l.openField == nil) || l.moduleFactory == nil {
 		return adapter.LoadedActivation{}, errors.New("adapter activation loader is not configured")
 	}
 	if journal == nil {
@@ -34,6 +34,10 @@ func (l *adapterLoader) LoadActivation(ctx context.Context, job adapter.Job, jou
 		loadActivation = l.runtime.LoadActivation
 	}
 	material, err := loadActivation(ctx, job)
+	if err != nil {
+		return adapter.LoadedActivation{}, err
+	}
+	provider, err := adapter.ParseProvider(material.Provider)
 	if err != nil {
 		return adapter.LoadedActivation{}, err
 	}
@@ -55,13 +59,17 @@ func (l *adapterLoader) LoadActivation(ctx context.Context, job adapter.Job, jou
 	if err != nil {
 		return adapter.LoadedActivation{}, err
 	}
-	module, forget, err := deploymentModule(material.Provider, material.Origin, string(credential), l.allowedCIDRs(material.Origin))
+	lease, err := l.moduleFactory(provider, adapter.Config{Origin: material.Origin}, string(credential))
 	if err != nil {
 		crypto.Zero(credential)
 		return adapter.LoadedActivation{}, err
 	}
+	release := sync.OnceFunc(func() {
+		crypto.Zero(credential)
+		lease.Release()
+	})
 	return adapter.LoadedActivation{
-		Module: module,
+		Module: lease.Module,
 		Request: adapter.ConnectionRequest{
 			Config:      adapter.Config{Origin: material.Origin},
 			Destination: material.Target.Destination, Access: adapter.Access{Credential: string(credential)},
@@ -69,22 +77,12 @@ func (l *adapterLoader) LoadActivation(ctx context.Context, job adapter.Job, jou
 				return journal.Gate(gateCtx, adapter.Effect{Surface: adapter.Secret, EffectiveName: "route", Disposition: adapter.Update})
 			},
 		},
-		Release: func() {
-			crypto.Zero(credential)
-			forget()
-		},
+		Release: release,
 	}, nil
 }
 
-func (l *adapterLoader) allowedCIDRs(origin string) []netip.Prefix {
-	if l == nil {
-		return nil
-	}
-	return append([]netip.Prefix(nil), l.egressPolicy[origin]...)
-}
-
 func (l *adapterLoader) Load(ctx context.Context, job adapter.Job, journal adapter.Journal) (adapter.LoadedSync, error) {
-	if l == nil || (l.runtime == nil && l.loadExecution == nil) || (l.keyring == nil && l.openField == nil) {
+	if l == nil || (l.runtime == nil && l.loadExecution == nil) || (l.keyring == nil && l.openField == nil) || l.moduleFactory == nil {
 		return adapter.LoadedSync{}, errors.New("adapter loader is not configured")
 	}
 	if journal == nil {
@@ -98,6 +96,10 @@ func (l *adapterLoader) Load(ctx context.Context, job adapter.Job, journal adapt
 		loadExecution = l.runtime.LoadExecution
 	}
 	material, err := loadExecution(ctx, job)
+	if err != nil {
+		return adapter.LoadedSync{}, err
+	}
+	provider, err := adapter.ParseProvider(material.Provider)
 	if err != nil {
 		return adapter.LoadedSync{}, err
 	}
@@ -122,7 +124,7 @@ func (l *adapterLoader) Load(ctx context.Context, job adapter.Job, journal adapt
 	if err != nil {
 		return adapter.LoadedSync{}, err
 	}
-	module, forget, err := deploymentModule(material.Provider, material.Origin, string(credential), l.allowedCIDRs(material.Origin))
+	lease, err := l.moduleFactory(provider, adapter.Config{Origin: material.Origin}, string(credential))
 	if err != nil {
 		crypto.Zero(credential)
 		return adapter.LoadedSync{}, err
@@ -139,7 +141,7 @@ func (l *adapterLoader) Load(ctx context.Context, job adapter.Job, journal adapt
 				crypto.Zero(value)
 			}
 			crypto.Zero(credential)
-			forget()
+			lease.Release()
 			return adapter.LoadedSync{}, err
 		}
 		plain, err := openField(crypto.ProjectFieldAAD{
@@ -152,7 +154,7 @@ func (l *adapterLoader) Load(ctx context.Context, job adapter.Job, journal adapt
 				crypto.Zero(value)
 			}
 			crypto.Zero(credential)
-			forget()
+			lease.Release()
 			return adapter.LoadedSync{}, err
 		}
 		opened = append(opened, plain)
@@ -165,17 +167,18 @@ func (l *adapterLoader) Load(ctx context.Context, job adapter.Job, journal adapt
 		Config: adapter.Config{Origin: material.Origin}, Target: material.Target,
 		Manifest: manifest, Ledger: material.Ledger,
 	}
+	release := sync.OnceFunc(func() {
+		for i := range manifest {
+			manifest[i].Value = ""
+		}
+		for _, value := range opened {
+			crypto.Zero(value)
+		}
+		crypto.Zero(credential)
+		lease.Release()
+	})
 	return adapter.LoadedSync{
-		Module: module, Request: request, Revision: material.Revision,
-		Release: func() {
-			for i := range manifest {
-				manifest[i].Value = ""
-			}
-			for _, value := range opened {
-				crypto.Zero(value)
-			}
-			crypto.Zero(credential)
-			forget()
-		},
+		Module: lease.Module, Request: request, Revision: material.Revision,
+		Release: release,
 	}, nil
 }

@@ -91,8 +91,8 @@ func runAdapterAuditLifecycle(t *testing.T, db *store.DB) {
 
 	svc := &service.Adapters{
 		DB: db, Keyring: probeKeyring(t, db), Now: func() time.Time { return now },
-		PlanModule: func(string, string) (adapter.Module, func(), error) {
-			return auditAdapterModule{}, func() {}, nil
+		ModuleFactory: func(adapter.Provider, adapter.Config, string) (*adapter.ModuleLease, error) {
+			return adapter.NewModuleLease(auditAdapterModule{}, func() {})
 		},
 	}
 	created, err := svc.Create(ctx, service.LocalPrincipal(alice), scope, service.CreateAdapterRequest{

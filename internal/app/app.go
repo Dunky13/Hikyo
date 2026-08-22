@@ -396,13 +396,12 @@ func boot(ctx context.Context, cfg *config.Config, log *slog.Logger, resources b
 			return err
 		})
 	})
+	moduleWiring := newAdapterModuleWiring(cfg.AdapterEgressPolicy)
 	adapterWorker := &adapter.Worker{
-		Store: adapterRuntime, Loader: &adapterLoader{runtime: adapterRuntime, keyring: kr, egressPolicy: cfg.AdapterEgressPolicy},
+		Store: adapterRuntime, Loader: &adapterLoader{runtime: adapterRuntime, keyring: kr, moduleFactory: moduleWiring.worker},
 		ID: "adapter-worker-" + uuid.Must(uuid.NewV7()).String(), Poll: time.Second, Log: log,
 	}
-	adapterService := &service.Adapters{DB: db, Auth: authSvc, Keyring: kr, Budget: budget, ProviderModule: func(provider, origin, credential string) (adapter.Module, func(), error) {
-		return deploymentModule(provider, origin, credential, cfg.AdapterEgressPolicy[origin])
-	}}
+	adapterService := &service.Adapters{DB: db, Auth: authSvc, Keyring: kr, Budget: budget, ModuleFactory: moduleWiring.service}
 	definitionsService := &service.Definitions{DB: db, Keyring: kr, Advisory: advisory, Budget: budget, Scan: ruleset}
 
 	api := &server.API{
