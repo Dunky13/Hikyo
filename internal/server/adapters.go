@@ -290,44 +290,41 @@ func (a *API) ShowAdapterTarget(ctx context.Context, req apigen.ShowAdapterTarge
 	return apigen.ShowAdapterTarget200JSONResponse(out), nil
 }
 
-func (a *API) UpdateAdapterTarget(ctx context.Context, req apigen.UpdateAdapterTargetRequestObject) (apigen.UpdateAdapterTargetResponseObject, error) {
+type targetMutationService interface {
+	ApplyTargetMutation(context.Context, service.Actor, domain.Scope, service.UpdateAdapterTargetRequest, bool) (service.TargetMutationResult, error)
+	Move(context.Context, service.Actor, domain.Scope, string) (service.AdapterMove, error)
+}
+
+func updateAdapterTarget(ctx context.Context, adapters targetMutationService, req apigen.UpdateAdapterTargetRequestObject) (apigen.UpdateAdapterTargetResponseObject, error) {
 	input := service.AdapterTargetInput{EnvironmentID: string(req.Body.EnvironmentId), DestinationKind: string(req.Body.DestinationKind), DestinationOwner: req.Body.DestinationOwner, DestinationName: req.Body.DestinationName, DestinationEnvironment: req.Body.DestinationEnvironment, Visibility: string(req.Body.Visibility), SelectedRepositoryIDs: append([]int64(nil), req.Body.SelectedRepositoryIds...), NamePrefix: req.Body.NamePrefix}
 	for _, id := range req.Body.KeyIds {
 		input.KeyIDs = append(input.KeyIDs, string(id))
 	}
 	request := service.UpdateAdapterTargetRequest{TargetID: string(req.Target), ExpectedGeneration: req.Body.ExpectedGeneration, Target: input}
-	current, err := a.Adapters.InspectTarget(ctx, service.Bearer(bearer(ctx)), adapterScope(req.Org, req.Project), string(req.Target))
+	result, err := adapters.ApplyTargetMutation(ctx, service.Bearer(bearer(ctx)), adapterScope(req.Org, req.Project), request, req.Body.KeepRemote != nil && *req.Body.KeepRemote)
 	if err != nil {
 		return nil, err
 	}
-	if input.EnvironmentID != current.Target.EnvironmentID {
-		return nil, fmt.Errorf("%w: target environment is immutable; remove and add the target", domain.ErrConflict)
-	}
-	sameDestination := input.DestinationKind == current.Target.DestinationKind &&
-		input.DestinationOwner == current.Target.DestinationOwner && input.DestinationName == current.Target.DestinationName && input.DestinationEnvironment == current.Target.DestinationEnvironment
-	if sameDestination {
-		if req.Body.KeepRemote != nil && *req.Body.KeepRemote {
-			return nil, fmt.Errorf("%w: keep_remote applies only to a destination move", domain.ErrInvalid)
-		}
-		updated, err := a.Adapters.UpdateTarget(ctx, service.Bearer(bearer(ctx)), adapterScope(req.Org, req.Project), request)
+	switch result := result.(type) {
+	case service.TargetMutationUpdated:
+		return apigen.UpdateAdapterTarget200JSONResponse(adapterTargetResponse(result.Target)), nil
+	case service.TargetMutationMoveStarted:
+		move, err := adapters.Move(ctx, service.Bearer(bearer(ctx)), adapterScope(req.Org, req.Project), result.Move.MoveID)
 		if err != nil {
 			return nil, err
 		}
-		return apigen.UpdateAdapterTarget200JSONResponse(adapterTargetResponse(updated)), nil
+		out, err := adapterMoveResponse(move)
+		if err != nil {
+			return nil, err
+		}
+		return apigen.UpdateAdapterTarget202JSONResponse(out), nil
+	default:
+		return nil, fmt.Errorf("unknown target mutation result %T", result)
 	}
-	started, err := a.Adapters.MoveTarget(ctx, service.Bearer(bearer(ctx)), adapterScope(req.Org, req.Project), request, req.Body.KeepRemote != nil && *req.Body.KeepRemote)
-	if err != nil {
-		return nil, err
-	}
-	move, err := a.Adapters.Move(ctx, service.Bearer(bearer(ctx)), adapterScope(req.Org, req.Project), started.MoveID)
-	if err != nil {
-		return nil, err
-	}
-	out, err := adapterMoveResponse(move)
-	if err != nil {
-		return nil, err
-	}
-	return apigen.UpdateAdapterTarget202JSONResponse(out), nil
+}
+
+func (a *API) UpdateAdapterTarget(ctx context.Context, req apigen.UpdateAdapterTargetRequestObject) (apigen.UpdateAdapterTargetResponseObject, error) {
+	return updateAdapterTarget(ctx, a.Adapters, req)
 }
 
 func (a *API) RemoveAdapterTarget(ctx context.Context, req apigen.RemoveAdapterTargetRequestObject) (apigen.RemoveAdapterTargetResponseObject, error) {
