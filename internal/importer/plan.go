@@ -92,7 +92,7 @@ type PlanInput struct {
 type Plan struct {
 	Template Template
 	Manifest Manifest
-	Bundle   definitions.Bundle
+	Bundle   definitions.CanonicalBundle
 	Values   ValuesFile
 
 	// Renames is every source-name → target-name mapping. Nothing is renamed
@@ -326,7 +326,7 @@ type EnvPlan struct {
 type ProjectPlan struct {
 	Template Template
 	Manifest Manifest
-	Bundle   definitions.Bundle
+	Bundle   definitions.CanonicalBundle
 	Envs     []EnvPlan
 
 	Renames         []Rename
@@ -447,7 +447,7 @@ func BuildProjectPlan(in ProjectPlanInput) (*ProjectPlan, error) {
 		Renames:         renames,
 		PlaintextHints:  plaintextHints,
 	}
-	plan.Bundle = definitions.Bundle{
+	bundle := definitions.Bundle{
 		FormatVersion: definitions.FormatVersion,
 		Environments:  []definitions.Environment{},
 		KeyGroups:     []definitions.KeyGroup{},
@@ -462,7 +462,7 @@ func BuildProjectPlan(in ProjectPlanInput) (*ProjectPlan, error) {
 			plan.AlreadyDeclared = append(plan.AlreadyDeclared, target)
 		} else {
 			rule := schema.Rule{Type: d.declType}
-			plan.Bundle.Keys = append(plan.Bundle.Keys, definitions.Key{
+			bundle.Keys = append(bundle.Keys, definitions.Key{
 				Name:           target,
 				FolderPath:     d.folder,
 				Classification: d.class,
@@ -552,11 +552,11 @@ func BuildProjectPlan(in ProjectPlanInput) (*ProjectPlan, error) {
 	}
 	slices.Sort(created)
 	for _, name := range created {
-		plan.Bundle.Environments = append(plan.Bundle.Environments, definitions.Environment{Name: name})
+		bundle.Environments = append(bundle.Environments, definitions.Environment{Name: name})
 	}
-	plan.Bundle, err = definitions.Normalize(plan.Bundle)
+	plan.Bundle, err = definitions.Canonicalize(bundle)
 	if err != nil {
-		return nil, fmt.Errorf("import: normalizing definitions bundle: %w", err)
+		return nil, fmt.Errorf("import: canonicalizing definitions bundle: %w", err)
 	}
 	return plan, nil
 }

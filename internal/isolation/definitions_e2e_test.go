@@ -1,6 +1,7 @@
 package isolation
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -88,7 +89,11 @@ func definitionsRoundTrip(t *testing.T, db *store.DB) {
 	svc := definitionsService(t, db)
 	raw := exportDefinitions(t, svc, f)
 	bundle := parseDefinitions(t, raw)
-	digest, err := definitions.Digest(bundle)
+	canonical, err := definitions.Canonicalize(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest, err := definitions.Digest(canonical)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -478,7 +483,7 @@ func definitionsSecretDeclarationBoundary(t *testing.T, db *store.DB) {
 		bundle := parseDefinitions(t, exportDefinitions(t, svc, f))
 		bundle.Keys[0].Declaration = schema.Declaration{Rule: &schema.Rule{Type: schema.TypeJSON,
 			JSONSchema: []byte(`{"properties":{"nested":{"const":"live-value"}}}`)}}
-		raw, err := definitions.Encode(bundle)
+		raw, err := json.Marshal(bundle)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -684,16 +689,16 @@ func parseDefinitions(t *testing.T, raw []byte) definitions.Bundle {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return bundle
+	return bundle.WireBundle()
 }
 
 func encodeDefinitions(t *testing.T, bundle definitions.Bundle) []byte {
 	t.Helper()
-	normalized, err := definitions.Normalize(bundle)
+	canonical, err := definitions.Canonicalize(bundle)
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, err := definitions.Encode(normalized)
+	raw, err := definitions.Encode(canonical)
 	if err != nil {
 		t.Fatal(err)
 	}

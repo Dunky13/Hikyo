@@ -47,9 +47,9 @@ func sampleBundle() Bundle {
 }
 
 func TestEncodeParseRoundTrip(t *testing.T) {
-	norm, err := Normalize(sampleBundle())
+	norm, err := Canonicalize(sampleBundle())
 	if err != nil {
-		t.Fatalf("normalize: %v", err)
+		t.Fatalf("canonicalize: %v", err)
 	}
 	canonical, err := Encode(norm)
 	if err != nil {
@@ -77,8 +77,8 @@ func TestEncodeParseRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	if !reflect.DeepEqual(parsed, norm) {
-		t.Fatalf("Parse(Encode(b)) != b\n got: %+v\nwant: %+v", parsed, norm)
+	if !reflect.DeepEqual(parsed.WireBundle(), norm.WireBundle()) {
+		t.Fatalf("Parse(Encode(b)) != b\n got: %+v\nwant: %+v", parsed.WireBundle(), norm.WireBundle())
 	}
 	reEncoded, err := Encode(parsed)
 	if err != nil {
@@ -90,7 +90,7 @@ func TestEncodeParseRoundTrip(t *testing.T) {
 }
 
 func TestParseCompiledCarriesClassifiedDeclarations(t *testing.T) {
-	norm := mustNormalize(t, sampleBundle())
+	norm := mustCanonicalize(t, sampleBundle())
 	raw, err := Encode(norm)
 	if err != nil {
 		t.Fatal(err)
@@ -99,8 +99,8 @@ func TestParseCompiledCarriesClassifiedDeclarations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(parsed.Bundle, norm) {
-		t.Fatalf("ParseCompiled bundle differs\n got: %+v\nwant: %+v", parsed.Bundle, norm)
+	if !reflect.DeepEqual(parsed.WireBundle(), norm.WireBundle()) {
+		t.Fatalf("ParseCompiled bundle differs\n got: %+v\nwant: %+v", parsed.WireBundle(), norm.WireBundle())
 	}
 	compiled, ok := parsed.CompiledDeclaration("DB_URL")
 	if !ok {
@@ -115,7 +115,7 @@ func TestParseCompiledCarriesClassifiedDeclarations(t *testing.T) {
 }
 
 func TestDigestStableOverCanonical(t *testing.T) {
-	norm, _ := Normalize(sampleBundle())
+	norm, _ := Canonicalize(sampleBundle())
 	d1, err := Digest(norm)
 	if err != nil {
 		t.Fatal(err)
@@ -155,14 +155,124 @@ func TestParseBaseFieldRejectedByName(t *testing.T) {
 func TestParseIDsWithoutBaseRejected(t *testing.T) {
 	b := sampleBundle()
 	b.BaseRevision = nil // ids remain
-	canonical, err := Encode(mustNormalize(t, b))
+	_, err := Canonicalize(b)
+	if !errors.Is(err, domain.ErrInvalid) || !strings.Contains(err.Error(), "ids without base revision") {
+		t.Fatalf("ids-without-base canonicalization must be rejected: %v", err)
+	}
+}
+
+func TestCanonicalizeRunsEveryPreEncodeBundleValidation(t *testing.T) {
+	tests := []struct {
+		name string
+		edit func(*Bundle)
+		want error
+	}{
+		{
+			name: "wrong format version",
+			edit: func(b *Bundle) { b.FormatVersion = FormatVersion + 1 },
+			want: domain.ErrInvalid,
+		},
+		{
+			name: "too many entries",
+			edit: func(b *Bundle) {
+				b.Environments = make([]Environment, MaxBundleEntries+1)
+			},
+			want: domain.ErrLimitExceeded,
+		},
+		{
+			name: "canonical bytes exceed parse limit",
+			edit: func(b *Bundle) {
+				b.Keys[0].Description = strings.Repeat("x", MaxBundleBytes)
+			},
+			want: domain.ErrLimitExceeded,
+		},
+		{
+			name: "invalid classification",
+			edit: func(b *Bundle) { b.Keys[0].Classification = "public" },
+			want: domain.ErrInvalid,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := sampleBundle()
+			tt.edit(&b)
+			_, err := Canonicalize(b)
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("Canonicalize error = %v, want %v", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestCanonicalBundleReturnsDetachedModel(t *testing.T) {
+	bundle := mustCanonicalize(t, sampleBundle())
+	want, err := Encode(bundle)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = Parse(canonical)
-	if !errors.Is(err, domain.ErrInvalid) || !strings.Contains(err.Error(), "ids without base revision") {
-		t.Fatalf("ids-without-base must be rejected: %v", err)
+
+	detached := bundle.WireBundle()
+	detached.Keys[0].Name = "MUTATED"
+	detached.Keys[0].Declaration.Rule.Type = schema.TypeInteger
+	got, err := Encode(bundle)
+	if err != nil {
+		t.Fatal(err)
 	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("mutating Bundle() copy changed canonical bytes\n got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestCanonicalBundleZeroValueRejected(t *testing.T) {
+	zero := CanonicalBundle{}
+	if _, err := Encode(zero); !errors.Is(err, domain.ErrInvalid) {
+		t.Fatalf("Encode zero CanonicalBundle error = %v, want ErrInvalid", err)
+	}
+	for _, tt := range []struct {
+		name string
+		call func()
+	}{
+		{name: "WireBundle", call: func() { zero.WireBundle() }},
+		{name: "Additive", call: func() { zero.Additive() }},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			panicked := false
+			func() {
+				defer func() { panicked = recover() != nil }()
+				tt.call()
+			}()
+			if !panicked {
+				t.Fatalf("%s accepted zero CanonicalBundle", tt.name)
+			}
+		})
+	}
+}
+
+func FuzzCanonicalBundleRoundTrip(f *testing.F) {
+	seed, err := Encode(mustCanonicalize(f, sampleBundle()))
+	if err != nil {
+		f.Fatal(err)
+	}
+	f.Add(seed)
+
+	f.Fuzz(func(t *testing.T, raw []byte) {
+		first, err := Parse(raw)
+		if err != nil {
+			return
+		}
+		encoded, err := Encode(first)
+		if err != nil {
+			t.Fatalf("Encode(Parse(raw)): %v", err)
+		}
+		second, err := Parse(encoded)
+		if err != nil {
+			t.Fatalf("Parse(Encode(Parse(raw))): %v\n%s", err, encoded)
+		}
+		if !reflect.DeepEqual(second.WireBundle(), first.WireBundle()) {
+			t.Fatalf("canonical model changed across round trip\n got: %+v\nwant: %+v", second.WireBundle(), first.WireBundle())
+		}
+	})
 }
 
 func TestParseDuplicateMemberRejected(t *testing.T) {
@@ -187,22 +297,18 @@ func TestParseRefusesNestedLiteralOnSecretKey(t *testing.T) {
 		Type:       schema.TypeJSON,
 		JSONSchema: []byte(`{"properties":{"password":{"const":"live-value"}}}`),
 	}}
-	raw, err := Encode(b)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = Parse(raw)
+	_, err := Canonicalize(b)
 	if !errors.Is(err, domain.ErrInvalid) || !strings.Contains(err.Error(), "DB_URL") ||
 		!strings.Contains(err.Error(), "use `pattern`, or declassify the key") {
-		t.Fatalf("secret literal parse refusal = %v", err)
+		t.Fatalf("secret literal canonicalization refusal = %v", err)
 	}
 }
 
-func mustNormalize(t *testing.T, b Bundle) Bundle {
+func mustCanonicalize(t testing.TB, b Bundle) CanonicalBundle {
 	t.Helper()
-	n, err := Normalize(b)
+	n, err := Canonicalize(b)
 	if err != nil {
-		t.Fatalf("normalize: %v", err)
+		t.Fatalf("canonicalize: %v", err)
 	}
 	return n
 }

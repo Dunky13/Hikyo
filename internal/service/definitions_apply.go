@@ -82,10 +82,11 @@ func (s *Definitions) Plan(ctx context.Context, actor Actor, scope domain.Scope,
 		if err := r.Projects().Lock(ctx, p); err != nil {
 			return err
 		}
-		bundle, err := definitions.Parse(raw)
+		canonical, err := definitions.Parse(raw)
 		if err != nil {
 			return err
 		}
+		bundle := canonical.WireBundle()
 		cur, err := buildCurrentState(ctx, r.Catalogue(), r.Environments(), p)
 		if err != nil {
 			return err
@@ -135,7 +136,7 @@ func (s *Definitions) Plan(ctx context.Context, actor Actor, scope domain.Scope,
 			return fmt.Errorf("%w: project already holds %d open definitions plans (max %d)",
 				domain.ErrLimitExceeded, open, MaxOpenPlansPerProject)
 		}
-		view, err = s.persistPlan(ctx, r, az, caller, p, scope, bundle, cur, res)
+		view, err = s.persistPlan(ctx, r, az, caller, p, scope, canonical, cur, res)
 		return err
 	})
 	return view, err
@@ -223,7 +224,7 @@ func definitionLimit(format string, args ...any) error {
 // persistPlan enriches the diff with live-occurrence impact, computes the pins,
 // writes the plan row, and audits it.
 func (s *Definitions) persistPlan(ctx context.Context, r store.Repos, az *authz.TxAuthorizer, caller authz.Identity,
-	p authz.Proof, scope domain.Scope, bundle definitions.Bundle, cur definitions.CurrentState,
+	p authz.Proof, scope domain.Scope, bundle definitions.CanonicalBundle, cur definitions.CurrentState,
 	res definitions.Resolution) (PlanView, error) {
 	now := s.now()
 	envNameByID := make(map[string]string, len(cur.Environments))
@@ -327,7 +328,7 @@ func (s *Definitions) persistPlan(ctx context.Context, r store.Repos, az *authz.
 	}
 
 	return PlanView{
-		ID: planID, Digest: digest, BaseRevision: bundle.BaseRevision, CurrentRevision: cur.SchemaRevision,
+		ID: planID, Digest: digest, BaseRevision: bundle.WireBundle().BaseRevision, CurrentRevision: cur.SchemaRevision,
 		Additive: bundle.Additive(), ExpiresAt: now.Add(PlanTTL),
 		ProtectedEnvironments: protectedPinNames(protectedSet),
 		Diff:                  planDiff, DeletionsPresent: res.DeletionsPresent(), RevealRequired: res.RevealKeys,
