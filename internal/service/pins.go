@@ -318,7 +318,11 @@ func validatePinnedSnapshot(ctx context.Context, r store.Repos, p authz.Proof, s
 		}
 		cells = append(cells, cell)
 	}
-	return validateResolved(cells, presence, string(scope.Env))
+	index, err := newGroupIndex(keys, presence)
+	if err != nil {
+		return err
+	}
+	return index.validateResolvedPublish(cells, string(scope.Env))
 }
 
 func pinnedHistoricalSecrets(ctx context.Context, r store.Repos, p authz.Proof,

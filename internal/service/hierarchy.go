@@ -877,7 +877,7 @@ func (s *Environments) create(ctx context.Context, actor Actor, scope domain.Sco
 		// environment born invalid.
 		newScope := domain.Scope{Org: scope.Org, Project: scope.Project, Env: domain.EnvID(created.ID)}
 		published, err = republish(ctx, r, az, caller, sealer, s.Keyring, newScope,
-			store.CanonTime(time.Now()), "environment-create")
+			store.CanonTime(time.Now()), "environment-create", &groupIndexPhase{})
 		return err
 	})
 	if err != nil {

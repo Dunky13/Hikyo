@@ -712,7 +712,7 @@ func (s *Values) declare(ctx context.Context, actor Actor, scope domain.Scope, e
 			// as an immediate write. It therefore materializes each destination
 			// rather than staging: a value that is authorized as delivered and
 			// then does not deliver would be a third state nobody asked for.
-			env, err := republish(ctx, r, az, caller, sealer, s.Keyring, envScope, time.Now().UTC(), "declare")
+			env, err := republish(ctx, r, az, caller, sealer, s.Keyring, envScope, time.Now().UTC(), "declare", &groupIndexPhase{})
 			if err != nil {
 				return declareWriteResult{}, err
 			}
@@ -1160,7 +1160,7 @@ func (s *Values) Copy(ctx context.Context, actor Actor, scope domain.Scope, req 
 				return copyWriteResult{}, err
 			}
 			published, err := republish(ctx, r, az, caller, sealer, s.Keyring, destScope,
-				store.CanonTime(time.Now()), operation)
+				store.CanonTime(time.Now()), operation, &groupIndexPhase{})
 			if err != nil {
 				return copyWriteResult{}, err
 			}
