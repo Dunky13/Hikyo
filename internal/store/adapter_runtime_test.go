@@ -46,6 +46,31 @@ func adapterRuntimeDB(t *testing.T) *store.DB {
 	return db
 }
 
+func TestAdapterEnqueueRefusesAtPerTargetQueueDepth(t *testing.T) {
+	db := adapterRuntimeDB(t)
+	_, err := db.SQLiteWrite().ExecContext(t.Context(), `
+		WITH RECURSIVE seq(n) AS (VALUES(2) UNION ALL SELECT n + 1 FROM seq WHERE n < 1000)
+		INSERT INTO adapter_outbox (
+			id, org_id, project_id, environment_id, target_id, kind,
+			authority_principal_id, generation, dedup_key, next_attempt_at, state, created_at
+		)
+		SELECT printf('job_%d', n), 'org_adapter', 'prj_adapter', 'env_adapter', 'tgt_1',
+			'converge', 'usr_adapter', 1, printf('legacy-%d', n),
+			'2026-08-17T00:00:00Z', 'queued', '2026-08-17T00:00:00Z'
+		FROM seq`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := store.NewAdapterRuntime(db, func(context.Context, adapter.Job, adapter.Effect) error { return nil })
+	_, err = runtime.Enqueue(t.Context(), adapter.Job{
+		OrgID: "org_adapter", ProjectID: "prj_adapter", EnvironmentID: "env_adapter",
+		TargetID: "tgt_1", Kind: adapter.Converge, AuthorityPrincipal: "usr_adapter",
+	}, time.Now().UTC())
+	if !errors.Is(err, adapter.ErrQueueFull) {
+		t.Fatalf("Enqueue() error = %v, want ErrQueueFull", err)
+	}
+}
+
 func TestAdapterJournalCommitsIntentOutcomeAndLedgerAtomically(t *testing.T) {
 	db := adapterRuntimeDB(t)
 	runtime := store.NewAdapterRuntime(db, func(context.Context, adapter.Job, adapter.Effect) error { return nil })
