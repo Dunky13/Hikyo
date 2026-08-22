@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"testing"
 	"time"
@@ -92,6 +93,51 @@ func TestWriteGenerationAndState(t *testing.T) {
 	}
 }
 
+func TestPublishMaterializesCommitsAndCollects(t *testing.T) {
+	_, rt := dirs(t)
+	projectDir := t.TempDir()
+	keys := testKeys(t)
+	rl := begin(t, projectDir, nil)
+	content := map[string][]byte{
+		"api":    []byte("API=1\n"),
+		"worker": []byte("WORKER=1\n"),
+	}
+
+	result, err := rl.Publish(PublishPlan{RuntimeDir: rt, Keys: keys, Targets: content})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantStamps := map[string]string{
+		"api":    TargetStamp(keys, "api", content["api"]),
+		"worker": TargetStamp(keys, "worker", content["worker"]),
+	}
+	if !reflect.DeepEqual(result.Stamps, wantStamps) {
+		t.Fatalf("Publish stamps = %v, want %v", result.Stamps, wantStamps)
+	}
+	if !reflect.DeepEqual(result.Materialized, map[string]bool{"api": true, "worker": true}) {
+		t.Fatalf("Publish materialized = %v, want both targets", result.Materialized)
+	}
+	if !result.CandidateActive() || !result.GCComplete() {
+		t.Fatalf("Publish phase=%s, want complete", result.Phase)
+	}
+	if !result.Recover.ActiveKnown || result.Recover.NeedsCleanup || !reflect.DeepEqual(result.Recover.ActiveStamps, wantStamps) || !reflect.DeepEqual(result.Recover.CandidateStamps, wantStamps) {
+		t.Fatalf("Publish recovery = %+v, want active candidates and no cleanup", result.Recover)
+	}
+	gotStamps, err := CurrentStamps(projectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(gotStamps, wantStamps) {
+		t.Fatalf("CurrentStamps = %v, want %v", gotStamps, wantStamps)
+	}
+	for target, stamp := range wantStamps {
+		got, err := os.ReadFile(filepath.Join(rt, stamp, target+".env"))
+		if err != nil || string(got) != string(content[target]) {
+			t.Fatalf("%s generation = %q err=%v", target, got, err)
+		}
+	}
+}
+
 func TestWriteGenerationRejectsBadTarget(t *testing.T) {
 	_, rt := dirs(t)
 	keys := testKeys(t)
@@ -124,9 +170,13 @@ func TestWriteGenerationExistingMismatch(t *testing.T) {
 
 // errProbe fails at a chosen seam.
 type errProbe struct {
-	failAfterCreate bool
-	failComplete    bool
-	failRename      bool
+	failAfterCreate      bool
+	failComplete         bool
+	failAfterMaterialize bool
+	failRename           bool
+	failAfterCommit      bool
+	failGC               bool
+	failGCRemoval        string
 }
 
 func (p errProbe) AfterGenerationDirCreated(string) error {
@@ -146,6 +196,145 @@ func (p errProbe) BeforeStampRename() error {
 		return errors.New("injected crash before rename")
 	}
 	return nil
+}
+func (p errProbe) AfterGenerationMaterialized(string, string) error {
+	if p.failAfterMaterialize {
+		return errors.New("injected crash after generation materialized")
+	}
+	return nil
+}
+func (p errProbe) AfterStampCommit() error {
+	if p.failAfterCommit {
+		return errors.New("injected crash after stamp commit")
+	}
+	return nil
+}
+func (p errProbe) BeforeGarbageCollection() error {
+	if p.failGC {
+		return errors.New("injected crash before gc")
+	}
+	return nil
+}
+func (p errProbe) BeforeGenerationRemoval(stamp string) error {
+	if p.failGCRemoval == stamp {
+		return errors.New("injected crash during gc removal")
+	}
+	return nil
+}
+
+func TestPublishMaterializeFailureKeepsPreviousActive(t *testing.T) {
+	_, rt := dirs(t)
+	projectDir := t.TempDir()
+	keys := testKeys(t)
+	oldContent := []byte("API=old\n")
+	oldStamp := TargetStamp(keys, "api", oldContent)
+	seed := begin(t, projectDir, nil)
+	if _, _, err := seed.WriteGeneration(rt, keys, "api", oldContent); err != nil {
+		t.Fatal(err)
+	}
+	if err := seed.CommitStamps(map[string]string{"api": oldStamp}); err != nil {
+		t.Fatal(err)
+	}
+
+	lock := begin(t, projectDir, errProbe{failAfterMaterialize: true})
+	newContent := []byte("API=new\n")
+	newStamp := TargetStamp(keys, "api", newContent)
+	result, err := lock.Publish(PublishPlan{RuntimeDir: rt, Keys: keys, Targets: map[string][]byte{"api": newContent}})
+	if err == nil {
+		t.Fatal("Publish should surface the injected materialization failure")
+	}
+	if result.CandidateActive() || result.GCComplete() {
+		t.Fatalf("Publish phase=%s after materialization failure", result.Phase)
+	}
+	if !result.Materialized["api"] || !result.Recover.NeedsCleanup {
+		t.Fatalf("Publish result = %+v, want materialized candidate needing cleanup", result)
+	}
+	if result.Recover.ActiveStamps["api"] != oldStamp || result.Recover.CandidateStamps["api"] != newStamp {
+		t.Fatalf("Publish recovery = %+v, want old active and new candidate", result.Recover)
+	}
+	if present, complete := GenerationState(rt, newStamp); !present || !complete {
+		t.Fatalf("candidate present=%v complete=%v, want recoverable complete candidate", present, complete)
+	}
+}
+
+func TestPublishPostCommitFailureReportsCandidateActive(t *testing.T) {
+	_, rt := dirs(t)
+	projectDir := t.TempDir()
+	keys := testKeys(t)
+	lock := begin(t, projectDir, errProbe{failAfterCommit: true})
+	content := []byte("API=new\n")
+	stamp := TargetStamp(keys, "api", content)
+
+	result, err := lock.Publish(PublishPlan{RuntimeDir: rt, Keys: keys, Targets: map[string][]byte{"api": content}})
+	if err == nil {
+		t.Fatal("Publish should surface the injected post-commit failure")
+	}
+	if !result.CandidateActive() || result.GCComplete() {
+		t.Fatalf("Publish phase=%s after post-commit failure", result.Phase)
+	}
+	if !result.Recover.NeedsCleanup || result.Recover.ActiveStamps["api"] != stamp {
+		t.Fatalf("Publish recovery = %+v, want committed candidate active and cleanup pending", result.Recover)
+	}
+	got, err := CurrentStamps(projectDir)
+	if err != nil || got["api"] != stamp {
+		t.Fatalf("CurrentStamps = %v err=%v, want committed %s", got, err, stamp)
+	}
+}
+
+func TestPublishStampSwitchFailureKeepsPreviousActive(t *testing.T) {
+	_, rt := dirs(t)
+	projectDir := t.TempDir()
+	keys := testKeys(t)
+	oldContent := []byte("API=old\n")
+	oldStamp := TargetStamp(keys, "api", oldContent)
+	seed := begin(t, projectDir, nil)
+	if _, _, err := seed.WriteGeneration(rt, keys, "api", oldContent); err != nil {
+		t.Fatal(err)
+	}
+	if err := seed.CommitStamps(map[string]string{"api": oldStamp}); err != nil {
+		t.Fatal(err)
+	}
+
+	lock := begin(t, projectDir, errProbe{failRename: true})
+	newContent := []byte("API=new\n")
+	newStamp := TargetStamp(keys, "api", newContent)
+	result, err := lock.Publish(PublishPlan{RuntimeDir: rt, Keys: keys, Targets: map[string][]byte{"api": newContent}})
+	if err == nil {
+		t.Fatal("Publish should surface the injected stamp-switch failure")
+	}
+	if result.CandidateActive() || result.GCComplete() {
+		t.Fatalf("Publish phase=%s after stamp-switch failure", result.Phase)
+	}
+	if !result.Recover.ActiveKnown || !result.Recover.NeedsCleanup || result.Recover.ActiveStamps["api"] != oldStamp || result.Recover.CandidateStamps["api"] != newStamp {
+		t.Fatalf("Publish recovery = %+v, want old active and new recoverable candidate", result.Recover)
+	}
+	got, err := CurrentStamps(projectDir)
+	if err != nil || got["api"] != oldStamp {
+		t.Fatalf("CurrentStamps = %v err=%v, want previous %s", got, err, oldStamp)
+	}
+}
+
+func TestPublishGCFailureNeverRemovesActiveGeneration(t *testing.T) {
+	_, rt := dirs(t)
+	projectDir := t.TempDir()
+	keys := testKeys(t)
+	lock := begin(t, projectDir, errProbe{failGC: true})
+	content := []byte("API=new\n")
+	stamp := TargetStamp(keys, "api", content)
+
+	result, err := lock.Publish(PublishPlan{RuntimeDir: rt, Keys: keys, Targets: map[string][]byte{"api": content}})
+	if err == nil {
+		t.Fatal("Publish should surface the injected GC failure")
+	}
+	if !result.CandidateActive() || result.GCComplete() {
+		t.Fatalf("Publish phase=%s after GC failure", result.Phase)
+	}
+	if !result.Recover.NeedsCleanup || result.Recover.ActiveStamps["api"] != stamp {
+		t.Fatalf("Publish recovery = %+v, want active generation retained", result.Recover)
+	}
+	if present, complete := GenerationState(rt, stamp); !present || !complete {
+		t.Fatalf("active generation present=%v complete=%v after GC failure", present, complete)
+	}
 }
 
 func TestCrashAfterDirCreatedLeavesUnreferenced(t *testing.T) {
@@ -474,6 +663,131 @@ func TestGCKeepsCurrentPlusThree(t *testing.T) {
 	}
 }
 
+func TestGCKeepsPreviousGenerationsPerTarget(t *testing.T) {
+	_, rt := dirs(t)
+	projectDir := t.TempDir()
+	keys := testKeys(t)
+	rl := begin(t, projectDir, nil)
+
+	apiOld, _, err := rl.WriteGeneration(rt, keys, "api", []byte("api-old"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	apiCurrent, _, err := rl.WriteGeneration(rt, keys, "api", []byte("api-current"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(filepath.Join(rt, apiOld), time.Unix(1, 0), time.Unix(1, 0)); err != nil {
+		t.Fatal(err)
+	}
+
+	worker := make([]string, 5)
+	for i := range worker {
+		worker[i], _, err = rl.WriteGeneration(rt, keys, "worker", []byte{byte('a' + i)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		mt := time.Unix(100+int64(i), 0)
+		if err := os.Chtimes(filepath.Join(rt, worker[i]), mt, mt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := rl.CommitStamps(map[string]string{"api": apiCurrent, "worker": worker[4]}); err != nil {
+		t.Fatal(err)
+	}
+	if err := rl.GC(rt, DefaultGenerationsKept); err != nil {
+		t.Fatal(err)
+	}
+
+	if present, complete := GenerationState(rt, apiOld); !present || !complete {
+		t.Fatalf("api previous generation present=%v complete=%v, want retained independently of worker history", present, complete)
+	}
+	workerPrevious := 0
+	for _, stamp := range worker[:4] {
+		if present, _ := GenerationState(rt, stamp); present {
+			workerPrevious++
+		}
+	}
+	if workerPrevious != DefaultGenerationsKept {
+		t.Fatalf("worker previous generations = %d, want %d", workerPrevious, DefaultGenerationsKept)
+	}
+}
+
+func TestPublishGCPartialFailureKeepsActiveAndReportsCleanup(t *testing.T) {
+	_, rt := dirs(t)
+	projectDir := t.TempDir()
+	keys := testKeys(t)
+	seed := begin(t, projectDir, nil)
+	stamps := make([]string, 6)
+	for i := range stamps {
+		stamp, _, err := seed.WriteGeneration(rt, keys, "api", []byte{byte('a' + i)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		stamps[i] = stamp
+		mt := time.Unix(100+int64(i), 0)
+		if err := os.Chtimes(filepath.Join(rt, stamp), mt, mt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := seed.CommitStamps(map[string]string{"api": stamps[4]}); err != nil {
+		t.Fatal(err)
+	}
+
+	lock := begin(t, projectDir, errProbe{failGCRemoval: stamps[0]})
+	result, err := lock.Publish(PublishPlan{RuntimeDir: rt, Keys: keys, Targets: map[string][]byte{"api": []byte("f")}})
+	if err == nil {
+		t.Fatal("Publish should surface the injected partial GC failure")
+	}
+	if !result.CandidateActive() || result.GCComplete() || !result.Recover.NeedsCleanup {
+		t.Fatalf("Publish result = %+v, want committed active state with cleanup pending", result)
+	}
+	if present, complete := GenerationState(rt, stamps[5]); !present || !complete {
+		t.Fatalf("active generation present=%v complete=%v after partial GC failure", present, complete)
+	}
+	if present, _ := GenerationState(rt, stamps[1]); present {
+		t.Fatal("first over-retention generation should be removed before injected failure")
+	}
+	if present, complete := GenerationState(rt, stamps[0]); !present || !complete {
+		t.Fatalf("failed-removal generation present=%v complete=%v, want recoverable", present, complete)
+	}
+}
+
+func TestPublishRecoversTornGenerationAfterLockRestart(t *testing.T) {
+	state, rt := dirs(t)
+	projectDir := t.TempDir()
+	keys := testKeys(t)
+	content := []byte("API=restart\n")
+	stamp := TargetStamp(keys, "api", content)
+	first, err := NewWriter(state, errProbe{failComplete: true}).BeginRender(projectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := first.Publish(PublishPlan{RuntimeDir: rt, Keys: keys, Targets: map[string][]byte{"api": content}})
+	if err == nil || result.CandidateActive() {
+		t.Fatalf("first Publish result=%+v err=%v, want torn pre-switch failure", result, err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if present, complete := GenerationState(rt, stamp); !present || complete {
+		t.Fatalf("torn candidate present=%v complete=%v before restart recovery", present, complete)
+	}
+
+	restarted, err := NewWriter(state, nil).BeginRender(projectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restarted.Close()
+	if err := restarted.Recover(rt); err != nil {
+		t.Fatal(err)
+	}
+	result, err = restarted.Publish(PublishPlan{RuntimeDir: rt, Keys: keys, Targets: map[string][]byte{"api": content}})
+	if err != nil || result.Phase != PublishPhaseComplete || !result.Materialized["api"] {
+		t.Fatalf("restart Publish result=%+v err=%v, want complete re-materialization", result, err)
+	}
+}
+
 func TestGCRemovesIncompleteRegardlessOfAge(t *testing.T) {
 	_, rt := dirs(t)
 	keys := testKeys(t)
@@ -612,6 +926,9 @@ func TestRenderLockRefusedAfterClose(t *testing.T) {
 	}
 	if err := lock.GC(rt, DefaultGenerationsKept); !errors.Is(err, errLockReleased) {
 		t.Errorf("GC after Close err = %v, want errLockReleased", err)
+	}
+	if _, err := lock.Publish(PublishPlan{RuntimeDir: rt, Keys: keys, Targets: map[string][]byte{"api": []byte("x")}}); !errors.Is(err, errLockReleased) {
+		t.Errorf("Publish after Close err = %v, want errLockReleased", err)
 	}
 }
 
