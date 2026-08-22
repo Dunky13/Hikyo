@@ -28,6 +28,7 @@ import {
   useInstanceOrgs,
   useRotateTokenKey,
 } from '../api/settings.ts';
+import { notifySuccess } from '../app/notifications.tsx';
 import { surfaceById } from '../app/navigation.ts';
 import { Alert, Done, JumpIndex, Panel } from './Sections.tsx';
 import { useFeedback, useModalDialog } from './useModalDialog.ts';
@@ -77,7 +78,6 @@ export function InstanceAdmin() {
   const grants = useInstanceGrants();
   const health = useInstanceRetentionHealth();
   const policy = useCredentialPolicy();
-  const create = useCreateOrg();
   const createGrants = useCreateGrants();
   const applyTemplate = useApplyTemplate();
   const revokeGrant = useRevokeGrant();
@@ -86,6 +86,12 @@ export function InstanceAdmin() {
   const principalId = useId();
   const { failure, done, report, ok } = useFeedback(instanceFailureText);
   const [name, setName] = useState('');
+  const create = useCreateOrg((org) => {
+    const message = `Created ${org.name} and granted you organisation admin access. Sign in again to use the new authority.`;
+    setName('');
+    notifySuccess(message);
+    ok(message);
+  });
   const [confirmRotate, setConfirmRotate] = useState(false);
   const rotationFeedback = useFeedback((error) => settingsFailureText(error, 'rotate-token-key'));
   const [grantPrincipal, setGrantPrincipal] = useState('');
@@ -122,10 +128,8 @@ export function InstanceAdmin() {
 
     <Panel id="instance-orgs" title="Organisations">
       <p className="machine__lede">
-        Creating an organisation grants nobody anything, including its creator. To work inside one,
-        add a grant under Instance grants below (your principal ID is on Account &amp; security; the
-        admin template covers the organisation) or in the organisation&apos;s Members page once you
-        hold manage-members there. A grant on your own account ends the current session.
+        Creating an organisation applies the organisation admin template to you atomically. That
+        privilege increase ends existing sessions, so sign in again before opening its settings.
       </p>
       {orgs.isPending ? <p role="status">Loading organisations…</p> : null}
       {secondFactor(orgs.error) ? <Alert>Listing every organisation on this instance needs a second factor. This session does not have sufficient second-factor assurance; present your authenticator code or passkey in the banner above.</Alert> : null}
@@ -140,7 +144,6 @@ export function InstanceAdmin() {
       </> : null}
       <div className="field"><label htmlFor={nameId}>New organisation name</label><input id={nameId} value={name} onChange={(event) => setName(event.target.value)} /></div>
       <div className="panel__actions"><button type="button" className="btn btn--primary" disabled={create.isPending || name.trim() === ''} onClick={() => create.mutate({ name: name.trim() }, {
-        onSuccess: (org) => { setName(''); ok(`Created ${org.name}. Creating an organisation seeds its creator nothing — grant somebody membership before it can be administered from inside.`); },
         onError: (error) => report(settingsOperationFailure('create-org', error)),
       })}>Create organisation</button></div>
     </Panel>

@@ -116,6 +116,7 @@ test.describe('account and security', () => {
 
     const alert = page.getByRole('alert').filter({ hasText: 'did not authorise the change' });
     await expect(alert).toContainText('did not authorise the change');
+    await expect(alert).toBeInViewport();
     // Never presented as a bare "wrong password": a 401 here is either a
     // refused proof or an ended session, and the sentence covers both without
     // guessing which.
@@ -220,11 +221,7 @@ test.describe('account and security', () => {
       await expect(page.locator('#account-factors')).toContainText(
         'An authenticator is enrolled on this account.',
       );
-      await page.getByRole('button', { name: 'Enrol an authenticator' }).click();
-      const totpProof = page.getByRole('dialog');
-      await totpProof.getByLabel('Password').fill(ADMIN.password);
-      await totpProof.getByRole('button', { name: 'Confirm' }).click();
-      await expect(page.getByRole('alert')).toContainText('request was invalid');
+      await expect(page.getByRole('button', { name: 'Enrol an authenticator' })).toBeDisabled();
       await expect(page.locator('.enrolment')).toHaveCount(0);
 
       const rows = page.locator('#account-factors li.factor');

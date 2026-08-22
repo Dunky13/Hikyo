@@ -289,20 +289,6 @@ func runDemoFlow(t *testing.T, db *store.DB) {
 		t.Errorf("post-step-up assurance factors %v, want [password totp]", got)
 	}
 
-	// The authenticated, audited API call — the demo's last step. It goes
-	// through authorize() against the admin template's real grant rows and
-	// commits its audit event in the same transaction.
-	before := queryInt(t, db, "SELECT COUNT(*) FROM audit_instance_events WHERE type = 'settings.org_created'")
-	create := ios()
-	create.Stdout = &strings.Builder{}
-	if code := cli.Run(t.Context(), create, []string{"org", "create", "--name", "demo-org"}); code != cli.ExitOK {
-		t.Fatalf("org create exited %d", code)
-	}
-	after := queryInt(t, db, "SELECT COUNT(*) FROM audit_instance_events WHERE type = 'settings.org_created'")
-	if after != before+1 {
-		t.Fatalf("org.created audit events: %d -> %d, want exactly one more", before, after)
-	}
-
 	// The hierarchy demo (#48), through the real CLI over the socket:
 	// create org -> project -> environments -> folders, then list and rename
 	// them. This is the acceptance criterion's demo, executed rather than
@@ -329,13 +315,12 @@ func runDemoFlow(t *testing.T, db *store.DB) {
 			t.Fatalf("re-step-up exited %d: %s", code, stepErr.String())
 		}
 	}
-
 	demoOrg := runHierarchyDemo(t, db, ios, takeRequests, relogin)
 
 	// The permission-model demo (#55), through the same real CLI: grant a
 	// template role, list the independent grants it expanded into, revoke one,
 	// and watch the acting session die.
-	runAccessDemo(t, db, ios, relogin)
+	runAccessDemo(t, db, ios, demoOrg, relogin)
 
 	// The SCIM demo (#73), through the same real CLI over the same socket:
 	// configure a binding, mint its display-once credential, drive the identity
@@ -354,7 +339,7 @@ func runDemoFlow(t *testing.T, db *store.DB) {
 	// later time step is.
 	advanceClock(30 * time.Second)
 	prompts["Account-security proof"] = totpCode(t, otpauthURI, clockNow())
-	runSCIMDemo(t, db, ios, httpSrv.URL)
+	runSCIMDemo(t, db, ios, httpSrv.URL, demoOrg)
 	// The revision demo (#51): edit -> selective publish -> fetch the resolved
 	// snapshot, with a second client watching the advisory stream.
 	runRevisionDemo(t, ios, demoOrg, httpSrv.URL, bearer)
@@ -455,9 +440,7 @@ func TestLoginDoesNotHoldTheWriteLockWhileDeriving(t *testing.T) {
 // rename them. It asserts on the CLI's own `-o json` output, because that is
 // the surface the criterion names and the one scripts consume.
 // It returns the org it built, so a later demo can ride the administrator's
-// existing admin-template grants there instead of minting a second org and
-// spending another login on the self-grant that kills its own session — the
-// pre-auth admission limiter is instance-wide and counts those.
+// existing admin-template grants there.
 func runHierarchyDemo(t *testing.T, db *store.DB, ios func() cli.IO, takeRequests func() []string, relogin func()) string {
 	t.Helper()
 
@@ -489,32 +472,37 @@ func runHierarchyDemo(t *testing.T, db *store.DB, ios func() cli.IO, takeRequest
 	}
 
 	var org row
+	before := queryInt(t, db, "SELECT COUNT(*) FROM audit_instance_events WHERE type = 'settings.org_created'")
 	decode(run("org", "create", "--name", "hierarchy-demo", "-o", "json"), &org)
+	after := queryInt(t, db, "SELECT COUNT(*) FROM audit_instance_events WHERE type = 'settings.org_created'")
+	if after != before+1 {
+		t.Fatalf("org.created audit events: %d -> %d, want exactly one more", before, after)
+	}
 
-	// #55, F2: the first administrator is seeded with `operator` at instance
-	// scope — the operator set plus manage-members, and NO tenant data by
-	// bundle. Reaching into an org is an explicit audited grant, which is what
-	// the ADR means by "never by bundle": applying the `admin` template to
-	// themselves at the org they just created, through their instance
-	// manage-members (the ADR's unheld-granting power). This is also where the
-	// "bootstrap the first administrator via the admin template" clause is
-	// satisfied — at org scope, where the template is applicable, with
-	// reveal/reveal-history arriving as its separate seeded rows.
+	// Creation atomically expands the admin template into independent grants for
+	// the creator. Because that authority increase invalidates the creating
+	// session, reauthenticate before inspecting or using the organisation.
+	relogin()
+	takeRequests()
 	var me struct {
 		Principal struct{ Id string }
 	}
 	decode(run("whoami", "-o", "json"), &me)
-	var seeded struct{ Count int }
-	decode(run("access", "grant", "template", "--org", org.Id,
-		"--principal", me.Principal.Id, "--template", "admin", "-o", "json"), &seeded)
-	if seeded.Count != 12 {
-		t.Fatalf("admin at org scope expanded into %d grants, want 12", seeded.Count)
+	var seeded struct {
+		Items []struct {
+			PrincipalId string `json:"principal_id"`
+		}
 	}
-	// A self-grant advances the administrator's own generation and deletes
-	// their sessions, in the same transaction — the ADR's rule applied to the
-	// person applying it. Log back in and step up again.
-	relogin()
-	takeRequests()
+	decode(run("access", "grant", "list", "--org", org.Id, "-o", "json"), &seeded)
+	creatorGrants := 0
+	for _, grant := range seeded.Items {
+		if grant.PrincipalId == me.Principal.Id {
+			creatorGrants++
+		}
+	}
+	if creatorGrants != 12 {
+		t.Fatalf("org creation gave the creator %d admin grants, want 12", creatorGrants)
+	}
 
 	var project row
 	decode(run("project", "create", "--org", org.Id, "--name", "checkout", "-o", "json"), &project)
@@ -719,7 +707,7 @@ func delIO(ios func() cli.IO) cli.IO {
 //
 // The service-layer twin (isolation.TestRevokeKillsSession) stays: this one
 // proves the WIRE carries it, that one proves the policy does.
-func runAccessDemo(t *testing.T, db *store.DB, ios func() cli.IO, relogin func()) {
+func runAccessDemo(t *testing.T, db *store.DB, ios func() cli.IO, orgID string, relogin func()) {
 	t.Helper()
 
 	run := func(args ...string) (string, int) {
@@ -750,9 +738,6 @@ func runAccessDemo(t *testing.T, db *store.DB, ios func() cli.IO, relogin func()
 		}
 	}
 
-	var org struct{ Id string }
-	decode(mustRun("org", "create", "--name", "access-demo", "-o", "json"), &org)
-
 	// The demo's grantee is a principal with no grants at all: a fresh machine
 	// row would hit the normative allowlists, so this is a human.
 	// A contract-shaped id: the ID schema is a prefixed UUIDv7 and the request
@@ -768,7 +753,7 @@ func runAccessDemo(t *testing.T, db *store.DB, ios func() cli.IO, relogin func()
 		}
 		Count int
 	}
-	decode(mustRun("access", "grant", "template", "--org", org.Id,
+	decode(mustRun("access", "grant", "template", "--org", orgID,
 		"--principal", grantee, "--template", "publisher", "-o", "json"), &applied)
 	if applied.Count != 4 || len(applied.Items) != 4 {
 		t.Fatalf("publisher expanded into count=%d items=%d, want 4 and 4", applied.Count, len(applied.Items))
@@ -787,7 +772,7 @@ func runAccessDemo(t *testing.T, db *store.DB, ios func() cli.IO, relogin func()
 		}
 		Count int
 	}
-	decode(mustRun("access", "grant", "list", "--org", org.Id, "-o", "json"), &members)
+	decode(mustRun("access", "grant", "list", "--org", orgID, "-o", "json"), &members)
 	seen := map[string]int{}
 	for _, m := range members.Items {
 		if m.PrincipalId != grantee {
@@ -798,15 +783,15 @@ func runAccessDemo(t *testing.T, db *store.DB, ios func() cli.IO, relogin func()
 	for _, want := range []string{"read", "edit", "publish", "pin"} {
 		if seen[want] != 1 {
 			t.Fatalf("membership line for %q has %d origin chips, want exactly 1 manual origin\n%s",
-				want, seen[want], mustRun("access", "grant", "list", "--org", org.Id, "-o", "json"))
+				want, seen[want], mustRun("access", "grant", "list", "--org", orgID, "-o", "json"))
 		}
 	}
 
 	// 3. Revoke ONE of them. The siblings survive — the template is not a
 	//    bundle — and the count drops by exactly one.
-	mustRun("access", "grant", "remove", "--org", org.Id,
+	mustRun("access", "grant", "remove", "--org", orgID,
 		"--principal", grantee, "--capability", "publish")
-	decode(mustRun("access", "grant", "list", "--org", org.Id, "-o", "json"), &members)
+	decode(mustRun("access", "grant", "list", "--org", orgID, "-o", "json"), &members)
 	after := map[string]bool{}
 	for _, m := range members.Items {
 		if m.PrincipalId == grantee {

@@ -379,6 +379,13 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 			t.Fatalf("the bootstrapped administrator cannot administer: %v", err)
 		}
 
+		if _, err := auth.Identity(ctx, session.SessionToken); !errors.Is(err, domain.ErrUnauthenticated) {
+			t.Fatalf("the creator-admin grant did not invalidate the creating session: %v", err)
+		}
+		session, err = auth.LocalLogin(ctx, "e2e-admin", password, service.ArtifactCLI)
+		if err != nil {
+			t.Fatalf("login after org create: %v", err)
+		}
 		if err := auth.Logout(ctx, session.SessionToken); err != nil {
 			t.Fatal(err)
 		}
@@ -979,6 +986,7 @@ func runHierarchyLifecycle(t *testing.T, db *store.DB, org domain.OrgID) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	clearOrgGrants(t, db, throwaway.ID)
 	if err := orgs.Delete(ctx, service.LocalPrincipal(root), domain.OrgID(throwaway.ID)); err != nil {
 		t.Fatal(err)
 	}

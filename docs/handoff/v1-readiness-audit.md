@@ -23,7 +23,7 @@ Screenshots: `docs/handoff/v1-readiness-audit-screens/` (untracked).
 | Ready for k3s | **No** | Chart pins a placeholder digest, requires an external Postgres Secret, renders no Ingress, and never wires the root key — as shipped it cannot boot a server. Operator + CRDs are real and CI-tested. |
 | Synchronises/manages secrets for a project | **Config yes; secrets no** | Workload principals are server-allowlisted to `{read}` only (`internal/domain/permission.go:255`). `hikyo run`, Compose `env_file`, and the k8s operator deliver config values; **no machine can receive a `secret` value in this build.** |
 | Plug in `.env` files | **No** | No dotenv importer (sources: k8s, sops, infisical, vault). `values import` rejects a `.env`. The ADR's `scaffold` verb for dotenv onboarding is unimplemented. |
-| Barrier to entry | **High** | ~30 commands and 5 hand-copied opaque IDs from clone to one value in two environments; mandatory TOTP before the first org; self-grant revokes your session; opaque API errors; `--help` is broken. |
+| Barrier to entry | **High** | ~25 commands and 5 hand-copied opaque IDs from clone to one value in two environments; mandatory TOTP before the first org; creator-admin grant requires a fresh login; opaque API errors; `--help` is broken. |
 
 **Bottom line:** core model, crypto/authz plumbing, and the matrix UI are
 1.0-quality. The last mile a first-time self-hoster walks — import a `.env`,
@@ -136,11 +136,12 @@ Broken / blocking:
 
 ## 4. Onboarding and developer experience (verified)
 
-- Documented path to first value: ~30 commands; IDs copied by hand: org,
-  principal, project, two environments. Mandatory TOTP enrol + step-up before
-  `org create`; the self-grant (`access grant template admin`) **revokes the
-  current session**, so: login → step-up → org create → grant → login →
-  step-up again.
+- Documented path to first value: IDs are still copied by hand for org,
+  project, and two environments. Mandatory TOTP enrol + step-up precedes
+  `org create`; creation now applies the creator's org `admin` template
+  atomically and therefore revokes the current session, so the path is login →
+  step-up → org create → login → step-up again, with no unreachable web-only
+  grant step.
 - **TOTP first-code rejection.** `StartTOTP` writes `last_step = created_step
   = now`; confirm/step-up require `last_step < step` (strictly greater), so the
   code the authenticator shows in the same 30-second step as enrolment/step-up
@@ -212,8 +213,8 @@ Launch-important, not blocking:
 - **B2** Chart: root-key Secret wiring, optional Ingress, SQLite/PVC mode for
   homelab, real digest at release.
 - **B3** Onboarding: names instead of IDs where the API allows, single
-  `hikyo init` that does admin → TOTP → org → self-grant → project → envs;
-  avoid the self-grant session revocation on first run.
+  `hikyo init` that does admin → TOTP → org → login → project → envs; explain
+  the creator-admin session invalidation during first run.
 - **B4** Error bodies with field detail on 400/409; fix `--help`; drop "not
   implemented yet" from the banner; document `mch_` vs `sa_`.
 - **B5** README status tables; UI nits (modal stacking, matrix overflow).

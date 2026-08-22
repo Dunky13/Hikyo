@@ -12,7 +12,14 @@ import { generatePath } from 'react-router';
 import { z } from 'zod';
 
 import { expectPinnedAssertionSet, expectStatusIsTextAndAria } from '../fixtures/assertions.ts';
-import { browserApi, readSeed, STORAGE_STATE } from '../fixtures/instance.ts';
+import {
+  browserApi,
+  establishSession,
+  installPasskeyAuthenticator,
+  readSeed,
+  refreshSharedSession,
+  STORAGE_STATE,
+} from '../fixtures/instance.ts';
 import { surfacesForFlow } from '../registry.ts';
 
 /**
@@ -46,16 +53,19 @@ test.describe('organisation settings', () => {
 
   let context: BrowserContext;
   let page: Page;
+  let persistPasskey: () => Promise<void>;
   let drillOrg = '';
   let drillName = '';
 
   test.beforeAll(async ({ browser }, testInfo) => {
     context = await browser.newContext({ storageState: STORAGE_STATE });
     page = await context.newPage();
+    persistPasskey = await installPasskeyAuthenticator(page);
     await page.goto('/');
     drillName = `Settings drill ${testInfo.project.name}`;
     const created = await browserApi(page, 'POST', '/api/v1/orgs', zOrg, { name: drillName });
     drillOrg = created.id;
+    await establishSession(page);
   });
 
   test.afterAll(async () => {
@@ -70,7 +80,9 @@ test.describe('organisation settings', () => {
         }
       }
     }
+    await persistPasskey();
     await context.close();
+    await refreshSharedSession();
   });
 
   test('states the organisation cap and saves a new one', async () => {
@@ -154,6 +166,7 @@ test.describe('organisation settings', () => {
   test('disarms organisation deletion while the route identity is pending', async () => {
     const targetName = `Pending org ${Date.now()}`;
     const target = await browserApi(page, 'POST', '/api/v1/orgs', zOrg, { name: targetName });
+    await establishSession(page);
     let release: (() => void) | undefined;
     const gate = new Promise<void>((resolve) => {
       release = resolve;
@@ -189,6 +202,11 @@ test.describe('organisation settings', () => {
       }
       await page.unroute(targetRead);
       await browserApi(page, 'DELETE', `/api/v1/orgs/${target.id}`, z.null());
+      // Org deletion removes its contained creator grants and therefore kills
+      // this principal's sessions. Re-mint before the next serial drill.
+      await context.clearCookies();
+      await page.goto('/');
+      await establishSession(page);
     }
   });
 
@@ -207,9 +225,17 @@ test.describe('organisation settings', () => {
     await danger.getByLabel('Delete this organisation').fill(drillName);
     await expect(danger.getByRole('status')).toContainText('The name matches');
     await expect(remove).toBeEnabled();
+    const responsePromise = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'DELETE' &&
+        new URL(response.url()).pathname === `/api/v1/orgs/${drillOrg}`,
+    );
     await remove.click();
-    await expect(page.locator('.notice').filter({ hasText: 'Organisation deleted' })).toBeVisible();
+    const response = await responsePromise;
+    expect(response.status()).toBe(204);
     drillOrg = '';
+    await expect(page.locator('.toast').filter({ hasText: 'Organisation deleted' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Sign in to Hikyo', level: 1 })).toBeVisible();
   });
 
 });
@@ -220,6 +246,7 @@ test.describe('project settings', () => {
 
   let context: BrowserContext;
   let page: Page;
+  let persistPasskey: () => Promise<void>;
   let drillProject = '';
   let drillEnv = '';
   let drillName = '';
@@ -229,6 +256,7 @@ test.describe('project settings', () => {
   test.beforeAll(async ({ browser }, testInfo) => {
     context = await browser.newContext({ storageState: STORAGE_STATE });
     page = await context.newPage();
+    persistPasskey = await installPasskeyAuthenticator(page);
     await page.goto('/');
     drillName = `drill-${testInfo.project.name}`;
     const project = await browserApi(
@@ -262,7 +290,9 @@ test.describe('project settings', () => {
         }
       }
     }
+    await persistPasskey();
     await context.close();
+    await refreshSharedSession();
   });
 
   test('renames the project and leaves the identifier alone', async () => {
@@ -565,6 +595,7 @@ test.describe('project settings', () => {
     const otherOrg = await browserApi(page, 'POST', '/api/v1/orgs', zOrg, {
       name: `Same-name holder ${Date.now()}`,
     });
+    await establishSession(page);
     const otherProject = await browserApi(
       page,
       'POST',
@@ -591,6 +622,9 @@ test.describe('project settings', () => {
         z.null(),
       );
       await browserApi(page, 'DELETE', `/api/v1/orgs/${otherOrg.id}`, z.null());
+      await context.clearCookies();
+      await page.goto('/');
+      await establishSession(page);
     }
   });
 

@@ -237,6 +237,17 @@ func execRaw(t *testing.T, db *store.DB, stmt string) {
 	}
 }
 
+// clearOrgGrants explicitly empties an organisation's membership before a
+// fixture exercises org deletion. Production deletion never cascades grants;
+// creator-admin seeding means an otherwise empty newly-created org is not
+// grant-empty until its membership is released.
+func clearOrgGrants(t *testing.T, db *store.DB, org string) {
+	t.Helper()
+	execRaw(t, db, `DELETE FROM grant_origins WHERE grant_id IN (`+
+		`SELECT id FROM grants WHERE org_id = '`+org+`')`)
+	execRaw(t, db, `DELETE FROM grants WHERE org_id = '`+org+`'`)
+}
+
 func execRawErr(t *testing.T, db *store.DB, stmt string) error {
 	t.Helper()
 	if db.Engine() == store.EnginePostgres {

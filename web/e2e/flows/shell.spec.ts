@@ -79,16 +79,20 @@ test.describe('app chrome', () => {
     await expect(page.locator('html')).toHaveAttribute('data-theme', second ?? '');
   });
 
-  // The rail's zero state. The bootstrap administrator's grants are all
-  // instance-scoped, and `listMyOrgs` projects only the orgs a caller's own
-  // grants NAME — so this session has none, correctly.
-  //
-  // What used to be here was a "you need a second factor" notice, because the
-  // rail asked `listOrgs`, the operator's enumeration of every org on the
-  // instance, which is MFA-mandatory. That notice was the UI apologising for
-  // asking the wrong question; the zero state is the honest answer to the
-  // right one, and it must still be text + ARIA rather than an empty column.
+  // The rail's zero state remains a real supported state even though the
+  // fixture's creator now has automatic access to its organisations. Reach it
+  // by controlling only this projection read; the interaction under test is
+  // the empty-state rendering, while the real creator-membership path is
+  // covered by the instance-administration flow.
   test('shows the zero-organisation state rather than an empty rail', async ({ page }) => {
+    await page.route('**/api/v1/me/orgs', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ items: [], count: 0 }),
+      }),
+    );
+    await page.reload();
     await openNav(page);
     const notice = page.getByRole('status');
     await expectStatusIsTextAndAria(page, notice);

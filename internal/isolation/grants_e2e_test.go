@@ -339,6 +339,8 @@ func TestTemplateExpansionPostgres(t *testing.T) { runTemplateExpansion(t, seede
 func runTemplateExpansion(t *testing.T, db *store.DB) {
 	g := grantSvc(db)
 	ctx := t.Context()
+	generationBefore := queryInt(t, db,
+		"SELECT session_generation FROM principals WHERE id = '"+string(grantee)+"'")
 
 	results, err := g.ApplyTemplate(ctx, service.LocalPrincipal(root), domain.TemplateAdmin, grantee, orgAScope)
 	if err != nil {
@@ -355,6 +357,19 @@ func runTemplateExpansion(t *testing.T, db *store.DB) {
 		if !held(t, db, grantee, c, orgAScope) {
 			t.Errorf("admin template did not create %q as its own row", c)
 		}
+	}
+	generationAfter := queryInt(t, db,
+		"SELECT session_generation FROM principals WHERE id = '"+string(grantee)+"'")
+	if generationAfter != generationBefore+1 {
+		t.Fatalf("admin template advanced session generation from %d to %d, want one atomic advance",
+			generationBefore, generationAfter)
+	}
+	if _, err := g.ApplyTemplate(ctx, service.LocalPrincipal(root), domain.TemplateAdmin, grantee, orgAScope); err != nil {
+		t.Fatalf("reapply admin at org scope: %v", err)
+	}
+	if got := queryInt(t, db,
+		"SELECT session_generation FROM principals WHERE id = '"+string(grantee)+"'"); got != generationAfter {
+		t.Fatalf("idempotent template reapply advanced session generation from %d to %d", generationAfter, got)
 	}
 	// The ADR's amendment to the revision-model ADR: `reveal` and `reveal-history`
 	// are separate revocable rows inside `admin`, so an installation can strip

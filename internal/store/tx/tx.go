@@ -16,6 +16,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"math/rand/v2"
 	"time"
 
@@ -53,6 +54,8 @@ type WriteResultFn[T any] func(ctx context.Context, r store.Repos, az *authz.TxA
 // evaluated in-transaction (permission-model ADR), so reads transact too.
 type ReadFn func(ctx context.Context, r store.ReadRepos, az *authz.TxAuthorizer) error
 
+const serializationLockNamespace int32 = 1212760911
+
 // Write runs fn inside a write transaction with bounded retries. Retry
 // exhaustion surfaces as a loud failure wrapping the last error — never an
 // infinite loop or a silent drop.
@@ -61,6 +64,31 @@ func Write(ctx context.Context, db *store.DB, fn WriteFn) error {
 		return struct{}{}, fn(ctx, r, az)
 	})
 	return err
+}
+
+// WriteSerialized is Write with a cross-instance admission lock acquired
+// before postgres begins the SERIALIZABLE transaction. It is for rare
+// control-plane mutations that update a shared row after authorization reads:
+// a row lock taken inside the transaction is too late because waiters already
+// own stale snapshots and must abort when the shared row changes. SQLite's
+// BEGIN IMMEDIATE already provides the same admission ordering.
+//
+// Names are hashed only to fit postgres's two-int advisory-lock API. A hash
+// collision merely serializes two uncommon operations; it cannot admit an
+// unsafe interleaving.
+func WriteSerialized(ctx context.Context, db *store.DB, name string, fn WriteFn) error {
+	return retryLoop(ctx, db.Engine(), func(ctx context.Context) error {
+		if db.Engine() != store.EnginePostgres {
+			return writeOnce(ctx, db, fn)
+		}
+		return writePostgresSerializedOnce(ctx, db, serializationKey(name), fn)
+	})
+}
+
+func serializationKey(name string) int32 {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(name))
+	return int32(h.Sum32())
 }
 
 // WriteResult runs fn inside a write transaction with bounded retries and
@@ -143,18 +171,7 @@ func writeOnce(ctx context.Context, db *store.DB, fn WriteFn) error {
 	defer tok.Invalidate() // the proof dies with the attempt, success or not
 
 	if db.Engine() == store.EnginePostgres {
-		pgtx, err := db.PG().BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
-		if err != nil {
-			return err
-		}
-		az := authz.NewTxAuthorizer(authn.NewPG(pgtx), tok)
-		err = fn(ctx, store.PGTxRepos(pgtx, tok), az)
-		if err != nil {
-			_ = pgtx.Rollback(ctx)
-		} else {
-			err = pgtx.Commit(ctx)
-		}
-		return settleDenials(ctx, db, az, err)
+		return writePostgresOnce(ctx, db, db.PG(), tok, fn)
 	}
 	// sqlite: the write pool's DSN carries _txlock=immediate, so BeginTx
 	// opens BEGIN IMMEDIATE — write intent acquired before reads.
@@ -169,6 +186,95 @@ func writeOnce(ctx context.Context, db *store.DB, fn WriteFn) error {
 	} else {
 		err = sqtx.Commit()
 	}
+	return settleDenials(ctx, db, az, err)
+}
+
+type postgresBeginner interface {
+	BeginTx(context.Context, pgx.TxOptions) (pgx.Tx, error)
+}
+
+func writePostgresOnce(ctx context.Context, db *store.DB, beginner postgresBeginner, tok *authz.TxToken, fn WriteFn) error {
+	az, err := runPostgresTransaction(ctx, beginner, tok, fn)
+	if az == nil {
+		return err
+	}
+	return settleDenials(ctx, db, az, err)
+}
+
+func runPostgresTransaction(ctx context.Context, beginner postgresBeginner, tok *authz.TxToken, fn WriteFn) (*authz.TxAuthorizer, error) {
+	pgtx, err := beginner.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
+	if err != nil {
+		return nil, err
+	}
+	az := authz.NewTxAuthorizer(authn.NewPG(pgtx), tok)
+	err = fn(ctx, store.PGTxRepos(pgtx, tok), az)
+	if err != nil {
+		_ = pgtx.Rollback(ctx)
+	} else {
+		err = pgtx.Commit(ctx)
+	}
+	return az, err
+}
+
+func writePostgresSerializedOnce(ctx context.Context, db *store.DB, key int32, fn WriteFn) error {
+	conn, err := db.PG().Acquire(ctx)
+	if err != nil {
+		return err
+	}
+	locked, released := false, false
+	discard := func() {
+		raw := conn.Hijack()
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = raw.Close(cleanupCtx)
+		released = true
+	}
+	release := func() {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+		defer cancel()
+		var unlocked bool
+		unlockErr := conn.QueryRow(cleanupCtx,
+			"SELECT pg_advisory_unlock($1, $2)", serializationLockNamespace, key).Scan(&unlocked)
+		if unlockErr == nil && unlocked {
+			conn.Release()
+			released = true
+			return
+		}
+		// A session lock survives transaction rollback. If explicit unlock is
+		// unavailable, discard the physical connection so postgres releases it
+		// instead of poisoning a pooled session.
+		discard()
+	}
+	defer func() {
+		if released {
+			return
+		}
+		if locked {
+			release()
+			return
+		}
+		conn.Release()
+	}()
+
+	if _, err := conn.Exec(ctx,
+		"SELECT pg_advisory_lock($1, $2)", serializationLockNamespace, key); err != nil {
+		// The server may have acquired the session lock before the client saw an
+		// error. Never return that session to the pool on an ambiguous result.
+		discard()
+		return err
+	}
+	locked = true
+
+	tok := authz.NewTxToken()
+	defer tok.Invalidate()
+	az, err := runPostgresTransaction(ctx, conn, tok, fn)
+	release()
+	if az == nil {
+		return err
+	}
+	// Denial audit settlement may acquire another pool connection. Release the
+	// admission lock and its connection first so queued creators cannot exhaust
+	// the pool while the lock holder waits to record its refusal.
 	return settleDenials(ctx, db, az, err)
 }
 

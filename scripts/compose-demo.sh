@@ -260,17 +260,14 @@ expect eof
 catch wait result
 exit [lindex $result 3]
 EOF
-"$binary" org create --context demo --name compose-demo >/dev/null
-org_json=$("$binary" org list --context demo -o json)
-org_id=$(printf '%s' "$org_json" | jq -er 'first(.. | objects | select(.name? == "compose-demo") | .id)')
-for capability in definitions-edit edit manage-identities manage-members manage-projects publish read; do
-	(
-		cd "$work_dir"
-		HIKYO_DB=sqlite:hikyo-dev.db HIKYO_ROOT_KEY="$root_key" \
-			"$binary" admin grant --principal "$admin_principal" --capability "$capability" --org "$org_id" >/dev/null
-	)
-done
+org_json=$("$binary" org create --context demo --name compose-demo -o json)
+org_id=$(printf '%s' "$org_json" | jq -er '.id')
 
+# Organisation creation atomically grants the creator the org-admin template
+# and invalidates the session that performed the privilege increase. Prove the
+# created grants, rather than seeding equivalent break-glass grants out of band:
+# start a fresh session, step it up, then create the first project with the
+# creator's ordinary authority.
 last_totp_step=$(( $(date +%s) / 30 ))
 while (( $(date +%s) / 30 <= last_totp_step )); do
 	sleep 0.2

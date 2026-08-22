@@ -262,10 +262,11 @@ name**, at org scope or below. Decisions, each argued rather than assumed:
 - **An instance-scoped principal gets an EMPTY list, and that is correct.**
   Instance scope inherits downward, so expanding it here would silently
   reproduce `listOrgs` on a surface without its gate. The bootstrap
-  administrator is in this state (the admin template expands at instance scope
-  and `org.create` seeds its creator nothing), so the rail's zero state —
-  prototype iteration 14, text + ARIA, no step-up wall — is what a fresh
-  instance shows. The Playwright shell flow asserts exactly that; the datastore
+  administrator starts in this state before the first organisation exists.
+  `org.create` now applies the org `admin` template to its creator atomically,
+  so the rail gains that organisation after the required fresh login. The zero
+  state — prototype iteration 14, text + ARIA, no step-up wall — is still what
+  a fresh instance shows. The Playwright shell flow asserts that; the datastore
   e2e (`TestListMineProjectsOnlyTheCallersOwnOrgs*`,
   `TestListMineNeedsNoSecondFactor*`, both engines) carries member-sees-own-org,
   cross-org-invisible, depth-below-org, and MFA-not-required.
