@@ -32,8 +32,8 @@ printf '%s\n' "$app_block" | grep -F 'run: ./scripts/ci/build-spa.sh --verify' >
 	fail 'app-build does not verify and build the SPA through the shared script'
 printf '%s\n' "$app_block" | grep -F 'go build -tags ui -o ci-artifacts/hikyo-ui ./cmd/hikyo' >/dev/null ||
 	fail 'app-build does not produce the release-shaped CI binary'
-printf '%s\n' "$app_block" | grep -F 'name: hikyo-app-${{ github.run_id }}' >/dev/null ||
-	fail 'app-build artifact is not scoped to this run'
+printf '%s\n' "$app_block" | grep -Fx '          name: hikyo-app-${{ github.run_id }}' >/dev/null ||
+	fail 'app-build artifact is not scoped to this workflow run'
 if printf '%s\n' "$app_block" | grep -F 'github.run_attempt' >/dev/null; then
 	fail 'app-build artifact name changes when failed jobs are rerun'
 fi
@@ -43,7 +43,7 @@ printf '%s\n' "$app_block" | grep -F 'overwrite: true' >/dev/null ||
 [ -n "$no_egress_block" ] || fail 'no-egress job is missing'
 printf '%s\n' "$no_egress_block" | grep -F 'needs: [changes, app-build]' >/dev/null ||
 	fail 'no-egress does not depend on app-build'
-printf '%s\n' "$no_egress_block" | grep -F 'name: hikyo-app-${{ github.run_id }}' >/dev/null ||
+printf '%s\n' "$no_egress_block" | grep -Fx '          name: hikyo-app-${{ github.run_id }}' >/dev/null ||
 	fail 'no-egress does not consume the exact app-build artifact'
 if printf '%s\n' "$no_egress_block" | grep -F 'github.run_attempt' >/dev/null; then
 	fail 'no-egress changes artifact names when failed jobs are rerun'
@@ -61,7 +61,7 @@ fi
 
 printf '%s\n' "$web_block" | grep -F 'needs: [changes, app-build]' >/dev/null ||
 	fail 'web does not depend on app-build'
-printf '%s\n' "$web_block" | grep -F 'name: hikyo-app-${{ github.run_id }}' >/dev/null ||
+printf '%s\n' "$web_block" | grep -Fx '          name: hikyo-app-${{ github.run_id }}' >/dev/null ||
 	fail 'web does not consume the exact app-build artifact'
 if printf '%s\n' "$web_block" | grep -F 'github.run_attempt' >/dev/null; then
 	fail 'web changes artifact names when failed jobs are rerun'
@@ -74,6 +74,10 @@ printf '%s\n' "$web_block" | grep -F 'run: chmod +x ci-artifacts/hikyo-ui' >/dev
 if printf '%s\n' "$web_block" |
 	grep -E 'pnpm run (typecheck|test|build)|pnpm build' >/dev/null; then
 	fail 'a browser shard repeats app-build frontend work'
+fi
+if printf '%s\n' "$app_block$no_egress_block$web_block" |
+	grep -F 'github.run_attempt' >/dev/null; then
+	fail 'app-build artifact changes name across partial rerun attempts'
 fi
 printf '%s\n' "$release_block" | grep -F 'needs: changes' >/dev/null ||
 	fail 'release snapshot is serialized behind app-build'

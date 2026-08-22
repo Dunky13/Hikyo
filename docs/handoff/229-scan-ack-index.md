@@ -43,3 +43,20 @@ required.
 - Standards axis: `CLEAN`
 - Spec axis: exact duplicate-token fixture gap fixed; round-2 verification
   `CLEAN`
+
+## CI repair
+
+The first PR run's `no-egress` job was terminated by its hosted runner with
+exit 143. A failed-job rerun then exposed a separate workflow defect: GitHub
+reuses successful dependency jobs from the original attempt, while
+`github.run_attempt` advances for the rerun. `app-build` therefore remained at
+artifact `hikyo-app-<run>-1`, but rerun consumers requested
+`hikyo-app-<run>-2`.
+
+App artifacts are now scoped to `github.run_id` only. A partial rerun consumes
+the prior successful dependency artifact; a full rerun safely replaces it with
+`overwrite: true` after the exact-head build succeeds. The policy fixture pins
+both requirements and rejects future attempt-scoped app artifact names.
+
+CI-repair validation: build-artifact reuse, required-jobs, changed-path,
+trusted-script, cache-policy, ShellCheck, and actionlint checks passed locally.
