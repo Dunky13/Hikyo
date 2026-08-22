@@ -288,6 +288,10 @@ func validateCredential(token string) error {
 }
 
 func NewClient(cfg ClientConfig) (*Client, error) {
+	return newClient(cfg, net.DefaultResolver, &net.Dialer{Timeout: cfg.Deadline})
+}
+
+func newClient(cfg ClientConfig, resolver netpolicy.Resolver, dialer netpolicy.Dialer) (*Client, error) {
 	origin, err := canonicalOrigin(cfg.Origin)
 	if err != nil {
 		return nil, err
@@ -298,26 +302,13 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 	if cfg.Deadline <= 0 || cfg.Deadline >= adapter.LeaseTime {
 		return nil, errors.New("github-actions: request deadline must be positive and shorter than the provider-write lease")
 	}
-	allowed := append([]netip.Prefix(nil), cfg.AllowedCIDRs...)
-	dialer := &net.Dialer{Timeout: cfg.Deadline}
+	publicDialer, err := netpolicy.NewPublicDialer(cfg.AllowedCIDRs, resolver, dialer)
+	if err != nil {
+		return nil, fmt.Errorf("github-actions: egress policy: %w", err)
+	}
 	transport := &http.Transport{
 		Proxy: nil, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12},
-		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
-			host, port, err := net.SplitHostPort(address)
-			if err != nil {
-				return nil, fmt.Errorf("github-actions: destination address: %w", err)
-			}
-			ips, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
-			if err != nil {
-				return nil, fmt.Errorf("github-actions: resolve destination: %w", err)
-			}
-			for _, ip := range ips {
-				if permitted(ip, allowed) {
-					return dialer.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
-				}
-			}
-			return nil, errors.New("github-actions: destination resolved only to non-global or special-use addresses")
-		},
+		DialContext: publicDialer.DialContext,
 	}
 	now := func() time.Time { return time.Now().UTC() }
 	state, releaseState := acquireCredentialState(cfg.Credential, now)
@@ -359,16 +350,6 @@ func canonicalOrigin(raw string) (string, error) {
 		return "", errors.New("github-actions: origin must be https://api.github.com or an HTTPS GHES /api/v3 base URL")
 	}
 	return "https://" + u.Host + path, nil
-}
-
-func permitted(ip netip.Addr, exceptions []netip.Prefix) bool {
-	ip = ip.Unmap()
-	for _, prefix := range exceptions {
-		if prefix.Contains(ip) {
-			return true
-		}
-	}
-	return !netpolicy.IsNonPublic(ip)
 }
 
 type ResponseError struct{ Status int }
